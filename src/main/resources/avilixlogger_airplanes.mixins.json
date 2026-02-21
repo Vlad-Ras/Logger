@@ -1,0 +1,14 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.airplanes.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "VehicleEntityMixin",
+    "VehicleItemMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

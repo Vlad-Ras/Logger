@@ -1,0 +1,4 @@
+If you previously extracted older versions over an existing folder, delete this old file if it still exists:
+  src/main/java/com/roften/avilixlogger/client/ClientPayloadHandlers.java
+
+Best practice: delete the old project folder полностью and extract this archive into a clean directory.

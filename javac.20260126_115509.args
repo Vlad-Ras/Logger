@@ -1,0 +1,7 @@
+-encoding
+UTF-8
+-proc:none
+-Xlint:none
+-d
+/tmp/out
+src/main/java/com/roften/avilixlogger/command/LoggerCommands.java
