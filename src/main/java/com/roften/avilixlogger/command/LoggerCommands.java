@@ -16,6 +16,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.nbt.CompoundTag;
@@ -451,7 +452,7 @@ public final class LoggerCommands {
             String customName = null;
             try {
                 planeName = plane.getHoverName() != null ? plane.getHoverName().getString() : null;
-                if (plane.hasCustomHoverName()) customName = plane.getHoverName().getString();
+                if (plane.has(DataComponents.CUSTOM_NAME)) customName = plane.getHoverName().getString();
             } catch (Throwable ignored2) {}
             try {
                 planeId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(plane.getItem()).toString();

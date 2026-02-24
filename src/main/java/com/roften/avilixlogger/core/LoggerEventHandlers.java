@@ -20,6 +20,7 @@ import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.level.block.ChestBlock;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.Container;
@@ -1168,7 +1169,7 @@ public final class LoggerEventHandlers {
                 String customName = null;
                 try {
                     planeName = snap.getHoverName() != null ? snap.getHoverName().getString() : null;
-                    if (snap.hasCustomHoverName()) customName = snap.getHoverName().getString();
+                    if (snap.has(DataComponents.CUSTOM_NAME)) customName = snap.getHoverName().getString();
                 } catch (Throwable ignored2) {}
                 String planeId = "";
                 try {
