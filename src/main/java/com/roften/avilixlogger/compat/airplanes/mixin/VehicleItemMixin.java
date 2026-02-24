@@ -59,23 +59,8 @@ public class VehicleItemMixin {
         }
     }
 
-    /**
-     * Explicit action log ("поставил самолет") for parity with the standalone AirPlanesLogger mod.
-     * We still keep ENTITY_SPAWN logs as well.
-     */
-    @Inject(
-            method = "use",
-            at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;addFreshEntity(Lnet/minecraft/world/entity/Entity;)Z", shift = At.Shift.AFTER),
-            require = 0
-    )
-    private void avilixlogger$logPlacement(Level world, Player user, InteractionHand hand, CallbackInfoReturnable<InteractionResultHolder<ItemStack>> cir) {
-        try {
-            if (world == null || world.isClientSide) return;
-            if (!(world instanceof ServerLevel sl)) return;
-            if (user == null) return;
-            ItemStack stack = user.getItemInHand(hand);
-            if (stack == null || stack.isEmpty()) return;
-            AirplanesCompatHooks.logPlacement(sl, user, stack);
-        } catch (Throwable ignored) {}
-    }
+    // NOTE:
+    // We intentionally do NOT emit a second "plane place" log here.
+    // Plane placement is already captured via the server-side entity spawn hook (LoggerEventHandlers)
+    // which records entity UUID + NBT and is the canonical source.
 }

@@ -1078,14 +1078,32 @@ public final class LoggerEventHandlers {
         if (isPlane) {
             String ownerName = null;
             String ownerUuid = null;
+            String planeName = null;
+            String customName = null;
             try {
                 var tag = NbtSerde.fromSnbt(e.entityNbt);
                 ownerName = com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks.ownerNameFromTag(tag);
                 ownerUuid = com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks.ownerUuidFromTag(tag);
+
+                // Best-effort plane name for display/search.
+                // - planeName: the current in-game display name (localized if no custom name)
+                // - customName: if present (entity CustomName JSON)
+                try {
+                    planeName = ent.getDisplayName() != null ? ent.getDisplayName().getString() : null;
+                } catch (Throwable ignored2) {}
+                try {
+                    if (tag != null && tag.contains("CustomName")) {
+                        customName = tag.getString("CustomName");
+                    }
+                } catch (Throwable ignored2) {}
             } catch (Throwable ignored) {}
-            String safeName = (ownerName == null ? "" : ownerName.replace("\"", "\\\""));
-            String safeUuid = (ownerUuid == null ? "" : ownerUuid);
-            e.extra = "{\"kind\":\"plane_place\",\"ownerName\":\"" + safeName + "\",\"ownerUuid\":\"" + safeUuid + "\"}";
+
+            String safePlaneId = (e.entityType == null ? "" : e.entityType);
+            String safePlaneName = (planeName == null ? "" : planeName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeCustom = (customName == null ? "" : customName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeOwnerName = (ownerName == null ? "" : ownerName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeOwnerUuid = (ownerUuid == null ? "" : ownerUuid).replace("\\", "\\\\").replace("\"", "\\\"");
+            e.extra = "{\"kind\":\"plane_place\",\"planeId\":\"" + safePlaneId + "\",\"planeName\":\"" + safePlaneName + "\",\"customName\":\"" + safeCustom + "\",\"ownerName\":\"" + safeOwnerName + "\",\"ownerUuid\":\"" + safeOwnerUuid + "\"}";
         } else {
             e.extra = "spawn " + e.entityType;
         }
@@ -1141,14 +1159,28 @@ public final class LoggerEventHandlers {
             pe.itemStackNbt = NbtSerde.writeItemStack(snap, level.registryAccess());
             pe.count = snap.getCount();
 
-            // Put owner info into extra for easy filtering.
+            // Put owner + plane info into extra for easy filtering.
             try {
                 var ot = com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks.getOwnerTag(snap);
                 String on = com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks.ownerNameFromTag(ot);
                 String ou = com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks.ownerUuidFromTag(ot);
-                String safeName = (on == null ? "" : on.replace("\"", "\\\""));
-                String safeUuid = (ou == null ? "" : ou);
-                pe.extra = "{\"kind\":\"plane_pickup\",\"ownerName\":\"" + safeName + "\",\"ownerUuid\":\"" + safeUuid + "\"}";
+                String planeName = null;
+                String customName = null;
+                try {
+                    planeName = snap.getHoverName() != null ? snap.getHoverName().getString() : null;
+                    if (snap.hasCustomHoverName()) customName = snap.getHoverName().getString();
+                } catch (Throwable ignored2) {}
+                String planeId = "";
+                try {
+                    planeId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(snap.getItem()).toString();
+                } catch (Throwable ignored2) {}
+
+                String safePlaneId = (planeId == null ? "" : planeId).replace("\\", "\\\\").replace("\"", "\\\"");
+                String safePlaneName = (planeName == null ? "" : planeName).replace("\\", "\\\\").replace("\"", "\\\"");
+                String safeCustom = (customName == null ? "" : customName).replace("\\", "\\\\").replace("\"", "\\\"");
+                String safeName = (on == null ? "" : on).replace("\\", "\\\\").replace("\"", "\\\"");
+                String safeUuid = (ou == null ? "" : ou).replace("\\", "\\\\").replace("\"", "\\\"");
+                pe.extra = "{\"kind\":\"plane_pickup\",\"planeId\":\"" + safePlaneId + "\",\"planeName\":\"" + safePlaneName + "\",\"customName\":\"" + safeCustom + "\",\"ownerName\":\"" + safeName + "\",\"ownerUuid\":\"" + safeUuid + "\"}";
             } catch (Throwable ignored) {
                 pe.extra = "{\"kind\":\"plane_pickup\"}";
             }

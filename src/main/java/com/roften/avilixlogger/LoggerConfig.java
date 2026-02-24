@@ -38,6 +38,7 @@ public final class LoggerConfig {
 
         public final ModConfigSpec.IntValue lookupDefaultLimit;
         public final ModConfigSpec.IntValue chatPageSize;
+        public final ModConfigSpec.IntValue guiPageSize;
         public final ModConfigSpec.ConfigValue<String> inspectToolItemId;
 
         Values(ModConfigSpec.Builder b) {
@@ -76,6 +77,8 @@ public final class LoggerConfig {
                     .defineInRange("lookupDefaultLimit", 15, 1, 200);
             chatPageSize = b.comment("How many log lines to show per page (chat pagination and GUI fetch size).")
                     .defineInRange("chatPageSize", 20, 3, 200);
+            guiPageSize = b.comment("How many rows the optional GUI fetches per page. Higher values show more history without paging.")
+                    .defineInRange("guiPageSize", 60, 10, 400);
             inspectToolItemId = b.comment("Item id for inspect tool (CoreProtect-like). Example: minecraft:stick")
                     .define("inspectToolItemId", "minecraft:stick");
             b.pop();

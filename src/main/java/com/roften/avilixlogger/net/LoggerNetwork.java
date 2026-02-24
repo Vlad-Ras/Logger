@@ -254,7 +254,8 @@ public final class LoggerNetwork {
         // Types (preset index)
         q.types = mapTypePreset(gf != null ? gf.typePresetIdx() : 0);
 
-        q.limit = Math.max(1, ChatLogPager.pageSize());
+        // GUI has its own page size; keep chat page size independent.
+        q.limit = Math.max(1, com.roften.avilixlogger.LoggerConfig.VALUES.guiPageSize.get());
         return q;
     }
 
@@ -324,7 +325,7 @@ public final class LoggerNetwork {
      * Produces a page similarly to {@link ChatLogPager} but returns components instead of sending to chat.
      */
     private static Page buildPage(ServerLevel level, LastQueryManager.State state, boolean aggregated, GuiFilters gf) {
-        int size = Math.max(1, ChatLogPager.pageSize());
+        int size = Math.max(1, com.roften.avilixlogger.LoggerConfig.VALUES.guiPageSize.get());
 
         LogQuery q = state.baseQuery.copy();
         q.beforeId = state.currentBeforeId();
@@ -401,6 +402,8 @@ public final class LoggerNetwork {
 
         final String train = gf.train() == null ? "" : gf.train().trim();
         final boolean wantTrainName = !train.isBlank();
+        final String planeNeedle = gf.planeName() == null ? "" : gf.planeName().trim();
+        final boolean wantPlaneName = !planeNeedle.isBlank();
         final int typePreset = gf.typePresetIdx();
         final boolean wantCreateTrainsOnly = typePreset == 5;
         final boolean wantCannonOnly = typePreset == 6;
@@ -408,7 +411,7 @@ public final class LoggerNetwork {
         // Planes: filter generic entity events down to plane-related ones.
         final boolean wantPlanesOnly = typePreset == 8;
 
-        if (!wantTrainName && !wantCreateTrainsOnly && !wantCannonOnly && !wantPlanesOnly) return in;
+        if (!wantTrainName && !wantPlaneName && !wantCreateTrainsOnly && !wantCannonOnly && !wantPlanesOnly) return in;
 
         ArrayList<LogEntry> out = new ArrayList<>(Math.min(desired, in.size()));
         for (LogEntry e : in) {
@@ -442,11 +445,13 @@ public final class LoggerNetwork {
                     if (!looksPlane) continue;
                 }
 
-                // If user typed something into the "train" box while in plane preset, interpret it as owner needle.
-                // The strong owner filter is applied via q.owner, but this provides immediate extra refinement
-                // in case the storage layer couldn't SQL-filter it.
+                // If user typed something into the "owner" box while in plane preset, interpret it as owner needle.
                 if (wantTrainName) {
                     if (!com.roften.avilixlogger.core.PlaneLogFilters.matchesOwner(e, train)) continue;
+                }
+                // Optional plane name filter.
+                if (wantPlaneName) {
+                    if (!com.roften.avilixlogger.core.PlaneLogFilters.matchesPlaneName(e, planeNeedle)) continue;
                 }
             } else {
                 // Non-plane presets: keep original meaning of the "train" needle.

@@ -171,6 +171,23 @@ public final class LoggerCommands {
             .then(argument("args", StringArgumentType.greedyString())
                     .executes(ctx -> lookupFromFlags(ctx, StringArgumentType.getString(ctx, "args"))))
     );
+
+    // Aliases for plane ownership tools:
+    // /owner info|set|reset  ->  /log plane owner info|set|reset
+    d.register(literal("owner")
+            .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane", 2))
+            .then(literal("info")
+                    .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane.owner.info", 2))
+                    .executes(LoggerCommands::planeOwnerInfo))
+            .then(literal("set")
+                    .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane.owner.set", 2))
+                    .then(argument("player", StringArgumentType.word())
+                            .suggests((ctx, b) -> CompletableFuture.completedFuture(suggestOnlinePlayersSync(ctx, b)))
+                            .executes(ctx -> planeOwnerSet(ctx, StringArgumentType.getString(ctx, "player")))))
+            .then(literal("reset")
+                    .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane.owner.reset", 2))
+                    .executes(LoggerCommands::planeOwnerReset))
+    );
 }
 
     private static int parseDurationSeconds(String input) {
@@ -428,7 +445,21 @@ public final class LoggerCommands {
 
             e.itemStackNbt = NbtSerde.writeItemStack(plane, level.registryAccess());
             e.count = plane.getCount();
-            e.extra = "{\"kind\":\"plane_owner\",\"old_name\":" + jsonStr(oldName) + ",\"old_uuid\":" + jsonStr(oldUuid)
+
+            String planeName = null;
+            String planeId = null;
+            String customName = null;
+            try {
+                planeName = plane.getHoverName() != null ? plane.getHoverName().getString() : null;
+                if (plane.hasCustomHoverName()) customName = plane.getHoverName().getString();
+            } catch (Throwable ignored2) {}
+            try {
+                planeId = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(plane.getItem()).toString();
+            } catch (Throwable ignored2) {}
+
+            e.extra = "{\"kind\":\"plane_owner\",\"planeId\":" + jsonStr(planeId) + ",\"planeName\":" + jsonStr(planeName)
+                    + ",\"customName\":" + jsonStr(customName)
+                    + ",\"old_name\":" + jsonStr(oldName) + ",\"old_uuid\":" + jsonStr(oldUuid)
                     + ",\"new_name\":" + jsonStr(newName) + ",\"new_uuid\":" + jsonStr(newUuid) + "}";
 
             LoggerRuntime.storage(level).append(e);

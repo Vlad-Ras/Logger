@@ -256,10 +256,32 @@ public final class AirplanesCompatHooks {
             e.x = pos.getX();
             e.y = pos.getY();
             e.z = pos.getZ();
-            e.entityType = planeEntity.getType().toString();
+            e.entityType = net.minecraft.world.entity.EntityType.getKey(planeEntity.getType()).toString();
             e.entityUuid = planeEntity.getUUID();
-            e.extra = (reason == null || reason.isBlank()) ? ("plane remove " + e.entityType)
-                    : ("plane remove " + e.entityType + " (" + reason + ")");
+            try { e.entityNbt = NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
+
+            String planeName = null;
+            String customName = null;
+            String ownerName = null;
+            String ownerUuid = null;
+            try {
+                planeName = planeEntity.getDisplayName() != null ? planeEntity.getDisplayName().getString() : null;
+            } catch (Throwable ignored) {}
+            try {
+                CompoundTag tag = new CompoundTag();
+                planeEntity.saveWithoutId(tag);
+                if (tag.contains("CustomName")) customName = tag.getString("CustomName");
+                ownerName = ownerNameFromTag(tag);
+                ownerUuid = ownerUuidFromTag(tag);
+            } catch (Throwable ignored) {}
+
+            String safePlaneId = (e.entityType == null ? "" : e.entityType);
+            String safePlaneName = (planeName == null ? "" : planeName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeCustom = (customName == null ? "" : customName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeOwnerName = (ownerName == null ? "" : ownerName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeOwnerUuid = (ownerUuid == null ? "" : ownerUuid).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeReason = (reason == null ? "" : reason).replace("\\", "\\\\").replace("\"", "\\\"");
+            e.extra = "{\"kind\":\"plane_remove\",\"planeId\":\"" + safePlaneId + "\",\"planeName\":\"" + safePlaneName + "\",\"customName\":\"" + safeCustom + "\",\"ownerName\":\"" + safeOwnerName + "\",\"ownerUuid\":\"" + safeOwnerUuid + "\",\"reason\":\"" + safeReason + "\"}";
             LoggerRuntime.storage(level).append(e);
         } catch (Throwable ignored) {}
     }
@@ -279,9 +301,31 @@ public final class AirplanesCompatHooks {
             e.x = pos.getX();
             e.y = pos.getY();
             e.z = pos.getZ();
-            e.entityType = planeEntity.getType().toString();
+            e.entityType = net.minecraft.world.entity.EntityType.getKey(planeEntity.getType()).toString();
             e.entityUuid = planeEntity.getUUID();
-            e.extra = "plane mount " + e.entityType;
+
+            try { e.entityNbt = NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
+            String planeName = null;
+            String customName = null;
+            String ownerName = null;
+            String ownerUuid = null;
+            try {
+                planeName = planeEntity.getDisplayName() != null ? planeEntity.getDisplayName().getString() : null;
+            } catch (Throwable ignored) {}
+            try {
+                CompoundTag tag = new CompoundTag();
+                planeEntity.saveWithoutId(tag);
+                if (tag.contains("CustomName")) customName = tag.getString("CustomName");
+                ownerName = ownerNameFromTag(tag);
+                ownerUuid = ownerUuidFromTag(tag);
+            } catch (Throwable ignored) {}
+
+            String safePlaneId = (e.entityType == null ? "" : e.entityType);
+            String safePlaneName = (planeName == null ? "" : planeName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeCustom = (customName == null ? "" : customName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeOwnerName = (ownerName == null ? "" : ownerName).replace("\\", "\\\\").replace("\"", "\\\"");
+            String safeOwnerUuid = (ownerUuid == null ? "" : ownerUuid).replace("\\", "\\\\").replace("\"", "\\\"");
+            e.extra = "{\"kind\":\"plane_mount\",\"planeId\":\"" + safePlaneId + "\",\"planeName\":\"" + safePlaneName + "\",\"customName\":\"" + safeCustom + "\",\"ownerName\":\"" + safeOwnerName + "\",\"ownerUuid\":\"" + safeOwnerUuid + "\"}";
             LoggerRuntime.storage(level).append(e);
         } catch (Throwable ignored) {}
     }

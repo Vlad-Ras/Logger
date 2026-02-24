@@ -239,7 +239,32 @@ public final class LogText {
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
                     PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT -> {
                 String id = (e.entityType != null ? e.entityType : "entity");
-                MutableComponent base = Component.literal(id);
+
+                // For planes we store a ready-to-display name in extra JSON (planeName/customName).
+                String planeName = null;
+                try {
+                    planeName = extractJsonString(e.extra, "planeName");
+                    if (planeName != null && planeName.isBlank()) planeName = null;
+                } catch (Throwable ignored) {}
+
+                MutableComponent base;
+                if (planeName != null) {
+                    base = Component.literal(planeName);
+                } else {
+                    // Prefer translated entity name if we can resolve it.
+                    base = Component.literal(id);
+                    try {
+                        if (level != null && e.entityType != null) {
+                            ResourceLocation rl = ResourceLocation.tryParse(e.entityType);
+                            if (rl != null) {
+                                var et = BuiltInRegistries.ENTITY_TYPE.get(rl);
+                                if (et != null) {
+                                    base = Component.translatable(et.getDescriptionId());
+                                }
+                            }
+                        }
+                    } catch (Throwable ignored2) {}
+                }
 
                 // If entity NBT contains owner tags (planes compat), show it in hover.
                 try {
@@ -372,5 +397,39 @@ private static MutableComponent blockNameComponent(ServerLevel level, String blo
             if (m.find()) return m.group(1);
         } catch (Throwable ignored) {}
         return null;
+    }
+
+    /**
+     * Very small JSON-string extractor for our extra payloads.
+     * We only need: {"key":"value"} style fields.
+     */
+    private static String extractJsonString(String json, String key) {
+        if (json == null || json.isBlank() || key == null || key.isBlank()) return null;
+        try {
+            String needle = "\"" + key + "\":\"";
+            int i = json.indexOf(needle);
+            if (i < 0) return null;
+            int p = i + needle.length();
+            StringBuilder out = new StringBuilder();
+            boolean esc = false;
+            while (p < json.length()) {
+                char c = json.charAt(p++);
+                if (esc) {
+                    // minimal unescape: \" and \\
+                    out.append(c);
+                    esc = false;
+                    continue;
+                }
+                if (c == '\\') {
+                    esc = true;
+                    continue;
+                }
+                if (c == '"') break;
+                out.append(c);
+            }
+            return out.toString();
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 }

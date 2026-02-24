@@ -34,6 +34,28 @@ public final class PlaneLogFilters {
         return false;
     }
 
+    public static boolean matchesPlaneName(LogEntry e, String planeNeedle) {
+        if (e == null) return false;
+        if (planeNeedle == null || planeNeedle.isBlank()) return true;
+
+        String needle = planeNeedle.trim().toLowerCase(Locale.ROOT);
+
+        // Preferred: extra JSON planeName/customName/planeId
+        if (containsIgnoreCase(e.extra, "\"planeName\":\"") || containsIgnoreCase(e.extra, "\"customName\":\"") || containsIgnoreCase(e.extra, "\"planeId\":\"")) {
+            if (containsIgnoreCase(e.extra, needle)) return true;
+        }
+
+        // entityType is usually a stable id (modid:entity)
+        if (containsIgnoreCase(e.entityType, needle)) return true;
+
+        // Fallback: SNBT blobs and raw extra
+        if (containsIgnoreCase(e.entityNbt, needle)) return true;
+        if (containsIgnoreCase(e.itemStackNbt, needle)) return true;
+        if (containsIgnoreCase(e.extra, needle)) return true;
+
+        return false;
+    }
+
     private static boolean containsIgnoreCase(String haystack, String needleLower) {
         if (haystack == null || haystack.isBlank()) return false;
         return haystack.toLowerCase(Locale.ROOT).contains(needleLower);
