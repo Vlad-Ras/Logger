@@ -48,5 +48,13 @@ public enum ActionType {
     PLANE_PICKUP,
 
     // Chat (AvilixChat / server chat)
-    CHAT_MESSAGE
+    CHAT_MESSAGE,
+
+    // --- Create trains (APPEND ONLY) ---
+    TRAIN_ASSEMBLE,
+    TRAIN_DISASSEMBLE,
+    TRAIN_SCHEDULE_TAKE,
+    TRAIN_CONTROL_START,
+    TRAIN_CONTROL_STOP,
+    TRAIN_SCHEDULE_PUT
 }
