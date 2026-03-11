@@ -35,6 +35,9 @@ public final class LoggerConfig {
         public final ModConfigSpec.BooleanValue logContainers;
         public final ModConfigSpec.BooleanValue logItemCraftSmelt;
         public final ModConfigSpec.BooleanValue logChat;
+        public final ModConfigSpec.IntValue interactionScanTicks;
+        public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInDeltaLogs;
+        public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInInteractLogs;
 
         public final ModConfigSpec.IntValue lookupDefaultLimit;
         public final ModConfigSpec.IntValue chatPageSize;
@@ -70,6 +73,12 @@ public final class LoggerConfig {
             logItemCraftSmelt = b.define("logItemCraftSmelt", true);
             logChat = b.comment("Log chat messages (vanilla server chat packets).")
                     .define("logChat", true);
+            interactionScanTicks = b.comment("How many delayed ticks to watch after block interaction for state/NBT changes. Lower = less TPS impact.")
+                    .defineInRange("interactionScanTicks", 3, 1, 10);
+            storeVerboseBeSnapshotsInDeltaLogs = b.comment("Store full before/after block-entity NBT inside each CONTAINER_PUT/CONTAINER_TAKE delta log. Disabling removes large duplicate payloads.")
+                    .define("storeVerboseBeSnapshotsInDeltaLogs", false);
+            storeVerboseBeSnapshotsInInteractLogs = b.comment("Store full before/after block-entity NBT inside BLOCK_INTERACT logs when a separate snapshot entry is also written. Disabling reduces duplicate payloads.")
+                    .define("storeVerboseBeSnapshotsInInteractLogs", false);
             b.pop();
 
             b.push("commands");

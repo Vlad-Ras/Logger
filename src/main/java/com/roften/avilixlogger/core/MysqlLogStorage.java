@@ -89,6 +89,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
         cfg.addDataSourceProperty("prepStmtCacheSize", "250");
         cfg.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
         cfg.addDataSourceProperty("useServerPrepStmts", "true");
+        cfg.addDataSourceProperty("rewriteBatchedStatements", "true");
 
         return new HikariDataSource(cfg);
     }
