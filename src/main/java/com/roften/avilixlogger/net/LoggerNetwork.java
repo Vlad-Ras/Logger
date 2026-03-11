@@ -32,6 +32,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class LoggerNetwork {
     private LoggerNetwork() {}
 
+    private static final java.util.concurrent.ExecutorService DB_EXECUTOR =
+            java.util.concurrent.Executors.newFixedThreadPool(2);
+    private static final java.util.Map<java.util.UUID, Long> LAST_GUI_REQUEST =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
     /** Tracks which players actually have the client mod. */
     private static final Map<UUID, Boolean> CLIENT_PRESENT = new ConcurrentHashMap<>();
 
@@ -124,6 +129,15 @@ public final class LoggerNetwork {
         ctx.enqueueWork(() -> {
             if (!(ctx.player() instanceof ServerPlayer sp)) return;
 
+            long now = System.currentTimeMillis();
+            long last = LAST_GUI_REQUEST.getOrDefault(sp.getUUID(), 0L);
+
+            if (now - last < 150) {
+                return; // игнорируем слишком частые запросы
+            }
+            LAST_GUI_REQUEST.put(sp.getUUID(), now);
+
+
             if (!hasGuiPermission(sp)) {
                 PacketDistributor.sendToPlayer(sp, new S2CLogPagePayload("Logger", 1, false, false,
                         List.of(new LogRow(0L, sp.serverLevel().dimension().location().toString(), 0, 0, 0,
@@ -162,8 +176,27 @@ public final class LoggerNetwork {
 
             // Use latest filter state (may have been updated above).
             gf = GUI_FILTERS.getOrDefault(sp.getUUID(), gf);
-            Page page = buildPage(lvl, st, payload.aggregated(), gf);
-            PacketDistributor.sendToPlayer(sp, new S2CLogPagePayload(page.title, page.pageIndex, page.hasPrev, page.hasNext, page.rows));
+
+            GuiFilters finalGf = gf;
+            LastQueryManager.State finalSt = st;
+            ServerLevel finalLvl = lvl;
+
+            DB_EXECUTOR.submit(() -> {
+
+                Page page = buildPage(finalLvl, finalSt, payload.aggregated(), finalGf);
+
+                sp.server.execute(() -> {
+                    PacketDistributor.sendToPlayer(sp,
+                            new S2CLogPagePayload(
+                                    page.title,
+                                    page.pageIndex,
+                                    page.hasPrev,
+                                    page.hasNext,
+                                    page.rows
+                            ));
+                });
+
+            });
         });
     }
 

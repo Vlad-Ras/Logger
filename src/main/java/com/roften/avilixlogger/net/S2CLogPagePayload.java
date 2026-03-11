@@ -10,11 +10,14 @@ import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** Server -> Client: a rendered page for the GUI (+ row metadata for actions). */
 public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, boolean hasNext, List<LogRow> rows) implements CustomPacketPayload {
 
     public static final Type<S2CLogPagePayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "gui_page_data"));
+
 
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CLogPagePayload> STREAM_CODEC = StreamCodec.of(
             (buf, msg) -> {

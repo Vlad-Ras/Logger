@@ -408,6 +408,7 @@ public final class LoggerEventHandlers {
         // 2) Generic interaction logging (fillable blocks, depot-like blocks, modded mechanics).
         //    We snapshot the blockstate and, if present, block-entity NBT BEFORE interaction and compare next tick.
         if (!LoggerConfig.VALUES.logBlocks.get()) return;
+        if (!shouldTrackDelayedInteraction(level, pos, state)) return;
         final String dim = level.dimension().location().toString();
         final String beforeState = NbtSerde.writeBlockState(state);
         final BlockEntity be0 = level.getBlockEntity(pos);
@@ -420,7 +421,7 @@ public final class LoggerEventHandlers {
         final java.util.concurrent.atomic.AtomicBoolean logged = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         // Some blocks mutate state/BE not immediately (modded mechanics). Check a short window of ticks.
-        for (int t = 1; t <= 10; t++) {
+        for (int t = 1, maxScanTicks = Math.max(1, LoggerConfig.VALUES.interactionScanTicks.get()); t <= maxScanTicks; t++) {
             int delay = t;
             runAfterTicks(level, delay, () -> {
                 if (logged.get()) return;
@@ -449,7 +450,7 @@ public final class LoggerEventHandlers {
                     ie.z = pos.getZ();
                     ie.blockBefore = beforeState;
                     ie.blockAfter = afterState;
-                    if (beChanged) {
+                    if (beChanged && LoggerConfig.VALUES.storeVerboseBeSnapshotsInInteractLogs.get()) {
                         ie.beBefore = beforeBe;
                         ie.beAfter = afterBe;
                     }
@@ -473,8 +474,10 @@ public final class LoggerEventHandlers {
                             de.y = pos.getY();
                             de.z = pos.getZ();
                             de.blockAfter = NbtSerde.writeBlockState(afterState0);
-                            de.beBefore = beforeBe;
-                            de.beAfter = afterBe;
+                            if (LoggerConfig.VALUES.storeVerboseBeSnapshotsInDeltaLogs.get()) {
+                                de.beBefore = beforeBe;
+                                de.beAfter = afterBe;
+                            }
                             de.count = Math.abs(d.deltaCount());
                             try {
                                 ItemStack st = d.representative().copy();
@@ -1292,6 +1295,23 @@ public final class LoggerEventHandlers {
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof Container) return true;
         return state.getMenuProvider(level, pos) != null;
+    }
+
+    private static boolean shouldTrackDelayedInteraction(ServerLevel level, BlockPos pos, BlockState state) {
+        if (state == null) return false;
+        try {
+            if (isInventoryLike(level, pos, state)) return true;
+        } catch (Throwable ignored) {}
+        try {
+            if (level.getBlockEntity(pos) != null) return true;
+        } catch (Throwable ignored) {}
+        try {
+            return state.hasAnalogOutputSignal()
+                    || state.hasBlockEntity()
+                    || !state.getFluidState().isEmpty();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private static BlockPos otherHalfChestPos(BlockPos pos, BlockState state) {
