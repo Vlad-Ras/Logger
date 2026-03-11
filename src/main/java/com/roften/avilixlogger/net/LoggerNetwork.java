@@ -21,6 +21,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * NeoForge (1.21+) payload-based networking for optional client GUI.
@@ -32,12 +37,28 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class LoggerNetwork {
     private LoggerNetwork() {}
 
-    private static final java.util.concurrent.ExecutorService DB_EXECUTOR =
-            java.util.concurrent.Executors.newFixedThreadPool(2, r -> {
-                Thread t = new Thread(r, "avilixlogger-gui-db");
+    private static final ThreadPoolExecutor DB_EXECUTOR;
+    static {
+        ThreadFactory tf = new ThreadFactory() {
+            private final AtomicInteger n = new AtomicInteger(1);
+
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "AvilixLogger-GUI-DB-" + n.getAndIncrement());
                 t.setDaemon(true);
+                t.setPriority(Thread.NORM_PRIORITY - 1);
                 return t;
-            });
+            }
+        };
+        DB_EXECUTOR = new ThreadPoolExecutor(
+                2, 2,
+                0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(256),
+                tf,
+                new ThreadPoolExecutor.DiscardPolicy()
+        );
+        DB_EXECUTOR.prestartAllCoreThreads();
+    }
     private static final java.util.Map<java.util.UUID, Long> LAST_GUI_REQUEST =
             new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -51,18 +72,18 @@ public final class LoggerNetwork {
         return player != null && Boolean.TRUE.equals(CLIENT_PRESENT.get(player.getUUID()));
     }
 
-    public static void shutdown() {
-        DB_EXECUTOR.shutdownNow();
-        CLIENT_PRESENT.clear();
-        GUI_FILTERS.clear();
-        LAST_GUI_REQUEST.clear();
-    }
-
     public static void clear(ServerPlayer player) {
         if (player != null) {
             CLIENT_PRESENT.remove(player.getUUID());
             GUI_FILTERS.remove(player.getUUID());
         }
+    }
+
+    public static void shutdown() {
+        DB_EXECUTOR.shutdownNow();
+        LAST_GUI_REQUEST.clear();
+        CLIENT_PRESENT.clear();
+        GUI_FILTERS.clear();
     }
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
@@ -143,7 +164,7 @@ public final class LoggerNetwork {
             long now = System.currentTimeMillis();
             long last = LAST_GUI_REQUEST.getOrDefault(sp.getUUID(), 0L);
 
-            if (now - last < 150) {
+            if (now - last < 300) {
                 return; // игнорируем слишком частые запросы
             }
             LAST_GUI_REQUEST.put(sp.getUUID(), now);
@@ -192,21 +213,20 @@ public final class LoggerNetwork {
             LastQueryManager.State finalSt = st;
             ServerLevel finalLvl = lvl;
 
-            DB_EXECUTOR.submit(() -> {
+            if (DB_EXECUTOR.getQueue().remainingCapacity() <= 0) {
+                return;
+            }
 
+            DB_EXECUTOR.execute(() -> {
                 Page page = buildPage(finalLvl, finalSt, payload.aggregated(), finalGf);
-
-                sp.server.execute(() -> {
-                    PacketDistributor.sendToPlayer(sp,
-                            new S2CLogPagePayload(
-                                    page.title,
-                                    page.pageIndex,
-                                    page.hasPrev,
-                                    page.hasNext,
-                                    page.rows
-                            ));
-                });
-
+                sp.server.execute(() -> PacketDistributor.sendToPlayer(sp,
+                        new S2CLogPagePayload(
+                                page.title,
+                                page.pageIndex,
+                                page.hasPrev,
+                                page.hasNext,
+                                page.rows
+                        )));
             });
         });
     }
@@ -216,6 +236,13 @@ public final class LoggerNetwork {
             if (!(ctx.player() instanceof ServerPlayer sp)) return;
             if (!hasGuiPermission(sp)) return;
 
+            long now = System.currentTimeMillis();
+            long last = LAST_GUI_REQUEST.getOrDefault(sp.getUUID(), 0L);
+            if (now - last < 400) {
+                return;
+            }
+            LAST_GUI_REQUEST.put(sp.getUUID(), now);
+
             // Resolve level
             ServerLevel lvl = safeLevel(sp, payload.dimHint());
             if (lvl == null) {
@@ -224,12 +251,19 @@ public final class LoggerNetwork {
             }
             if (lvl == null) lvl = sp.serverLevel();
 
-            List<Component> lines = switch (payload.mode()) {
-                case RAW -> buildRawLines(lvl, payload.entryId(), payload.rawIds());
-                case DETAILS -> buildDetailsLines(lvl, payload.entryId(), payload.rawIds());
-                case JSON -> buildJsonLines(lvl, payload.entryId());
-            };
-            PacketDistributor.sendToPlayer(sp, new S2CLogDetailsPayload(payload.entryId(), payload.mode(), lines));
+            ServerLevel finalLvl = lvl;
+            if (DB_EXECUTOR.getQueue().remainingCapacity() <= 0) {
+                return;
+            }
+            DB_EXECUTOR.execute(() -> {
+                List<Component> lines = switch (payload.mode()) {
+                    case RAW -> buildRawLines(finalLvl, payload.entryId(), payload.rawIds());
+                    case DETAILS -> buildDetailsLines(finalLvl, payload.entryId(), payload.rawIds());
+                    case JSON -> buildJsonLines(finalLvl, payload.entryId());
+                };
+                sp.server.execute(() -> PacketDistributor.sendToPlayer(sp,
+                        new S2CLogDetailsPayload(payload.entryId(), payload.mode(), lines)));
+            });
         });
     }
 

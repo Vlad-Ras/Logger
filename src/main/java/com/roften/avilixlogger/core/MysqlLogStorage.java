@@ -324,6 +324,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
     @Override
     public void shutdown() {
         running = false;
+        writer.interrupt();
         try { writer.join(2_000L); } catch (InterruptedException ignored) {}
         ds.close();
         AvilixLoggerMod.LOGGER.info("[AvilixLogger] Storage shutdown. written={}, dropped={}", written, dropped);
