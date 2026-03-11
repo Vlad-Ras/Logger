@@ -213,12 +213,15 @@ public final class LoggerNetwork {
             }
             if (lvl == null) lvl = sp.serverLevel();
 
-            List<Component> lines = switch (payload.mode()) {
-                case RAW -> buildRawLines(lvl, payload.entryId(), payload.rawIds());
-                case DETAILS -> buildDetailsLines(lvl, payload.entryId(), payload.rawIds());
-                case JSON -> buildJsonLines(lvl, payload.entryId());
-            };
-            PacketDistributor.sendToPlayer(sp, new S2CLogDetailsPayload(payload.entryId(), payload.mode(), lines));
+            ServerLevel finalLvl = lvl;
+            DB_EXECUTOR.submit(() -> {
+                List<Component> lines = switch (payload.mode()) {
+                    case RAW -> buildRawLines(finalLvl, payload.entryId(), payload.rawIds());
+                    case DETAILS -> buildDetailsLines(finalLvl, payload.entryId(), payload.rawIds());
+                    case JSON -> buildJsonLines(finalLvl, payload.entryId());
+                };
+                sp.server.execute(() -> PacketDistributor.sendToPlayer(sp, new S2CLogDetailsPayload(payload.entryId(), payload.mode(), lines)));
+            });
         });
     }
 
@@ -387,7 +390,7 @@ public final class LoggerNetwork {
             filtered = tmp;
         }
 
-        // GUI-only extra filters that aren't part of LogQuery (train name, cannon, create-train events).
+        // GUI-only extra filters that aren't part of LogQuery (train name, cannon, block id, create-train events).
         filtered = applyGuiExtraFilters(filtered, gf, desired);
 
         boolean hasNext;
@@ -437,6 +440,8 @@ public final class LoggerNetwork {
         final boolean wantTrainName = !train.isBlank();
         final String planeNeedle = gf.planeName() == null ? "" : gf.planeName().trim();
         final boolean wantPlaneName = !planeNeedle.isBlank();
+        final String blockNeedle = gf.blockId() == null ? "" : gf.blockId().trim();
+        final boolean wantBlockId = !blockNeedle.isBlank();
         final int typePreset = gf.typePresetIdx();
         final boolean wantCreateTrainsOnly = typePreset == 5;
         final boolean wantCannonOnly = typePreset == 6;
@@ -444,12 +449,16 @@ public final class LoggerNetwork {
         // Planes: filter generic entity events down to plane-related ones.
         final boolean wantPlanesOnly = typePreset == 8;
 
-        if (!wantTrainName && !wantPlaneName && !wantCreateTrainsOnly && !wantCannonOnly && !wantPlanesOnly) return in;
+        if (!wantTrainName && !wantPlaneName && !wantBlockId && !wantCreateTrainsOnly && !wantCannonOnly && !wantPlanesOnly) return in;
 
         ArrayList<LogEntry> out = new ArrayList<>(Math.min(desired, in.size()));
         for (LogEntry e : in) {
             String extra = e.extra;
             if (extra == null) extra = "";
+
+            if (wantBlockId) {
+                if (!matchesBlockId(e, blockNeedle)) continue;
+            }
 
             if (wantCannonOnly) {
                 // Heuristic: our cannon hooks write marker strings to extra.
@@ -496,6 +505,35 @@ public final class LoggerNetwork {
             if (out.size() >= desired) break;
         }
         return out;
+    }
+
+
+
+    private static boolean matchesBlockId(LogEntry e, String needle) {
+        if (e == null || needle == null) return false;
+        String n = needle.trim().toLowerCase(java.util.Locale.ROOT);
+        if (n.isBlank()) return true;
+
+        String before = extractBlockId(e.blockBefore);
+        String after = extractBlockId(e.blockAfter);
+        String source = e.source == null ? "" : e.source.toLowerCase(java.util.Locale.ROOT);
+        return (!before.isBlank() && before.contains(n))
+                || (!after.isBlank() && after.contains(n))
+                || (!source.isBlank() && source.contains(n));
+    }
+
+    private static String extractBlockId(String blockStateSnbtOrId) {
+        if (blockStateSnbtOrId == null) return "";
+        String s = blockStateSnbtOrId.trim();
+        if (s.isEmpty()) return "";
+        if (!s.startsWith("{") && s.contains(":")) return s.toLowerCase(java.util.Locale.ROOT);
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("\\bName\\s*:\s*[\"']?([a-z0-9_.-]+:[a-z0-9_./-]+)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                    .matcher(s);
+            if (m.find()) return m.group(1).toLowerCase(java.util.Locale.ROOT);
+        } catch (Throwable ignored) {}
+        return "";
     }
 
     private static boolean hasGuiPermission(ServerPlayer sp) {

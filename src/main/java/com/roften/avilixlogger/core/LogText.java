@@ -177,6 +177,14 @@ public final class LogText {
             case ENTITY_SPAWN -> ChatFormatting.LIGHT_PURPLE;
             case ENTITY_OWNER_SET -> ChatFormatting.YELLOW;
             case CHAT_MESSAGE -> ChatFormatting.AQUA;
+
+            case TRAIN_ASSEMBLE -> ChatFormatting.GREEN;
+            case TRAIN_DISASSEMBLE -> ChatFormatting.RED;
+            case TRAIN_SCHEDULE_TAKE -> ChatFormatting.GOLD;
+            case TRAIN_CONTROL_START -> ChatFormatting.AQUA;
+            case TRAIN_CONTROL_STOP -> ChatFormatting.GRAY;
+            case TRAIN_SCHEDULE_PUT -> ChatFormatting.GOLD;
+
             default -> ChatFormatting.GRAY;
         };
     }
@@ -222,88 +230,70 @@ public final class LogText {
             case PLAYER_JOIN -> "вошёл";
             case PLAYER_LEAVE -> "вышел";
             case CHAT_MESSAGE -> "написал";
+
+            case TRAIN_ASSEMBLE -> "собрал поезд";
+            case TRAIN_DISASSEMBLE -> "разобрал поезд";
+            case TRAIN_SCHEDULE_TAKE -> "забрал расписание";
+            case TRAIN_CONTROL_START -> "начал управление";
+            case TRAIN_CONTROL_STOP -> "закончил управление";
+            case TRAIN_SCHEDULE_PUT -> "поставил расписание";
+
             default -> "сделал";
         };
     }
+
 
     private static MutableComponent subjectComponent(ServerLevel level, LogEntry e) {
         if (e == null || e.type == null) return null;
 
         return switch (e.type) {
-            case BLOCK_BREAK -> blockNameComponent(level, e.blockBefore);
-            case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> blockNameComponent(level, e.blockAfter);
 
-            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT, PLANE_PICKUP ->
+            // blocks
+            case BLOCK_BREAK -> blockNameComponent(level, e.blockBefore);
+            case BLOCK_PLACE, BLOCK_INTERACT, CONTAINER_OPEN, BLOCK_ENTITY_NBT_CHANGE -> blockNameComponent(level, e.blockAfter);
+
+            // container/item diffs
+            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT ->
                     itemNameComponent(level, e.itemStackNbt);
 
-            case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                    PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT -> {
-                String id = (e.entityType != null ? e.entityType : "entity");
+            case PLANE_PICKUP -> planeItemNameComponent(level, e);
 
-                // For planes we store a ready-to-display name in extra JSON (planeName/customName).
-                String planeName = null;
-                try {
-                    planeName = extractJsonString(e.extra, "planeName");
-                    if (planeName != null && planeName.isBlank()) planeName = null;
-                } catch (Throwable ignored) {}
+            // schedule: и забрал, и поставил показываем предметом
+            case TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT ->
+                    itemNameComponent(level, e.itemStackNbt);
 
-                MutableComponent base;
-                if (planeName != null) {
-                    base = Component.literal(planeName);
-                } else {
-                    // Prefer translated entity name if we can resolve it.
-                    base = Component.literal(id);
-                    try {
-                        if (level != null && e.entityType != null) {
-                            ResourceLocation rl = ResourceLocation.tryParse(e.entityType);
-                            if (rl != null) {
-                                var et = BuiltInRegistries.ENTITY_TYPE.get(rl);
-                                if (et != null) {
-                                    base = Component.translatable(et.getDescriptionId());
-                                }
-                            }
-                        }
-                    } catch (Throwable ignored2) {}
-                }
-
-                // If entity NBT contains owner tags (planes compat), show it in hover.
-                try {
-                    if (e.entityNbt != null && !e.entityNbt.isBlank()) {
-                        var tag = NbtSerde.fromSnbt(e.entityNbt);
-                        if (tag != null) {
-                            String ownerName = tag.contains("owner_name") ? tag.getString("owner_name") : null;
-                            String ownerUuid = tag.contains("owner_uuid") ? tag.getString("owner_uuid") : (tag.contains("owner") ? tag.getString("owner") : null);
-                            if ((ownerName != null && !ownerName.isBlank()) || (ownerUuid != null && !ownerUuid.isBlank())) {
-                                String txt = "Владелец: "
-                                        + (ownerName != null && !ownerName.isBlank() ? ownerName : "?")
-                                        + (ownerUuid != null && !ownerUuid.isBlank() ? (" (" + ownerUuid + ")") : "");
-                                base = base.withStyle(s -> s.withHoverEvent(new net.minecraft.network.chat.HoverEvent(
-                                        net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT,
-                                        Component.literal(txt).withStyle(ChatFormatting.GRAY)
-                                )));
-                            }
-                        }
-                    }
-                } catch (Throwable ignored) {}
-
-                yield base;
+            // trains: показываем имя поезда из extra.trainName
+            case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, TRAIN_CONTROL_START, TRAIN_CONTROL_STOP -> {
+                String tn = null;
+                try { tn = extractJsonString(e.extra, "trainName"); } catch (Throwable ignored) {}
+                if (tn == null || tn.isBlank()) tn = "поезд";
+                yield Component.literal(tn);
             }
 
-            case ENTITY_OWNER_SET -> {
-                // Prefer item stack (command changes owner on the item), fallback to entity type.
-                if (e.itemStackNbt != null && !e.itemStackNbt.isBlank()) {
-                    yield itemNameComponent(level, e.itemStackNbt);
+            // entities / planes / etc (оставь как у тебя было — ниже максимально безопасный вариант)
+            case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
+                 PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT -> {
+                String planeName = null;
+                try { planeName = extractJsonString(e.extra, "planeName"); } catch (Throwable ignored) {}
+                if (planeName != null && !planeName.isBlank()) {
+                    yield Component.literal(planeName);
                 }
                 yield Component.literal(e.entityType != null ? e.entityType : "entity");
             }
 
-            case PLAYER_DEATH, PLAYER_JOIN, PLAYER_LEAVE -> null;
-
-            case CHAT_MESSAGE -> {
-                // Prefer explicit message in extra; fallback to itemStackNbt (rare) or empty.
-                String msg = (e.extra != null ? e.extra : "");
-                yield Component.literal(msg);
+            case ENTITY_OWNER_SET -> {
+                if (e.itemStackNbt != null && !e.itemStackNbt.isBlank()) {
+                    yield planeItemNameComponent(level, e);
+                }
+                yield Component.literal(e.entityType != null ? e.entityType : "entity");
             }
+
+            // player events / chat
+            case PLAYER_DEATH, PLAYER_JOIN, PLAYER_LEAVE -> null;
+            case CHAT_MESSAGE -> Component.literal(e.extra != null ? e.extra : "");
+
+            // ВАЖНО: чтобы компилилось при добавлении новых ActionType в будущем
+            default -> null;
         };
     }
 
@@ -360,6 +350,24 @@ private static MutableComponent blockNameComponent(ServerLevel level, String blo
         if (m.find()) return m.group(1);
 
         return null;
+    }
+
+
+    private static MutableComponent planeItemNameComponent(ServerLevel level, LogEntry e) {
+        MutableComponent base = itemNameComponent(level, e.itemStackNbt);
+        String plain = base == null ? "" : base.getString();
+        if (!plain.isBlank() && !plain.equalsIgnoreCase("minecraft:air") && !plain.equalsIgnoreCase("air")) {
+            return base;
+        }
+        try {
+            String custom = extractJsonString(e.extra, "customName");
+            if (custom != null && !custom.isBlank()) return Component.literal(custom);
+            String plane = extractJsonString(e.extra, "planeName");
+            if (plane != null && !plane.isBlank()) return Component.literal(plane);
+            String planeId = extractJsonString(e.extra, "planeId");
+            if (planeId != null && !planeId.isBlank()) return Component.literal(planeId);
+        } catch (Throwable ignored) {}
+        return base == null ? Component.literal("предмет") : base;
     }
 
     private static MutableComponent itemNameComponent(ServerLevel level, String itemStackSnbt) {

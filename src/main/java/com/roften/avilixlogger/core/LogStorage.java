@@ -27,6 +27,12 @@ public interface LogStorage {
      */
     List<LogEntry> queryReverse(LogQuery q);
 
+    /** Approximate queue fill percent, if supported by implementation. */
+    default int queueFillPercent() { return 0; }
+
+    /** Whether storage is currently in overload-protection mode. */
+    default boolean isUnderPressure() { return false; }
+
     /** Flush and shutdown background writers. */
     void shutdown();
 }
