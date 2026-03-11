@@ -82,7 +82,7 @@ public abstract class ServerLevelSetBlockMixin {
 
             String beforeState = NbtSerde.writeBlockState(before);
             BlockEntity be = level.getBlockEntity(pos);
-            String beforeBe = LoggerRuntime.isUnderPressure(level) ? null : NbtSerde.writeBlockEntity(level, be);
+            String beforeBe = (be != null || newState.hasBlockEntity()) ? NbtSerde.writeBlockEntity(level, be) : null;
 
             java.util.UUID actorUuid = null;
             String actorName = null;
@@ -125,7 +125,7 @@ public abstract class ServerLevelSetBlockMixin {
             BlockState after = level.getBlockState(pos);
             String afterState = NbtSerde.writeBlockState(after);
             BlockEntity beAfter = level.getBlockEntity(pos);
-            String afterBe = LoggerRuntime.isUnderPressure(level) ? null : NbtSerde.writeBlockEntity(level, beAfter);
+            String afterBe = (beAfter != null || cap.beforeBe() != null) ? NbtSerde.writeBlockEntity(level, beAfter) : null;
 
             ActionType type;
             boolean beforeAir = beforeIsAir(cap.beforeState());

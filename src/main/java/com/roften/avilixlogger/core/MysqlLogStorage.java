@@ -27,7 +27,7 @@ public final class MysqlLogStorage implements LogStorage {
 private static void ensureDatabaseExists(String host, int port, String database, String user, String pass) {
     // Connect without a schema first, then create it if missing.
     String baseUrl = "jdbc:mysql://" + host + ":" + port + "/"
-            + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&useUnicode=true&createDatabaseIfNotExist=true&rewriteBatchedStatements=true";
+            + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&useUnicode=true&createDatabaseIfNotExist=true";
     try (Connection c = DriverManager.getConnection(baseUrl, user, pass);
          Statement st = c.createStatement()) {
         // Use utf8mb4 for full Unicode (emoji-safe).
@@ -49,7 +49,6 @@ private static void ensureDatabaseExists(String host, int port, String database,
     // metrics
     private volatile long dropped;
     private volatile long written;
-    private volatile boolean underPressure;
 
     public MysqlLogStorage() {
         this.queue = new ArrayBlockingQueue<>(Math.max(10_000, LoggerConfig.VALUES.dbQueueCapacity.get()));
@@ -72,7 +71,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
 
         // XAMPP default: root / empty password; allow custom config.
         String url = "jdbc:mysql://" + host + ":" + port + "/" + database
-                + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&useUnicode=true&createDatabaseIfNotExist=true&rewriteBatchedStatements=true";
+                + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&useUnicode=true&createDatabaseIfNotExist=true";
 
         HikariConfig cfg = new HikariConfig();
         cfg.setJdbcUrl(url);
@@ -90,6 +89,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
         cfg.addDataSourceProperty("prepStmtCacheSize", "250");
         cfg.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
         cfg.addDataSourceProperty("useServerPrepStmts", "true");
+        cfg.addDataSourceProperty("rewriteBatchedStatements", "true");
 
         return new HikariDataSource(cfg);
     }
@@ -122,15 +122,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
 
     @Override
     public void append(LogEntry entry) {
-        if (!running || entry == null) return;
-        updatePressureState();
-        if (underPressure && LoggerConfig.VALUES.dropLowPriorityUnderPressure.get() && isLowPriority(entry.type)) {
-            dropped++;
-            return;
-        }
-        if (underPressure && LoggerConfig.VALUES.stripHeavyFieldsUnderPressure.get()) {
-            stripHeavyFields(entry);
-        }
+        if (!running) return;
         boolean ok = queue.offer(entry);
         if (!ok) {
             dropped++;
@@ -143,8 +135,6 @@ private static void ensureDatabaseExists(String host, int port, String database,
         final List<LogEntry> batch = new ArrayList<>(batchSize);
 
         long lastFlush = System.currentTimeMillis();
-        Connection persistentConn = null;
-        PreparedStatement persistentInsert = null;
 
         while (running || !queue.isEmpty()) {
             try {
@@ -152,26 +142,11 @@ private static void ensureDatabaseExists(String host, int port, String database,
                 if (first != null) batch.add(first);
 
                 queue.drainTo(batch, batchSize - batch.size());
-                updatePressureState();
 
                 long now = System.currentTimeMillis();
                 boolean timeFlush = (now - lastFlush) >= flushEveryMs;
                 if (!batch.isEmpty() && (batch.size() >= batchSize || timeFlush)) {
-                    try {
-                        if (persistentConn == null || persistentConn.isClosed()) {
-                            persistentConn = ds.getConnection();
-                            persistentConn.setAutoCommit(true);
-                            persistentInsert = persistentConn.prepareStatement(
-                                    "INSERT INTO avilixlogger_actions (ts, dim, x, y, z, action, actor_name, actor_uuid, data) VALUES (?,?,?,?,?,?,?,?,?)");
-                        }
-                        insertBatch(batch, persistentInsert);
-                    } catch (SQLException sql) {
-                        closeQuietly(persistentInsert);
-                        closeQuietly(persistentConn);
-                        persistentInsert = null;
-                        persistentConn = null;
-                        throw sql;
-                    }
+                    insertBatch(batch);
                     written += batch.size();
                     batch.clear();
                     lastFlush = now;
@@ -182,6 +157,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
                     maybeCleanup(now);
                 }
             } catch (InterruptedException ignored) {
+                // ignore
             } catch (Throwable t) {
                 AvilixLoggerMod.LOGGER.error("[AvilixLogger] MySQL writer failure", t);
                 try { Thread.sleep(250L); } catch (InterruptedException ignored) {}
@@ -191,20 +167,12 @@ private static void ensureDatabaseExists(String host, int port, String database,
         // last flush
         if (!batch.isEmpty()) {
             try {
-                if (persistentConn == null || persistentConn.isClosed()) {
-                    persistentConn = ds.getConnection();
-                    persistentConn.setAutoCommit(true);
-                    persistentInsert = persistentConn.prepareStatement(
-                            "INSERT INTO avilixlogger_actions (ts, dim, x, y, z, action, actor_name, actor_uuid, data) VALUES (?,?,?,?,?,?,?,?,?)");
-                }
-                insertBatch(batch, persistentInsert);
+                insertBatch(batch);
                 written += batch.size();
             } catch (Throwable t) {
                 AvilixLoggerMod.LOGGER.error("[AvilixLogger] MySQL final flush failure", t);
             }
         }
-        closeQuietly(persistentInsert);
-        closeQuietly(persistentConn);
     }
 
     private volatile long lastCleanupAt = 0L;
@@ -225,77 +193,27 @@ private static void ensureDatabaseExists(String host, int port, String database,
         }
     }
 
-    private void insertBatch(List<LogEntry> batch, PreparedStatement ps) throws SQLException {
-        for (LogEntry e : batch) {
-            ps.setLong(1, e.ts);
-            ps.setString(2, e.dim);
-            ps.setInt(3, e.x);
-            ps.setInt(4, e.y);
-            ps.setInt(5, e.z);
-            ps.setInt(6, e.type.ordinal());
-            ps.setString(7, e.actorName);
-            if (e.actorUuid != null) {
-                ps.setBytes(8, UuidBytes.toBytes(e.actorUuid));
-            } else {
-                ps.setNull(8, Types.BINARY);
+    private void insertBatch(List<LogEntry> batch) throws SQLException {
+        try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(
+                "INSERT INTO avilixlogger_actions (ts, dim, x, y, z, action, actor_name, actor_uuid, data) VALUES (?,?,?,?,?,?,?,?,?)")) {
+            for (LogEntry e : batch) {
+                ps.setLong(1, e.ts);
+                ps.setString(2, e.dim);
+                ps.setInt(3, e.x);
+                ps.setInt(4, e.y);
+                ps.setInt(5, e.z);
+                ps.setInt(6, e.type.ordinal());
+                ps.setString(7, e.actorName);
+                if (e.actorUuid != null) {
+                    ps.setBytes(8, UuidBytes.toBytes(e.actorUuid));
+                } else {
+                    ps.setNull(8, Types.BINARY);
+                }
+                ps.setBytes(9, GzipJson.toGzippedJsonBytes(e));
+                ps.addBatch();
             }
-            ps.setBytes(9, GzipJson.toGzippedJsonBytes(e));
-            ps.addBatch();
+            ps.executeBatch();
         }
-        ps.executeBatch();
-        ps.clearBatch();
-    }
-
-    private void updatePressureState() {
-        int fill = queueFillPercent();
-        int high = Math.max(1, LoggerConfig.VALUES.pressureHighWatermarkPct.get());
-        int low = Math.max(0, Math.min(high - 1, LoggerConfig.VALUES.pressureLowWatermarkPct.get()));
-        if (!underPressure && fill >= high) {
-            underPressure = true;
-        } else if (underPressure && fill <= low) {
-            underPressure = false;
-        }
-    }
-
-    private static boolean isLowPriority(ActionType type) {
-        if (type == null) return false;
-        return type == ActionType.BLOCK_INTERACT
-                || type == ActionType.CONTAINER_OPEN
-                || type == ActionType.ENTITY_CONTAINER_OPEN
-                || type == ActionType.CHAT_MESSAGE;
-    }
-
-    private static void stripHeavyFields(LogEntry e) {
-        e.beBefore = null;
-        e.beAfter = null;
-        e.entityNbt = null;
-        e.playerInvBefore = null;
-        e.playerInvAfter = null;
-        e.containerSlotsBefore = null;
-        e.containerSlotsAfter = null;
-        if (e.itemStackNbt != null && e.itemStackNbt.length() > 512) {
-            e.itemStackNbt = e.itemStackNbt.substring(0, 512);
-        }
-        if (e.extra != null && e.extra.length() > 1024) {
-            e.extra = e.extra.substring(0, 1024);
-        }
-    }
-
-    private static void closeQuietly(AutoCloseable c) {
-        if (c == null) return;
-        try { c.close(); } catch (Throwable ignored) {}
-    }
-
-    @Override
-    public int queueFillPercent() {
-        int cap = Math.max(1, queue.remainingCapacity() + queue.size());
-        return (int) Math.min(100L, Math.round((queue.size() * 100.0) / cap));
-    }
-
-    @Override
-    public boolean isUnderPressure() {
-        updatePressureState();
-        return underPressure;
     }
 
     @Override

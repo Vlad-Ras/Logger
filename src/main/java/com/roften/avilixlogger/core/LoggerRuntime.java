@@ -27,16 +27,6 @@ public final class LoggerRuntime {
         }
     }
 
-    public static boolean isUnderPressure(Level level) {
-        LogStorage s = storage(level);
-        return s != null && s.isUnderPressure();
-    }
-
-    public static int queueFillPercent(Level level) {
-        LogStorage s = storage(level);
-        return s == null ? 0 : s.queueFillPercent();
-    }
-
     public static void shutdown() {
         LogStorage s = STORAGE;
         if (s != null) s.shutdown();

@@ -49,7 +49,6 @@ public final class LogViewerScreen extends Screen {
     private String actorFilter = GuiFilters.DEFAULT.actor();
     private String trainFilter = GuiFilters.DEFAULT.train();
     private String planeNameFilter = GuiFilters.DEFAULT.planeName();
-    private String blockIdFilter = GuiFilters.DEFAULT.blockId();
 
     private boolean showRawTab = false;
     private long selectedEntryId = -1L;
@@ -79,7 +78,6 @@ public final class LogViewerScreen extends Screen {
     private Button btnActor;
     private Button btnTrain;
     private Button btnPlaneName;
-    private Button btnBlockId;
     private Button btnClear;
     private Button btnTabDetails;
     private Button btnTabRaw;
@@ -91,7 +89,6 @@ public final class LogViewerScreen extends Screen {
     private EditBox actorBox;
     private EditBox trainBox;
     private EditBox planeNameBox;
-    private EditBox blockIdBox;
     private Button btnApply;
 
     private boolean typeDropdownOpen = false;
@@ -217,14 +214,6 @@ public final class LogViewerScreen extends Screen {
         this.addRenderableWidget(this.planeNameBox);
         y += leftRowH + leftGap;
 
-        this.btnBlockId = this.addRenderableWidget(Button.builder(Component.literal("Блок"), b -> {})
-                .bounds(leftX, y, btnW, leftRowH).build());
-        this.btnBlockId.active = false;
-        this.blockIdBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.literal("block id"));
-        this.blockIdBox.setHint(Component.literal("minecraft:chest"));
-        this.addRenderableWidget(this.blockIdBox);
-        y += leftRowH + leftGap;
-
         // Search (label-style button + box)
         Button btnSearch = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.search"), b -> {})
                 .bounds(leftX, y, btnW, leftRowH).build());
@@ -292,8 +281,7 @@ public final class LogViewerScreen extends Screen {
         String actor = (actorBox != null && !actorBox.getValue().isBlank()) ? actorBox.getValue().trim() : (actorFilter == null ? "" : actorFilter);
         String train = (trainBox != null && !trainBox.getValue().isBlank()) ? trainBox.getValue().trim() : (trainFilter == null ? "" : trainFilter);
         String planeName = (planeNameBox != null && !planeNameBox.getValue().isBlank()) ? planeNameBox.getValue().trim() : (planeNameFilter == null ? "" : planeNameFilter);
-        String blockId = (blockIdBox != null && !blockIdBox.getValue().isBlank()) ? blockIdBox.getValue().trim() : (blockIdFilter == null ? "" : blockIdFilter);
-        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName, blockId);
+        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName);
     }
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
@@ -805,13 +793,11 @@ public final class LogViewerScreen extends Screen {
         this.actorFilter = "";
         this.trainFilter = "";
         this.planeNameFilter = "";
-        this.blockIdFilter = "";
         if (timeBox != null) timeBox.setValue("");
         if (radiusBox != null) radiusBox.setValue("");
         if (actorBox != null) actorBox.setValue("");
         if (trainBox != null) trainBox.setValue("");
         if (planeNameBox != null) planeNameBox.setValue("");
-        if (blockIdBox != null) blockIdBox.setValue("");
         this.searchBox.setValue("");
         this.typeDropdownOpen = false;
         refreshFilterButtonLabels();
@@ -828,7 +814,6 @@ public final class LogViewerScreen extends Screen {
 
         String actor = (actorBox != null && !actorBox.getValue().isBlank()) ? actorBox.getValue().trim() : (actorFilter == null ? "" : actorFilter);
         String train = (trainBox != null && !trainBox.getValue().isBlank()) ? trainBox.getValue().trim() : (trainFilter == null ? "" : trainFilter);
-        String blockId = (blockIdBox != null && !blockIdBox.getValue().isBlank()) ? blockIdBox.getValue().trim() : (blockIdFilter == null ? "" : blockIdFilter);
 
         if (btnActor != null) btnActor.setMessage(Component.translatable("gui.avilixlogger.filter.actor.v",
                 actor.isBlank() ? Component.translatable("gui.avilixlogger.value.any") : Component.literal(actor)));
@@ -847,7 +832,6 @@ public final class LogViewerScreen extends Screen {
 
         // Plane name filter widgets are only meaningful in planes preset.
         if (btnPlaneName != null) btnPlaneName.visible = planes;
-        if (btnBlockId != null) btnBlockId.setMessage(Component.literal("Блок: " + (blockId.isBlank() ? "любой" : trimLabel(blockId, 18))));
         if (planeNameBox != null) {
             planeNameBox.visible = planes;
             planeNameBox.active = planes;
@@ -944,8 +928,6 @@ public final class LogViewerScreen extends Screen {
                     || (radiusBox != null && radiusBox.isFocused())
                     || (actorBox != null && actorBox.isFocused())
                     || (trainBox != null && trainBox.isFocused())
-                    || (planeNameBox != null && planeNameBox.isFocused())
-                    || (blockIdBox != null && blockIdBox.isFocused())
                     || (searchBox != null && searchBox.isFocused())) {
                 applyCustomInputs();
                 return true;

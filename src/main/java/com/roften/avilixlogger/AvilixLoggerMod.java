@@ -53,7 +53,8 @@ public final class AvilixLoggerMod {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
-        // Ensure we flush writers.
+        // Ensure we flush writers and stop helper executors.
+        LoggerNetwork.shutdown();
         LoggerRuntime.shutdown();
     }
 

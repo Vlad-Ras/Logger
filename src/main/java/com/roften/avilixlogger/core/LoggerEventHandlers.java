@@ -63,8 +63,6 @@ public final class LoggerEventHandlers {
      * Key format: playerUUID:itemEntityUUID
      */
     private static final Map<String, Long> RECENT_DROPS = new ConcurrentHashMap<>();
-    private static final Map<String, Long> RECENT_INTERACTS = new ConcurrentHashMap<>();
-    private static final Map<String, Long> RECENT_CONTAINER_OPENS = new ConcurrentHashMap<>();
 
     private static boolean shouldLogRecent(Map<String, Long> map, String key, long nowMs, long windowMs) {
         if (key == null) return true;
@@ -83,47 +81,6 @@ public final class LoggerEventHandlers {
             }
         }
         return true;
-    }
-
-
-
-    private static boolean storageUnderPressure(ServerLevel level) {
-        try {
-            return level != null && LoggerRuntime.isUnderPressure(level);
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private static long interactDedupWindowMs() {
-        try {
-            return Math.max(0, LoggerConfig.VALUES.interactDedupWindowMs.get());
-        } catch (Throwable ignored) {
-            return 300L;
-        }
-    }
-
-    private static long containerOpenDedupWindowMs() {
-        try {
-            return Math.max(0, LoggerConfig.VALUES.containerOpenDedupWindowMs.get());
-        } catch (Throwable ignored) {
-            return 400L;
-        }
-    }
-
-    private static String maybeWriteBlockEntity(ServerLevel level, BlockEntity be) {
-        if (be == null || storageUnderPressure(level)) return null;
-        return NbtSerde.writeBlockEntity(level, be);
-    }
-
-    private static String maybeWriteEntity(ServerLevel level, Entity ent) {
-        if (ent == null || storageUnderPressure(level)) return null;
-        return NbtSerde.writeEntity(level, ent);
-    }
-
-    private static String maybeWriteItemStack(ServerLevel level, ItemStack stack) {
-        if (stack == null || stack.isEmpty() || storageUnderPressure(level)) return null;
-        return NbtSerde.writeItemStack(stack, level.registryAccess());
     }
 
     private static void runAfterTicks(ServerLevel level, int delayTicks, Runnable r) {
@@ -285,7 +242,7 @@ public final class LoggerEventHandlers {
         e.y = pos.getY();
         e.z = pos.getZ();
         e.blockBefore = NbtSerde.writeBlockState(before);
-        e.beBefore = maybeWriteBlockEntity(level, be);
+        e.beBefore = NbtSerde.writeBlockEntity(level, be);
         e.blockAfter = NbtSerde.writeBlockState(level.getBlockState(pos)); // may still be before, but ok
         e.extra = "break " + BuiltInRegistries.BLOCK.getKey(before.getBlock()).toString();
         LoggerRuntime.storage(level).append(e);
@@ -346,7 +303,7 @@ public final class LoggerEventHandlers {
         e.blockBefore = NbtSerde.writeBlockState(replaced);
         e.beBefore = beBeforeSnbt;
         e.blockAfter = NbtSerde.writeBlockState(placed);
-        e.beAfter = maybeWriteBlockEntity(level, beAfter);
+        e.beAfter = NbtSerde.writeBlockEntity(level, beAfter);
         e.extra = "place " + BuiltInRegistries.BLOCK.getKey(placed.getBlock()) + " (was " + BuiltInRegistries.BLOCK.getKey(replaced.getBlock()) + ")";
         LoggerRuntime.storage(level).append(e);
 
@@ -442,33 +399,24 @@ public final class LoggerEventHandlers {
                 e.x = pos.getX();
                 e.y = pos.getY();
                 e.z = pos.getZ();
-                String openDedupKey = p.getUUID() + ":" + dim + ":" + pos.asLong();
-                long nowOpen = System.currentTimeMillis();
-                boolean allowOpenLog = shouldLogRecent(RECENT_CONTAINER_OPENS, openDedupKey, nowOpen, containerOpenDedupWindowMs());
-                if (allowOpenLog) {
-                    e.blockAfter = NbtSerde.writeBlockState(state);
-                    e.extra = "open " + BuiltInRegistries.BLOCK.getKey(state.getBlock());
-                    LoggerRuntime.storage(level).append(e);
-                }
+                e.blockAfter = NbtSerde.writeBlockState(state);
+                e.extra = "open " + BuiltInRegistries.BLOCK.getKey(state.getBlock());
+                LoggerRuntime.storage(level).append(e);
             }
         }
 
         // 2) Generic interaction logging (fillable blocks, depot-like blocks, modded mechanics).
         //    We snapshot the blockstate and, if present, block-entity NBT BEFORE interaction and compare next tick.
         if (!LoggerConfig.VALUES.logBlocks.get()) return;
-        if (storageUnderPressure(level)) return;
         if (!shouldTrackDelayedInteraction(level, pos, state)) return;
         final String dim = level.dimension().location().toString();
         final String beforeState = NbtSerde.writeBlockState(state);
         final BlockEntity be0 = level.getBlockEntity(pos);
-        final String beforeBe = (LoggerConfig.VALUES.logContainers.get() && be0 != null) ? maybeWriteBlockEntity(level, be0) : null;
+        final String beforeBe = (LoggerConfig.VALUES.logContainers.get() && be0 != null) ? NbtSerde.writeBlockEntity(level, be0) : null;
         final ItemStack used = event.getItemStack() != null ? event.getItemStack().copy() : ItemStack.EMPTY;
-        final String usedItemSnbt = (!used.isEmpty()) ? maybeWriteItemStack(level, used) : null;
+        final String usedItemSnbt = (!used.isEmpty()) ? NbtSerde.writeItemStack(used, level.registryAccess()) : null;
         final UUID actorUuid = p.getUUID();
         final String actorName = p.getName().getString();
-        final long nowInteract = System.currentTimeMillis();
-        final String interactDedupKey = actorUuid + ":" + dim + ":" + pos.asLong();
-        if (!shouldLogRecent(RECENT_INTERACTS, interactDedupKey, nowInteract, interactDedupWindowMs())) return;
 
         final java.util.concurrent.atomic.AtomicBoolean logged = new java.util.concurrent.atomic.AtomicBoolean(false);
 
@@ -481,7 +429,7 @@ public final class LoggerEventHandlers {
                 BlockState afterState0 = level.getBlockState(pos);
                 String afterState = NbtSerde.writeBlockState(afterState0);
                 BlockEntity be1 = level.getBlockEntity(pos);
-                String afterBe = (LoggerConfig.VALUES.logContainers.get() && be1 != null) ? maybeWriteBlockEntity(level, be1) : null;
+                String afterBe = (LoggerConfig.VALUES.logContainers.get() && be1 != null) ? NbtSerde.writeBlockEntity(level, be1) : null;
 
                 boolean stateChanged = beforeState != null && afterState != null && !afterState.equals(beforeState);
                 boolean beChanged = beforeBe != null && afterBe != null && !afterBe.equals(beforeBe);
@@ -534,7 +482,7 @@ public final class LoggerEventHandlers {
                             try {
                                 ItemStack st = d.representative().copy();
                                 st.setCount(Math.max(1, Math.abs(d.deltaCount())));
-                                de.itemStackNbt = maybeWriteItemStack(level, st);
+                                de.itemStackNbt = NbtSerde.writeItemStack(st, level.registryAccess());
                             } catch (Throwable ignored) {}
                             LoggerRuntime.storage(level).append(de);
                         }
@@ -606,7 +554,7 @@ public final class LoggerEventHandlers {
             if (!sp.isShiftKeyDown()) return;
 
             String dim = level.dimension().location().toString();
-            String beforeInv = storageUnderPressure(level) ? null : EntityContainerSerde.write(cont, level.registryAccess());
+            String beforeInv = EntityContainerSerde.write(cont, level.registryAccess());
             if (beforeInv == null) return;
 
             String entityType = EntityType.getKey(target.getType()).toString();
@@ -637,7 +585,7 @@ public final class LoggerEventHandlers {
         try {
             Entity vehicle = sp.getVehicle();
             if (vehicle instanceof Container cont && !(vehicle instanceof Player)) {
-                String beforeInv = storageUnderPressure(level) ? null : EntityContainerSerde.write(cont, level.registryAccess());
+                String beforeInv = EntityContainerSerde.write(cont, level.registryAccess());
                 if (beforeInv != null) {
                     String entityType = EntityType.getKey(vehicle.getType()).toString();
                     logEntityContainerOpen(level, sp, vehicle, dim, entityType, beforeInv);
@@ -674,7 +622,7 @@ public final class LoggerEventHandlers {
         e.entityUuid = target.getUUID();
         e.extra = "open entity container " + entityType;
         // Store a snapshot too (so rollback tools can be deterministic if you add them later)
-        e.entityNbt = maybeWriteEntity(level, target);
+        e.entityNbt = NbtSerde.writeEntity(level, target);
         // beforeInv is kept in OPEN_ENTITY_CONTAINER ctx
         LoggerRuntime.storage(level).append(e);
     }
@@ -713,7 +661,7 @@ public final class LoggerEventHandlers {
         e.z = ridden.blockPosition().getZ();
         e.entityType = EntityType.getKey(ridden.getType()).toString();
         e.entityUuid = ridden.getUUID();
-        e.entityNbt = maybeWriteEntity(level, ridden);
+        e.entityNbt = NbtSerde.writeEntity(level, ridden);
         if (event.isMounting() && isPlane) {
             e.extra = "plane mount " + e.entityType;
         } else {
@@ -751,7 +699,7 @@ public final class LoggerEventHandlers {
             if (ectx != null && ectx.dim.equals(level.dimension().location().toString())) {
                 Entity ent = level.getEntity(ectx.entityUuid);
                 if (ent instanceof Container cont) {
-                    String afterInv = storageUnderPressure(level) ? null : EntityContainerSerde.write(cont, level.registryAccess());
+                    String afterInv = EntityContainerSerde.write(cont, level.registryAccess());
                     if (afterInv != null && !afterInv.equals(ectx.beforeInv)) {
                         var diffs = InventoryDiffUtil.diff(ectx.beforeInv, afterInv, level.registryAccess());
                         if (diffs != null && !diffs.isEmpty()) {
@@ -771,7 +719,7 @@ public final class LoggerEventHandlers {
                                 try {
                                     ItemStack st = d.representative().copy();
                                     st.setCount(Math.max(1, Math.abs(d.deltaCount())));
-                                    de.itemStackNbt = maybeWriteItemStack(level, st);
+                                    de.itemStackNbt = NbtSerde.writeItemStack(st, level.registryAccess());
                                 } catch (Throwable ignored) {}
                                 de.extra = "entity container " + ectx.entityType;
                                 LoggerRuntime.storage(level).append(de);
@@ -853,7 +801,7 @@ public final class LoggerEventHandlers {
             float dmg = getDamageAmountCompat(event);
             if (hp > 0.0f && (hp - dmg) <= 0.0f) {
                 String dim = level.dimension().location().toString();
-                String nbt = maybeWriteEntity(level, event.getEntity());
+                String nbt = NbtSerde.writeEntity(level, event.getEntity());
                 if (nbt != null) {
                     // Snapshot meta helps later if we want to respawn at the same spot/type
                     var ent = event.getEntity();
@@ -942,7 +890,7 @@ public final class LoggerEventHandlers {
                 preNbt = snap.entityNbt;
             }
         }
-        e.entityNbt = (preNbt != null) ? preNbt : maybeWriteEntity(level, victim);
+        e.entityNbt = (preNbt != null) ? preNbt : NbtSerde.writeEntity(level, victim);
         if (victim instanceof Player vp) {
             e.extra = "victim " + vp.getName().getString();
         } else {
@@ -958,7 +906,7 @@ public final class LoggerEventHandlers {
         try {
             ItemStack norm = st.copy();
             norm.setCount(1);
-            String itemKey = maybeWriteItemStack(level, norm);
+            String itemKey = NbtSerde.writeItemStack(norm, level.registryAccess());
             if (itemKey == null) return;
 
             String key = sp.getUUID() + ":" + itemKey;
@@ -1008,7 +956,7 @@ public final class LoggerEventHandlers {
             ItemStack rep = NbtSerde.readItemStack(agg.itemKeySnbt, level.registryAccess());
             if (rep != null && !rep.isEmpty()) {
                 rep.setCount(Math.max(1, agg.count));
-                e.itemStackNbt = maybeWriteItemStack(level, rep);
+                e.itemStackNbt = NbtSerde.writeItemStack(rep, level.registryAccess());
             } else {
                 e.itemStackNbt = agg.itemKeySnbt;
             }
@@ -1079,7 +1027,7 @@ public final class LoggerEventHandlers {
             e.x = itemEnt.blockPosition().getX();
             e.y = itemEnt.blockPosition().getY();
             e.z = itemEnt.blockPosition().getZ();
-            e.itemStackNbt = maybeWriteItemStack(level, st);
+            e.itemStackNbt = NbtSerde.writeItemStack(st, level.registryAccess());
             e.count = st.getCount();
             e.extra = "drop " + BuiltInRegistries.ITEM.getKey(st.getItem());
             LoggerRuntime.storage(level).append(e);
@@ -1106,7 +1054,7 @@ public final class LoggerEventHandlers {
         e.z = ent.blockPosition().getZ();
         e.entityType = EntityType.getKey(ent.getType()).toString();
         e.entityUuid = ent.getUUID();
-        e.entityNbt = maybeWriteEntity(level, ent);
+        e.entityNbt = NbtSerde.writeEntity(level, ent);
 
         // Best-effort attribution for entity placements that don't preserve a placer.
         // (frames, decorative entities, many modded MISC spawns).
@@ -1212,7 +1160,7 @@ public final class LoggerEventHandlers {
             pe.x = ie.blockPosition().getX();
             pe.y = ie.blockPosition().getY();
             pe.z = ie.blockPosition().getZ();
-            pe.itemStackNbt = maybeWriteItemStack(level, snap);
+            pe.itemStackNbt = NbtSerde.writeItemStack(snap, level.registryAccess());
             pe.count = snap.getCount();
 
             // Put owner + plane info into extra for easy filtering.
@@ -1253,7 +1201,7 @@ public final class LoggerEventHandlers {
         e.x = ie.blockPosition().getX();
         e.y = ie.blockPosition().getY();
         e.z = ie.blockPosition().getZ();
-        e.itemStackNbt = maybeWriteItemStack(level, snap);
+        e.itemStackNbt = NbtSerde.writeItemStack(snap, level.registryAccess());
         e.count = snap.getCount();
         e.extra = "pickup " + BuiltInRegistries.ITEM.getKey(snap.getItem()) + " x" + snap.getCount();
         LoggerRuntime.storage(level).append(e);
@@ -1277,7 +1225,7 @@ public final class LoggerEventHandlers {
         e.x = event.getEntity().blockPosition().getX();
         e.y = event.getEntity().blockPosition().getY();
         e.z = event.getEntity().blockPosition().getZ();
-        e.itemStackNbt = maybeWriteItemStack(level, crafted);
+        e.itemStackNbt = NbtSerde.writeItemStack(crafted, level.registryAccess());
         e.count = crafted.getCount();
         e.extra = "craft " + BuiltInRegistries.ITEM.getKey(crafted.getItem()) + " x" + crafted.getCount();
 
@@ -1301,7 +1249,7 @@ public final class LoggerEventHandlers {
         e.x = event.getEntity().blockPosition().getX();
         e.y = event.getEntity().blockPosition().getY();
         e.z = event.getEntity().blockPosition().getZ();
-        e.itemStackNbt = maybeWriteItemStack(level, smelted);
+        e.itemStackNbt = NbtSerde.writeItemStack(smelted, level.registryAccess());
         e.count = smelted.getCount();
         e.extra = "smelt " + BuiltInRegistries.ITEM.getKey(smelted.getItem()) + " x" + smelted.getCount();
         LoggerRuntime.storage(level).append(e);
@@ -1627,7 +1575,7 @@ public final class LoggerEventHandlers {
         e.z = ent.blockPosition().getZ();
         e.entityType = EntityType.getKey(ent.getType()).toString();
         e.entityUuid = ent.getUUID();
-        e.entityNbt = maybeWriteEntity(level, ent);
+        e.entityNbt = NbtSerde.writeEntity(level, ent);
 
         ActorTracker.ActorRef ar = resolveActorForEntity(level, ent, e.entityNbt);
         if (ar != null) {

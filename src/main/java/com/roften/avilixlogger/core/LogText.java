@@ -253,10 +253,8 @@ public final class LogText {
             case BLOCK_PLACE, BLOCK_INTERACT, CONTAINER_OPEN, BLOCK_ENTITY_NBT_CHANGE -> blockNameComponent(level, e.blockAfter);
 
             // container/item diffs
-            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT ->
+            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT, PLANE_PICKUP ->
                     itemNameComponent(level, e.itemStackNbt);
-
-            case PLANE_PICKUP -> planeItemNameComponent(level, e);
 
             // schedule: и забрал, и поставил показываем предметом
             case TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT ->
@@ -272,19 +270,8 @@ public final class LogText {
 
             // entities / planes / etc (оставь как у тебя было — ниже максимально безопасный вариант)
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT -> {
-                String planeName = null;
-                try { planeName = extractJsonString(e.extra, "planeName"); } catch (Throwable ignored) {}
-                if (planeName != null && !planeName.isBlank()) {
-                    yield Component.literal(planeName);
-                }
-                yield Component.literal(e.entityType != null ? e.entityType : "entity");
-            }
-
-            case ENTITY_OWNER_SET -> {
-                if (e.itemStackNbt != null && !e.itemStackNbt.isBlank()) {
-                    yield planeItemNameComponent(level, e);
-                }
+                 PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT, ENTITY_OWNER_SET -> {
+                // если у тебя уже есть логика для самолётов/энтити — можно вернуть её обратно.
                 yield Component.literal(e.entityType != null ? e.entityType : "entity");
             }
 
@@ -350,24 +337,6 @@ private static MutableComponent blockNameComponent(ServerLevel level, String blo
         if (m.find()) return m.group(1);
 
         return null;
-    }
-
-
-    private static MutableComponent planeItemNameComponent(ServerLevel level, LogEntry e) {
-        MutableComponent base = itemNameComponent(level, e.itemStackNbt);
-        String plain = base == null ? "" : base.getString();
-        if (!plain.isBlank() && !plain.equalsIgnoreCase("minecraft:air") && !plain.equalsIgnoreCase("air")) {
-            return base;
-        }
-        try {
-            String custom = extractJsonString(e.extra, "customName");
-            if (custom != null && !custom.isBlank()) return Component.literal(custom);
-            String plane = extractJsonString(e.extra, "planeName");
-            if (plane != null && !plane.isBlank()) return Component.literal(plane);
-            String planeId = extractJsonString(e.extra, "planeId");
-            if (planeId != null && !planeId.isBlank()) return Component.literal(planeId);
-        } catch (Throwable ignored) {}
-        return base == null ? Component.literal("предмет") : base;
     }
 
     private static MutableComponent itemNameComponent(ServerLevel level, String itemStackSnbt) {

@@ -234,7 +234,7 @@ public final class AirplanesCompatHooks {
             e.x = pos.getX();
             e.y = pos.getY();
             e.z = pos.getZ();
-            e.itemStackNbt = LoggerRuntime.isUnderPressure(level) ? null : NbtSerde.writeItemStack(usedStack, level.registryAccess());
+            e.itemStackNbt = NbtSerde.writeItemStack(usedStack, level.registryAccess());
             e.extra = "plane place " + usedStack.getDescriptionId();
             LoggerRuntime.storage(level).append(e);
         } catch (Throwable ignored) {
@@ -258,7 +258,7 @@ public final class AirplanesCompatHooks {
             e.z = pos.getZ();
             e.entityType = net.minecraft.world.entity.EntityType.getKey(planeEntity.getType()).toString();
             e.entityUuid = planeEntity.getUUID();
-            try { e.entityNbt = LoggerRuntime.isUnderPressure(level) ? null : NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
+            try { e.entityNbt = NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
 
             String planeName = null;
             String customName = null;
@@ -304,7 +304,7 @@ public final class AirplanesCompatHooks {
             e.entityType = net.minecraft.world.entity.EntityType.getKey(planeEntity.getType()).toString();
             e.entityUuid = planeEntity.getUUID();
 
-            try { e.entityNbt = LoggerRuntime.isUnderPressure(level) ? null : NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
+            try { e.entityNbt = NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
             String planeName = null;
             String customName = null;
             String ownerName = null;

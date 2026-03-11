@@ -29,10 +29,6 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue dbBatchSize;
         public final ModConfigSpec.IntValue dbFlushIntervalMs;
         public final ModConfigSpec.IntValue dbQueueCapacity;
-        public final ModConfigSpec.IntValue pressureHighWatermarkPct;
-        public final ModConfigSpec.IntValue pressureLowWatermarkPct;
-        public final ModConfigSpec.BooleanValue dropLowPriorityUnderPressure;
-        public final ModConfigSpec.BooleanValue stripHeavyFieldsUnderPressure;
 
         public final ModConfigSpec.BooleanValue logBlocks;
         public final ModConfigSpec.BooleanValue logEntities;
@@ -40,8 +36,6 @@ public final class LoggerConfig {
         public final ModConfigSpec.BooleanValue logItemCraftSmelt;
         public final ModConfigSpec.BooleanValue logChat;
         public final ModConfigSpec.IntValue interactionScanTicks;
-        public final ModConfigSpec.IntValue interactDedupWindowMs;
-        public final ModConfigSpec.IntValue containerOpenDedupWindowMs;
         public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInDeltaLogs;
         public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInInteractLogs;
 
@@ -70,14 +64,6 @@ public final class LoggerConfig {
                     .defineInRange("flushIntervalMs", 250, 50, 5000);
             dbQueueCapacity = b.comment("In-memory queue capacity. If full, new logs will be dropped to protect TPS.")
                     .defineInRange("queueCapacity", 50000, 10000, 500000);
-            pressureHighWatermarkPct = b.comment("Enter overload protection when queue fill reaches this percent.")
-                    .defineInRange("pressureHighWatermarkPct", 70, 10, 99);
-            pressureLowWatermarkPct = b.comment("Leave overload protection when queue fill drops below this percent.")
-                    .defineInRange("pressureLowWatermarkPct", 40, 1, 95);
-            dropLowPriorityUnderPressure = b.comment("Drop low-priority events while queue is under pressure.")
-                    .define("dropLowPriorityUnderPressure", true);
-            stripHeavyFieldsUnderPressure = b.comment("Strip heavy NBT/snapshot fields while queue is under pressure.")
-                    .define("stripHeavyFieldsUnderPressure", true);
             b.pop();
 
             b.push("capture");
@@ -89,10 +75,6 @@ public final class LoggerConfig {
                     .define("logChat", true);
             interactionScanTicks = b.comment("How many delayed ticks to watch after block interaction for state/NBT changes. Lower = less TPS impact.")
                     .defineInRange("interactionScanTicks", 3, 1, 10);
-            interactDedupWindowMs = b.comment("Dedup repeated right-click interaction logs for the same player/block within this window.")
-                    .defineInRange("interactDedupWindowMs", 300, 0, 5000);
-            containerOpenDedupWindowMs = b.comment("Dedup repeated container-open logs for the same player/block within this window.")
-                    .defineInRange("containerOpenDedupWindowMs", 400, 0, 5000);
             storeVerboseBeSnapshotsInDeltaLogs = b.comment("Store full before/after block-entity NBT inside each CONTAINER_PUT/CONTAINER_TAKE delta log. Disabling removes large duplicate payloads.")
                     .define("storeVerboseBeSnapshotsInDeltaLogs", false);
             storeVerboseBeSnapshotsInInteractLogs = b.comment("Store full before/after block-entity NBT inside BLOCK_INTERACT logs when a separate snapshot entry is also written. Disabling reduces duplicate payloads.")
