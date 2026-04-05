@@ -24,6 +24,7 @@ public final class ClientBootstrap {
 
         // Runtime (game) bus listeners
         NeoForge.EVENT_BUS.addListener(LogViewerClientHooks::onLogin);
+        NeoForge.EVENT_BUS.addListener(LogViewerClientHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(LogViewerKeybinds::onClientTick);
     }
 }

@@ -1,10 +1,12 @@
 package com.roften.avilixlogger.compat.create.mixin;
 
 import com.roften.avilixlogger.compat.create.CreateTrainsCompatHooks;
+import com.roften.avilixlogger.core.CreateContraptionSnapshotStore;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Entity.RemovalReason;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -17,6 +19,38 @@ import java.util.UUID;
 
 @Mixin(targets = "com.simibubi.create.content.contraptions.AbstractContraptionEntity")
 public class AbstractContraptionEntityMixin {
+
+
+    @Inject(method = "disassemble", at = @At("HEAD"), require = 0)
+    private void avilixlogger$captureBeforeDisassemble(CallbackInfo ci) {
+        try {
+            Entity self = (Entity) (Object) this;
+            if (self.level() instanceof ServerLevel sl) {
+                CreateContraptionSnapshotStore.remember(sl, self, "disassemble");
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    @Inject(method = "remove", at = @At("HEAD"), require = 0)
+    private void avilixlogger$captureBeforeRemove(RemovalReason reason, CallbackInfo ci) {
+        try {
+            Entity self = (Entity) (Object) this;
+            if (self.level() instanceof ServerLevel sl) {
+                String why = reason == null ? "remove" : ("remove:" + reason.name().toLowerCase(java.util.Locale.ROOT));
+                CreateContraptionSnapshotStore.remember(sl, self, why);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    @Inject(method = "kill", at = @At("HEAD"), require = 0)
+    private void avilixlogger$captureBeforeKill(CallbackInfo ci) {
+        try {
+            Entity self = (Entity) (Object) this;
+            if (self.level() instanceof ServerLevel sl) {
+                CreateContraptionSnapshotStore.remember(sl, self, "kill");
+            }
+        } catch (Throwable ignored) {}
+    }
 
     @Inject(method = "stopControlling", at = @At("HEAD"), require = 0)
     private void avilixlogger$controlStop(BlockPos controlsLocalPos, CallbackInfo ci) {

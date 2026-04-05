@@ -6,6 +6,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
+import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
@@ -15,6 +16,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -92,6 +95,20 @@ public final class NbtSerde {
         CompoundTag tag = new CompoundTag();
         // Entity#save is stable across many versions
         ent.save(tag);
+
+        // Create contraptions are a special case: during removal/disassembly the generic save path may
+        // produce a half-empty snapshot where Contraption.Type is already missing. For rollback we need
+        // the full nested Contraption NBT. Enrich it while the entity is still alive.
+        try {
+            if (looksLikeCreateContraptionEntity(ent)) {
+                CompoundTag contraptionTag = extractCreateContraptionNbt(level, ent);
+                if (contraptionTag != null && !contraptionTag.isEmpty()) {
+                    tag.put("Contraption", contraptionTag);
+                }
+                invokeCreateWriteAdditional(level, ent, tag);
+            }
+        } catch (Throwable ignored) {}
+
         return toSnbt(tag);
     }
 
@@ -105,31 +122,367 @@ public final class NbtSerde {
         CompoundTag tag = fromSnbt(entSnbt);
         if (tag == null) return null;
 
+        // Create contraptions are restored as blocks via a dedicated path in rollback.
+        // Spawning them as entities from raw NBT is fragile and can crash clients.
+        if (isUnsafeEntityRollback(key, tag)) {
+            return null;
+        }
+
+        // Strip runtime-only fields that should be regenerated for rollback-spawned entities.
+        tag.remove("UUID");
+        tag.remove("Pos");
+        tag.remove("Motion");
+        tag.remove("Rotation");
+        tag.remove("Passengers");
+        tag.remove("Leash");
+        tag.remove("RootVehicle");
+
         Entity ent = type.create(level);
         if (ent == null) return null;
 
-        // Attempt to load. Different mappings exist; try common ones.
+        boolean loaded = false;
         try {
             Method m = Entity.class.getMethod("load", CompoundTag.class);
             m.invoke(ent, tag);
+            loaded = true;
         } catch (Throwable ignored) {
             try {
                 Method m = Entity.class.getMethod("load", CompoundTag.class, HolderLookup.Provider.class);
                 m.invoke(ent, tag, level.registryAccess());
+                loaded = true;
             } catch (Throwable ignored2) {
-                // Best-effort; entity will spawn without full data.
+                loaded = false;
             }
         }
 
+        if (!loaded) return null;
+
         ent.moveTo(x, y, z, ent.getYRot(), ent.getXRot());
-        level.addFreshEntity(ent);
-        return ent;
+        return level.addFreshEntity(ent) ? ent : null;
+    }
+
+    /**
+     * Best-effort rollback for Create contraption entities.
+     *
+     * Instead of respawning a moving contraption entity (which is brittle and often client-crashy),
+     * we reconstruct the Create contraption from the saved NBT and ask Create to place its blocks back
+     * into the world using the entity's saved transform.
+     */
+    public static boolean restoreCreateContraptionAsBlocks(ServerLevel level, String entityTypeId, String entSnbt,
+                                                           double fallbackX, double fallbackY, double fallbackZ) {
+        try {
+            ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
+            CompoundTag entityTag = fromSnbt(entSnbt);
+            if (key == null || entityTag == null || !isUnsafeEntityRollback(key, entityTag)) return false;
+            EntityType<?> type = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.get(key);
+            if (type == null) return false;
+
+            CompoundTag contraptionTag = entityTag.getCompound("Contraption");
+            if (contraptionTag == null || contraptionTag.isEmpty()) return false;
+            String contraptionType = contraptionTag.getString("Type");
+            if (contraptionType == null || contraptionType.isBlank()) return false;
+
+            Object contraption = createCreateContraptionFromNbt(level, contraptionTag);
+            if (contraption == null) return false;
+
+            Entity shell = instantiateCreateRollbackShell(level, key, type, entityTag, fallbackX, fallbackY, fallbackZ);
+            if (shell == null) return false;
+
+            Object transform = invokeNoArg(shell, "makeStructureTransform");
+            if (transform == null) return false;
+
+            try {
+                invokeNamed(contraption, "stop", level);
+            } catch (Throwable ignored) {}
+
+            if (!invokeNamed(contraption, "addBlocksToWorld", level, transform)) return false;
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     public static String writeItemStack(ItemStack stack, HolderLookup.Provider provider) {
         if (stack == null || stack.isEmpty()) return null;
         CompoundTag tag = invokeItemStackSave(stack, provider);
         return toSnbt(tag);
+    }
+
+    private static boolean isUnsafeEntityRollback(ResourceLocation key, CompoundTag tag) {
+        if (key == null) return true;
+        String ns = key.getNamespace();
+        String path = key.getPath();
+        if ("create".equals(ns)) {
+            if (path != null && (path.contains("contraption") || path.contains("carriage"))) {
+                return true;
+            }
+            try {
+                if (tag != null && (tag.contains("Contraption") || tag.contains("contraption")
+                        || tag.contains("Carriage") || tag.contains("carriage"))) {
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
+    }
+
+    private static boolean looksLikeCreateContraptionEntity(Entity ent) {
+        if (ent == null) return false;
+        try {
+            ResourceLocation key = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(ent.getType());
+            if (key == null || !"create".equals(key.getNamespace())) return false;
+            String path = key.getPath();
+            return path != null && (path.contains("contraption") || path.contains("carriage"));
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static CompoundTag extractCreateContraptionNbt(ServerLevel level, Entity ent) {
+        if (level == null || ent == null) return null;
+        try {
+            Object contraption = readField(ent, "contraption");
+            if (contraption == null) return null;
+            Method m = findCompatibleMethod(contraption.getClass(), "writeNBT", level.registryAccess(), Boolean.FALSE);
+            if (m == null) return null;
+            Object out = m.invoke(contraption, level.registryAccess(), Boolean.FALSE);
+            return out instanceof CompoundTag t ? t : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static void invokeCreateWriteAdditional(ServerLevel level, Entity ent, CompoundTag out) {
+        if (level == null || ent == null || out == null) return;
+        try {
+            Method m = findCompatibleMethod(ent.getClass(), "writeAdditional", out, level.registryAccess(), Boolean.FALSE);
+            if (m != null) {
+                m.invoke(ent, out, level.registryAccess(), Boolean.FALSE);
+                return;
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            Method m = findCompatibleMethod(ent.getClass(), "addAdditionalSaveData", out);
+            if (m != null) {
+                m.invoke(ent, out);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static Object createCreateContraptionFromNbt(ServerLevel level, CompoundTag contraptionTag) {
+        try {
+            Class<?> contraptionClass = Class.forName("com.simibubi.create.content.contraptions.Contraption");
+            for (Method m : contraptionClass.getMethods()) {
+                if (!m.getName().equals("fromNBT") || m.getParameterCount() != 3) continue;
+                Object[] args = new Object[]{level, contraptionTag, Boolean.FALSE};
+                return m.invoke(null, args);
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static Entity instantiateCreateRollbackShell(ServerLevel level, ResourceLocation key, EntityType<?> type,
+                                                         CompoundTag entityTag, double fallbackX, double fallbackY, double fallbackZ) {
+        try {
+            String className = createRollbackShellClassName(key);
+            if (className == null) return null;
+
+            Class<?> cls = Class.forName(className);
+            Constructor<?> ctor = cls.getConstructor(EntityType.class, net.minecraft.world.level.Level.class);
+            Object raw = ctor.newInstance(type, level);
+            if (!(raw instanceof Entity shell)) return null;
+
+            double px = fallbackX;
+            double py = fallbackY;
+            double pz = fallbackZ;
+            try {
+                var pos = entityTag.getList("Pos", 6);
+                if (pos.size() >= 3) {
+                    px = pos.getDouble(0);
+                    py = pos.getDouble(1);
+                    pz = pos.getDouble(2);
+                }
+            } catch (Throwable ignored) {}
+
+            float yaw = 0.0F;
+            float pitch = 0.0F;
+            try {
+                var rot = entityTag.getList("Rotation", 5);
+                if (rot.size() >= 2) {
+                    yaw = rot.getFloat(0);
+                    pitch = rot.getFloat(1);
+                }
+            } catch (Throwable ignored) {}
+
+            shell.moveTo(px, py, pz, yaw, pitch);
+
+            String path = key.getPath();
+            if (path != null && (path.contains("oriented_contraption") || path.contains("carriage_contraption"))) {
+                Object dir = readDirectionTag(entityTag, "InitialOrientation");
+                if (dir != null) invokeNamed(shell, "setInitialOrientation", dir);
+                writeFieldIfPresent(shell, "yaw", entityTag.getFloat("Yaw"));
+                writeFieldIfPresent(shell, "pitch", entityTag.getFloat("Pitch"));
+            }
+            if (path != null && path.contains("controlled_contraption")) {
+                Object axis = readAxisTag(entityTag, "Axis");
+                if (axis != null) invokeNamed(shell, "setRotationAxis", axis);
+                invokeNamed(shell, "setAngle", entityTag.getFloat("Angle"));
+            }
+            if (path != null && path.contains("carriage_contraption")) {
+                try {
+                    writeFieldIfPresent(shell, "trainId", entityTag.getUUID("TrainId"));
+                } catch (Throwable ignored) {}
+                try {
+                    writeFieldIfPresent(shell, "carriageIndex", entityTag.getInt("CarriageIndex"));
+                } catch (Throwable ignored) {}
+            }
+
+            return shell;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static String createRollbackShellClassName(ResourceLocation key) {
+        if (key == null) return null;
+        if (!"create".equals(key.getNamespace())) return null;
+        String path = key.getPath();
+        if (path == null) return null;
+        if (path.contains("carriage_contraption")) {
+            return "com.simibubi.create.content.trains.entity.CarriageContraptionEntity";
+        }
+        if (path.contains("controlled_contraption")) {
+            return "com.simibubi.create.content.contraptions.ControlledContraptionEntity";
+        }
+        if (path.contains("oriented_contraption")) {
+            return "com.simibubi.create.content.contraptions.OrientedContraptionEntity";
+        }
+        return null;
+    }
+
+    private static Object readDirectionTag(CompoundTag tag, String key) {
+        try {
+            if (!tag.contains(key)) return null;
+            String raw = tag.getString(key);
+            if (raw != null && !raw.isBlank()) {
+                return Enum.valueOf(net.minecraft.core.Direction.class, raw.toUpperCase(java.util.Locale.ROOT));
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static Object readAxisTag(CompoundTag tag, String key) {
+        try {
+            if (!tag.contains(key)) return null;
+            String raw = tag.getString(key);
+            if (raw != null && !raw.isBlank()) {
+                return Enum.valueOf(net.minecraft.core.Direction.Axis.class, raw.toUpperCase(java.util.Locale.ROOT));
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static boolean invokeNamed(Object target, String name, Object... args) {
+        if (target == null || name == null) return false;
+        Method m = findCompatibleMethod(target.getClass(), name, args);
+        if (m == null) return false;
+        try {
+            m.invoke(target, args);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static Object invokeNoArg(Object target, String name) {
+        if (target == null || name == null) return null;
+        Method m = findCompatibleMethod(target.getClass(), name);
+        if (m == null) return null;
+        try {
+            return m.invoke(target);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Method findCompatibleMethod(Class<?> cls, String name, Object... args) {
+        Class<?> c = cls;
+        while (c != null && c != Object.class) {
+            for (Method m : c.getDeclaredMethods()) {
+                if (!m.getName().equals(name)) continue;
+                Class<?>[] params = m.getParameterTypes();
+                if (params.length != args.length) continue;
+                boolean ok = true;
+                for (int i = 0; i < params.length; i++) {
+                    Object arg = args[i];
+                    if (arg == null) continue;
+                    if (params[i].isPrimitive()) {
+                        Class<?> wrapper = primitiveWrapper(params[i]);
+                        if (wrapper == null || !wrapper.isInstance(arg)) {
+                            ok = false;
+                            break;
+                        }
+                    } else if (!params[i].isAssignableFrom(arg.getClass())) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) continue;
+                try {
+                    m.setAccessible(true);
+                } catch (Throwable ignored) {}
+                return m;
+            }
+            c = c.getSuperclass();
+        }
+        return null;
+    }
+
+    private static Class<?> primitiveWrapper(Class<?> primitive) {
+        if (primitive == boolean.class) return Boolean.class;
+        if (primitive == byte.class) return Byte.class;
+        if (primitive == short.class) return Short.class;
+        if (primitive == int.class) return Integer.class;
+        if (primitive == long.class) return Long.class;
+        if (primitive == float.class) return Float.class;
+        if (primitive == double.class) return Double.class;
+        if (primitive == char.class) return Character.class;
+        return null;
+    }
+
+    private static Object readField(Object target, String fieldName) {
+        if (target == null || fieldName == null) return null;
+        Class<?> c = target.getClass();
+        while (c != null && c != Object.class) {
+            try {
+                Field f = c.getDeclaredField(fieldName);
+                f.setAccessible(true);
+                return f.get(target);
+            } catch (NoSuchFieldException ex) {
+                c = c.getSuperclass();
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static void writeFieldIfPresent(Object target, String fieldName, Object value) {
+        if (target == null || fieldName == null) return;
+        Class<?> c = target.getClass();
+        while (c != null && c != Object.class) {
+            try {
+                Field f = c.getDeclaredField(fieldName);
+                f.setAccessible(true);
+                f.set(target, value);
+                return;
+            } catch (NoSuchFieldException ex) {
+                c = c.getSuperclass();
+            } catch (Throwable ignored) {
+                return;
+            }
+        }
     }
 
     public static ItemStack readItemStack(String snbt, HolderLookup.Provider provider) {

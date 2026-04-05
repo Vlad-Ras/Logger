@@ -1,0 +1,10 @@
+-proc:none
+-Xlint:none
+-d
+/tmp/out_syntax
+src/main/java/com/roften/avilixlogger/core/ActionType.java
+src/main/java/com/roften/avilixlogger/LoggerConfig.java
+src/main/java/com/roften/avilixlogger/core/MysqlLogStorage.java
+src/main/java/com/roften/avilixlogger/core/LoggerEventHandlers.java
+src/main/java/com/roften/avilixlogger/core/LogText.java
+src/main/java/com/roften/avilixlogger/net/LoggerNetwork.java

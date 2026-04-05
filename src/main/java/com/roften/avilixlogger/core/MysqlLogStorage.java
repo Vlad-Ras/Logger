@@ -110,6 +110,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
                     ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
             // MySQL/MariaDB compatibility: CREATE INDEX may not support IF NOT EXISTS.
+            try { st.executeUpdate("CREATE INDEX idx_avilixlogger_ts ON avilixlogger_actions (ts)"); } catch (SQLException ignored) {}
             try { st.executeUpdate("CREATE INDEX idx_avilixlogger_dim_ts ON avilixlogger_actions (dim, ts)"); } catch (SQLException ignored) {}
             try { st.executeUpdate("CREATE INDEX idx_avilixlogger_dim_xyz_ts ON avilixlogger_actions (dim, x, y, z, ts)"); } catch (SQLException ignored) {}
             try { st.executeUpdate("CREATE INDEX idx_avilixlogger_actor_ts ON avilixlogger_actions (actor_name, ts)"); } catch (SQLException ignored) {}
@@ -178,16 +179,40 @@ private static void ensureDatabaseExists(String host, int port, String database,
     private volatile long lastCleanupAt = 0L;
 
     private void maybeCleanup(long now) {
+        if (!running) return;
+
         int keepDays = LoggerConfig.VALUES.keepDays.get();
         if (keepDays <= 0) return;
+
         long everyMs = 60 * 60_000L;
         if ((now - lastCleanupAt) < everyMs) return;
         lastCleanupAt = now;
+
         long cutoff = now - (long) keepDays * 24L * 60L * 60_000L;
-        try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(
-                "DELETE FROM avilixlogger_actions WHERE ts < ?")) {
-            ps.setLong(1, cutoff);
-            ps.executeUpdate();
+        int cleanupBatchSize = Math.max(100, LoggerConfig.VALUES.dbCleanupBatchSize.get());
+        int maxBatches = Math.max(1, LoggerConfig.VALUES.dbCleanupMaxBatchesPerRun.get());
+        int timeoutSec = Math.max(1, LoggerConfig.VALUES.dbCleanupQueryTimeoutSec.get());
+
+        int totalDeleted = 0;
+        try (Connection c = ds.getConnection()) {
+            for (int i = 0; i < maxBatches && running; i++) {
+                try (PreparedStatement ps = c.prepareStatement(
+                        "DELETE FROM avilixlogger_actions WHERE ts < ? ORDER BY ts LIMIT ?")) {
+                    ps.setQueryTimeout(timeoutSec);
+                    ps.setLong(1, cutoff);
+                    ps.setInt(2, cleanupBatchSize);
+
+                    int deleted = ps.executeUpdate();
+                    totalDeleted += deleted;
+                    if (deleted < cleanupBatchSize) {
+                        break;
+                    }
+                }
+            }
+
+            if (totalDeleted > 0) {
+                AvilixLoggerMod.LOGGER.info("[AvilixLogger] Cleanup removed {} old rows", totalDeleted);
+            }
         } catch (SQLException e) {
             AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Cleanup failed", e);
         }
@@ -299,6 +324,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
 
         List<LogEntry> out = new ArrayList<>();
         try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql.toString())) {
+            try { ps.setQueryTimeout(Math.max(1, LoggerConfig.VALUES.dbSelectQueryTimeoutSec.get())); } catch (Throwable ignored) {}
             for (int i = 0; i < params.size(); i++) {
                 Object v = params.get(i);
                 if (v instanceof String s) ps.setString(i + 1, s);
@@ -325,7 +351,12 @@ private static void ensureDatabaseExists(String host, int port, String database,
     public void shutdown() {
         running = false;
         writer.interrupt();
-        try { writer.join(2_000L); } catch (InterruptedException ignored) {}
+        try { writer.join(5_000L); } catch (InterruptedException ignored) {}
+
+        if (writer.isAlive()) {
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Writer thread did not stop within timeout; closing datasource anyway.");
+        }
+
         ds.close();
         AvilixLoggerMod.LOGGER.info("[AvilixLogger] Storage shutdown. written={}, dropped={}", written, dropped);
     }

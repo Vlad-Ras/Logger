@@ -16,6 +16,7 @@ import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * NeoForge (1.21+) payload-based networking for optional client GUI.
@@ -37,30 +39,46 @@ import java.util.concurrent.atomic.AtomicInteger;
 public final class LoggerNetwork {
     private LoggerNetwork() {}
 
-    private static final ThreadPoolExecutor DB_EXECUTOR;
-    static {
+    private static ThreadPoolExecutor createGuiExecutor(String threadNamePrefix, int threads, int queueSize) {
         ThreadFactory tf = new ThreadFactory() {
             private final AtomicInteger n = new AtomicInteger(1);
 
             @Override
             public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, "AvilixLogger-GUI-DB-" + n.getAndIncrement());
+                Thread t = new Thread(r, threadNamePrefix + n.getAndIncrement());
                 t.setDaemon(true);
                 t.setPriority(Thread.NORM_PRIORITY - 1);
                 return t;
             }
         };
-        DB_EXECUTOR = new ThreadPoolExecutor(
-                2, 2,
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                threads, threads,
                 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(256),
+                new LinkedBlockingQueue<>(queueSize),
                 tf,
                 new ThreadPoolExecutor.DiscardPolicy()
         );
-        DB_EXECUTOR.prestartAllCoreThreads();
+        executor.prestartAllCoreThreads();
+        return executor;
     }
-    private static final java.util.Map<java.util.UUID, Long> LAST_GUI_REQUEST =
+
+    private static final ThreadPoolExecutor PAGE_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-PAGE-", 2, 256);
+    private static final ThreadPoolExecutor DETAILS_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-DETAILS-", 2, 128);
+
+    private static final java.util.Map<java.util.UUID, Long> LAST_GUI_PAGE_REQUEST_AT =
             new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, String> LAST_GUI_PAGE_REQUEST_SIG =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, Long> LAST_GUI_DETAILS_REQUEST_AT =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, String> LAST_GUI_DETAILS_REQUEST_SIG =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, Long> LATEST_GUI_PAGE_SEQ =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, Long> LATEST_GUI_DETAILS_SEQ =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final AtomicLong GUI_PAGE_SEQ_GENERATOR = new AtomicLong();
+    private static final AtomicLong GUI_DETAILS_SEQ_GENERATOR = new AtomicLong();
 
     /** Tracks which players actually have the client mod. */
     private static final Map<UUID, Boolean> CLIENT_PRESENT = new ConcurrentHashMap<>();
@@ -74,16 +92,54 @@ public final class LoggerNetwork {
 
     public static void clear(ServerPlayer player) {
         if (player != null) {
-            CLIENT_PRESENT.remove(player.getUUID());
-            GUI_FILTERS.remove(player.getUUID());
+            UUID uuid = player.getUUID();
+            CLIENT_PRESENT.remove(uuid);
+            GUI_FILTERS.remove(uuid);
+            LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
+            LAST_GUI_PAGE_REQUEST_SIG.remove(uuid);
+            LAST_GUI_DETAILS_REQUEST_AT.remove(uuid);
+            LAST_GUI_DETAILS_REQUEST_SIG.remove(uuid);
+            LATEST_GUI_PAGE_SEQ.remove(uuid);
+            LATEST_GUI_DETAILS_SEQ.remove(uuid);
+            LastQueryManager.clear(player);
+            pruneQueuedPageTasks(uuid);
+            pruneQueuedDetailsTasks(uuid);
         }
     }
 
     public static void shutdown() {
-        DB_EXECUTOR.shutdownNow();
-        LAST_GUI_REQUEST.clear();
+        PAGE_EXECUTOR.shutdownNow();
+        DETAILS_EXECUTOR.shutdownNow();
+        LAST_GUI_PAGE_REQUEST_AT.clear();
+        LAST_GUI_PAGE_REQUEST_SIG.clear();
+        LAST_GUI_DETAILS_REQUEST_AT.clear();
+        LAST_GUI_DETAILS_REQUEST_SIG.clear();
         CLIENT_PRESENT.clear();
         GUI_FILTERS.clear();
+        LATEST_GUI_PAGE_SEQ.clear();
+        LATEST_GUI_DETAILS_SEQ.clear();
+    }
+
+    private static long nextGuiPageSeq(UUID playerId) {
+        long seq = GUI_PAGE_SEQ_GENERATOR.incrementAndGet();
+        LATEST_GUI_PAGE_SEQ.put(playerId, seq);
+        return seq;
+    }
+
+    private static long nextGuiDetailsSeq(UUID playerId) {
+        long seq = GUI_DETAILS_SEQ_GENERATOR.incrementAndGet();
+        LATEST_GUI_DETAILS_SEQ.put(playerId, seq);
+        return seq;
+    }
+
+    private static void pruneQueuedPageTasks(UUID playerId) {
+        if (playerId == null) return;
+        PAGE_EXECUTOR.getQueue().removeIf(r -> r instanceof GuiPageTask task && playerId.equals(task.playerId));
+    }
+
+    private static void pruneQueuedDetailsTasks(UUID playerId) {
+        if (playerId == null) return;
+        DETAILS_EXECUTOR.getQueue().removeIf(r -> r instanceof GuiDetailsTask task && playerId.equals(task.playerId));
     }
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
@@ -138,6 +194,108 @@ public final class LoggerNetwork {
         }
     }
 
+    private static final class GuiPageTask implements Runnable {
+        private final UUID playerId;
+        private final java.lang.ref.WeakReference<ServerPlayer> playerRef;
+        private final long seq;
+        private final ServerLevel level;
+        private final LastQueryManager.State snapshotState;
+        private final boolean aggregated;
+        private final GuiFilters filters;
+
+        private GuiPageTask(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State snapshotState, boolean aggregated, GuiFilters filters) {
+            this.playerId = sp.getUUID();
+            this.playerRef = new java.lang.ref.WeakReference<>(sp);
+            this.seq = seq;
+            this.level = level;
+            this.snapshotState = snapshotState;
+            this.aggregated = aggregated;
+            this.filters = filters;
+        }
+
+        @Override
+        public void run() {
+            Long latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+            if (latestSeq == null || latestSeq.longValue() != seq) return;
+
+            Page page = buildPage(level, snapshotState, aggregated, filters);
+
+            latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+            if (latestSeq == null || latestSeq.longValue() != seq) return;
+
+            ServerPlayer sp = playerRef.get();
+            if (sp == null || sp.server == null || !sp.isAlive()) return;
+
+            sp.server.execute(() -> {
+                Long serverLatestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+                if (serverLatestSeq == null || serverLatestSeq.longValue() != seq) return;
+
+                ServerPlayer livePlayer = playerRef.get();
+                if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
+
+                LastQueryManager.State current = LastQueryManager.get(livePlayer);
+                if (current != null) {
+                    current.nextCursorCandidate = snapshotState.nextCursorCandidate();
+                    current.hasNext = snapshotState.hasNext();
+                }
+
+                PacketDistributor.sendToPlayer(livePlayer,
+                        new S2CLogPagePayload(
+                                page.title,
+                                page.pageIndex,
+                                page.hasPrev,
+                                page.hasNext,
+                                page.rows
+                        ));
+            });
+        }
+    }
+
+    private static final class GuiDetailsTask implements Runnable {
+        private final UUID playerId;
+        private final java.lang.ref.WeakReference<ServerPlayer> playerRef;
+        private final long seq;
+        private final ServerLevel level;
+        private final C2SRequestDetailsPayload payload;
+
+        private GuiDetailsTask(ServerPlayer sp, long seq, ServerLevel level, C2SRequestDetailsPayload payload) {
+            this.playerId = sp.getUUID();
+            this.playerRef = new java.lang.ref.WeakReference<>(sp);
+            this.seq = seq;
+            this.level = level;
+            this.payload = payload;
+        }
+
+        @Override
+        public void run() {
+            Long latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+            if (latestSeq == null || latestSeq.longValue() != seq) return;
+
+            List<Component> lines = switch (payload.mode()) {
+                case RAW -> buildRawLines(level, payload.entryId(), payload.rawIds());
+                case DETAILS -> buildDetailsLines(level, payload.entryId(), payload.rawIds());
+                case JSON -> buildJsonLines(level, payload.entryId());
+            };
+
+            latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+            if (latestSeq == null || latestSeq.longValue() != seq) return;
+
+            ServerPlayer sp = playerRef.get();
+            if (sp == null || sp.server == null || !sp.isAlive()) return;
+
+            sp.server.execute(() -> {
+                Long serverLatestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+                if (serverLatestSeq == null || serverLatestSeq.longValue() != seq) return;
+
+                ServerPlayer livePlayer = playerRef.get();
+                if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
+
+                PacketDistributor.sendToPlayer(livePlayer,
+                        new S2CLogDetailsPayload(payload.entryId(), payload.mode(), lines));
+            });
+        }
+    }
+
     // -------- handlers --------
 
     private static void handleHello(C2SHelloPayload payload, IPayloadContext ctx) {
@@ -162,12 +320,15 @@ public final class LoggerNetwork {
             if (!(ctx.player() instanceof ServerPlayer sp)) return;
 
             long now = System.currentTimeMillis();
-            long last = LAST_GUI_REQUEST.getOrDefault(sp.getUUID(), 0L);
+            String requestSig = String.valueOf(payload.nav()) + "|" + payload.aggregated() + "|" + String.valueOf(payload.filters());
+            long last = LAST_GUI_PAGE_REQUEST_AT.getOrDefault(sp.getUUID(), 0L);
+            String lastSig = LAST_GUI_PAGE_REQUEST_SIG.get(sp.getUUID());
 
-            if (now - last < 300) {
-                return; // игнорируем слишком частые запросы
+            if (now - last < 300 && java.util.Objects.equals(lastSig, requestSig)) {
+                return; // игнорируем только дубль того же самого GUI-запроса
             }
-            LAST_GUI_REQUEST.put(sp.getUUID(), now);
+            LAST_GUI_PAGE_REQUEST_AT.put(sp.getUUID(), now);
+            LAST_GUI_PAGE_REQUEST_SIG.put(sp.getUUID(), requestSig);
 
 
             if (!hasGuiPermission(sp)) {
@@ -178,6 +339,7 @@ public final class LoggerNetwork {
             }
 
             GuiFilters gf = payload.filters() == null ? GuiFilters.DEFAULT : payload.filters();
+            long seq = nextGuiPageSeq(sp.getUUID());
             GuiFilters prevGf = GUI_FILTERS.get(sp.getUUID());
 
             // Build (or reuse) a base query. If filters changed, restart pagination.
@@ -210,24 +372,26 @@ public final class LoggerNetwork {
             gf = GUI_FILTERS.getOrDefault(sp.getUUID(), gf);
 
             GuiFilters finalGf = gf;
-            LastQueryManager.State finalSt = st;
+            LastQueryManager.State liveState = st;
+            LastQueryManager.State snapshotState = new LastQueryManager.State(
+                    liveState.baseQuery.copy(),
+                    new ArrayDeque<>(liveState.cursors),
+                    liveState.title
+            );
+            snapshotState.nextCursorCandidate = liveState.nextCursorCandidate();
+            snapshotState.hasNext = liveState.hasNext();
             ServerLevel finalLvl = lvl;
 
-            if (DB_EXECUTOR.getQueue().remainingCapacity() <= 0) {
-                return;
+            pruneQueuedPageTasks(sp.getUUID());
+            if (PAGE_EXECUTOR.getQueue().remainingCapacity() <= 0) {
+                pruneQueuedPageTasks(sp.getUUID());
             }
 
-            DB_EXECUTOR.execute(() -> {
-                Page page = buildPage(finalLvl, finalSt, payload.aggregated(), finalGf);
-                sp.server.execute(() -> PacketDistributor.sendToPlayer(sp,
-                        new S2CLogPagePayload(
-                                page.title,
-                                page.pageIndex,
-                                page.hasPrev,
-                                page.hasNext,
-                                page.rows
-                        )));
-            });
+            try {
+                PAGE_EXECUTOR.execute(new GuiPageTask(sp, seq, finalLvl, snapshotState, payload.aggregated(), finalGf));
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // queue saturated or shutting down; newest request will be retried by the client on next action
+            }
         });
     }
 
@@ -237,11 +401,14 @@ public final class LoggerNetwork {
             if (!hasGuiPermission(sp)) return;
 
             long now = System.currentTimeMillis();
-            long last = LAST_GUI_REQUEST.getOrDefault(sp.getUUID(), 0L);
-            if (now - last < 400) {
+            String requestSig = payload.mode().name() + "|" + payload.entryId() + "|" + payload.dimHint() + "|" + (payload.rawIds() == null ? 0 : java.util.Arrays.hashCode(payload.rawIds()));
+            long last = LAST_GUI_DETAILS_REQUEST_AT.getOrDefault(sp.getUUID(), 0L);
+            String lastSig = LAST_GUI_DETAILS_REQUEST_SIG.get(sp.getUUID());
+            if (now - last < 250 && java.util.Objects.equals(lastSig, requestSig)) {
                 return;
             }
-            LAST_GUI_REQUEST.put(sp.getUUID(), now);
+            LAST_GUI_DETAILS_REQUEST_AT.put(sp.getUUID(), now);
+            LAST_GUI_DETAILS_REQUEST_SIG.put(sp.getUUID(), requestSig);
 
             // Resolve level
             ServerLevel lvl = safeLevel(sp, payload.dimHint());
@@ -251,19 +418,17 @@ public final class LoggerNetwork {
             }
             if (lvl == null) lvl = sp.serverLevel();
 
+            long seq = nextGuiDetailsSeq(sp.getUUID());
             ServerLevel finalLvl = lvl;
-            if (DB_EXECUTOR.getQueue().remainingCapacity() <= 0) {
-                return;
+            pruneQueuedDetailsTasks(sp.getUUID());
+            if (DETAILS_EXECUTOR.getQueue().remainingCapacity() <= 0) {
+                pruneQueuedDetailsTasks(sp.getUUID());
             }
-            DB_EXECUTOR.execute(() -> {
-                List<Component> lines = switch (payload.mode()) {
-                    case RAW -> buildRawLines(finalLvl, payload.entryId(), payload.rawIds());
-                    case DETAILS -> buildDetailsLines(finalLvl, payload.entryId(), payload.rawIds());
-                    case JSON -> buildJsonLines(finalLvl, payload.entryId());
-                };
-                sp.server.execute(() -> PacketDistributor.sendToPlayer(sp,
-                        new S2CLogDetailsPayload(payload.entryId(), payload.mode(), lines)));
-            });
+            try {
+                DETAILS_EXECUTOR.execute(new GuiDetailsTask(sp, seq, finalLvl, payload));
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // details queue saturated or shutting down
+            }
         });
     }
 
@@ -282,7 +447,6 @@ public final class LoggerNetwork {
     private static LogQuery buildBaseGuiQuery(ServerPlayer sp, GuiFilters gf) {
         LogQuery q = new LogQuery();
         ServerLevel level = sp.serverLevel();
-        q.dim = level.dimension().location().toString();
 
         long now = System.currentTimeMillis();
         q.untilTs = now;
@@ -312,9 +476,13 @@ public final class LoggerNetwork {
             r = radii[ridx];
         }
         if (r > 0) {
+            q.dim = level.dimension().location().toString();
             q.minPos = sp.blockPosition().offset(-r, -r, -r);
             q.maxPos = sp.blockPosition().offset(r, r, r);
         } else {
+            // GUI radius WORLD means global lookup across all logged dimensions, not just the player's current one.
+            // MySQL storage already supports this via dim="*".
+            q.dim = "*";
             q.minPos = null;
             q.maxPos = null;
         }
@@ -359,6 +527,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ENTITY_DEATH,
                     com.roften.avilixlogger.core.ActionType.ENTITY_MOUNT,
                     com.roften.avilixlogger.core.ActionType.ENTITY_DISMOUNT,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_INTERACT,
                     com.roften.avilixlogger.core.ActionType.PLAYER_DEATH
             );
             case 4 -> java.util.EnumSet.of(
@@ -383,17 +552,15 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.CHAT_MESSAGE
             );
             case 8 -> java.util.EnumSet.of(
-                    // Dedicated plane actions
+                    // Plane GUI must stay cheap even for WORLD lookups.
+                    // Use only dedicated plane actions that are already emitted by our compat hooks.
+                    // Pulling generic ENTITY_* actions here causes huge broad scans and then expensive
+                    // in-memory post-filtering on busy servers, especially with WORLD radius.
                     com.roften.avilixlogger.core.ActionType.PLANE_PLACE,
                     com.roften.avilixlogger.core.ActionType.PLANE_REMOVE,
                     com.roften.avilixlogger.core.ActionType.PLANE_MOUNT,
                     com.roften.avilixlogger.core.ActionType.PLANE_PICKUP,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_OWNER_SET,
-                    // Plus generic entity lifecycle, refined to "only planes" by GUI extra filtering.
-                    com.roften.avilixlogger.core.ActionType.ENTITY_SPAWN,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_DEATH,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_MOUNT,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_DISMOUNT
+                    com.roften.avilixlogger.core.ActionType.ENTITY_OWNER_SET
             );
             default -> null;
         };
@@ -412,28 +579,64 @@ public final class LoggerNetwork {
         // too few rows after aggregation, we overfetch.
         int desired = size + 1;
         int fetchLimit = Math.min(5000, desired * 12);
-        if (q.owner != null && !q.owner.isBlank()) fetchLimit = Math.min(8000, desired * 25);
+        if (gf != null && gf.typePresetIdx() == 8) {
+            // Plane preset now hits dedicated plane actions only, so we can keep the DB window tight.
+            fetchLimit = Math.min(1500, desired * 8);
+            if (q.owner != null && !q.owner.isBlank()) fetchLimit = Math.min(2500, desired * 12);
+            if (hasExtraGuiFilters(gf)) fetchLimit = Math.min(3500, Math.max(fetchLimit, desired * 16));
+        } else {
+            if (q.owner != null && !q.owner.isBlank()) fetchLimit = Math.min(8000, desired * 25);
+            if (hasExtraGuiFilters(gf)) fetchLimit = Math.min(8000, Math.max(fetchLimit, desired * 40));
+        }
         q.limit = fetchLimit;
 
-        List<LogEntry> raw = LoggerRuntime.storage(level).queryReverse(q);
-        if (raw == null) raw = List.of();
+        int neededFiltered = aggregated ? Math.max(desired * 6, size * 8) : desired;
+        neededFiltered = Math.min(1200, Math.max(neededFiltered, desired));
+        java.util.ArrayList<LogEntry> filtered = new java.util.ArrayList<>(Math.min(neededFiltered, fetchLimit));
+        long scanBeforeId = q.beforeId;
+        boolean exhausted = false;
+        boolean brokeEarly = false;
+        int passes = 0;
+        int maxPasses = hasExtraGuiFilters(gf) ? 8 : 3;
 
-        List<LogEntry> filtered = raw;
-
-        // Optional owner post-filter (planes)
-        if (q.owner != null && !q.owner.isBlank()) {
-            ArrayList<LogEntry> tmp = new ArrayList<>(Math.min(desired, raw.size()));
-            for (LogEntry e : raw) {
-                if (com.roften.avilixlogger.core.PlaneLogFilters.matchesOwner(e, q.owner)) {
-                    tmp.add(e);
-                    if (tmp.size() >= desired) break;
-                }
+        while (passes < maxPasses && filtered.size() < neededFiltered) {
+            LogQuery pageQ = q.copy();
+            pageQ.beforeId = scanBeforeId;
+            List<LogEntry> raw = LoggerRuntime.storage(level).queryReverse(pageQ);
+            if (raw == null || raw.isEmpty()) {
+                exhausted = true;
+                break;
             }
-            filtered = tmp;
-        }
 
-        // GUI-only extra filters that aren't part of LogQuery (train name, cannon, create-train events).
-        filtered = applyGuiExtraFilters(filtered, gf, desired);
+            List<LogEntry> pageFiltered = raw;
+
+            // Optional owner post-filter (planes)
+            if (q.owner != null && !q.owner.isBlank()) {
+                ArrayList<LogEntry> tmp = new ArrayList<>(Math.min(raw.size(), desired * 4));
+                for (LogEntry e : raw) {
+                    if (com.roften.avilixlogger.core.PlaneLogFilters.matchesOwner(e, q.owner)) {
+                        tmp.add(e);
+                    }
+                }
+                pageFiltered = tmp;
+            }
+
+            // GUI-only extra filters that aren't part of LogQuery (train name, cannon, create-train events).
+            pageFiltered = applyGuiExtraFilters(pageFiltered, gf, neededFiltered - filtered.size());
+            if (!pageFiltered.isEmpty()) filtered.addAll(pageFiltered);
+
+            scanBeforeId = raw.get(raw.size() - 1).id;
+            passes++;
+
+            if (raw.size() < pageQ.limit) {
+                exhausted = true;
+                break;
+            }
+            if (filtered.size() >= neededFiltered) {
+                brokeEarly = true;
+                break;
+            }
+        }
 
         boolean hasNext;
         long nextCursorCandidate;
@@ -441,7 +644,7 @@ public final class LoggerNetwork {
         if (aggregated) {
             // Aggregate ONLY for GUI output. Chat commands remain raw.
             AggregationResult agg = aggregateForGui(level, filtered, size);
-            hasNext = agg.hasNext;
+            hasNext = agg.hasNext || !exhausted || brokeEarly;
             nextCursorCandidate = agg.nextCursorCandidate;
             rows = agg.rows;
         } else {
@@ -450,11 +653,10 @@ public final class LoggerNetwork {
             int n = 0;
             for (LogEntry e : filtered) {
                 rr.add(LogRow.single(e.id, e.dim, e.x, e.y, e.z, com.roften.avilixlogger.core.LogText.toChatLine(level, e)));
-                nextCursorCandidate = e.id;
                 n++;
                 if (n >= size) break;
             }
-            hasNext = filtered.size() > size;
+            hasNext = filtered.size() > size || !exhausted || brokeEarly;
             nextCursorCandidate = (rr.isEmpty() ? 0L : rr.get(rr.size() - 1).id());
             rows = List.copyOf(rr);
         }
@@ -474,6 +676,16 @@ public final class LoggerNetwork {
         return new Page(state.title == null ? "Логи" : state.title, state.pageIndex(), hasPrev, hasNext, outRows);
     }
 
+    private static boolean hasExtraGuiFilters(GuiFilters gf) {
+        if (gf == null) return false;
+        return (gf.train() != null && !gf.train().isBlank())
+                || (gf.planeName() != null && !gf.planeName().isBlank())
+                || (gf.blockId() != null && !gf.blockId().isBlank())
+                || gf.typePresetIdx() == 5
+                || gf.typePresetIdx() == 6
+                || gf.typePresetIdx() == 8;
+    }
+
     private static List<LogEntry> applyGuiExtraFilters(List<LogEntry> in, GuiFilters gf, int desired) {
         if (in == null || in.isEmpty()) return List.of();
         if (gf == null) return in;
@@ -482,6 +694,8 @@ public final class LoggerNetwork {
         final boolean wantTrainName = !train.isBlank();
         final String planeNeedle = gf.planeName() == null ? "" : gf.planeName().trim();
         final boolean wantPlaneName = !planeNeedle.isBlank();
+        final String blockNeedle = normalizeFilterNeedle(gf.blockId());
+        final boolean wantBlock = !blockNeedle.isBlank();
         final int typePreset = gf.typePresetIdx();
         final boolean wantCreateTrainsOnly = typePreset == 5;
         final boolean wantCannonOnly = typePreset == 6;
@@ -489,12 +703,14 @@ public final class LoggerNetwork {
         // Planes: filter generic entity events down to plane-related ones.
         final boolean wantPlanesOnly = typePreset == 8;
 
-        if (!wantTrainName && !wantPlaneName && !wantCreateTrainsOnly && !wantCannonOnly && !wantPlanesOnly) return in;
+        if (!wantTrainName && !wantPlaneName && !wantCreateTrainsOnly && !wantCannonOnly && !wantPlanesOnly && !wantBlock) return in;
 
         ArrayList<LogEntry> out = new ArrayList<>(Math.min(desired, in.size()));
         for (LogEntry e : in) {
             String extra = e.extra;
             if (extra == null) extra = "";
+
+            if (wantBlock && !matchesBlockNeedle(e, blockNeedle)) continue;
 
             if (wantCannonOnly) {
                 // Heuristic: our cannon hooks write marker strings to extra.
@@ -541,6 +757,50 @@ public final class LoggerNetwork {
             if (out.size() >= desired) break;
         }
         return out;
+    }
+
+
+    private static boolean matchesBlockNeedle(LogEntry e, String blockNeedle) {
+        if (blockNeedle == null || blockNeedle.isBlank() || e == null) return true;
+        java.util.Locale L = java.util.Locale.ROOT;
+        String bb = e.blockBefore == null ? "" : e.blockBefore.toLowerCase(L);
+        String ba = e.blockAfter == null ? "" : e.blockAfter.toLowerCase(L);
+        String src = e.source == null ? "" : e.source.toLowerCase(L);
+        String extra = e.extra == null ? "" : e.extra.toLowerCase(L);
+
+        if (bb.contains(blockNeedle) || ba.contains(blockNeedle) || src.contains(blockNeedle) || extra.contains(blockNeedle)) {
+            return true;
+        }
+
+        return extractResourceLikeId(bb).equals(blockNeedle)
+                || extractResourceLikeId(ba).equals(blockNeedle)
+                || extractResourceLikeId(src).equals(blockNeedle)
+                || extractResourceLikeId(extra).equals(blockNeedle);
+    }
+
+    private static String normalizeFilterNeedle(String s) {
+        if (s == null) return "";
+        String out = s.trim().toLowerCase(java.util.Locale.ROOT);
+        while (!out.isEmpty()) {
+            char c0 = out.charAt(0);
+            if (c0 == '\'' || c0 == '"' || c0 == '`' || Character.isWhitespace(c0)) out = out.substring(1).trim();
+            else break;
+        }
+        while (!out.isEmpty()) {
+            char c1 = out.charAt(out.length() - 1);
+            if (c1 == '\'' || c1 == '"' || c1 == '`' || Character.isWhitespace(c1)) out = out.substring(0, out.length() - 1).trim();
+            else break;
+        }
+        String extracted = extractResourceLikeId(out);
+        return extracted.isBlank() ? out : extracted;
+    }
+
+    private static String extractResourceLikeId(String s) {
+        if (s == null || s.isBlank()) return "";
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("([a-z0-9_.-]+:[a-z0-9_./-]+)")
+                .matcher(s.toLowerCase(java.util.Locale.ROOT));
+        return m.find() ? m.group(1) : "";
     }
 
     private static boolean hasGuiPermission(ServerPlayer sp) {

@@ -15,6 +15,7 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.server.ServerStartingEvent;
 
 /**
  * Avilix Logger: server-side audit log + rollback for blocks/entities/inventories.
@@ -44,6 +45,7 @@ public final class AvilixLoggerMod {
         // Server/game events
         NeoForge.EVENT_BUS.register(new LoggerEventHandlers());
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
+        NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
     }
@@ -52,8 +54,14 @@ public final class AvilixLoggerMod {
         LoggerCommands.register(event.getDispatcher());
     }
 
+    private void onServerStarting(ServerStartingEvent event) {
+        // Warm up DB storage off-thread so the first player join does not block the server tick.
+        LoggerRuntime.warmupAsync();
+    }
+
     private void onServerStopping(ServerStoppingEvent event) {
         // Ensure we flush writers and stop GUI/database helper executors.
+        LoggerEventHandlers.shutdownBackground();
         LoggerNetwork.shutdown();
         LoggerRuntime.shutdown();
     }

@@ -29,6 +29,10 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue dbBatchSize;
         public final ModConfigSpec.IntValue dbFlushIntervalMs;
         public final ModConfigSpec.IntValue dbQueueCapacity;
+        public final ModConfigSpec.IntValue dbCleanupBatchSize;
+        public final ModConfigSpec.IntValue dbCleanupMaxBatchesPerRun;
+        public final ModConfigSpec.IntValue dbCleanupQueryTimeoutSec;
+        public final ModConfigSpec.IntValue dbSelectQueryTimeoutSec;
 
         public final ModConfigSpec.BooleanValue logBlocks;
         public final ModConfigSpec.BooleanValue logEntities;
@@ -47,8 +51,8 @@ public final class LoggerConfig {
         Values(ModConfigSpec.Builder b) {
             b.push("general");
             enabled = b.comment("Master switch.").define("enabled", true);
-            keepDays = b.comment("Delete log files older than N days.")
-                    .defineInRange("keepDays", 30, 1, 365);
+            keepDays = b.comment("Delete log rows older than N days. Set to 0 to disable automatic cleanup.")
+                    .defineInRange("keepDays", 30, 0, 365);
             b.pop();
 
             b.push("mysql");
@@ -64,6 +68,14 @@ public final class LoggerConfig {
                     .defineInRange("flushIntervalMs", 250, 50, 5000);
             dbQueueCapacity = b.comment("In-memory queue capacity. If full, new logs will be dropped to protect TPS.")
                     .defineInRange("queueCapacity", 50000, 10000, 500000);
+            dbCleanupBatchSize = b.comment("How many old rows to delete per cleanup statement. Smaller values reduce lock pressure.")
+                    .defineInRange("cleanupBatchSize", 2000, 100, 50000);
+            dbCleanupMaxBatchesPerRun = b.comment("How many cleanup DELETE batches may run in one periodic cleanup pass.")
+                    .defineInRange("cleanupMaxBatchesPerRun", 4, 1, 100);
+            dbCleanupQueryTimeoutSec = b.comment("Statement timeout for cleanup DELETE queries. Keeps shutdown responsive when DB is under load.")
+                    .defineInRange("cleanupQueryTimeoutSec", 3, 1, 60);
+            dbSelectQueryTimeoutSec = b.comment("Statement timeout for SELECT queries used by lookup / GUI. Prevents the GUI from hanging forever on heavy scans.")
+                    .defineInRange("selectQueryTimeoutSec", 5, 1, 60);
             b.pop();
 
             b.push("capture");

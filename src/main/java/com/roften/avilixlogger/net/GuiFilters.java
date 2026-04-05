@@ -12,14 +12,15 @@ public record GuiFilters(
         int customRadiusBlocks,
         String actor,
         String train,
-        String planeName
+        String planeName,
+        String blockId
 ) {
 
     /**
      * customTimeMinutes/customRadiusBlocks: -1 means "use presets".
      * Radius: 0 means WORLD.
      */
-    public static final GuiFilters DEFAULT = new GuiFilters(1, 1, 0, -1, -1, "", "", "");
+    public static final GuiFilters DEFAULT = new GuiFilters(1, 1, 0, -1, -1, "", "", "", "");
 
     public static final StreamCodec<RegistryFriendlyByteBuf, GuiFilters> STREAM_CODEC = StreamCodec.of(
             (buf, f) -> {
@@ -31,6 +32,7 @@ public record GuiFilters(
                 buf.writeUtf(f.actor == null ? "" : f.actor, 64);
                 buf.writeUtf(f.train == null ? "" : f.train, 64);
                 buf.writeUtf(f.planeName == null ? "" : f.planeName, 64);
+                buf.writeUtf(f.blockId == null ? "" : f.blockId, 128);
             },
             buf -> {
                 int t = buf.readVarInt();
@@ -46,7 +48,13 @@ public record GuiFilters(
                 } catch (Throwable ignored) {
                     // backward compat
                 }
-                return new GuiFilters(t, r, y, ctm, crb, actor, train, planeName);
+                String blockId = "";
+                try {
+                    blockId = buf.readUtf(128);
+                } catch (Throwable ignored) {
+                    // backward compat
+                }
+                return new GuiFilters(t, r, y, ctm, crb, actor, train, planeName, blockId);
             }
     );
 }

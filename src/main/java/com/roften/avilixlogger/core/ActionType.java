@@ -56,5 +56,8 @@ public enum ActionType {
     TRAIN_SCHEDULE_TAKE,
     TRAIN_CONTROL_START,
     TRAIN_CONTROL_STOP,
-    TRAIN_SCHEDULE_PUT
+    TRAIN_SCHEDULE_PUT,
+
+    // Append-only: generic entity interaction (villagers / NPCs / storekeepers / etc.)
+    ENTITY_INTERACT
 }

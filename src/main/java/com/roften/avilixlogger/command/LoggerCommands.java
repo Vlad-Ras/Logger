@@ -74,7 +74,7 @@ public final class LoggerCommands {
 
     public static void register(CommandDispatcher<CommandSourceStack> d) {
     d.register(literal("log")
-            .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.use", 2))
+            .requires(LoggerCommands::hasAnyLoggerPermission)
             .executes(LoggerCommands::lookupDefaultRoot)
 
             // Short help + examples
@@ -101,7 +101,7 @@ public final class LoggerCommands {
 
             // Plane ownership tools (Immersive Aircraft / Man of Many Planes)
             .then(literal("plane")
-                    .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane", 2))
+                    .requires(LoggerCommands::hasAnyPlanePermission)
                     .then(literal("find")
                             .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane.find", 2))
                             .then(argument("player", StringArgumentType.word())
@@ -170,13 +170,14 @@ public final class LoggerCommands {
 
             // Flag-based lookup: /log --time 30m --radius 10 --mode theft ...
             .then(argument("args", StringArgumentType.greedyString())
+                    .requires(LoggerCommands::hasLookupPermission)
                     .executes(ctx -> lookupFromFlags(ctx, StringArgumentType.getString(ctx, "args"))))
     );
 
     // Aliases for plane ownership tools:
     // /owner info|set|reset  ->  /log plane owner info|set|reset
     d.register(literal("owner")
-            .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane", 2))
+            .requires(LoggerCommands::hasAnyPlaneOwnerPermission)
             .then(literal("info")
                     .requires(s -> com.roften.avilixlogger.core.PermissionUtil.has(s, "avilixlogger.command.plane.owner.info", 2))
                     .executes(LoggerCommands::planeOwnerInfo))
@@ -190,6 +191,51 @@ public final class LoggerCommands {
                     .executes(LoggerCommands::planeOwnerReset))
     );
 }
+
+
+    private static boolean hasAnyLoggerPermission(CommandSourceStack source) {
+        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+                "avilixlogger.command.use",
+                "avilixlogger.command.lookup",
+                "avilixlogger.command.inspect",
+                "avilixlogger.command.page",
+                "avilixlogger.command.admin",
+                "avilixlogger.command.plane",
+                "avilixlogger.command.plane.find",
+                "avilixlogger.command.plane.find.offline",
+                "avilixlogger.command.plane.owner.info",
+                "avilixlogger.command.plane.owner.set",
+                "avilixlogger.command.plane.owner.reset",
+                "avilixlogger.gui"
+        );
+    }
+
+    private static boolean hasLookupPermission(CommandSourceStack source) {
+        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+                "avilixlogger.command.use",
+                "avilixlogger.command.lookup"
+        );
+    }
+
+    private static boolean hasAnyPlanePermission(CommandSourceStack source) {
+        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+                "avilixlogger.command.plane",
+                "avilixlogger.command.plane.find",
+                "avilixlogger.command.plane.find.offline",
+                "avilixlogger.command.plane.owner.info",
+                "avilixlogger.command.plane.owner.set",
+                "avilixlogger.command.plane.owner.reset"
+        );
+    }
+
+    private static boolean hasAnyPlaneOwnerPermission(CommandSourceStack source) {
+        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+                "avilixlogger.command.plane",
+                "avilixlogger.command.plane.owner.info",
+                "avilixlogger.command.plane.owner.set",
+                "avilixlogger.command.plane.owner.reset"
+        );
+    }
 
     private static int parseDurationSeconds(String input) {
         if (input == null) return 0;
@@ -1406,6 +1452,11 @@ public final class LoggerCommands {
      * Default /log execution (no args): show recent events around the executor.
      */
     private static int lookupDefaultRoot(CommandContext<CommandSourceStack> ctx) {
+        if (!hasLookupPermission(ctx.getSource())) {
+            ctx.getSource().sendFailure(Component.literal("Нет прав на просмотр логов (avilixlogger.command.lookup / avilixlogger.command.use)."));
+            return 0;
+        }
+
         ctx.getSource().sendSystemMessage(Component.literal("Подсказка: /log help — примеры фильтров и откатов."));
         // Keep backward-compatible behaviour: short local lookup.
         return lookup(ctx, 30 * 60, 5, null);
@@ -1996,6 +2047,7 @@ public final class LoggerCommands {
             case "chunk_unloaded" -> "чанк не загружен";
             case "no_snapshot" -> "нет снимка";
             case "no_entity_snapshot" -> "нет снимка сущности";
+            case "unsafe_entity_snapshot" -> "опасная сущность Create/contraption";
             case "entity_not_found" -> "сущность не найдена";
             case "missing_uuid" -> "нет UUID";
             case "invalid_stack" -> "битый предмет";

@@ -3,12 +3,11 @@ package com.roften.avilixlogger.core;
 import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks;
 
+import net.minecraft.server.TickTask;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -44,6 +43,10 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.lang.reflect.Method;
 
 /**
@@ -83,15 +86,50 @@ public final class LoggerEventHandlers {
         return true;
     }
 
+    private static final ScheduledExecutorService DROP_FLUSH_EXECUTOR = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread t = new Thread(r, "AvilixLogger-DropFlush");
+            t.setDaemon(true);
+            return t;
+        }
+    });
+
+    public static void shutdownBackground() {
+        try {
+            DROP_FLUSH_EXECUTOR.shutdown();
+            DROP_FLUSH_EXECUTOR.awaitTermination(3, TimeUnit.SECONDS);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        } catch (Throwable ignored) {
+        } finally {
+            try {
+                DROP_FLUSH_EXECUTOR.shutdownNow();
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static void scheduleDropFlush(ServerLevel level, int delayTicks, String key, long idleMs) {
+        if (level == null || key == null) return;
+        long delayMs = Math.max(1L, delayTicks) * 50L;
+        try {
+            DROP_FLUSH_EXECUTOR.schedule(() -> flushDropIfIdle(level, key, idleMs), delayMs, TimeUnit.MILLISECONDS);
+        } catch (Throwable ignored) {
+        }
+    }
+
     private static void runAfterTicks(ServerLevel level, int delayTicks, Runnable r) {
         try {
-            MinecraftServer srv = level.getServer();
+            if (level == null || r == null) return;
+            var srv = level.getServer();
             if (srv == null) return;
             int d = Math.max(1, delayTicks);
             srv.tell(new TickTask(srv.getTickCount() + d, r));
         } catch (Throwable ignored) {
         }
     }
+
     private static final class ContainerCtx {
         final String dim;
         final BlockPos pos;
@@ -111,11 +149,15 @@ public final class LoggerEventHandlers {
         final long ts;
         final String dim;
         final BlockPos pos;
+        final String blockAfter;
+        final boolean openLogged;
 
-        PendingBlockContainerOpen(long ts, String dim, BlockPos pos) {
+        PendingBlockContainerOpen(long ts, String dim, BlockPos pos, String blockAfter, boolean openLogged) {
             this.ts = ts;
             this.dim = dim;
             this.pos = pos;
+            this.blockAfter = blockAfter;
+            this.openLogged = openLogged;
         }
     }
 
@@ -383,13 +425,24 @@ public final class LoggerEventHandlers {
             return;
         }
 
-        // 1) If this looks like a container that opens a menu, stage it and log "open".
-        // Actual inventory snapshot must be taken from real storage at PlayerContainerEvent.Open/Close.
-        if (LoggerConfig.VALUES.logContainers.get() && isInventoryLike(level, pos, state)) {
+        // 1) Stage a possible menu/container open for any block interaction.
+        // Some modded storages / "кладовщики" open a menu but do not expose a vanilla Container/MenuProvider
+        // on the block itself, so relying only on isInventoryLike() misses them completely.
+        if (LoggerConfig.VALUES.logContainers.get()) {
             String dim = level.dimension().location().toString();
-            PENDING_BLOCK_CONTAINER_OPEN.put(p.getUUID(), new PendingBlockContainerOpen(System.currentTimeMillis(), dim, pos.immutable()));
+            boolean inventoryLike = false;
+            try { inventoryLike = isInventoryLike(level, pos, state); } catch (Throwable ignored) {}
+            String blockAfter = null;
+            try { blockAfter = NbtSerde.writeBlockState(state); } catch (Throwable ignored) {}
+            PENDING_BLOCK_CONTAINER_OPEN.put(p.getUUID(), new PendingBlockContainerOpen(
+                    System.currentTimeMillis(),
+                    dim,
+                    pos.immutable(),
+                    blockAfter,
+                    inventoryLike && LoggerConfig.VALUES.logBlocks.get()
+            ));
 
-            if (LoggerConfig.VALUES.logBlocks.get()) {
+            if (inventoryLike && LoggerConfig.VALUES.logBlocks.get()) {
                 LogEntry e = new LogEntry();
                 e.ts = System.currentTimeMillis();
                 e.dim = dim;
@@ -399,7 +452,7 @@ public final class LoggerEventHandlers {
                 e.x = pos.getX();
                 e.y = pos.getY();
                 e.z = pos.getZ();
-                e.blockAfter = NbtSerde.writeBlockState(state);
+                e.blockAfter = blockAfter;
                 e.extra = "open " + BuiltInRegistries.BLOCK.getKey(state.getBlock());
                 LoggerRuntime.storage(level).append(e);
             }
@@ -543,6 +596,24 @@ public final class LoggerEventHandlers {
             // Also remember the interaction location to attribute follow-up spawns.
             try { RecentPlayerActionTracker.note(level, sp, target.blockPosition(), RecentPlayerActionTracker.ActionKind.INTERACT_ENTITY, sp.getMainHandItem()); } catch (Throwable ignored) {}
 
+            // Generic entity interaction log (villagers / NPCs / кладовщики / etc.).
+            if (LoggerConfig.VALUES.logEntities.get()) {
+                LogEntry e = new LogEntry();
+                e.ts = System.currentTimeMillis();
+                e.dim = level.dimension().location().toString();
+                e.type = ActionType.ENTITY_INTERACT;
+                e.actorUuid = sp.getUUID();
+                e.actorName = sp.getName().getString();
+                e.x = target.blockPosition().getX();
+                e.y = target.blockPosition().getY();
+                e.z = target.blockPosition().getZ();
+                e.entityType = EntityType.getKey(target.getType()).toString();
+                e.entityUuid = target.getUUID();
+                try { e.entityNbt = NbtSerde.writeEntity(level, target); } catch (Throwable ignored) {}
+                e.extra = "interact entity " + e.entityType;
+                LoggerRuntime.storage(level).append(e);
+            }
+
         // Entity container (planes, modded vehicles, etc.)
         // For Immersive Aircraft / Man of Many Planes inventory opens only via:
         //  - Shift + RMB when outside
@@ -574,6 +645,21 @@ public final class LoggerEventHandlers {
         try {
             PendingBlockContainerOpen pending = PENDING_BLOCK_CONTAINER_OPEN.remove(sp.getUUID());
             if (pending != null && pending.dim.equals(dim) && (System.currentTimeMillis() - pending.ts) <= 1200L) {
+                if (!pending.openLogged && LoggerConfig.VALUES.logBlocks.get()) {
+                    LogEntry e = new LogEntry();
+                    e.ts = System.currentTimeMillis();
+                    e.dim = dim;
+                    e.type = ActionType.CONTAINER_OPEN;
+                    e.actorUuid = sp.getUUID();
+                    e.actorName = sp.getName().getString();
+                    e.x = pending.pos.getX();
+                    e.y = pending.pos.getY();
+                    e.z = pending.pos.getZ();
+                    e.blockAfter = pending.blockAfter;
+                    e.extra = "open menu " + BuiltInRegistries.BLOCK.getKey(level.getBlockState(pending.pos).getBlock());
+                    LoggerRuntime.storage(level).append(e);
+                }
+
                 String beforeSlots = ContainerSlotSnapshot.snapshot(level, pending.pos);
                 if (beforeSlots != null) {
                     OPEN_CONTAINER.put(sp.getUUID(), new ContainerCtx(dim, pending.pos, beforeSlots));
@@ -922,8 +1008,8 @@ public final class LoggerEventHandlers {
                 agg.lastTs = now;
             }
 
-            // Flush once the player stops spamming Q for a short time.
-            runAfterTicks(level, 5, () -> flushDropIfIdle(level, key, 250L));
+            // Flush once the player stops spamming Q for a short time, fully off the main thread.
+            scheduleDropFlush(level, 5, key, 250L);
         } catch (Throwable ignored) {}
     }
 
@@ -937,7 +1023,7 @@ public final class LoggerEventHandlers {
             if (dt < idleMs) {
                 // still active; reschedule until the player stops dropping for idleMs
                 int more = (int) Math.ceil((idleMs - dt) / 50.0D);
-                runAfterTicks(level, Math.max(1, more), () -> flushDropIfIdle(level, key, idleMs));
+                scheduleDropFlush(level, Math.max(1, more), key, idleMs);
                 return;
             }
 
@@ -952,14 +1038,9 @@ public final class LoggerEventHandlers {
             e.x = agg.x;
             e.y = agg.y;
             e.z = agg.z;
-            // Recreate a representative stack with total count.
-            ItemStack rep = NbtSerde.readItemStack(agg.itemKeySnbt, level.registryAccess());
-            if (rep != null && !rep.isEmpty()) {
-                rep.setCount(Math.max(1, agg.count));
-                e.itemStackNbt = NbtSerde.writeItemStack(rep, level.registryAccess());
-            } else {
-                e.itemStackNbt = agg.itemKeySnbt;
-            }
+            // Keep the normalized stack SNBT captured on toss and just store the aggregated count.
+            // Avoid rebuilding ItemStack here to keep idle-flush cheap and fully off-thread.
+            e.itemStackNbt = agg.itemKeySnbt;
             e.count = Math.max(1, agg.count);
             e.extra = "drop";
             LoggerRuntime.storage(level).append(e);
@@ -1575,7 +1656,13 @@ public final class LoggerEventHandlers {
         e.z = ent.blockPosition().getZ();
         e.entityType = EntityType.getKey(ent.getType()).toString();
         e.entityUuid = ent.getUUID();
-        e.entityNbt = NbtSerde.writeEntity(level, ent);
+        String preRemoveSnapshot = null;
+        try {
+            if (CreateContraptionSnapshotStore.isCreateContraptionEntity(ent)) {
+                preRemoveSnapshot = CreateContraptionSnapshotStore.takeFresh(ent.getUUID(), e.dim, 30_000L);
+            }
+        } catch (Throwable ignored) {}
+        e.entityNbt = (preRemoveSnapshot != null) ? preRemoveSnapshot : NbtSerde.writeEntity(level, ent);
 
         ActorTracker.ActorRef ar = resolveActorForEntity(level, ent, e.entityNbt);
         if (ar != null) {

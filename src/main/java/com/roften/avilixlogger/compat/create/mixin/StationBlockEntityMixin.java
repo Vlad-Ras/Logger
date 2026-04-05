@@ -3,6 +3,7 @@ package com.roften.avilixlogger.compat.create.mixin;
 import com.roften.avilixlogger.compat.create.CreateTrainsCompatHooks;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -46,7 +47,7 @@ public class StationBlockEntityMixin {
             require = 0
     )
     private boolean avilixlogger$disassembleAndLog(@Coerce Object train,
-                                                   Object assemblyDirection,
+                                                   Direction assemblyDirection,
                                                    BlockPos pos,
                                                    ServerPlayer sender) {
         boolean ok = (boolean) tryInvoke3Bool(train, "disassemble", assemblyDirection, pos, sender);

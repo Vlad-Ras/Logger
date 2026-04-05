@@ -175,6 +175,7 @@ public final class LogText {
             case PLAYER_DEATH, ENTITY_DEATH -> ChatFormatting.DARK_RED;
 
             case ENTITY_SPAWN -> ChatFormatting.LIGHT_PURPLE;
+            case ENTITY_INTERACT -> ChatFormatting.GOLD;
             case ENTITY_OWNER_SET -> ChatFormatting.YELLOW;
             case CHAT_MESSAGE -> ChatFormatting.AQUA;
 
@@ -219,6 +220,7 @@ public final class LogText {
             case ENTITY_MOUNT -> "сел";
             case ENTITY_DISMOUNT -> "вышел";
             case ENTITY_CONTAINER_OPEN -> "открыл";
+            case ENTITY_INTERACT -> "взаимодействовал с";
             case ENTITY_OWNER_SET -> "сменил владельца";
 
             case PLANE_PLACE -> "поставил самолёт";
@@ -269,7 +271,7 @@ public final class LogText {
             }
 
             // entities / planes / etc (оставь как у тебя было — ниже максимально безопасный вариант)
-            case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
+            case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN, ENTITY_INTERACT,
                  PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT, ENTITY_OWNER_SET -> {
                 // если у тебя уже есть логика для самолётов/энтити — можно вернуть её обратно.
                 yield Component.literal(e.entityType != null ? e.entityType : "entity");

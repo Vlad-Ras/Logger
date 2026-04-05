@@ -24,14 +24,19 @@ public final class LogViewerClientHooks {
     private static LogViewerScreen OPEN_SCREEN;
 
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
+        OPEN_SCREEN = null;
         // Inform server that this player supports the GUI payloads.
         PacketDistributor.sendToServer(new C2SHelloPayload());
+    }
+
+    public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
+        OPEN_SCREEN = null;
     }
 
     public static void open() {
         Minecraft mc = Minecraft.getInstance();
         if (mc == null) return;
-        if (OPEN_SCREEN == null) OPEN_SCREEN = new LogViewerScreen();
+        OPEN_SCREEN = new LogViewerScreen();
         mc.setScreen(OPEN_SCREEN);
         // Load first page immediately.
         PacketDistributor.sendToServer(new C2SRequestPagePayload(C2SRequestPagePayload.Nav.FIRST, true, GuiFilters.DEFAULT));
