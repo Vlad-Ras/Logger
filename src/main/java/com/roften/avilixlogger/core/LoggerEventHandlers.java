@@ -2,6 +2,7 @@ package com.roften.avilixlogger.core;
 
 import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks;
+import com.roften.avilixlogger.compat.aeronautics.AeronauticsCompatHooks;
 
 import net.minecraft.server.TickTask;
 import net.minecraft.core.BlockPos;
@@ -406,6 +407,7 @@ public final class LoggerEventHandlers {
                     var face = event.getFace();
                         if (face != null) RecentPlayerActionTracker.note(level, sp, base.relative(face), RecentPlayerActionTracker.ActionKind.RIGHT_CLICK_BLOCK, used0);
                 } catch (Throwable ignored) {}
+                try { AeronauticsCompatHooks.notePlayerBlockAction(level, sp, base, used0, "right_click_block"); } catch (Throwable ignored2) {}
             }
         } catch (Throwable ignored) {}
 
@@ -467,7 +469,7 @@ public final class LoggerEventHandlers {
         final BlockEntity be0 = level.getBlockEntity(pos);
         final String beforeBe = (LoggerConfig.VALUES.logContainers.get() && be0 != null) ? NbtSerde.writeBlockEntity(level, be0) : null;
         final ItemStack used = event.getItemStack() != null ? event.getItemStack().copy() : ItemStack.EMPTY;
-        final String usedItemSnbt = (!used.isEmpty()) ? NbtSerde.writeItemStack(used, level.registryAccess()) : null;
+        final String usedItemSnbt = (!used.isEmpty()) ? NbtSerde.writeItemStackHotPath(used, level.registryAccess()) : null;
         final UUID actorUuid = p.getUUID();
         final String actorName = p.getName().getString();
 
@@ -512,36 +514,14 @@ public final class LoggerEventHandlers {
                     LoggerRuntime.storage(level).append(ie);
                 }
 
-                // Block-entity inventory / data changes without a GUI (Create Depot, modded blocks, etc.)
+                // Block-entity inventory / data changes without a GUI (Create Depot, modded blocks, etc.).
+                // Snapshot capture stays on the server thread, but expensive NBT parsing/diff fan-out is off-thread.
                 if (beChanged) {
-                    var diffs = InventoryDiffUtil.diff(beforeBe, afterBe, level.registryAccess());
-                    if (diffs != null && !diffs.isEmpty()) {
-                        for (var d : diffs) {
-                            LogEntry de = new LogEntry();
-                            de.ts = System.currentTimeMillis();
-                            de.dim = dim;
-                            de.type = (d.deltaCount() > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
-                            de.actorUuid = actorUuid;
-                            de.actorName = actorName;
-                            de.x = pos.getX();
-                            de.y = pos.getY();
-                            de.z = pos.getZ();
-                            de.blockAfter = NbtSerde.writeBlockState(afterState0);
-                            if (LoggerConfig.VALUES.storeVerboseBeSnapshotsInDeltaLogs.get()) {
-                                de.beBefore = beforeBe;
-                                de.beAfter = afterBe;
-                            }
-                            de.count = Math.abs(d.deltaCount());
-                            try {
-                                ItemStack st = d.representative().copy();
-                                st.setCount(Math.max(1, Math.abs(d.deltaCount())));
-                                de.itemStackNbt = NbtSerde.writeItemStack(st, level.registryAccess());
-                            } catch (Throwable ignored) {}
-                            LoggerRuntime.storage(level).append(de);
-                        }
-                    }
+                    final String capturedAfterBe = afterBe;
+                    final String capturedBlockAfter = NbtSerde.writeBlockState(afterState0);
+                    final String capturedExtra = "container change " + BuiltInRegistries.BLOCK.getKey(afterState0.getBlock());
 
-                    // Keep snapshot entry for deterministic rollback.
+                    // Keep snapshot entry for deterministic rollback immediately; this preserves full functionality.
                     LogEntry se = new LogEntry();
                     se.ts = System.currentTimeMillis();
                     se.dim = dim;
@@ -551,11 +531,42 @@ public final class LoggerEventHandlers {
                     se.x = pos.getX();
                     se.y = pos.getY();
                     se.z = pos.getZ();
-                    se.blockAfter = NbtSerde.writeBlockState(afterState0);
+                    se.blockAfter = capturedBlockAfter;
                     se.beBefore = beforeBe;
-                    se.beAfter = afterBe;
-                    se.extra = "container change " + BuiltInRegistries.BLOCK.getKey(afterState0.getBlock());
+                    se.beAfter = capturedAfterBe;
+                    se.extra = capturedExtra;
                     LoggerRuntime.storage(level).append(se);
+
+                    final var registryAccess = level.registryAccess();
+                    final LogStorage storage = LoggerRuntime.storage(level);
+                    AsyncLogProcessor.submit(() -> {
+                        var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
+                        if (diffs == null || diffs.isEmpty()) return;
+                        long ts = System.currentTimeMillis();
+                        for (var d : diffs) {
+                            LogEntry de = new LogEntry();
+                            de.ts = ts;
+                            de.dim = dim;
+                            de.type = (d.deltaCount() > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
+                            de.actorUuid = actorUuid;
+                            de.actorName = actorName;
+                            de.x = pos.getX();
+                            de.y = pos.getY();
+                            de.z = pos.getZ();
+                            de.blockAfter = capturedBlockAfter;
+                            if (LoggerConfig.VALUES.storeVerboseBeSnapshotsInDeltaLogs.get()) {
+                                de.beBefore = beforeBe;
+                                de.beAfter = capturedAfterBe;
+                            }
+                            de.count = Math.abs(d.deltaCount());
+                            try {
+                                ItemStack st = d.representative().copy();
+                                st.setCount(Math.max(1, Math.abs(d.deltaCount())));
+                                de.itemStackNbt = NbtSerde.writeItemStackHotPath(st, registryAccess);
+                            } catch (Throwable ignored) {}
+                            storage.append(de);
+                        }
+                    });
                 }
                 } catch (Throwable ignored) {
                 }
@@ -609,7 +620,9 @@ public final class LoggerEventHandlers {
                 e.z = target.blockPosition().getZ();
                 e.entityType = EntityType.getKey(target.getType()).toString();
                 e.entityUuid = target.getUUID();
-                try { e.entityNbt = NbtSerde.writeEntity(level, target); } catch (Throwable ignored) {}
+                if (LoggerConfig.VALUES.storeVerboseEntitySnapshotsInInteractLogs.get()) {
+                    try { e.entityNbt = NbtSerde.writeEntity(level, target); } catch (Throwable ignored) {}
+                }
                 e.extra = "interact entity " + e.entityType;
                 LoggerRuntime.storage(level).append(e);
             }
@@ -707,8 +720,11 @@ public final class LoggerEventHandlers {
         e.entityType = entityType;
         e.entityUuid = target.getUUID();
         e.extra = "open entity container " + entityType;
-        // Store a snapshot too (so rollback tools can be deterministic if you add them later)
-        e.entityNbt = NbtSerde.writeEntity(level, target);
+        // Full entity snapshots on open are intentionally optional: NBT serialization here happens on the
+        // server tick thread and becomes very expensive with 40+ online players using vehicles/NPC keepers.
+        if (LoggerConfig.VALUES.storeVerboseEntitySnapshotsInMountLogs.get()) {
+            try { e.entityNbt = NbtSerde.writeEntity(level, target); } catch (Throwable ignored) {}
+        }
         // beforeInv is kept in OPEN_ENTITY_CONTAINER ctx
         LoggerRuntime.storage(level).append(e);
     }
@@ -747,7 +763,9 @@ public final class LoggerEventHandlers {
         e.z = ridden.blockPosition().getZ();
         e.entityType = EntityType.getKey(ridden.getType()).toString();
         e.entityUuid = ridden.getUUID();
-        e.entityNbt = NbtSerde.writeEntity(level, ridden);
+        if (LoggerConfig.VALUES.storeVerboseEntitySnapshotsInMountLogs.get()) {
+            try { e.entityNbt = NbtSerde.writeEntity(level, ridden); } catch (Throwable ignored) {}
+        }
         if (event.isMounting() && isPlane) {
             e.extra = "plane mount " + e.entityType;
         } else {
@@ -780,6 +798,7 @@ public final class LoggerEventHandlers {
 
 
         // 0) Entity container close (planes / vehicles). Emit put/take deltas.
+        // Capture the after snapshot on the server thread, then parse/diff it in the CPU worker.
         try {
             EntityContainerCtx ectx = OPEN_ENTITY_CONTAINER.remove(sp.getUUID());
             if (ectx != null && ectx.dim.equals(level.dimension().location().toString())) {
@@ -787,30 +806,38 @@ public final class LoggerEventHandlers {
                 if (ent instanceof Container cont) {
                     String afterInv = EntityContainerSerde.write(cont, level.registryAccess());
                     if (afterInv != null && !afterInv.equals(ectx.beforeInv)) {
-                        var diffs = InventoryDiffUtil.diff(ectx.beforeInv, afterInv, level.registryAccess());
-                        if (diffs != null && !diffs.isEmpty()) {
+                        final String capturedAfterInv = afterInv;
+                        final var registryAccess = level.registryAccess();
+                        final LogStorage storage = LoggerRuntime.storage(level);
+                        final UUID actorUuid = sp.getUUID();
+                        final String actorName = sp.getName().getString();
+                        final BlockPos entityPos = ent.blockPosition();
+                        AsyncLogProcessor.submit(() -> {
+                            var diffs = InventoryDiffUtil.diff(ectx.beforeInv, capturedAfterInv, registryAccess);
+                            if (diffs == null || diffs.isEmpty()) return;
+                            long ts = System.currentTimeMillis();
                             for (var d : diffs) {
                                 LogEntry de = new LogEntry();
-                                de.ts = System.currentTimeMillis();
+                                de.ts = ts;
                                 de.dim = ectx.dim;
                                 de.type = (d.deltaCount() > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
-                                de.actorUuid = sp.getUUID();
-                                de.actorName = sp.getName().getString();
-                                de.x = ent.blockPosition().getX();
-                                de.y = ent.blockPosition().getY();
-                                de.z = ent.blockPosition().getZ();
+                                de.actorUuid = actorUuid;
+                                de.actorName = actorName;
+                                de.x = entityPos.getX();
+                                de.y = entityPos.getY();
+                                de.z = entityPos.getZ();
                                 de.entityType = ectx.entityType;
                                 de.entityUuid = ectx.entityUuid;
                                 de.count = Math.abs(d.deltaCount());
                                 try {
                                     ItemStack st = d.representative().copy();
                                     st.setCount(Math.max(1, Math.abs(d.deltaCount())));
-                                    de.itemStackNbt = NbtSerde.writeItemStack(st, level.registryAccess());
+                                    de.itemStackNbt = NbtSerde.writeItemStackHotPath(st, registryAccess);
                                 } catch (Throwable ignored) {}
                                 de.extra = "entity container " + ectx.entityType;
-                                LoggerRuntime.storage(level).append(de);
+                                storage.append(de);
                             }
-                        }
+                        });
                     }
                 }
             }
@@ -825,33 +852,39 @@ public final class LoggerEventHandlers {
         if (afterSlots == null) return;
         if (afterSlots.equals(ctx.beforeSlots)) return;
 
-        // Emit human-friendly aggregated put/take events.
-        try {
-            var agg = ContainerSlotDiffUtil.diffAggregated(ctx.beforeSlots, afterSlots, level.registryAccess());
-            if (agg != null && !agg.isEmpty()) {
-                for (var ent : agg.entrySet()) {
-                    int delta = ent.getValue();
-                    if (delta == 0) continue;
-                    LogEntry de = new LogEntry();
-                    de.ts = System.currentTimeMillis();
-                    de.dim = ctx.dim;
-                    de.type = (delta > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
-                    de.actorUuid = sp.getUUID();
-                    de.actorName = sp.getName().getString();
-                    de.x = ctx.pos.getX();
-                    de.y = ctx.pos.getY();
-                    de.z = ctx.pos.getZ();
-                    de.blockAfter = NbtSerde.writeBlockState(level.getBlockState(ctx.pos));
-                    de.count = Math.abs(delta);
-                    // IMPORTANT: keep the normalized stack SNBT (Count=1) as the item key,
-                    // and store the real amount in "count". This avoids DB truncation and
-                    // guarantees we can always decode item id for UI/details.
-                    de.itemStackNbt = ent.getKey();
-                    de.extra = "container delta";
-                    LoggerRuntime.storage(level).append(de);
-                }
+        final String capturedBlockAfter = NbtSerde.writeBlockState(level.getBlockState(ctx.pos));
+        final var registryAccess = level.registryAccess();
+        final LogStorage storage = LoggerRuntime.storage(level);
+        final UUID actorUuid = sp.getUUID();
+        final String actorName = sp.getName().getString();
+
+        // Emit human-friendly aggregated put/take events off-thread.
+        AsyncLogProcessor.submit(() -> {
+            var agg = ContainerSlotDiffUtil.diffAggregated(ctx.beforeSlots, afterSlots, registryAccess);
+            if (agg == null || agg.isEmpty()) return;
+            long ts = System.currentTimeMillis();
+            for (var ent : agg.entrySet()) {
+                int delta = ent.getValue();
+                if (delta == 0) continue;
+                LogEntry de = new LogEntry();
+                de.ts = ts;
+                de.dim = ctx.dim;
+                de.type = (delta > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
+                de.actorUuid = actorUuid;
+                de.actorName = actorName;
+                de.x = ctx.pos.getX();
+                de.y = ctx.pos.getY();
+                de.z = ctx.pos.getZ();
+                de.blockAfter = capturedBlockAfter;
+                de.count = Math.abs(delta);
+                // IMPORTANT: keep the normalized stack SNBT (Count=1) as the item key,
+                // and store the real amount in "count". This avoids DB truncation and
+                // guarantees we can always decode item id for UI/details.
+                de.itemStackNbt = ent.getKey();
+                de.extra = "container delta";
+                storage.append(de);
             }
-        } catch (Throwable ignored) {}
+        });
 
         // Always keep a deterministic snapshot entry for rollback tools.
         LogEntry e = new LogEntry();
@@ -863,7 +896,7 @@ public final class LoggerEventHandlers {
         e.x = ctx.pos.getX();
         e.y = ctx.pos.getY();
         e.z = ctx.pos.getZ();
-        e.blockAfter = NbtSerde.writeBlockState(level.getBlockState(ctx.pos));
+        e.blockAfter = capturedBlockAfter;
         e.containerSlotsBefore = ctx.beforeSlots;
         e.containerSlotsAfter = afterSlots;
         e.extra = "container change " + BuiltInRegistries.BLOCK.getKey(level.getBlockState(ctx.pos).getBlock());
@@ -992,7 +1025,7 @@ public final class LoggerEventHandlers {
         try {
             ItemStack norm = st.copy();
             norm.setCount(1);
-            String itemKey = NbtSerde.writeItemStack(norm, level.registryAccess());
+            String itemKey = NbtSerde.writeItemStackHotPath(norm, level.registryAccess());
             if (itemKey == null) return;
 
             String key = sp.getUUID() + ":" + itemKey;
@@ -1108,7 +1141,7 @@ public final class LoggerEventHandlers {
             e.x = itemEnt.blockPosition().getX();
             e.y = itemEnt.blockPosition().getY();
             e.z = itemEnt.blockPosition().getZ();
-            e.itemStackNbt = NbtSerde.writeItemStack(st, level.registryAccess());
+            e.itemStackNbt = NbtSerde.writeItemStackHotPath(st, level.registryAccess());
             e.count = st.getCount();
             e.extra = "drop " + BuiltInRegistries.ITEM.getKey(st.getItem());
             LoggerRuntime.storage(level).append(e);
@@ -1241,7 +1274,7 @@ public final class LoggerEventHandlers {
             pe.x = ie.blockPosition().getX();
             pe.y = ie.blockPosition().getY();
             pe.z = ie.blockPosition().getZ();
-            pe.itemStackNbt = NbtSerde.writeItemStack(snap, level.registryAccess());
+            pe.itemStackNbt = NbtSerde.writeItemStackHotPath(snap, level.registryAccess());
             pe.count = snap.getCount();
 
             // Put owner + plane info into extra for easy filtering.
@@ -1282,7 +1315,7 @@ public final class LoggerEventHandlers {
         e.x = ie.blockPosition().getX();
         e.y = ie.blockPosition().getY();
         e.z = ie.blockPosition().getZ();
-        e.itemStackNbt = NbtSerde.writeItemStack(snap, level.registryAccess());
+        e.itemStackNbt = NbtSerde.writeItemStackHotPath(snap, level.registryAccess());
         e.count = snap.getCount();
         e.extra = "pickup " + BuiltInRegistries.ITEM.getKey(snap.getItem()) + " x" + snap.getCount();
         LoggerRuntime.storage(level).append(e);
@@ -1306,7 +1339,7 @@ public final class LoggerEventHandlers {
         e.x = event.getEntity().blockPosition().getX();
         e.y = event.getEntity().blockPosition().getY();
         e.z = event.getEntity().blockPosition().getZ();
-        e.itemStackNbt = NbtSerde.writeItemStack(crafted, level.registryAccess());
+        e.itemStackNbt = NbtSerde.writeItemStackHotPath(crafted, level.registryAccess());
         e.count = crafted.getCount();
         e.extra = "craft " + BuiltInRegistries.ITEM.getKey(crafted.getItem()) + " x" + crafted.getCount();
 
@@ -1330,7 +1363,7 @@ public final class LoggerEventHandlers {
         e.x = event.getEntity().blockPosition().getX();
         e.y = event.getEntity().blockPosition().getY();
         e.z = event.getEntity().blockPosition().getZ();
-        e.itemStackNbt = NbtSerde.writeItemStack(smelted, level.registryAccess());
+        e.itemStackNbt = NbtSerde.writeItemStackHotPath(smelted, level.registryAccess());
         e.count = smelted.getCount();
         e.extra = "smelt " + BuiltInRegistries.ITEM.getKey(smelted.getItem()) + " x" + smelted.getCount();
         LoggerRuntime.storage(level).append(e);
@@ -1381,7 +1414,7 @@ public final class LoggerEventHandlers {
     private static boolean shouldTrackDelayedInteraction(ServerLevel level, BlockPos pos, BlockState state) {
         if (state == null) return false;
         try {
-            if (isInventoryLike(level, pos, state)) return true;
+            if (isInventoryLike(level, pos, state)) return false;
         } catch (Throwable ignored) {}
         try {
             if (level.getBlockEntity(pos) != null) return true;

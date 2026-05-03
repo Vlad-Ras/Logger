@@ -59,6 +59,9 @@ config="avilixlogger_core.mixins.json"
 [[mixins]]
 config="avilixlogger_create_trains.mixins.json"
 
+[[mixins]]
+config="avilixlogger_aeronautics.mixins.json"
+
 # The [[accessTransformers]] block allows you to declare where your AT file is.
 # If this block is omitted, a fallback attempt will be made to load an AT from META-INF/accesstransformer.cfg
 #[[accessTransformers]]
@@ -110,6 +113,28 @@ config="avilixlogger_create_trains.mixins.json"
 
 [[dependencies.${mod_id}]]
     modId="man_of_many_planes"
+    type="optional"
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# Optional compat: Create Aeronautics / Simulated Project
+[[dependencies.${mod_id}]]
+    modId="aeronautics"
+    type="optional"
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="sable"
+    type="optional"
+    versionRange="[0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="simulated"
     type="optional"
     versionRange="[0,)"
     ordering="AFTER"

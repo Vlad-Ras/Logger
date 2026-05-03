@@ -2,6 +2,7 @@ package com.roften.avilixlogger.mixin;
 
 import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.core.*;
+import com.roften.avilixlogger.compat.aeronautics.AeronauticsCompatHooks;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
@@ -87,7 +88,23 @@ public abstract class ServerLevelSetBlockMixin {
             java.util.UUID actorUuid = null;
             String actorName = null;
 
-            if (source.startsWith("create")) {
+            try {
+                CauseContext.Cause c = CauseContext.peek();
+                if (c != null && c.actorUuid() != null) {
+                    actorUuid = c.actorUuid();
+                    actorName = c.actorName();
+                }
+            } catch (Throwable ignored) {}
+
+            if ((actorUuid == null && actorName == null) && source.startsWith("aeronautics")) {
+                var ar = AeronauticsCompatHooks.resolveActorForBlock(level, pos);
+                if (ar != null) {
+                    actorUuid = ar.actorUuid();
+                    actorName = (ar.actorName() != null && !ar.actorName().isBlank()) ? ar.actorName() : null;
+                }
+            }
+
+            if ((actorUuid == null && actorName == null) && source.startsWith("create")) {
                 var ra = CreateOwnershipTracker.resolveForSystemChange(level, pos, null);
                 if (ra != null) {
                     actorUuid = ra.uuid();
@@ -96,9 +113,8 @@ public abstract class ServerLevelSetBlockMixin {
                 }
             }
             if (actorName == null) {
-                actorName = source.startsWith("worldedit") ? "WorldEdit" : (source.startsWith("create") ? "Create" : "SYSTEM");
+                actorName = source.startsWith("worldedit") ? "WorldEdit" : (source.startsWith("aeronautics") ? "Aeronautics" : (source.startsWith("create") ? "Create" : "SYSTEM"));
             }
-
             AVILIXLOGGER$CAPTURE_STACK.get().addLast(new SetBlockCapture(new BlockPos(pos.getX(), pos.getY(), pos.getZ()), level.dimension().location().toString(), beforeState, beforeBe, source, actorUuid, actorName));
         } catch (Throwable ignored) {
         }
@@ -175,12 +191,16 @@ public abstract class ServerLevelSetBlockMixin {
     private static String detectExternalSource() {
         try {
             final boolean[] create = {false};
+            final boolean[] aero = {false};
             final boolean[] we = {false};
 
             java.lang.StackWalker.getInstance().walk(s -> {
-                s.limit(28).forEach(f -> {
+                s.limit(36).forEach(f -> {
                     String cn = f.getClassName();
                     if (cn == null) return;
+                    if (!aero[0] && (cn.startsWith("dev.eriksonn.aeronautics")
+                            || cn.startsWith("dev.ryanhcode.sable")
+                            || cn.startsWith("dev.simulated_team.simulated"))) aero[0] = true;
                     if (!create[0] && cn.startsWith("com.simibubi.create")) create[0] = true;
                     if (!we[0] && cn.startsWith("com.sk89q.worldedit")) we[0] = true;
                 });
@@ -188,6 +208,7 @@ public abstract class ServerLevelSetBlockMixin {
             });
 
             if (we[0]) return "worldedit";
+            if (aero[0]) return "aeronautics";
             if (create[0]) return "create";
         } catch (Throwable ignored) {
         }

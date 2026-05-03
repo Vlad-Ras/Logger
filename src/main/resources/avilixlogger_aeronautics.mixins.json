@@ -1,0 +1,15 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.aeronautics.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MountedPotatoCannonBlockMixin",
+    "MountedPotatoCannonBlockEntityMixin",
+    "HotAirBurnerValueBehaviourMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

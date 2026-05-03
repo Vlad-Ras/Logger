@@ -4,6 +4,8 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
@@ -68,6 +70,15 @@ public final class NbtSerde {
     /** Snapshot a block entity including its full metadata. */
     public static String writeBlockEntity(ServerLevel level, BlockEntity be) {
         if (be == null) return null;
+
+        // Hot path for MC 1.21.x: avoid the reflection-heavy invokeBlockEntitySave chain.
+        // Reflection fallback stays below for compatibility with mapping/API edge cases.
+        try {
+            CompoundTag tag = be.saveWithFullMetadata(level.registryAccess());
+            if (tag != null) return toSnbt(tag);
+        } catch (Throwable ignored) {
+        }
+
         CompoundTag tag = invokeBlockEntitySave(level, be);
         return toSnbt(tag);
     }
@@ -206,6 +217,42 @@ public final class NbtSerde {
         if (stack == null || stack.isEmpty()) return null;
         CompoundTag tag = invokeItemStackSave(stack, provider);
         return toSnbt(tag);
+    }
+
+    /**
+     * Very cheap serializer for hot events such as item pickup/drop.
+     * Plain vanilla stacks dominate pickup spam; full ItemStack#save() is kept for all risky stacks.
+     */
+    public static String writeItemStackHotPath(ItemStack stack, HolderLookup.Provider provider) {
+        if (stack == null || stack.isEmpty()) return null;
+        if (canUseSimpleItemStackSnbt(stack)) {
+            ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (id != null) {
+                return "{id:\"" + id + "\",count:" + stack.getCount() + "}";
+            }
+        }
+        return writeItemStack(stack, provider);
+    }
+
+    private static boolean canUseSimpleItemStackSnbt(ItemStack stack) {
+        try {
+            ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (id == null || !"minecraft".equals(id.getNamespace())) return false;
+            try { if (stack.isDamaged()) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.CUSTOM_DATA)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.CUSTOM_NAME)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.ITEM_NAME)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.ENCHANTMENTS)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.STORED_ENCHANTMENTS)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.CONTAINER)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.CONTAINER_LOOT)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.BLOCK_ENTITY_DATA)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.ENTITY_DATA)) return false; } catch (Throwable ignored) {}
+            try { if (stack.has(DataComponents.BLOCK_STATE)) return false; } catch (Throwable ignored) {}
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private static boolean isUnsafeEntityRollback(ResourceLocation key, CompoundTag tag) {

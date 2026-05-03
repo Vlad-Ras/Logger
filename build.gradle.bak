@@ -127,20 +127,24 @@ dependencies {
         version { prefer '8.0.33' }
     }
 
-    // --- ClickHouse backend ---
-    // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.
-
-    // --- Dev/runtime classpath for Gradle runClient/runServer ---
-    // jarJar bundles these into the production mod jar, but NeoForge dev runs load the mod
-    // from build/classes instead of the final jar. localRuntime keeps the DB drivers available
-    // during IDE/Gradle runs without publishing them as normal mod dependencies.
-    localRuntime("com.zaxxer:HikariCP:5.1.0")
-    localRuntime("com.mysql:mysql-connector-j:8.0.33")
+    // --- Optional ClickHouse backend for high-volume append-only log storage ---
+    // IMPORTANT for NeoForge/Minecraft:
+    // Do NOT use com.clickhouse:clickhouse-jdbc:0.9.8 or clickhouse-jdbc:0.9.8:all with transitive deps.
+    // Their POM pulls newer commons/guava/lz4 versions, while Minecraft dependencies are strictly pinned.
+    // Use the shaded all-in-one artifact and disable transitive dependency resolution.
+    jarJar(implementation("com.clickhouse:clickhouse-jdbc-all:0.9.8") {
+        transitive = false
+    }) {
+        version { prefer '0.9.8' }
+    }
 
     // --- Optional GUI library ---
     // IMPORTANT: do NOT embed LowDragLib2 (ldlib2) into this mod.
     // If ldlib2 is present on the dedicated server, clients without ldlib2 will be kicked during handshake
     // due to missing required network channels.
+    // Our GUI is implemented with vanilla widgets and does not require ldlib2.
+    // Example optional mod dependency with JEI
+    // The JEI API is declared for compile time use, while the full JEI artifact is used at runtime
     // compileOnly "mezz.jei:jei-${mc_version}-common-api:${jei_version}"
     // compileOnly "mezz.jei:jei-${mc_version}-neoforge-api:${jei_version}"
     // We add the full version to localRuntime, not runtimeOnly, so that we do not publish a dependency on it

@@ -240,7 +240,7 @@ public final class RollbackEngine {
         if (state == null) return false;
         try {
             var id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock());
-            return id != null && "create".equals(id.getNamespace());
+            return id != null && ("create".equals(id.getNamespace()) || "aeronautics".equals(id.getNamespace()));
         } catch (Throwable t) {
             return false;
         }
@@ -249,7 +249,7 @@ public final class RollbackEngine {
     private static boolean looksLikeCreateStateSnbt(String snbt) {
         if (snbt == null || snbt.isBlank()) return false;
         String s = snbt.toLowerCase(java.util.Locale.ROOT);
-        return s.contains("\"create:") || s.contains("create:");
+        return s.contains("\"create:") || s.contains("create:") || s.contains("\"aeronautics:") || s.contains("aeronautics:");
     }
 
     private static boolean looksLikeCreatePayload(String snbt) {

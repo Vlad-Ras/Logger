@@ -9,7 +9,9 @@ import net.minecraft.core.BlockPos;
 
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -21,10 +23,19 @@ import java.util.concurrent.TimeUnit;
  * - batch inserts with prepared statements
  * - schema optimized for the dominant queries (dim+time and exact block lookups)
  */
-public final class MysqlLogStorage implements LogStorage {
+public final class MysqlLogStorage implements HealthAwareLogStorage {
 
+
+private static void loadMysqlDriver() {
+    try {
+        Class.forName("com.mysql.cj.jdbc.Driver");
+    } catch (ClassNotFoundException e) {
+        throw new IllegalStateException("MySQL Connector/J is not on the runtime classpath. Check jarJar/localRuntime dependencies.", e);
+    }
+}
 
 private static void ensureDatabaseExists(String host, int port, String database, String user, String pass) {
+    loadMysqlDriver();
     // Connect without a schema first, then create it if missing.
     String baseUrl = "jdbc:mysql://" + host + ":" + port + "/"
             + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&useUnicode=true&createDatabaseIfNotExist=true";
@@ -49,6 +60,8 @@ private static void ensureDatabaseExists(String host, int port, String database,
     // metrics
     private volatile long dropped;
     private volatile long written;
+    private volatile long unhealthyUntilMs;
+    private volatile Throwable lastFailure;
 
     public MysqlLogStorage() {
         this.queue = new ArrayBlockingQueue<>(Math.max(10_000, LoggerConfig.VALUES.dbQueueCapacity.get()));
@@ -58,6 +71,32 @@ private static void ensureDatabaseExists(String host, int port, String database,
         this.writer = new Thread(this::runWriter, "avilixlogger-mysql-writer");
         this.writer.setDaemon(true);
         this.writer.start();
+    }
+
+    @Override
+    public boolean isLikelyAvailable() {
+        return running && System.currentTimeMillis() >= unhealthyUntilMs;
+    }
+
+    @Override
+    public String storageName() {
+        return "MySQL";
+    }
+
+    private void markHealthy() {
+        unhealthyUntilMs = 0L;
+        lastFailure = null;
+    }
+
+    private void markUnhealthy(Throwable t) {
+        lastFailure = t;
+        long cooldown;
+        try {
+            cooldown = Math.max(1000L, LoggerConfig.VALUES.dualFallbackCooldownMs.get());
+        } catch (Throwable ignored) {
+            cooldown = 10_000L;
+        }
+        unhealthyUntilMs = System.currentTimeMillis() + cooldown;
     }
 
     private static HikariDataSource createDataSource() {
@@ -73,7 +112,10 @@ private static void ensureDatabaseExists(String host, int port, String database,
         String url = "jdbc:mysql://" + host + ":" + port + "/" + database
                 + "?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&useUnicode=true&createDatabaseIfNotExist=true";
 
+        loadMysqlDriver();
+
         HikariConfig cfg = new HikariConfig();
+        cfg.setDriverClassName("com.mysql.cj.jdbc.Driver");
         cfg.setJdbcUrl(url);
         cfg.setUsername(user);
         cfg.setPassword(pass);
@@ -88,8 +130,12 @@ private static void ensureDatabaseExists(String host, int port, String database,
         cfg.addDataSourceProperty("cachePrepStmts", "true");
         cfg.addDataSourceProperty("prepStmtCacheSize", "250");
         cfg.addDataSourceProperty("prepStmtCacheSqlLimit", "2048");
-        cfg.addDataSourceProperty("useServerPrepStmts", "true");
+        cfg.addDataSourceProperty("useServerPrepStmts", "false");
         cfg.addDataSourceProperty("rewriteBatchedStatements", "true");
+        cfg.addDataSourceProperty("useLocalSessionState", "true");
+        cfg.addDataSourceProperty("elideSetAutoCommits", "true");
+        cfg.addDataSourceProperty("maintainTimeStats", "false");
+        cfg.addDataSourceProperty("cacheServerConfiguration", "true");
 
         return new HikariDataSource(cfg);
     }
@@ -115,6 +161,9 @@ private static void ensureDatabaseExists(String host, int port, String database,
             try { st.executeUpdate("CREATE INDEX idx_avilixlogger_dim_xyz_ts ON avilixlogger_actions (dim, x, y, z, ts)"); } catch (SQLException ignored) {}
             try { st.executeUpdate("CREATE INDEX idx_avilixlogger_actor_ts ON avilixlogger_actions (actor_name, ts)"); } catch (SQLException ignored) {}
             try { st.executeUpdate("CREATE INDEX idx_avilixlogger_action_ts ON avilixlogger_actions (action, ts)"); } catch (SQLException ignored) {}
+            try { st.executeUpdate("CREATE INDEX idx_avilixlogger_action_ts_id ON avilixlogger_actions (action, ts, id)"); } catch (SQLException ignored) {}
+            try { st.executeUpdate("CREATE INDEX idx_avilixlogger_dim_action_ts_id ON avilixlogger_actions (dim, action, ts, id)"); } catch (SQLException ignored) {}
+            try { st.executeUpdate("CREATE INDEX idx_avilixlogger_actor_action_ts_id ON avilixlogger_actions (actor_name, action, ts, id)"); } catch (SQLException ignored) {}
         } catch (SQLException e) {
             AvilixLoggerMod.LOGGER.error("[AvilixLogger] Failed to ensure MySQL schema", e);
             throw new RuntimeException(e);
@@ -160,6 +209,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
             } catch (InterruptedException ignored) {
                 // ignore
             } catch (Throwable t) {
+                markUnhealthy(t);
                 AvilixLoggerMod.LOGGER.error("[AvilixLogger] MySQL writer failure", t);
                 try { Thread.sleep(250L); } catch (InterruptedException ignored) {}
             }
@@ -171,6 +221,7 @@ private static void ensureDatabaseExists(String host, int port, String database,
                 insertBatch(batch);
                 written += batch.size();
             } catch (Throwable t) {
+                markUnhealthy(t);
                 AvilixLoggerMod.LOGGER.error("[AvilixLogger] MySQL final flush failure", t);
             }
         }
@@ -219,26 +270,78 @@ private static void ensureDatabaseExists(String host, int port, String database,
     }
 
     private void insertBatch(List<LogEntry> batch) throws SQLException {
+        List<LogEntry> toWrite = coalesceBatch(batch);
         try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(
-                "INSERT INTO avilixlogger_actions (ts, dim, x, y, z, action, actor_name, actor_uuid, data) VALUES (?,?,?,?,?,?,?,?,?)")) {
-            for (LogEntry e : batch) {
-                ps.setLong(1, e.ts);
-                ps.setString(2, e.dim);
-                ps.setInt(3, e.x);
-                ps.setInt(4, e.y);
-                ps.setInt(5, e.z);
-                ps.setInt(6, e.type.ordinal());
-                ps.setString(7, e.actorName);
+                "INSERT INTO avilixlogger_actions (id, ts, dim, x, y, z, action, actor_name, actor_uuid, data) VALUES (?,?,?,?,?,?,?,?,?,?)")) {
+            for (LogEntry e : toWrite) {
+                long id = e.id > 0 ? e.id : LogIdGenerator.ensure(e);
+                ps.setLong(1, id);
+                ps.setLong(2, e.ts);
+                ps.setString(3, e.dim);
+                ps.setInt(4, e.x);
+                ps.setInt(5, e.y);
+                ps.setInt(6, e.z);
+                ps.setInt(7, e.type.ordinal());
+                ps.setString(8, e.actorName);
                 if (e.actorUuid != null) {
-                    ps.setBytes(8, UuidBytes.toBytes(e.actorUuid));
+                    ps.setBytes(9, UuidBytes.toBytes(e.actorUuid));
                 } else {
-                    ps.setNull(8, Types.BINARY);
+                    ps.setNull(9, Types.BINARY);
                 }
-                ps.setBytes(9, GzipJson.toGzippedJsonBytes(e));
+                ps.setBytes(10, GzipJson.toGzippedJsonBytes(e));
                 ps.addBatch();
             }
             ps.executeBatch();
+            markHealthy();
         }
+    }
+
+    /** Lossless per-flush coalescing for spammy container deltas. */
+    private static List<LogEntry> coalesceBatch(List<LogEntry> in) {
+        if (in == null || in.size() < 2) return in;
+        LinkedHashMap<String, LogEntry> merged = new LinkedHashMap<>(in.size());
+        ArrayList<LogEntry> out = new ArrayList<>(in.size());
+        for (LogEntry e : in) {
+            if (!isCoalescibleDelta(e)) {
+                out.add(e);
+                continue;
+            }
+            String key = coalesceKey(e);
+            LogEntry prev = merged.get(key);
+            if (prev == null) {
+                merged.put(key, e);
+                out.add(e);
+            } else {
+                prev.count += Math.max(0, e.count);
+                if (e.ts < prev.ts) prev.ts = e.ts;
+            }
+        }
+        return out;
+    }
+
+    private static boolean isCoalescibleDelta(LogEntry e) {
+        if (e == null) return false;
+        if (e.type != ActionType.CONTAINER_PUT && e.type != ActionType.CONTAINER_TAKE) return false;
+        if (e.itemStackNbt == null || e.itemStackNbt.isBlank()) return false;
+        if (e.count <= 0) return false;
+        return isBlank(e.beBefore) && isBlank(e.beAfter)
+                && isBlank(e.containerSlotsBefore) && isBlank(e.containerSlotsAfter)
+                && isBlank(e.playerInvBefore) && isBlank(e.playerInvAfter);
+    }
+
+    private static String coalesceKey(LogEntry e) {
+        return e.type.ordinal() + "|" + e.dim + "|" + e.x + '|' + e.y + '|' + e.z
+                + "|" + Objects.toString(e.actorUuid, "")
+                + "|" + Objects.toString(e.actorName, "")
+                + "|" + Objects.toString(e.entityUuid, "")
+                + "|" + Objects.toString(e.entityType, "")
+                + "|" + Objects.toString(e.blockAfter, "")
+                + "|" + Objects.toString(e.itemStackNbt, "")
+                + "|" + Objects.toString(e.extra, "");
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     @Override
@@ -341,7 +444,9 @@ private static void ensureDatabaseExists(String host, int port, String database,
                     out.add(e);
                 }
             }
+            markHealthy();
         } catch (SQLException e) {
+            markUnhealthy(e);
             AvilixLoggerMod.LOGGER.error("[AvilixLogger] MySQL query failed", e);
         }
         return out;
