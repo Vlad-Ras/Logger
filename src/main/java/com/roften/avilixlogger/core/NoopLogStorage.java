@@ -14,12 +14,12 @@ public final class NoopLogStorage implements LogStorage {
 
     @Override
     public List<LogEntry> query(LogQuery q) {
-        return List.of();
+        throw new IllegalStateException("Logger storage is unavailable; check the ClickHouse connection error in server log");
     }
 
     @Override
     public List<LogEntry> queryReverse(LogQuery q) {
-        return List.of();
+        throw new IllegalStateException("Logger storage is unavailable; check the ClickHouse connection error in server log");
     }
 
     @Override

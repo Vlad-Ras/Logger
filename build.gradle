@@ -116,26 +116,8 @@ configurations {
 }
 
 dependencies {
-
-    // --- Database (MySQL/MariaDB via XAMPP) ---
-    // Packaged into the mod jar using NeoForge's Jar-in-Jar system.
-    jarJar(implementation("com.zaxxer:HikariCP:5.1.0")) {
-        version { prefer '5.1.0' }
-    }
-    // Correct Maven coordinates for MySQL Connector/J are com.mysql:mysql-connector-j
-    jarJar(implementation("com.mysql:mysql-connector-j:8.0.33")) {
-        version { prefer '8.0.33' }
-    }
-
     // --- ClickHouse backend ---
     // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.
-
-    // --- Dev/runtime classpath for Gradle runClient/runServer ---
-    // jarJar bundles these into the production mod jar, but NeoForge dev runs load the mod
-    // from build/classes instead of the final jar. localRuntime keeps the DB drivers available
-    // during IDE/Gradle runs without publishing them as normal mod dependencies.
-    localRuntime("com.zaxxer:HikariCP:5.1.0")
-    localRuntime("com.mysql:mysql-connector-j:8.0.33")
 
     // --- Optional GUI library ---
     // IMPORTANT: do NOT embed LowDragLib2 (ldlib2) into this mod.

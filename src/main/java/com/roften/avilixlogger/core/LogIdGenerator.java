@@ -3,12 +3,10 @@ package com.roften.avilixlogger.core;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Storage-independent monotonic ids used by MySQL and ClickHouse.
+ * Monotonic ids used by ClickHouse cursor pagination.
  *
  * The high bits are the millisecond timestamp, the low 20 bits are a per-JVM
- * sequence. This keeps cursor pagination comparable across backends in dual
- * read/merge mode and avoids MySQL AUTO_INCREMENT vs ClickHouse generated id
- * divergence for new logs.
+ * sequence. This keeps ids ordered by event time without relying on a database-side sequence.
  */
 public final class LogIdGenerator {
     private static final AtomicLong SEQ = new AtomicLong();

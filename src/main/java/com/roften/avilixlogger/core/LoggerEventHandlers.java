@@ -29,9 +29,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
+import net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent;
 import net.neoforged.neoforge.event.entity.item.ItemTossEvent;
 import net.neoforged.neoforge.event.entity.player.ItemEntityPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerContainerEvent;
@@ -67,6 +69,12 @@ public final class LoggerEventHandlers {
      * Key format: playerUUID:itemEntityUUID
      */
     private static final Map<String, Long> RECENT_DROPS = new ConcurrentHashMap<>();
+
+    /**
+     * Anti-spam bucket for deliberately broad audit events: item use, block use, entity attacks.
+     * These events are useful for investigations, but some mods fire them very often.
+     */
+    private static final Map<String, Long> RECENT_GENERIC_ACTIONS = new ConcurrentHashMap<>();
 
     private static boolean shouldLogRecent(Map<String, Long> map, String key, long nowMs, long windowMs) {
         if (key == null) return true;
@@ -384,6 +392,7 @@ public final class LoggerEventHandlers {
         try (var scope = CauseContext.push(sp, CauseContext.Kind.USE_ITEM, sp.blockPosition(), used0)) {
             // Some items spawn entities without going through RightClickBlock.
             try { RecentPlayerActionTracker.note(level, sp, sp.blockPosition(), RecentPlayerActionTracker.ActionKind.RIGHT_CLICK_ITEM, used0); } catch (Throwable ignored) {}
+            logItemUseIfNeeded(level, sp, used0, sp.blockPosition(), "right_click_item");
         }
     }
 
@@ -426,6 +435,8 @@ public final class LoggerEventHandlers {
             event.setCanceled(true);
             return;
         }
+
+        logBlockUseIfNeeded(level, p, pos, state, used0, event.getFace());
 
         // 1) Stage a possible menu/container open for any block interaction.
         // Some modded storages / "кладовщики" open a menu but do not expose a vanilla Container/MenuProvider
@@ -583,10 +594,28 @@ public final class LoggerEventHandlers {
         if (!(sp.level() instanceof ServerLevel level)) return;
         Entity target = event.getTarget();
         if (target == null) return;
-        if (target instanceof Player) return;
         try (var scope = CauseContext.push(sp, CauseContext.Kind.ATTACK_ENTITY, target.blockPosition(), sp.getMainHandItem())) {
-            ActorTracker.note(target.getUUID(), sp.getUUID(), sp.getName().getString());
+            if (!(target instanceof Player)) {
+                ActorTracker.note(target.getUUID(), sp.getUUID(), sp.getName().getString());
+            }
             try { RecentPlayerActionTracker.note(level, sp, target.blockPosition(), RecentPlayerActionTracker.ActionKind.ATTACK_ENTITY, sp.getMainHandItem()); } catch (Throwable ignored) {}
+
+            if (isEnabled(LoggerConfig.VALUES.logEntityAttacks) && shouldLogGeneric(sp, "ENTITY_ATTACK:" + target.getUUID(), genericCooldownMs())) {
+                LogEntry e = new LogEntry();
+                e.ts = System.currentTimeMillis();
+                e.dim = level.dimension().location().toString();
+                e.type = ActionType.ENTITY_ATTACK;
+                e.actorUuid = sp.getUUID();
+                e.actorName = sp.getName().getString();
+                e.x = target.blockPosition().getX();
+                e.y = target.blockPosition().getY();
+                e.z = target.blockPosition().getZ();
+                e.entityType = EntityType.getKey(target.getType()).toString();
+                e.entityUuid = target.getUUID();
+                try { e.itemStackNbt = NbtSerde.writeItemStackHotPath(sp.getMainHandItem(), level.registryAccess()); } catch (Throwable ignored) {}
+                e.extra = "attack entity " + e.entityType;
+                LoggerRuntime.storage(level).append(e);
+            }
         }
     }
 
@@ -648,14 +677,20 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onContainerOpen(PlayerContainerEvent.Open event) {
-        if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logContainers.get()) return;
+        if (!LoggerConfig.VALUES.enabled.get()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
+        boolean wantContainers = isEnabled(LoggerConfig.VALUES.logContainers);
+        boolean wantGui = isEnabled(LoggerConfig.VALUES.logGuiOpen);
+        if (!wantContainers && !wantGui) return;
+
         String dim = level.dimension().location().toString();
+        boolean trackedMenu = false;
 
         // 0) Block container open confirmed by menu open.
         try {
+            if (wantContainers) {
             PendingBlockContainerOpen pending = PENDING_BLOCK_CONTAINER_OPEN.remove(sp.getUUID());
             if (pending != null && pending.dim.equals(dim) && (System.currentTimeMillis() - pending.ts) <= 1200L) {
                 if (!pending.openLogged && LoggerConfig.VALUES.logBlocks.get()) {
@@ -673,15 +708,19 @@ public final class LoggerEventHandlers {
                     LoggerRuntime.storage(level).append(e);
                 }
 
+                trackedMenu = true;
+
                 String beforeSlots = ContainerSlotSnapshot.snapshot(level, pending.pos);
                 if (beforeSlots != null) {
                     OPEN_CONTAINER.put(sp.getUUID(), new ContainerCtx(dim, pending.pos, beforeSlots));
                 }
             }
+            }
         } catch (Throwable ignored) {}
 
         // 1) When player presses E while riding a vehicle with inventory.
         try {
+            if (wantContainers) {
             Entity vehicle = sp.getVehicle();
             if (vehicle instanceof Container cont && !(vehicle instanceof Player)) {
                 String beforeInv = EntityContainerSerde.write(cont, level.registryAccess());
@@ -692,19 +731,29 @@ public final class LoggerEventHandlers {
                     return;
                 }
             }
+            }
         } catch (Throwable ignored) {}
 
         // 2) When player shift-RMB outside: we staged it in EntityInteract.
         try {
+            if (wantContainers) {
             PendingEntityContainerOpen pending = PENDING_ENTITY_CONTAINER_OPEN.remove(sp.getUUID());
             if (pending != null && pending.dim.equals(dim) && (System.currentTimeMillis() - pending.ts) <= 1200L) {
                 Entity ent = level.getEntity(pending.entityUuid);
                 if (ent instanceof Container) {
                     logEntityContainerOpen(level, sp, ent, dim, pending.entityType, pending.beforeInv);
                     OPEN_ENTITY_CONTAINER.put(sp.getUUID(), new EntityContainerCtx(dim, pending.entityUuid, pending.entityType, pending.beforeInv));
+                    trackedMenu = true;
                 }
             }
+            }
         } catch (Throwable ignored) {}
+
+        // 3) Generic GUI/menu open fallback: crafting table/anvil/villager trade/modded menus.
+        // Containers already logged above as CONTAINER_OPEN/ENTITY_CONTAINER_OPEN, so do not duplicate them.
+        if (!trackedMenu) {
+            logGuiOpenIfNeeded(level, sp, event);
+        }
     }
 
     private static void logEntityContainerOpen(ServerLevel level, ServerPlayer sp, Entity target, String dim, String entityType, String beforeInv) {
@@ -912,6 +961,10 @@ public final class LoggerEventHandlers {
     public void onEntityHurtPreDeath(LivingDamageEvent.Pre event) {
         if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logEntities.get()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
+
+        // Projectile hit via damage source (entity hits). This also covers player victims.
+        logProjectileDamageHitIfNeeded(level, event);
+
         if (event.getEntity() instanceof Player) return; // игроков отдельно
 
         // Сохраняем снимок ДО применения смертельного урона, чтобы откат возвращал сущность "живой".
@@ -1149,8 +1202,14 @@ public final class LoggerEventHandlers {
 
         }
 
-        // 2) Non-living / misc entities (vehicles, plane mods, etc.).
-        if (ent instanceof Projectile || ent instanceof ExperienceOrb) return;
+        // 2) Projectiles: arrows, crossbow bolts, thrown potions, tridents, snowballs, etc.
+        if (ent instanceof Projectile projectile) {
+            logProjectileShootIfNeeded(level, projectile);
+            return;
+        }
+
+        // 3) Non-living / misc entities (vehicles, plane mods, etc.).
+        if (ent instanceof ExperienceOrb) return;
         if (ent.getType().getCategory() != MobCategory.MISC) return;
 
         boolean isPlane = false;
@@ -1321,6 +1380,63 @@ public final class LoggerEventHandlers {
         LoggerRuntime.storage(level).append(e);
     }
 
+
+    @SubscribeEvent
+    public void onItemUseStart(LivingEntityUseItemEvent.Start event) {
+        if (!LoggerConfig.VALUES.enabled.get() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
+        if (!(event.getEntity() instanceof ServerPlayer sp)) return;
+        if (!(sp.level() instanceof ServerLevel level)) return;
+
+        ItemStack used = ItemStack.EMPTY;
+        try { used = event.getItem(); } catch (Throwable ignored) {}
+        if (!shouldLogUsePhaseItem(used)) return;
+
+        try { RecentPlayerActionTracker.note(level, sp, sp.blockPosition(), RecentPlayerActionTracker.ActionKind.RIGHT_CLICK_ITEM, used); } catch (Throwable ignored) {}
+        logItemUsePhase(level, sp, used, ActionType.ITEM_USE_START, "start_use");
+    }
+
+    @SubscribeEvent
+    public void onItemUseStop(LivingEntityUseItemEvent.Stop event) {
+        if (!LoggerConfig.VALUES.enabled.get() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
+        if (!(event.getEntity() instanceof ServerPlayer sp)) return;
+        if (!(sp.level() instanceof ServerLevel level)) return;
+
+        ItemStack used = ItemStack.EMPTY;
+        try { used = event.getItem(); } catch (Throwable ignored) {}
+        if (!shouldLogUsePhaseItem(used)) return;
+
+        logItemUsePhase(level, sp, used, ActionType.ITEM_USE_STOP, "stop_use remaining=" + safeObjectString(callNoArg(event, "getDuration")));
+    }
+
+
+    @SubscribeEvent
+    public void onItemUseFinish(LivingEntityUseItemEvent.Finish event) {
+        if (!LoggerConfig.VALUES.enabled.get() || !isEnabled(LoggerConfig.VALUES.logItemConsume)) return;
+        if (!(event.getEntity() instanceof ServerPlayer sp)) return;
+        if (!(sp.level() instanceof ServerLevel level)) return;
+
+        ItemStack used = ItemStack.EMPTY;
+        try { used = event.getItem(); } catch (Throwable ignored) {}
+        if (used == null || used.isEmpty()) return;
+
+        String itemId = itemIdOf(used);
+        if (!shouldLogGeneric(sp, "ITEM_CONSUME:" + itemId, genericCooldownMs())) return;
+
+        LogEntry e = new LogEntry();
+        e.ts = System.currentTimeMillis();
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.ITEM_CONSUME;
+        e.actorUuid = sp.getUUID();
+        e.actorName = sp.getName().getString();
+        e.x = sp.blockPosition().getX();
+        e.y = sp.blockPosition().getY();
+        e.z = sp.blockPosition().getZ();
+        try { e.itemStackNbt = NbtSerde.writeItemStackHotPath(used.copy(), level.registryAccess()); } catch (Throwable ignored) {}
+        e.count = Math.max(1, used.getCount());
+        e.extra = "consume " + itemId;
+        LoggerRuntime.storage(level).append(e);
+    }
+
     @SubscribeEvent
     public void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
         if (!LoggerConfig.VALUES.enabled.get()) return;
@@ -1403,6 +1519,417 @@ public final class LoggerEventHandlers {
         e.z = event.getEntity().blockPosition().getZ();
         e.extra = "leave";
         LoggerRuntime.storage(level).append(e);
+    }
+
+
+    @SubscribeEvent
+    public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (!LoggerConfig.VALUES.enabled.get() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
+        if (!(event.getEntity() instanceof ServerPlayer sp)) return;
+        if (!(sp.level() instanceof ServerLevel level)) return;
+
+        String from = safeResourceKeyString(callNoArg(event, "getFrom"));
+        String to = safeResourceKeyString(callNoArg(event, "getTo"));
+        LogEntry e = new LogEntry();
+        e.ts = System.currentTimeMillis();
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.PLAYER_DIMENSION_CHANGE;
+        e.actorUuid = sp.getUUID();
+        e.actorName = sp.getName().getString();
+        e.x = sp.blockPosition().getX();
+        e.y = sp.blockPosition().getY();
+        e.z = sp.blockPosition().getZ();
+        e.extra = "dimension_change from=" + from + " to=" + to;
+        LoggerRuntime.storage(level).append(e);
+    }
+
+    @SubscribeEvent
+    public void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        if (!LoggerConfig.VALUES.enabled.get() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
+        if (!(event.getEntity() instanceof ServerPlayer sp)) return;
+        if (!(sp.level() instanceof ServerLevel level)) return;
+
+        LogEntry e = new LogEntry();
+        e.ts = System.currentTimeMillis();
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.PLAYER_RESPAWN;
+        e.actorUuid = sp.getUUID();
+        e.actorName = sp.getName().getString();
+        e.x = sp.blockPosition().getX();
+        e.y = sp.blockPosition().getY();
+        e.z = sp.blockPosition().getZ();
+        Object end = callNoArg(event, "isEndConquered");
+        e.extra = (end instanceof Boolean b && b) ? "respawn end_conquered" : "respawn";
+        LoggerRuntime.storage(level).append(e);
+    }
+
+
+    @SubscribeEvent
+    public void onProjectileImpact(ProjectileImpactEvent event) {
+        if (!LoggerConfig.VALUES.enabled.get() || !isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
+
+        Object projectileObj = callNoArg(event, "getProjectile");
+        if (!(projectileObj instanceof Projectile projectile)) return;
+        if (!(projectile.level() instanceof ServerLevel level)) return;
+
+        Object hit = callNoArg(event, "getRayTraceResult");
+        if (hit == null) hit = callNoArg(event, "getHitResult");
+
+        Entity target = null;
+        try {
+            Object maybeEntity = callNoArg(hit, "getEntity");
+            if (maybeEntity instanceof Entity ent) target = ent;
+        } catch (Throwable ignored) {}
+
+        String hitKind = "impact";
+        try {
+            Object type = callNoArg(hit, "getType");
+            if (type != null) hitKind = "impact_" + String.valueOf(type).toLowerCase(java.util.Locale.ROOT);
+        } catch (Throwable ignored) {}
+
+        logProjectileHitIfNeeded(level, projectile, target, hitKind, 0.0f);
+    }
+
+
+    private static void logGuiOpenIfNeeded(ServerLevel level, ServerPlayer sp, PlayerContainerEvent.Open event) {
+        if (level == null || sp == null || event == null) return;
+        if (!isEnabled(LoggerConfig.VALUES.logGuiOpen)) return;
+
+        Object menu = callNoArg(event, "getContainer");
+        try {
+            if (menu != null && menu == sp.inventoryMenu) return; // do not log plain inventory screen
+        } catch (Throwable ignored) {}
+
+        String menuId = menuIdOf(menu);
+        if (menuId == null || menuId.isBlank() || menuId.equals("minecraft:generic_9x3") || menuId.equals("minecraft:generic_9x6")) {
+            // Generic chest-like menus are already covered by CONTAINER_OPEN when we know the block/entity.
+            // Unknown menus are still useful, so only suppress obvious duplicate vanilla chest types.
+            if (menuId != null && menuId.startsWith("minecraft:generic_")) return;
+        }
+
+        if (!shouldLogGeneric(sp, "GUI_OPEN:" + menuId, Math.max(250L, genericCooldownMs()))) return;
+
+        LogEntry e = new LogEntry();
+        e.ts = System.currentTimeMillis();
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.GUI_OPEN;
+        e.actorUuid = sp.getUUID();
+        e.actorName = sp.getName().getString();
+        e.x = sp.blockPosition().getX();
+        e.y = sp.blockPosition().getY();
+        e.z = sp.blockPosition().getZ();
+        e.extra = "gui_open " + (menuId == null || menuId.isBlank() ? "unknown" : menuId);
+        LoggerRuntime.storage(level).append(e);
+    }
+
+    private static String menuIdOf(Object menu) {
+        if (menu == null) return "unknown";
+        try {
+            Object type = callNoArg(menu, "getType");
+            if (type instanceof net.minecraft.world.inventory.MenuType<?> mt) {
+                ResourceLocation id = BuiltInRegistries.MENU.getKey(mt);
+                if (id != null) return id.toString();
+            }
+        } catch (Throwable ignored) {}
+        try { return menu.getClass().getName(); } catch (Throwable ignored) { return "unknown"; }
+    }
+
+    private static boolean shouldLogUsePhaseItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        String itemId = itemIdOf(stack);
+        String anim = useAnimName(stack);
+        if (!"NONE".equals(anim)) return true;
+        // Some modded weapons/items do not expose a vanilla use animation but are still important audit targets.
+        return itemId.contains("bow")
+                || itemId.contains("crossbow")
+                || itemId.contains("trident")
+                || itemId.contains("potion")
+                || itemId.contains("wand")
+                || itemId.contains("gun")
+                || itemId.contains("rifle")
+                || itemId.contains("staff");
+    }
+
+    private static String useAnimName(ItemStack stack) {
+        try {
+            Object anim = stack.getUseAnimation();
+            return anim == null ? "NONE" : String.valueOf(anim).toUpperCase(java.util.Locale.ROOT);
+        } catch (Throwable ignored) {
+            return "NONE";
+        }
+    }
+
+    private static void logItemUsePhase(ServerLevel level, ServerPlayer sp, ItemStack used, ActionType type, String phase) {
+        if (level == null || sp == null || used == null || used.isEmpty() || type == null) return;
+        String itemId = itemIdOf(used);
+        String anim = useAnimName(used);
+        String key = type.name() + ":" + itemId + ":" + phase;
+        if (!shouldLogGeneric(sp, key, Math.max(150L, genericCooldownMs()))) return;
+
+        LogEntry e = new LogEntry();
+        e.ts = System.currentTimeMillis();
+        e.dim = level.dimension().location().toString();
+        e.type = type;
+        e.actorUuid = sp.getUUID();
+        e.actorName = sp.getName().getString();
+        e.x = sp.blockPosition().getX();
+        e.y = sp.blockPosition().getY();
+        e.z = sp.blockPosition().getZ();
+        try { e.itemStackNbt = NbtSerde.writeItemStackHotPath(used.copy(), level.registryAccess()); } catch (Throwable ignored) {}
+        e.count = Math.max(1, used.getCount());
+        e.extra = phase + " " + itemId + " anim=" + anim;
+        LoggerRuntime.storage(level).append(e);
+    }
+
+    private static void logProjectileShootIfNeeded(ServerLevel level, Projectile projectile) {
+        if (level == null || projectile == null) return;
+        if (!isEnabled(LoggerConfig.VALUES.logProjectileShots)) return;
+
+        ActorInfo actor = projectileActor(level, projectile);
+        if (actor == null || actor.uuid == null) return; // skip skeletons/dispensers/noise; this logger is player-audit oriented
+
+        long now = System.currentTimeMillis();
+        String key = "PROJECTILE_SHOOT:" + projectile.getUUID();
+        if (!shouldLogRecent(RECENT_GENERIC_ACTIONS, key, now, 250L)) return;
+
+        String projectileType = entityTypeId(projectile);
+        LogEntry e = new LogEntry();
+        e.ts = now;
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.PROJECTILE_SHOOT;
+        e.actorUuid = actor.uuid;
+        e.actorName = actor.name;
+        e.x = projectile.blockPosition().getX();
+        e.y = projectile.blockPosition().getY();
+        e.z = projectile.blockPosition().getZ();
+        e.entityType = projectileType;
+        e.entityUuid = projectile.getUUID();
+        if (actor.player != null) {
+            ItemStack src = bestHeldUseItem(actor.player, projectileType);
+            if (src != null && !src.isEmpty()) {
+                try { e.itemStackNbt = NbtSerde.writeItemStackHotPath(src.copy(), level.registryAccess()); } catch (Throwable ignored) {}
+                e.count = Math.max(1, src.getCount());
+                e.extra = "projectile_shoot " + projectileType + " source=" + itemIdOf(src);
+            }
+        }
+        if (e.extra == null) e.extra = "projectile_shoot " + projectileType;
+        LoggerRuntime.storage(level).append(e);
+    }
+
+    private static void logProjectileDamageHitIfNeeded(ServerLevel level, LivingDamageEvent.Pre event) {
+        if (level == null || event == null) return;
+        if (!isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
+        try {
+            Entity direct = event.getSource().getDirectEntity();
+            if (direct instanceof Projectile projectile) {
+                logProjectileHitIfNeeded(level, projectile, event.getEntity(), "entity_damage", getDamageAmountCompat(event));
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void logProjectileHitIfNeeded(ServerLevel level, Projectile projectile, Entity target, String hitKind, float damage) {
+        if (level == null || projectile == null) return;
+        if (!isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
+
+        ActorInfo actor = projectileActor(level, projectile);
+        if (actor == null || actor.uuid == null) return;
+
+        long now = System.currentTimeMillis();
+        String key = "PROJECTILE_HIT:" + projectile.getUUID() + ":" + (target == null ? "block" : target.getUUID());
+        if (!shouldLogRecent(RECENT_GENERIC_ACTIONS, key, now, 500L)) return;
+
+        String projectileType = entityTypeId(projectile);
+        LogEntry e = new LogEntry();
+        e.ts = now;
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.PROJECTILE_HIT;
+        e.actorUuid = actor.uuid;
+        e.actorName = actor.name;
+        if (target != null) {
+            e.x = target.blockPosition().getX();
+            e.y = target.blockPosition().getY();
+            e.z = target.blockPosition().getZ();
+            e.entityType = entityTypeId(target);
+            e.entityUuid = target.getUUID();
+        } else {
+            e.x = projectile.blockPosition().getX();
+            e.y = projectile.blockPosition().getY();
+            e.z = projectile.blockPosition().getZ();
+            e.entityType = projectileType;
+            e.entityUuid = projectile.getUUID();
+        }
+        String targetText = target == null ? "block" : entityTypeId(target);
+        e.extra = "projectile_hit projectile=" + projectileType + " target=" + targetText
+                + (hitKind == null || hitKind.isBlank() ? "" : " kind=" + hitKind)
+                + (damage > 0.0f ? " damage=" + damage : "");
+        LoggerRuntime.storage(level).append(e);
+    }
+
+    private record ActorInfo(UUID uuid, String name, ServerPlayer player) {}
+
+    private static ActorInfo projectileActor(ServerLevel level, Projectile projectile) {
+        if (level == null || projectile == null) return null;
+        try {
+            Entity owner = projectile.getOwner();
+            if (owner instanceof ServerPlayer sp) return new ActorInfo(sp.getUUID(), sp.getName().getString(), sp);
+            if (owner != null) {
+                ActorTracker.ActorRef ref = ActorTracker.getRecent(owner.getUUID(), 10_000L);
+                if (ref != null && ref.actorUuid() != null) return new ActorInfo(ref.actorUuid(), ref.actorName(), null);
+            }
+        } catch (Throwable ignored) {}
+        try {
+            RecentPlayerActionTracker.ActionRef rr = RecentPlayerActionTracker.resolveBest(level, projectile.blockPosition(), 8, 5000L, null);
+            if (rr != null && rr.actorUuid() != null) {
+                ServerPlayer sp = level.getServer().getPlayerList().getPlayer(rr.actorUuid());
+                return new ActorInfo(rr.actorUuid(), rr.actorName(), sp);
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static String entityTypeId(Entity entity) {
+        try {
+            if (entity == null) return "unknown";
+            ResourceLocation id = EntityType.getKey(entity.getType());
+            return id == null ? "unknown" : id.toString();
+        } catch (Throwable ignored) {
+            return "unknown";
+        }
+    }
+
+    private static ItemStack bestHeldUseItem(ServerPlayer sp, String projectileType) {
+        if (sp == null) return ItemStack.EMPTY;
+        try {
+            ItemStack main = sp.getMainHandItem();
+            ItemStack off = sp.getOffhandItem();
+            if (looksLikeProjectileSource(main, projectileType)) return main;
+            if (looksLikeProjectileSource(off, projectileType)) return off;
+            if (main != null && !main.isEmpty()) return main;
+            if (off != null && !off.isEmpty()) return off;
+        } catch (Throwable ignored) {}
+        return ItemStack.EMPTY;
+    }
+
+    private static boolean looksLikeProjectileSource(ItemStack stack, String projectileType) {
+        if (stack == null || stack.isEmpty()) return false;
+        String id = itemIdOf(stack);
+        String p = projectileType == null ? "" : projectileType;
+        if (id.contains("bow") || id.contains("crossbow") || id.contains("trident")) return true;
+        if (id.contains("potion") && p.contains("potion")) return true;
+        if (id.contains("snowball") && p.contains("snowball")) return true;
+        if (id.contains("egg") && p.contains("egg")) return true;
+        if (id.contains("ender_pearl") && p.contains("ender_pearl")) return true;
+        return false;
+    }
+
+    private static String safeObjectString(Object value) {
+        try { return value == null ? "" : String.valueOf(value); } catch (Throwable ignored) { return ""; }
+    }
+
+
+    private static boolean isEnabled(net.neoforged.neoforge.common.ModConfigSpec.BooleanValue value) {
+        try {
+            return value != null && value.get();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static long genericCooldownMs() {
+        try {
+            return Math.max(0L, LoggerConfig.VALUES.genericActionCooldownMs.get());
+        } catch (Throwable ignored) {
+            return 500L;
+        }
+    }
+
+    private static boolean shouldLogGeneric(ServerPlayer sp, String actionKey, long cooldownMs) {
+        if (sp == null || actionKey == null) return false;
+        if (cooldownMs <= 0L) return true;
+        return shouldLogRecent(RECENT_GENERIC_ACTIONS, sp.getUUID() + ":" + actionKey, System.currentTimeMillis(), cooldownMs);
+    }
+
+    private static String itemIdOf(ItemStack stack) {
+        try {
+            if (stack == null || stack.isEmpty()) return "minecraft:air";
+            ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            return id == null ? "unknown" : id.toString();
+        } catch (Throwable ignored) {
+            return "unknown";
+        }
+    }
+
+    private static void logItemUseIfNeeded(ServerLevel level, ServerPlayer sp, ItemStack used, BlockPos pos, String source) {
+        if (level == null || sp == null || used == null || used.isEmpty()) return;
+        if (!isEnabled(LoggerConfig.VALUES.logItemUse)) return;
+
+        String itemId = itemIdOf(used);
+        if (!shouldLogGeneric(sp, "ITEM_USE:" + itemId, genericCooldownMs())) return;
+
+        LogEntry e = new LogEntry();
+        e.ts = System.currentTimeMillis();
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.ITEM_USE;
+        e.actorUuid = sp.getUUID();
+        e.actorName = sp.getName().getString();
+        BlockPos p = pos == null ? sp.blockPosition() : pos;
+        e.x = p.getX();
+        e.y = p.getY();
+        e.z = p.getZ();
+        try { e.itemStackNbt = NbtSerde.writeItemStackHotPath(used.copy(), level.registryAccess()); } catch (Throwable ignored) {}
+        e.count = Math.max(1, used.getCount());
+        e.extra = "use item " + itemId + (source == null || source.isBlank() ? "" : " source=" + source);
+        LoggerRuntime.storage(level).append(e);
+    }
+
+    private static void logBlockUseIfNeeded(ServerLevel level, Player player, BlockPos pos, BlockState state, ItemStack used, Direction face) {
+        if (level == null || player == null || pos == null || state == null) return;
+        if (!(player instanceof ServerPlayer sp)) return;
+        if (!isEnabled(LoggerConfig.VALUES.logGenericBlockUse)) return;
+
+        String blockId = "unknown";
+        try {
+            ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+            if (id != null) blockId = id.toString();
+        } catch (Throwable ignored) {}
+        String key = "BLOCK_USE:" + pos.getX() + ":" + pos.getY() + ":" + pos.getZ() + ":" + blockId;
+        if (!shouldLogGeneric(sp, key, genericCooldownMs())) return;
+
+        LogEntry e = new LogEntry();
+        e.ts = System.currentTimeMillis();
+        e.dim = level.dimension().location().toString();
+        e.type = ActionType.BLOCK_USE;
+        e.actorUuid = sp.getUUID();
+        e.actorName = sp.getName().getString();
+        e.x = pos.getX();
+        e.y = pos.getY();
+        e.z = pos.getZ();
+        try { e.blockAfter = NbtSerde.writeBlockState(state); } catch (Throwable ignored) {}
+        if (used != null && !used.isEmpty()) {
+            try { e.itemStackNbt = NbtSerde.writeItemStackHotPath(used.copy(), level.registryAccess()); } catch (Throwable ignored) {}
+        }
+        e.extra = "use block " + blockId + (face == null ? "" : " face=" + String.valueOf(face));
+        LoggerRuntime.storage(level).append(e);
+    }
+
+    private static Object callNoArg(Object target, String method) {
+        if (target == null || method == null) return null;
+        try {
+            Method m = target.getClass().getMethod(method);
+            return m.invoke(target);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static String safeResourceKeyString(Object value) {
+        if (value == null) return "?";
+        try {
+            Method m = value.getClass().getMethod("location");
+            Object loc = m.invoke(value);
+            if (loc != null) return loc.toString();
+        } catch (Throwable ignored) {}
+        try { return String.valueOf(value); } catch (Throwable ignored) { return "?"; }
     }
 
     private static boolean isInventoryLike(ServerLevel level, BlockPos pos, BlockState state) {

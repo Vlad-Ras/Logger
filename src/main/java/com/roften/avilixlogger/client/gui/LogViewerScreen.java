@@ -9,6 +9,7 @@ import com.roften.avilixlogger.net.S2CLogPagePayload;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -22,6 +23,9 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * Optional client GUI for viewing logs.
@@ -30,8 +34,30 @@ import java.util.List;
  */
 public final class LogViewerScreen extends Screen {
 
-    /** Row height for the main list. 18px matches vanilla list widgets and avoids cramped/overlapping text. */
-    private static final int LIST_ROW_H = 18;
+    // GUI layout is intentionally client-side: admins can shrink controls/text without changing server config.
+    private static final int BUTTON_SCALE_MIN = 45;
+    private static final int BUTTON_SCALE_MAX = 125;
+    private static final int LOG_TEXT_SCALE_MIN = 55;
+    private static final int LOG_TEXT_SCALE_MAX = 140;
+
+    private static boolean guiStateLoaded = false;
+    private static int savedTimePresetIdx = GuiFilters.DEFAULT.timePresetIdx();
+    private static int savedRadiusPresetIdx = GuiFilters.DEFAULT.radiusPresetIdx();
+    private static int savedTypePresetIdx = GuiFilters.DEFAULT.typePresetIdx();
+    private static boolean savedAggregatedMode = true;
+    private static String savedActorFilter = GuiFilters.DEFAULT.actor();
+    private static String savedTrainFilter = GuiFilters.DEFAULT.train();
+    private static String savedPlaneNameFilter = GuiFilters.DEFAULT.planeName();
+    private static String savedBlockIdFilter = GuiFilters.DEFAULT.blockId();
+    private static String savedTimeInput = "";
+    private static String savedRadiusInput = "";
+    private static String savedActorInput = "";
+    private static String savedTrainInput = "";
+    private static String savedPlaneNameInput = "";
+    private static String savedBlockIdInput = "";
+    private static String savedSearchInput = "";
+    private static int savedButtonScalePercent = 100;
+    private static int savedLogTextScalePercent = 100;
 
     private final List<LogRow> rows = new ArrayList<>();
     private int pageIndex = 1;
@@ -83,6 +109,10 @@ public final class LogViewerScreen extends Screen {
     private Button btnTabDetails;
     private Button btnTabRaw;
     private Button btnShowRaw;
+    private Button btnButtonsMinus;
+    private Button btnButtonsPlus;
+    private Button btnTextMinus;
+    private Button btnTextPlus;
 
     private EditBox searchBox;
     private EditBox timeBox;
@@ -100,7 +130,13 @@ public final class LogViewerScreen extends Screen {
     private int detailsPanelTop = 0;
 
     private int rightPanelW() {
-        return Math.min(190, Math.max(150, this.width / 5));
+        // B-/B+ controls both button height and side-panel/input width.
+        float wScale = wideControlScale();
+        int base = Math.round(190 * wScale);
+        int min = Math.max(72, Math.round(105 * wScale));
+        int max = Math.max(min, Math.min(220, this.width / 3));
+        if (this.width <= 760) max = Math.min(max, Math.max(min, this.width / 4));
+        return clampInt(base, min, max);
     }
 
     private int rightPanelX() {
@@ -108,27 +144,109 @@ public final class LogViewerScreen extends Screen {
     }
 
     private int rowsPerPage() {
-        // Leave space for the selected-row preview bar.
-        int available = (this.height - 30) - listTop() - 26;
-        // Allow more rows on tall screens; server-side pageSize is configured separately.
-        return Math.max(6, Math.min(80, available / LIST_ROW_H));
+        // Leave space for the selected-row preview bar. Smaller log text = more visible log rows.
+        int available = (this.height - 30) - listTop() - 24;
+        return Math.max(8, Math.min(140, available / listRowH()));
     }
 
     private int leftPanelW() {
-        return Math.min(260, Math.max(190, this.width / 4));
+        // B-/B+ controls both button height and side-panel/input width.
+        float wScale = wideControlScale();
+        int base = Math.min(260, Math.max(150, this.width / 4));
+        int scaled = Math.round(base * wScale);
+        int max = Math.max(92, Math.min(280, this.width / 3));
+        int min = Math.min(max, Math.max(74, Math.round(132 * wScale)));
+        return clampInt(scaled, min, max);
     }
 
     private int listLeftX() {
         return 10 + leftPanelW() + 10;
     }
 
+    private int sideInputGap() {
+        return Math.max(2, Math.round(6 * sideControlScale()));
+    }
+
+    private int sideButtonW(int panelW) {
+        int minByScale = Math.round(50 * wideControlScale());
+        int target = Math.round(120 * wideControlScale());
+        return Math.min(target, Math.max(minByScale, (int) (panelW * 0.42f)));
+    }
+
+    private int sideBoxW(int panelW, int buttonW, int gap) {
+        return Math.max(Math.round(32 * wideControlScale()), panelW - buttonW - gap);
+    }
+
     public LogViewerScreen() {
         super(Component.translatable("gui.avilixlogger.title"));
+        loadGuiState();
+        restoreSavedStateToFields();
     }
 
     private int listTop() {
         // Only the pager row lives at the top. Filters/inputs are in the left sidebar.
-        return 18 + 20 + 8;
+        return 18 + controlH() + 8;
+    }
+
+    private float autoControlScale() {
+        float byHeight;
+        if (this.height <= 420) byHeight = 0.62f;
+        else if (this.height <= 540) byHeight = 0.72f;
+        else if (this.height <= 680) byHeight = 0.86f;
+        else byHeight = 1.0f;
+
+        float byWidth = this.width <= 720 ? 0.82f : 1.0f;
+        return Math.min(byHeight, byWidth);
+    }
+
+    private float controlScale() {
+        return clampFloat(autoControlScale() * (savedButtonScalePercent / 100.0f), 0.42f, 1.25f);
+    }
+
+    private float wideControlScale() {
+        // Width is no longer controlled by a separate W-/W+ pair: B-/B+ changes both height and width.
+        return controlScale();
+    }
+
+    private boolean compactControlLabels() {
+        return controlScale() < 0.82f || this.width <= 760;
+    }
+
+    private float sideControlScale() {
+        return Math.min(controlScale(), wideControlScale());
+    }
+
+    private float logTextScale() {
+        float auto = this.height <= 480 ? 0.88f : 1.0f;
+        return clampFloat(auto * (savedLogTextScalePercent / 100.0f), 0.55f, 1.40f);
+    }
+
+    private int controlH() {
+        return Math.max(9, Math.round(20 * controlScale()));
+    }
+
+    private int controlGap() {
+        return Math.max(1, Math.round(2 * controlScale()));
+    }
+
+    private int listRowH() {
+        // T-/T+ controls the real visual size of log rows.
+        // Blur is disabled separately by bypassing Screen#render/renderBackground; do not remove this scaling again.
+        int scaledFontH = Math.max(1, Math.round(this.font.lineHeight * logTextScale()));
+        return Math.max(5, scaledFontH + Math.max(1, Math.round(3 * logTextScale())));
+    }
+
+    private int detailLineH() {
+        int scaledFontH = Math.max(1, Math.round(this.font.lineHeight * logTextScale()));
+        return Math.max(5, scaledFontH + Math.max(1, Math.round(1 * logTextScale())));
+    }
+
+    private static int clampInt(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static float clampFloat(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     @Override
@@ -137,13 +255,13 @@ public final class LogViewerScreen extends Screen {
         int cx = this.width / 2;
         int top = 18;
 
-        // Layout constants
+        // Layout constants. These shrink automatically on high Minecraft GUI scales.
         final int leftPad = 10;
-        final int leftPanelW = Math.min(260, Math.max(190, this.width / 4));
+        final int leftPanelW = leftPanelW();
         final int leftX = leftPad;
-        final int leftTop = top + 22;
-        final int leftRowH = 20;
-        final int leftGap = 2;
+        final int leftRowH = controlH();
+        final int leftGap = controlGap();
+        final int leftTop = top + leftRowH + leftGap + 2;
 
         this.titleWidget = this.addRenderableWidget(new StringWidget(0, 6, this.width, 10,
                 (title.isEmpty() ? Component.translatable("gui.avilixlogger.title") : Component.literal(title))
@@ -151,14 +269,14 @@ public final class LogViewerScreen extends Screen {
                 this.font));
         // 1.21.1 StringWidget has no setCentered(); we center by positioning the widget.
 
-        this.btnPrev = this.addRenderableWidget(Button.builder(Component.literal("<"), b -> sendPage(C2SRequestPagePayload.Nav.PREV))
-                .bounds(cx - 60, top, 20, 20).build());
+        this.btnPrev = addButton(Component.literal("<"), b -> sendPage(C2SRequestPagePayload.Nav.PREV),
+                cx - Math.round(60 * controlScale()), top, controlH(), controlH());
 
-        this.btnNext = this.addRenderableWidget(Button.builder(Component.literal(">"), b -> sendPage(C2SRequestPagePayload.Nav.NEXT))
-                .bounds(cx + 40, top, 20, 20).build());
+        this.btnNext = addButton(Component.literal(">"), b -> sendPage(C2SRequestPagePayload.Nav.NEXT),
+                cx + Math.round(40 * controlScale()), top, controlH(), controlH());
 
-        this.btnRefresh = this.addRenderableWidget(Button.builder(Component.literal("⟳"), b -> sendPage(C2SRequestPagePayload.Nav.SAME))
-                .bounds(cx - 20, top, 40, 20).build());
+        this.btnRefresh = addButton(Component.literal("⟳"), b -> sendPage(C2SRequestPagePayload.Nav.SAME),
+                cx - Math.round(20 * controlScale()), top, Math.max(controlH() * 2, Math.round(40 * controlScale())), controlH());
 
         // Mode toggles moved to the right sidebar (people confuse them with Details/Raw).
         // We'll create them later after we know rightX.
@@ -167,124 +285,261 @@ public final class LogViewerScreen extends Screen {
 
         // Left sidebar: compact rows (button + input on the same line)
         int y = leftTop;
-        final int inputGap = 6;
-        final int btnW = Math.min(120, Math.max(92, (int) (leftPanelW * 0.42f)));
-        final int boxW = Math.max(60, leftPanelW - btnW - inputGap);
+        final int inputGap = sideInputGap();
+        final int btnW = sideButtonW(leftPanelW);
+        final int boxW = sideBoxW(leftPanelW, btnW, inputGap);
 
         // Time
-        this.btnTime = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.time"), b -> cycleTime())
-                .bounds(leftX, y, btnW, leftRowH).build());
-        this.timeBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.time"));
+        this.btnTime = addButton(Component.translatable("gui.avilixlogger.filter.time"), b -> cycleTime(),
+                leftX, y, btnW, leftRowH);
+        this.timeBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.time"));
         this.timeBox.setHint(Component.translatable("gui.avilixlogger.hint.time"));
+        this.timeBox.setValue(savedTimeInput);
         this.addRenderableWidget(this.timeBox);
         y += leftRowH + leftGap;
 
         // Radius
-        this.btnRadius = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.radius"), b -> cycleRadius())
-                .bounds(leftX, y, btnW, leftRowH).build());
-        this.radiusBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.radius"));
+        this.btnRadius = addButton(Component.translatable("gui.avilixlogger.filter.radius"), b -> cycleRadius(),
+                leftX, y, btnW, leftRowH);
+        this.radiusBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.radius"));
         this.radiusBox.setHint(Component.translatable("gui.avilixlogger.hint.radius"));
+        this.radiusBox.setValue(savedRadiusInput);
         this.addRenderableWidget(this.radiusBox);
         y += leftRowH + leftGap;
 
         // Type dropdown (full width)
-        this.btnType = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.type"), b -> toggleTypeDropdown())
-                .bounds(leftX, y, leftPanelW, leftRowH).build());
+        this.btnType = addButton(Component.translatable("gui.avilixlogger.filter.type"), b -> toggleTypeDropdown(),
+                leftX, y, leftPanelW, leftRowH);
         y += leftRowH + leftGap;
 
         // Actor
-        this.btnActor = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.actor"), b -> cycleActor())
-                .bounds(leftX, y, btnW, leftRowH).build());
-        this.actorBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.actor"));
+        this.btnActor = addButton(Component.translatable("gui.avilixlogger.filter.actor"), b -> cycleActor(),
+                leftX, y, btnW, leftRowH);
+        this.actorBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.actor"));
         this.actorBox.setHint(Component.translatable("gui.avilixlogger.hint.actor"));
+        this.actorBox.setValue(savedActorInput);
         this.addRenderableWidget(this.actorBox);
         y += leftRowH + leftGap;
 
         // Train
-        this.btnTrain = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.train"), b -> cycleTrain())
-                .bounds(leftX, y, btnW, leftRowH).build());
-        this.trainBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.train"));
+        this.btnTrain = addButton(Component.translatable("gui.avilixlogger.filter.train"), b -> cycleTrain(),
+                leftX, y, btnW, leftRowH);
+        this.trainBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.train"));
         this.trainBox.setHint(Component.translatable("gui.avilixlogger.hint.train"));
+        this.trainBox.setValue(savedTrainInput);
         this.addRenderableWidget(this.trainBox);
         y += leftRowH + leftGap;
 
         // Plane name (only relevant for Type=PLANES). Kept hidden otherwise.
-        this.btnPlaneName = this.addRenderableWidget(Button.builder(Component.literal("Самолёт"), b -> {})
-                .bounds(leftX, y, btnW, leftRowH).build());
+        this.btnPlaneName = addButton(Component.literal("Самолёт"), b -> {},
+                leftX, y, btnW, leftRowH);
         this.btnPlaneName.active = false;
-        this.planeNameBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.literal("Самолёт"));
+        this.planeNameBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.literal("Самолёт"));
         this.planeNameBox.setHint(Component.literal("имя/тип самолёта"));
+        this.planeNameBox.setValue(savedPlaneNameInput);
         this.addRenderableWidget(this.planeNameBox);
         y += leftRowH + leftGap;
 
         // Block id filter
-        this.btnBlockId = this.addRenderableWidget(Button.builder(Component.literal("Блок"), b -> {})
-                .bounds(leftX, y, btnW, leftRowH).build());
+        this.btnBlockId = addButton(Component.literal("Блок"), b -> {},
+                leftX, y, btnW, leftRowH);
         this.btnBlockId.active = false;
-        this.blockIdBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.literal("block id"));
+        this.blockIdBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.literal("block id"));
         this.blockIdBox.setHint(Component.literal("minecraft:chest"));
+        this.blockIdBox.setValue(savedBlockIdInput);
         this.addRenderableWidget(this.blockIdBox);
         y += leftRowH + leftGap;
 
         // Search (label-style button + box)
-        Button btnSearch = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.search"), b -> {})
-                .bounds(leftX, y, btnW, leftRowH).build());
+        Button btnSearch = addButton(Component.translatable("gui.avilixlogger.filter.search"), b -> {},
+                leftX, y, btnW, leftRowH);
         btnSearch.active = false;
-        this.searchBox = new EditBox(this.font, leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.search"));
+        this.searchBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.search"));
         this.searchBox.setHint(Component.translatable("gui.avilixlogger.hint.search"));
-        this.searchBox.setValue("");
+        this.searchBox.setValue(savedSearchInput);
         this.addRenderableWidget(this.searchBox);
         y += leftRowH + leftGap;
 
         // Clear + Apply
-        this.btnClear = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.filter.clear"), b -> clearFilters())
-                .bounds(leftX, y, leftPanelW, leftRowH).build());
+        this.btnClear = addButton(Component.translatable("gui.avilixlogger.filter.clear"), b -> clearFilters(),
+                leftX, y, leftPanelW, leftRowH);
         y += leftRowH + leftGap;
 
-        this.btnApply = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.apply"), b -> applyCustomInputs())
-                .bounds(leftX, y, leftPanelW, leftRowH).build());
+        this.btnApply = addButton(Component.translatable("gui.avilixlogger.apply"), b -> applyCustomInputs(),
+                leftX, y, leftPanelW, leftRowH);
 
-        // Row action buttons (operate on selected row) - right sidebar
+        // Row action buttons (operate on selected row) - right sidebar.
+        // On large Minecraft GUI scale these are compact two-column rows, so the details panel keeps room.
         int rightX = rightPanelX();
         int rightW = rightPanelW();
-        int actionTop = top + 24;
+        int btnH = controlH();
+        int gap = controlGap();
+        int actionTop = top + btnH + gap + 2;
+        int half = (rightW - gap) / 2;
+        this.btnAgg = addButton(Component.translatable("gui.avilixlogger.mode.agg"), b -> setAggregatedMode(true),
+                rightX, actionTop, half, btnH);
+        this.btnRaw = addButton(Component.translatable("gui.avilixlogger.mode.raw"), b -> setAggregatedMode(false),
+                rightX + half + gap, actionTop, rightW - half - gap, btnH);
 
-        // Mode toggles first row (no overlap)
-        int half = (rightW - 2) / 2;
-        this.btnAgg = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.mode.agg"), b -> setAggregatedMode(true))
-                .bounds(rightX, actionTop, half, 20).build());
-        this.btnRaw = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.mode.raw"), b -> setAggregatedMode(false))
-                .bounds(rightX + half + 2, actionTop, rightW - half - 2, 20).build());
+        int y2 = actionTop + btnH + gap;
+        int scaleButtonCount = 4;
+        int tiny = Math.max(12, (rightW - gap * (scaleButtonCount - 1)) / scaleButtonCount);
+        int sx = rightX;
+        this.btnButtonsMinus = addButton(Component.literal("B-"), b -> adjustButtonScale(-5),
+                sx, y2, tiny, btnH);
+        sx += tiny + gap;
+        this.btnButtonsPlus = addButton(Component.literal("B+"), b -> adjustButtonScale(5),
+                sx, y2, tiny, btnH);
+        sx += tiny + gap;
+        this.btnTextMinus = addButton(Component.literal("T-"), b -> adjustLogTextScale(-5),
+                sx, y2, tiny, btnH);
+        sx += tiny + gap;
+        this.btnTextPlus = addButton(Component.literal("T+"), b -> adjustLogTextScale(5),
+                sx, y2, rightX + rightW - sx, btnH);
 
-        // Actions
-        int y2 = actionTop + 22;
-        this.btnCopy = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.copy_xyz"), b -> copySelectedXYZ())
-                .bounds(rightX, y2, rightW, 20).build());
-        y2 += 22;
-        this.btnTp = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.copy_tp"), b -> runSelectedTpCmd())
-                .bounds(rightX, y2, rightW, 20).build());
-        y2 += 22;
-        this.btnCopyFull = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.copy_full"), b -> copyCurrentTabText())
-                .bounds(rightX, y2, rightW, 20).build());
-        y2 += 22;
-        this.btnCopyJson = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.copy_json"), b -> requestJsonAndCopy())
-                .bounds(rightX, y2, rightW, 20).build());
-        y2 += 26;
+        y2 += btnH + gap;
+        this.btnCopy = addButton(sideLabel("gui.avilixlogger.copy_xyz", "XYZ"), b -> copySelectedXYZ(),
+                rightX, y2, half, btnH);
+        this.btnTp = addButton(sideLabel("gui.avilixlogger.copy_tp", "TP"), b -> runSelectedTpCmd(),
+                rightX + half + gap, y2, rightW - half - gap, btnH);
 
-        // Tabs
-        this.btnTabDetails = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.tab.details"), b -> { showRawTab = false; })
-                .bounds(rightX, y2, half, 20).build());
-        this.btnTabRaw = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.tab.raw"), b -> { showRawTab = true; requestRawIfNeeded(); })
-                .bounds(rightX + half + 2, y2, rightW - half - 2, 20).build());
-        y2 += 22;
-        this.btnShowRaw = this.addRenderableWidget(Button.builder(Component.translatable("gui.avilixlogger.show_raw"), b -> requestRawIfNeeded())
-                .bounds(rightX, y2, rightW, 20).build());
+        y2 += btnH + gap;
+        this.btnCopyFull = addButton(sideLabel("gui.avilixlogger.copy_full", "Full"), b -> copyCurrentTabText(),
+                rightX, y2, half, btnH);
+        this.btnCopyJson = addButton(sideLabel("gui.avilixlogger.copy_json", "JSON"), b -> requestJsonAndCopy(),
+                rightX + half + gap, y2, rightW - half - gap, btnH);
+
+        y2 += btnH + gap;
+        this.btnTabDetails = addButton(sideLabel("gui.avilixlogger.tab.details", "D"), b -> { showRawTab = false; saveGuiStateFromInstance(); },
+                rightX, y2, half, btnH);
+        this.btnTabRaw = addButton(sideLabel("gui.avilixlogger.tab.raw", "Raw"), b -> { showRawTab = true; saveGuiStateFromInstance(); requestRawIfNeeded(); },
+                rightX + half + gap, y2, rightW - half - gap, btnH);
+
+        y2 += btnH + gap;
+        this.btnShowRaw = addButton(sideLabel("gui.avilixlogger.show_raw", "RAW"), b -> requestRawIfNeeded(),
+                rightX, y2, rightW, btnH);
 
         // Details panel must start BELOW the right-side controls to avoid overlap.
-        this.detailsPanelTop = y2 + 26;
+        this.detailsPanelTop = y2 + btnH + gap + 2;
 
         updateButtons();
         refreshFilterButtonLabels();
+    }
+
+    private Button addButton(Component message, Button.OnPress onPress, int x, int y, int w, int h) {
+        return this.addRenderableWidget(new ScaledTextButton(x, y, w, h, message, onPress));
+    }
+
+    private EditBox makeEditBox(int x, int y, int w, int h, Component message) {
+        return new ScaledEditBox(this.font, x, y, w, h, message);
+    }
+
+    /**
+     * Vanilla Button scales only the rectangle. The label is always drawn with the normal Minecraft font size.
+     * When B- makes controls very small, text starts overflowing. This button scales and clips its own label.
+     */
+    private final class ScaledTextButton extends Button {
+        private ScaledTextButton(int x, int y, int width, int height, Component message, Button.OnPress onPress) {
+            super(x, y, width, height, message, onPress, Button.DEFAULT_NARRATION);
+        }
+
+        @Override
+        public void renderString(GuiGraphics g, Font font, int color) {
+            Component message = this.getMessage();
+            int x = this.getX();
+            int y = this.getY();
+            int w = this.getWidth();
+            int h = this.getHeight();
+            int textW = Math.max(1, font.width(message));
+            float s = controlScale();
+            s = Math.min(s, Math.max(0.35f, (h - 4) / (float) font.lineHeight));
+            s = Math.min(s, Math.max(0.35f, (w - 6) / (float) textW));
+            s = clampFloat(s, 0.35f, 1.25f);
+
+            int scLeft = x + 1;
+            int scTop = y + 1;
+            int scRight = x + w - 1;
+            int scBottom = y + h - 1;
+            if (scRight <= scLeft || scBottom <= scTop) return;
+
+            g.enableScissor(scLeft, scTop, scRight, scBottom);
+            g.pose().pushPose();
+            float drawX = x + (w / 2.0f) - (textW * s / 2.0f);
+            float drawY = y + (h / 2.0f) - (font.lineHeight * s / 2.0f);
+            g.pose().translate(drawX, drawY, 0);
+            g.pose().scale(s, s, 1.0f);
+            g.drawString(font, message, 0, 0, color, false);
+            g.pose().popPose();
+            g.disableScissor();
+        }
+    }
+
+    /**
+     * EditBox also does not follow our custom B-/B+ scale. We keep its normal input behavior,
+     * but draw the visible text ourselves so long values are clipped and small controls stay readable.
+     */
+    private final class ScaledEditBox extends EditBox {
+        private final Font boxFont;
+        private Component localHint = Component.empty();
+
+        private ScaledEditBox(Font font, int x, int y, int width, int height, Component message) {
+            super(font, x, y, width, height, message);
+            this.boxFont = font;
+        }
+
+        @Override
+        public void setHint(Component hint) {
+            super.setHint(hint);
+            this.localHint = hint == null ? Component.empty() : hint;
+        }
+
+        @Override
+        public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+            int x = this.getX();
+            int y = this.getY();
+            int w = this.getWidth();
+            int h = this.getHeight();
+            if (w <= 0 || h <= 0) return;
+
+            boolean focused = this.isFocused();
+            int border = focused ? 0xFFE0E0E0 : 0xFF777777;
+            int bg = this.active ? 0xE0000000 : 0xA0202020;
+            g.fill(x, y, x + w, y + h, border);
+            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, bg);
+
+            String value = this.getValue() == null ? "" : this.getValue();
+            boolean hint = value.isEmpty() && !focused;
+            Component text = hint ? this.localHint.copy().withStyle(ChatFormatting.DARK_GRAY) : Component.literal(value);
+            int color = this.active ? 0xFFE0E0E0 : 0xFF808080;
+            if (hint) color = 0xFF808080;
+
+            float s = Math.min(controlScale(), Math.max(0.35f, (h - 4) / (float) this.boxFont.lineHeight));
+            s = clampFloat(s, 0.45f, 1.10f);
+            int innerLeft = x + 3;
+            int innerTop = y + 2;
+            int innerRight = x + w - 3;
+            int innerBottom = y + h - 2;
+            if (innerRight <= innerLeft || innerBottom <= innerTop) return;
+
+            g.enableScissor(innerLeft, innerTop, innerRight, innerBottom);
+            g.pose().pushPose();
+            float drawY = y + (h / 2.0f) - (this.boxFont.lineHeight * s / 2.0f);
+            g.pose().translate(innerLeft, drawY, 0);
+            g.pose().scale(s, s, 1.0f);
+            g.drawString(this.boxFont, text, 0, 0, color, false);
+            if (focused && !hint && (System.currentTimeMillis() / 500L) % 2L == 0L) {
+                int cursor = Math.max(0, Math.min(value.length(), this.getCursorPosition()));
+                String before = value.substring(0, cursor);
+                int cx = this.boxFont.width(before);
+                g.fill(cx, 0, cx + 1, this.boxFont.lineHeight, 0xFFFFFFFF);
+            }
+            g.pose().popPose();
+            g.disableScissor();
+        }
+    }
+
+    private Component sideLabel(String translationKey, String compact) {
+        return compactControlLabels() ? Component.literal(compact) : Component.translatable(translationKey);
     }
 
     private GuiFilters currentFilters() {
@@ -298,6 +553,7 @@ public final class LogViewerScreen extends Screen {
     }
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
+        saveGuiStateFromInstance();
         PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, currentFilters()));
     }
 
@@ -371,6 +627,7 @@ public final class LogViewerScreen extends Screen {
         this.lastJson = "";
         this.pendingCopyJson = false;
         updateButtons();
+        saveGuiStateFromInstance();
         sendPage(C2SRequestPagePayload.Nav.FIRST);
     }
 
@@ -383,10 +640,15 @@ public final class LogViewerScreen extends Screen {
             return true; // swallow clicks outside
         }
 
+        updateAdaptiveInputWidths();
+        if (mouseInsideAnyInput(mouseX, mouseY)) {
+            return super.mouseClicked(mouseX, mouseY, button);
+        }
+
         // Row selection
         int listLeft = listLeftX();
         int listTop = listTop();
-        int rowH = LIST_ROW_H;
+        int rowH = listRowH();
         int listWidth = Math.max(60, (rightPanelX() - 10) - listLeft); // leave room for right panel
         int rpp = rowsPerPage();
 
@@ -440,7 +702,7 @@ public final class LogViewerScreen extends Screen {
             if (lines == null) lines = List.of();
             int headerH = 14;
             int y = detailsTop + headerH;
-            int maxLines = Math.max(0, (detailsBottom - y) / 10);
+            int maxLines = Math.max(0, (detailsBottom - y) / detailLineH());
             int maxStart = Math.max(0, lines.size() - maxLines);
             this.detailsScroll = Math.max(0, Math.min(maxStart, this.detailsScroll - step));
             return true;
@@ -449,13 +711,22 @@ public final class LogViewerScreen extends Screen {
     }
 
     @Override
+    public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        // Hard-disable vanilla 1.21.x screen background/blur for this transparent admin overlay.
+        // Do not draw any dim layer and do not trigger the menu blur shader here.
+    }
+
+    @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(g, mouseX, mouseY, partialTick);
-        super.render(g, mouseX, mouseY, partialTick);
+        // Do NOT call Screen#renderBackground or Screen#render here.
+        // On 1.21.x some Screen render paths apply the vanilla blurred/dimmed background.
+        // This GUI draws logs/details before widgets, so a late vanilla background pass makes
+        // the already-drawn log text look smeared while the buttons stay sharp.
+        updateAdaptiveInputWidths();
 
         int listLeft = listLeftX();
         int listTop = listTop();
-        int rowH = LIST_ROW_H;
+        int rowH = listRowH();
         int rpp = rowsPerPage();
         int listWidth = Math.max(60, (rightPanelX() - 10) - listLeft);
 
@@ -477,9 +748,9 @@ public final class LogViewerScreen extends Screen {
             if (i == selected) {
                 g.fill(listLeft - 2, y - 1, listLeft + listWidth + 2, y + rowH, 0x55222222);
             }
-            // Keep formatting/colors; clip by width.
+            // Keep formatting/colors and native crisp Minecraft font; clip by width.
             g.enableScissor(listLeft, y, listLeft + listWidth, y + rowH);
-            g.drawString(this.font, line, listLeft, y + 4, 0xFFFFFF, false);
+            drawLogString(g, line, listLeft, y + Math.max(1, (rowH - this.font.lineHeight) / 2), 0xFFFFFF);
             g.disableScissor();
             drawn++;
         }
@@ -490,11 +761,17 @@ public final class LogViewerScreen extends Screen {
             Component full = r.line();
             int y = this.height - 24;
             g.fill(8, y - 2, this.width - 8, y + 12, 0x66000000);
-            g.drawString(this.font, full, 10, y, 0xFFFFFF, false);
+            drawLogString(g, full, 10, y, 0xFFFFFF);
         }
 
         // Right-side details panel
         renderDetailsPanel(g);
+
+        // Render widgets after rows/details so an active adaptive input field stays readable above the log list.
+        // Do this manually instead of super.render(...): on some 1.21.x mappings/modpacks
+        // Screen#render may route through background rendering and blur/dim content that was
+        // already drawn earlier in this method.
+        renderWidgetsWithoutScreenBackground(g, mouseX, mouseY, partialTick);
 
         // Dropdown overlays (modal)
         if (typeDropdownOpen) {
@@ -505,6 +782,13 @@ public final class LogViewerScreen extends Screen {
             g.pose().translate(0, 0, 500);
             renderTypeDropdown(g, mouseX, mouseY);
             g.pose().popPose();
+        }
+    }
+
+
+    private void renderWidgetsWithoutScreenBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        for (net.minecraft.client.gui.components.Renderable renderable : this.renderables) {
+            renderable.render(g, mouseX, mouseY, partialTick);
         }
     }
 
@@ -522,10 +806,11 @@ public final class LogViewerScreen extends Screen {
 
         // Wrap lines to fit the panel width.
         int wrapW = Math.max(10, (panelRight - panelLeft) - 8);
+        int splitW = Math.max(10, Math.round(wrapW / Math.max(0.25f, logTextScale())));
         java.util.ArrayList<net.minecraft.util.FormattedCharSequence> lines = new java.util.ArrayList<>();
         for (Component c : base) {
             if (c == null) continue;
-            var split = this.font.split(c, wrapW);
+            var split = this.font.split(c, splitW);
             if (split == null || split.isEmpty()) {
                 lines.add(net.minecraft.util.FormattedCharSequence.EMPTY);
             } else {
@@ -543,15 +828,16 @@ public final class LogViewerScreen extends Screen {
 
         int headerH = 14;
         int y = panelTop + headerH;
-        int maxLines = Math.max(0, (panelBottom - y) / 10);
+        int lineH = detailLineH();
+        int maxLines = Math.max(0, (panelBottom - y) / lineH);
         int maxStart = Math.max(0, lines.size() - maxLines);
         if (detailsScroll > maxStart) detailsScroll = maxStart;
         int start = detailsScroll;
         for (int i = 0; i < maxLines && (start + i) < lines.size(); i++) {
             net.minecraft.util.FormattedCharSequence c = lines.get(start + i);
-            int yy = y + i * 10;
-            g.enableScissor(panelLeft + 2, yy, panelRight - 6, yy + 10);
-            g.drawString(this.font, c, panelLeft + 3, yy, 0xFFFFFF, false);
+            int yy = y + i * lineH;
+            g.enableScissor(panelLeft + 2, yy, panelRight - 6, yy + lineH);
+            drawLogString(g, c, panelLeft + 3, yy, 0xFFFFFF);
             g.disableScissor();
         }
 
@@ -567,6 +853,55 @@ public final class LogViewerScreen extends Screen {
             int thumbY = barTop + (int) ((barBottom - barTop - thumbH) * frac);
             g.fill(barX, thumbY, barX + 2, thumbY + thumbH, 0x99AAAAAA);
         }
+    }
+
+    private void updateAdaptiveInputWidths() {
+        int panelW = leftPanelW();
+        int gap = sideInputGap();
+        int btnW = sideButtonW(panelW);
+        int baseX = 10 + btnW + gap;
+        int baseW = sideBoxW(panelW, btnW, gap);
+        adaptInputBox(timeBox, baseX, baseW);
+        adaptInputBox(radiusBox, baseX, baseW);
+        adaptInputBox(actorBox, baseX, baseW);
+        adaptInputBox(trainBox, baseX, baseW);
+        adaptInputBox(planeNameBox, baseX, baseW);
+        adaptInputBox(blockIdBox, baseX, baseW);
+        adaptInputBox(searchBox, baseX, baseW);
+    }
+
+    private float inputTextScaleFor(int h) {
+        return clampFloat(Math.min(controlScale(), Math.max(0.35f, (h - 4) / (float) this.font.lineHeight)), 0.45f, 1.10f);
+    }
+
+    private void adaptInputBox(EditBox box, int baseX, int baseW) {
+        if (box == null) return;
+        box.setX(baseX);
+        int w = baseW;
+        if (box.isFocused()) {
+            String value = box.getValue() == null ? "" : box.getValue();
+            float s = inputTextScaleFor(box.getHeight());
+            int wanted = Math.max(baseW, Math.round(this.font.width(value) * s) + 30);
+            int maxW = Math.max(baseW, rightPanelX() - 12 - baseX);
+            w = clampInt(wanted, baseW, maxW);
+        }
+        box.setWidth(w);
+    }
+
+    private boolean mouseInsideAnyInput(double mouseX, double mouseY) {
+        return mouseInsideInput(timeBox, mouseX, mouseY)
+                || mouseInsideInput(radiusBox, mouseX, mouseY)
+                || mouseInsideInput(actorBox, mouseX, mouseY)
+                || mouseInsideInput(trainBox, mouseX, mouseY)
+                || mouseInsideInput(planeNameBox, mouseX, mouseY)
+                || mouseInsideInput(blockIdBox, mouseX, mouseY)
+                || mouseInsideInput(searchBox, mouseX, mouseY);
+    }
+
+    private boolean mouseInsideInput(EditBox box, double mouseX, double mouseY) {
+        if (box == null || !box.visible) return false;
+        return mouseX >= box.getX() && mouseX <= box.getX() + box.getWidth()
+                && mouseY >= box.getY() && mouseY <= box.getY() + box.getHeight();
     }
 
     private void requestRawIfNeeded() {
@@ -592,7 +927,15 @@ public final class LogViewerScreen extends Screen {
     private void runSelectedTpCmd() {
         if (selected < 0 || selected >= rows.size()) return;
         LogRow r = rows.get(selected);
-        String cmd = "tp " + r.x() + " " + r.y() + " " + r.z();
+        String dim = r.dim() == null ? "" : r.dim().trim();
+        String xyz = r.x() + " " + r.y() + " " + r.z();
+        String currentDim = "";
+        if (Minecraft.getInstance() != null && Minecraft.getInstance().level != null) {
+            currentDim = Minecraft.getInstance().level.dimension().location().toString();
+        }
+        String cmd = (!dim.isBlank() && !dim.equals("*") && !dim.equals(currentDim))
+                ? "execute in " + dim + " run tp @s " + xyz
+                : "tp " + xyz;
         Minecraft mc = Minecraft.getInstance();
 
         // Run immediately. If we can't (no connection), fall back to clipboard.
@@ -662,7 +1005,7 @@ public final class LogViewerScreen extends Screen {
         int x = btnType.getX();
         int y = btnType.getY() + btnType.getHeight();
         int w = btnType.getWidth();
-        int itemH = 18;
+        int itemH = Math.max(12, Math.round(18 * controlScale()));
         int h = TYPE_COUNT * itemH;
         if (mouseX < x || mouseX > x + w || mouseY < y || mouseY > y + h) return false;
         int idx = (int) ((mouseY - y) / itemH);
@@ -679,7 +1022,7 @@ public final class LogViewerScreen extends Screen {
         int x = btnType.getX();
         int y = btnType.getY() + btnType.getHeight();
         int w = btnType.getWidth();
-        int itemH = 18;
+        int itemH = Math.max(12, Math.round(18 * controlScale()));
         int h = TYPE_COUNT * itemH;
         g.fill(x, y, x + w, y + h, 0xFF0A0A0A);
         for (int i = 0; i < TYPE_COUNT; i++) {
@@ -823,15 +1166,18 @@ public final class LogViewerScreen extends Screen {
         String t = timeLabel();
         String r = radiusLabel();
         Component ty = Component.translatable("gui.avilixlogger.type." + typeKey(typePresetIdx));
-        if (btnTime != null) btnTime.setMessage(Component.translatable("gui.avilixlogger.filter.time.v", t));
-        if (btnRadius != null) btnRadius.setMessage(Component.translatable("gui.avilixlogger.filter.radius.v", r));
-        if (btnType != null) btnType.setMessage(Component.translatable("gui.avilixlogger.filter.type.v", ty));
+        boolean compact = compactControlLabels();
+        if (btnTime != null) btnTime.setMessage(compact ? Component.literal("T: " + t) : Component.translatable("gui.avilixlogger.filter.time.v", t));
+        if (btnRadius != null) btnRadius.setMessage(compact ? Component.literal("R: " + r) : Component.translatable("gui.avilixlogger.filter.radius.v", r));
+        if (btnType != null) btnType.setMessage(compact ? Component.literal("Тип: ").append(ty) : Component.translatable("gui.avilixlogger.filter.type.v", ty));
 
         String actor = (actorBox != null && !actorBox.getValue().isBlank()) ? actorBox.getValue().trim() : (actorFilter == null ? "" : actorFilter);
         String train = (trainBox != null && !trainBox.getValue().isBlank()) ? trainBox.getValue().trim() : (trainFilter == null ? "" : trainFilter);
 
-        if (btnActor != null) btnActor.setMessage(Component.translatable("gui.avilixlogger.filter.actor.v",
-                actor.isBlank() ? Component.translatable("gui.avilixlogger.value.any") : Component.literal(actor)));
+        if (btnActor != null) {
+            Component actorValue = actor.isBlank() ? Component.translatable("gui.avilixlogger.value.any") : Component.literal(trimLabel(actor, compact ? 8 : 16));
+            btnActor.setMessage(compact ? Component.literal("Иг: ").append(actorValue) : Component.translatable("gui.avilixlogger.filter.actor.v", actorValue));
+        }
         // Reuse the existing "train" input as a context-sensitive filter:
         // - Type=TRAINS: train name/needle
         // - Type=PLANES: owner name/needle
@@ -841,8 +1187,8 @@ public final class LogViewerScreen extends Screen {
         }
         if (btnTrain != null) {
             String key = planes ? "gui.avilixlogger.filter.owner.v" : "gui.avilixlogger.filter.train.v";
-            btnTrain.setMessage(Component.translatable(key,
-                    train.isBlank() ? Component.translatable("gui.avilixlogger.value.any") : Component.literal(trimLabel(train, 16))));
+            Component trainValue = train.isBlank() ? Component.translatable("gui.avilixlogger.value.any") : Component.literal(trimLabel(train, compact ? 8 : 16));
+            btnTrain.setMessage(compact ? Component.literal(planes ? "Вл: " : "По: ").append(trainValue) : Component.translatable(key, trainValue));
         }
 
         // Plane name filter widgets are only meaningful in planes preset.
@@ -943,6 +1289,8 @@ public final class LogViewerScreen extends Screen {
                     || (radiusBox != null && radiusBox.isFocused())
                     || (actorBox != null && actorBox.isFocused())
                     || (trainBox != null && trainBox.isFocused())
+                    || (planeNameBox != null && planeNameBox.isFocused())
+                    || (blockIdBox != null && blockIdBox.isFocused())
                     || (searchBox != null && searchBox.isFocused())) {
                 applyCustomInputs();
                 return true;
@@ -950,6 +1298,161 @@ public final class LogViewerScreen extends Screen {
         }
 
         return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private void drawLogString(GuiGraphics g, Component text, int x, int y, int color) {
+        drawScaledLogString(g, () -> g.drawString(this.font, text, 0, 0, color, false), x, y);
+    }
+
+    private void drawLogString(GuiGraphics g, net.minecraft.util.FormattedCharSequence text, int x, int y, int color) {
+        drawScaledLogString(g, () -> g.drawString(this.font, text, 0, 0, color, false), x, y);
+    }
+
+    private void drawScaledLogString(GuiGraphics g, Runnable draw, int x, int y) {
+        float s = logTextScale();
+        g.pose().pushPose();
+        g.pose().translate(x, y, 0);
+        g.pose().scale(s, s, 1.0f);
+        draw.run();
+        g.pose().popPose();
+    }
+
+    private static Path guiStatePath() {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc != null && mc.gameDirectory != null) {
+                return mc.gameDirectory.toPath().resolve("config").resolve("avilixlogger_gui.properties");
+            }
+        } catch (Throwable ignored) {}
+        return Path.of("config", "avilixlogger_gui.properties");
+    }
+
+    private static void loadGuiState() {
+        if (guiStateLoaded) return;
+        guiStateLoaded = true;
+        Path path = guiStatePath();
+        if (!Files.isRegularFile(path)) return;
+        Properties p = new Properties();
+        try (java.io.Reader reader = Files.newBufferedReader(path)) {
+            p.load(reader);
+            savedTimePresetIdx = parseInt(p.getProperty("timePreset"), savedTimePresetIdx);
+            savedRadiusPresetIdx = parseInt(p.getProperty("radiusPreset"), savedRadiusPresetIdx);
+            savedTypePresetIdx = parseInt(p.getProperty("typePreset"), savedTypePresetIdx);
+            savedAggregatedMode = Boolean.parseBoolean(p.getProperty("aggregated", String.valueOf(savedAggregatedMode)));
+            savedActorFilter = p.getProperty("actorFilter", savedActorFilter);
+            savedTrainFilter = p.getProperty("trainFilter", savedTrainFilter);
+            savedPlaneNameFilter = p.getProperty("planeNameFilter", savedPlaneNameFilter);
+            savedBlockIdFilter = p.getProperty("blockIdFilter", savedBlockIdFilter);
+            savedTimeInput = p.getProperty("timeInput", savedTimeInput);
+            savedRadiusInput = p.getProperty("radiusInput", savedRadiusInput);
+            savedActorInput = p.getProperty("actorInput", savedActorInput);
+            savedTrainInput = p.getProperty("trainInput", savedTrainInput);
+            savedPlaneNameInput = p.getProperty("planeNameInput", savedPlaneNameInput);
+            savedBlockIdInput = p.getProperty("blockIdInput", savedBlockIdInput);
+            savedSearchInput = p.getProperty("searchInput", savedSearchInput);
+            savedButtonScalePercent = clampInt(parseInt(p.getProperty("buttonScalePercent"), savedButtonScalePercent), BUTTON_SCALE_MIN, BUTTON_SCALE_MAX);
+            savedLogTextScalePercent = clampInt(parseInt(p.getProperty("logTextScalePercent"), savedLogTextScalePercent), LOG_TEXT_SCALE_MIN, LOG_TEXT_SCALE_MAX);
+        } catch (Throwable ignored) {
+            // Broken local client config should never break opening the logger GUI.
+        }
+    }
+
+    private static int parseInt(String s, int fallback) {
+        try {
+            if (s == null || s.isBlank()) return fallback;
+            return Integer.parseInt(s.trim());
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private void restoreSavedStateToFields() {
+        this.timePresetIdx = savedTimePresetIdx;
+        this.radiusPresetIdx = savedRadiusPresetIdx;
+        this.typePresetIdx = savedTypePresetIdx;
+        this.aggregatedMode = savedAggregatedMode;
+        this.actorFilter = savedActorFilter == null ? "" : savedActorFilter;
+        this.trainFilter = savedTrainFilter == null ? "" : savedTrainFilter;
+        this.planeNameFilter = savedPlaneNameFilter == null ? "" : savedPlaneNameFilter;
+        this.blockIdFilter = savedBlockIdFilter == null ? "" : savedBlockIdFilter;
+    }
+
+    private void saveGuiStateFromInstance() {
+        savedTimePresetIdx = this.timePresetIdx;
+        savedRadiusPresetIdx = this.radiusPresetIdx;
+        savedTypePresetIdx = this.typePresetIdx;
+        savedAggregatedMode = this.aggregatedMode;
+        savedActorFilter = this.actorFilter == null ? "" : this.actorFilter;
+        savedTrainFilter = this.trainFilter == null ? "" : this.trainFilter;
+        savedPlaneNameFilter = this.planeNameFilter == null ? "" : this.planeNameFilter;
+        savedBlockIdFilter = this.blockIdFilter == null ? "" : this.blockIdFilter;
+        savedTimeInput = this.timeBox == null ? savedTimeInput : this.timeBox.getValue();
+        savedRadiusInput = this.radiusBox == null ? savedRadiusInput : this.radiusBox.getValue();
+        savedActorInput = this.actorBox == null ? savedActorInput : this.actorBox.getValue();
+        savedTrainInput = this.trainBox == null ? savedTrainInput : this.trainBox.getValue();
+        savedPlaneNameInput = this.planeNameBox == null ? savedPlaneNameInput : this.planeNameBox.getValue();
+        savedBlockIdInput = this.blockIdBox == null ? savedBlockIdInput : this.blockIdBox.getValue();
+        savedSearchInput = this.searchBox == null ? savedSearchInput : this.searchBox.getValue();
+        saveGuiStateToDisk();
+    }
+
+    private static void saveGuiStateToDisk() {
+        Properties p = new Properties();
+        p.setProperty("timePreset", String.valueOf(savedTimePresetIdx));
+        p.setProperty("radiusPreset", String.valueOf(savedRadiusPresetIdx));
+        p.setProperty("typePreset", String.valueOf(savedTypePresetIdx));
+        p.setProperty("aggregated", String.valueOf(savedAggregatedMode));
+        p.setProperty("actorFilter", savedActorFilter == null ? "" : savedActorFilter);
+        p.setProperty("trainFilter", savedTrainFilter == null ? "" : savedTrainFilter);
+        p.setProperty("planeNameFilter", savedPlaneNameFilter == null ? "" : savedPlaneNameFilter);
+        p.setProperty("blockIdFilter", savedBlockIdFilter == null ? "" : savedBlockIdFilter);
+        p.setProperty("timeInput", savedTimeInput == null ? "" : savedTimeInput);
+        p.setProperty("radiusInput", savedRadiusInput == null ? "" : savedRadiusInput);
+        p.setProperty("actorInput", savedActorInput == null ? "" : savedActorInput);
+        p.setProperty("trainInput", savedTrainInput == null ? "" : savedTrainInput);
+        p.setProperty("planeNameInput", savedPlaneNameInput == null ? "" : savedPlaneNameInput);
+        p.setProperty("blockIdInput", savedBlockIdInput == null ? "" : savedBlockIdInput);
+        p.setProperty("searchInput", savedSearchInput == null ? "" : savedSearchInput);
+        p.setProperty("buttonScalePercent", String.valueOf(savedButtonScalePercent));
+        p.setProperty("wideControlScalePercent", String.valueOf(savedButtonScalePercent));
+        p.setProperty("logTextScalePercent", String.valueOf(savedLogTextScalePercent));
+        try {
+            Path path = guiStatePath();
+            Files.createDirectories(path.getParent());
+            try (java.io.Writer writer = Files.newBufferedWriter(path)) {
+                p.store(writer, "Avilix Logger client GUI state");
+            }
+        } catch (Throwable ignored) {
+            // Read-only config folder should not break the GUI.
+        }
+    }
+
+    private void adjustButtonScale(int delta) {
+        savedButtonScalePercent = clampInt(savedButtonScalePercent + delta, BUTTON_SCALE_MIN, BUTTON_SCALE_MAX);
+        saveGuiStateFromInstance();
+        rebuildGuiSafely();
+    }
+
+    private void adjustLogTextScale(int delta) {
+        savedLogTextScalePercent = clampInt(savedLogTextScalePercent + delta, LOG_TEXT_SCALE_MIN, LOG_TEXT_SCALE_MAX);
+        saveGuiStateFromInstance();
+        rebuildGuiSafely();
+    }
+
+    private void rebuildGuiSafely() {
+        try {
+            this.clearWidgets();
+            this.init();
+            updateButtons();
+        } catch (Throwable ignored) {
+            // If a future MC version changes Screen internals, the new scale still applies on reopen.
+        }
+    }
+
+    @Override
+    public void removed() {
+        saveGuiStateFromInstance();
+        super.removed();
     }
 
     @Override

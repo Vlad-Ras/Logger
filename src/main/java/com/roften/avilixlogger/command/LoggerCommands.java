@@ -941,30 +941,6 @@ public final class LoggerCommands {
         return 0;
     }
 
-    private static void probeNextCursor(ServerLevel level, ServerPlayer sp) {
-        LastQueryManager.State st = LastQueryManager.get(sp);
-        if (st == null) return;
-
-        int size = ChatLogPager.pageSize();
-
-        LogQuery q = st.baseQuery.copy();
-        q.beforeId = st.currentBeforeId();
-        q.limit = size + 1;
-
-        List<LogEntry> raw = LoggerRuntime.storage(level).queryReverse(q);
-        if (raw == null) raw = List.of();
-
-        boolean hasNext = raw.size() > size;
-        List<LogEntry> page = raw;
-        if (hasNext) page = raw.subList(0, size);
-
-        long nextCursorCandidate = 0L;
-        if (!page.isEmpty()) nextCursorCandidate = page.get(page.size() - 1).id;
-
-        st.nextCursorCandidate = nextCursorCandidate;
-        st.hasNext = hasNext;
-    }
-
     private static int pageTo(CommandContext<CommandSourceStack> ctx, int targetPage) {
         if (!(ctx.getSource().getEntity() instanceof ServerPlayer sp)) {
             ctx.getSource().sendFailure(Component.literal("Пагинация доступна только игроку."));
@@ -979,15 +955,19 @@ public final class LoggerCommands {
         if (level == null) level = sp.serverLevel();
         int target = Math.max(1, targetPage);
 
-        // Cursor-based pagination: to reach page N, we step forward from the first page.
-        LastQueryManager.first(sp);
-
-        for (int page = 1; page < target; page++) {
-            probeNextCursor(level, sp);
-            st = LastQueryManager.get(sp);
-            if (st == null) break;
-            if (!st.hasNext() || st.nextCursorCandidate() <= 0) break;
+        int current = st.pageIndex();
+        if (target == 1) {
+            LastQueryManager.first(sp);
+        } else if (target < current) {
+            while (st != null && st.pageIndex() > target) {
+                LastQueryManager.prev(sp);
+                st = LastQueryManager.get(sp);
+            }
+        } else if (target == current + 1 && st.hasNext() && st.nextCursorCandidate() > 0L) {
             LastQueryManager.next(sp, st.nextCursorCandidate());
+        } else if (target != current) {
+            ctx.getSource().sendFailure(Component.literal("Чтобы не блокировать сервер серией запросов, переходи кнопкой «Вперёд» последовательно."));
+            return 0;
         }
 
         st = LastQueryManager.get(sp);
@@ -1075,16 +1055,18 @@ public final class LoggerCommands {
         }
 
         LogQuery q = new LogQuery();
-        q.dim = level.dimension().location().toString();
+        q.dim = radius <= 0 ? "*" : level.dimension().location().toString();
         q.sinceTs = System.currentTimeMillis() - (seconds * 1000L);
         q.untilTs = System.currentTimeMillis();
         q.limit = LoggerConfig.VALUES.lookupDefaultLimit.get();
         if (actor != null && !actor.isBlank()) q.actorName = actor;
-        if (radius <= 0) {
-            q.exactPos = center;
-        } else {
+        if (radius > 0) {
             q.minPos = center.offset(-radius, -radius, -radius);
             q.maxPos = center.offset(radius, radius, radius);
+        } else {
+            q.exactPos = null;
+            q.minPos = null;
+            q.maxPos = null;
         }
 
         if (ctx.getSource().getEntity() instanceof ServerPlayer sp) {
@@ -1167,9 +1149,6 @@ public final class LoggerCommands {
         }
         ServerLevel lvl = resolveLevelForDim(ctx.getSource(), st.baseQuery.dim);
         if (lvl == null) lvl = sp.serverLevel();
-
-        // Refresh cursors (so NEXT availability is correct).
-        probeNextCursor(lvl, sp);
 
         ChatLogPager.renderAndSend(lvl, sp, st);
         return 1;
@@ -1368,16 +1347,18 @@ public final class LoggerCommands {
         }
 
         LogQuery q = new LogQuery();
-        q.dim = level.dimension().location().toString();
+        q.dim = radius <= 0 ? "*" : level.dimension().location().toString();
         q.sinceTs = range[0];
         q.untilTs = range[1];
         q.limit = LoggerConfig.VALUES.lookupDefaultLimit.get();
         if (actor != null && !actor.isBlank()) q.actorName = actor;
-        if (radius <= 0) {
-            q.exactPos = center;
-        } else {
+        if (radius > 0) {
             q.minPos = center.offset(-radius, -radius, -radius);
             q.maxPos = center.offset(radius, radius, radius);
+        } else {
+            q.exactPos = null;
+            q.minPos = null;
+            q.maxPos = null;
         }
 
         if (ctx.getSource().getEntity() instanceof ServerPlayer sp) {
@@ -1413,7 +1394,7 @@ public final class LoggerCommands {
         }
 
         LogQuery q = new LogQuery();
-        q.dim = null; // all dimensions
+        q.dim = "*"; // all dimensions
         q.sinceTs = range[0];
         q.untilTs = range[1];
         q.limit = LoggerConfig.VALUES.lookupDefaultLimit.get();
@@ -1482,7 +1463,7 @@ public final class LoggerCommands {
         src.sendSystemMessage(Component.literal("  /log rollback --t 2h --r 30 --m grief --c   (применить)" ).withStyle(ChatFormatting.GRAY));
 
         src.sendSystemMessage(Component.literal("Флаги (коротко)").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  --t time | --d date | --r radius | --m mode | --p player | --di dim | --ad all-dims | --c confirm" ).withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("  --t time | --d date | --r radius (0 = WORLD) | --m mode | --p player | --di dim | --ad all-dims | --c confirm" ).withStyle(ChatFormatting.GRAY));
         src.sendSystemMessage(Component.literal("  mode: grief | theft | combat | planes | all   |   types: --ty break,place,container_take" ).withStyle(ChatFormatting.GRAY));
         src.sendSystemMessage(Component.literal("  dim: overworld | nether | end   (или полный id: minecraft:overworld)" ).withStyle(ChatFormatting.GRAY));
 
@@ -1694,6 +1675,13 @@ public final class LoggerCommands {
             case "item_pickup", "pickup" -> ActionType.ITEM_PICKUP;
             case "craft", "item_craft" -> ActionType.ITEM_CRAFT;
             case "smelt", "item_smelt" -> ActionType.ITEM_SMELT;
+            case "item_use", "use_item" -> ActionType.ITEM_USE;
+            case "item_use_start", "use_start", "charge", "draw", "start_use" -> ActionType.ITEM_USE_START;
+            case "item_use_stop", "use_stop", "release", "stop_use" -> ActionType.ITEM_USE_STOP;
+            case "item_consume", "consume", "drink", "eat" -> ActionType.ITEM_CONSUME;
+            case "projectile_shoot", "shoot", "shot", "bow", "crossbow", "arrow" -> ActionType.PROJECTILE_SHOOT;
+            case "projectile_hit", "hit", "arrow_hit", "impact" -> ActionType.PROJECTILE_HIT;
+            case "gui", "gui_open", "menu", "interface" -> ActionType.GUI_OPEN;
             case "player_death" -> ActionType.PLAYER_DEATH;
             case "join", "player_join" -> ActionType.PLAYER_JOIN;
             case "leave", "quit", "player_leave" -> ActionType.PLAYER_LEAVE;
@@ -1714,9 +1702,14 @@ public final class LoggerCommands {
         String m = mode.trim().toLowerCase(Locale.ROOT);
         return switch (m) {
             case "grief", "build" -> EnumSet.of(ActionType.BLOCK_BREAK, ActionType.BLOCK_PLACE, ActionType.BLOCK_INTERACT);
-            case "theft", "steal" -> EnumSet.of(ActionType.CONTAINER_OPEN, ActionType.CONTAINER_PUT, ActionType.CONTAINER_TAKE, ActionType.ITEM_PICKUP, ActionType.ITEM_DROP);
-            case "combat", "pvp" -> EnumSet.of(ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.ENTITY_SPAWN);
-            case "planes", "plane", "aircraft" -> EnumSet.of(ActionType.PLANE_PLACE, ActionType.PLANE_REMOVE, ActionType.PLANE_MOUNT, ActionType.PLANE_PICKUP, ActionType.ENTITY_OWNER_SET);
+            case "theft", "steal" -> EnumSet.of(ActionType.CONTAINER_OPEN, ActionType.CONTAINER_PUT, ActionType.CONTAINER_TAKE, ActionType.ITEM_PICKUP, ActionType.ITEM_DROP, ActionType.GUI_OPEN);
+            case "combat", "pvp" -> EnumSet.of(ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
+            case "items", "item" -> EnumSet.of(ActionType.ITEM_DROP, ActionType.ITEM_PICKUP, ActionType.ITEM_CRAFT, ActionType.ITEM_SMELT, ActionType.ITEM_USE, ActionType.ITEM_USE_START, ActionType.ITEM_USE_STOP, ActionType.ITEM_CONSUME, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
+            case "gui", "menus", "interfaces" -> EnumSet.of(ActionType.GUI_OPEN, ActionType.CONTAINER_OPEN, ActionType.ENTITY_CONTAINER_OPEN);
+            case "planes", "plane", "aircraft" -> EnumSet.of(
+                    ActionType.PLANE_PLACE, ActionType.PLANE_REMOVE, ActionType.PLANE_MOUNT, ActionType.PLANE_PICKUP, ActionType.ENTITY_OWNER_SET,
+                    ActionType.ENTITY_SPAWN, ActionType.ENTITY_DEATH, ActionType.ENTITY_MOUNT, ActionType.ENTITY_DISMOUNT, ActionType.ENTITY_INTERACT
+            );
             case "all" -> null;
             default -> null;
         };
@@ -1786,8 +1779,10 @@ public final class LoggerCommands {
         int seconds = f.seconds != null ? f.seconds : 30 * 60;
         int radius = f.radius != null ? f.radius : 5;
 
+        boolean worldLookup = f.world || (f.radius != null && f.radius <= 0);
+
         LogQuery q = new LogQuery();
-        if (f.allDims) q.dim = null;
+        if (f.allDims || (worldLookup && (f.dim == null || f.dim.isBlank()))) q.dim = "*";
         else if (f.dim != null && !f.dim.isBlank()) q.dim = f.dim;
         else q.dim = level.dimension().location().toString();
 
@@ -1803,14 +1798,12 @@ public final class LoggerCommands {
         if (f.actor != null && !f.actor.isBlank()) q.actorName = f.actor;
         if (f.types != null && !f.types.isEmpty()) q.types = f.types;
         if (f.owner != null && !f.owner.isBlank()) q.owner = f.owner;
+        q.debugSource = "command";
 
-        if (!f.world) {
+        if (!worldLookup) {
             BlockPos center = sp.blockPosition();
-            if (radius <= 0) q.exactPos = center;
-            else {
-                q.minPos = center.offset(-radius, -radius, -radius);
-                q.maxPos = center.offset(radius, radius, radius);
-            }
+            q.minPos = center.offset(-radius, -radius, -radius);
+            q.maxPos = center.offset(radius, radius, radius);
         } else {
             // World/global search: no position bounding box.
             q.exactPos = null;
@@ -1825,7 +1818,7 @@ public final class LoggerCommands {
             title = "Поиск " + formatDuration(seconds) + ", r=" + radius;
         }
         if (f.mode != null && !f.mode.isBlank()) title += ", mode=" + f.mode;
-        if (f.world) title += ", world";
+        if (worldLookup) title += ", world";
         if (f.owner != null && !f.owner.isBlank()) title += ", owner=" + f.owner;
 
         LastQueryManager.State st = LastQueryManager.set(sp, q, title);
@@ -2107,10 +2100,13 @@ public final class LoggerCommands {
         }
 
         // Apply overrides onto last query
-        if (f.allDims) q.dim = null;
+        boolean worldOverride = f.world || (f.radius != null && f.radius <= 0);
+        if (f.allDims || (worldOverride && (f.dim == null || f.dim.isBlank()))) q.dim = "*";
         else if (f.dim != null && !f.dim.isBlank()) q.dim = f.dim;
         if (f.actor != null && !f.actor.isBlank()) q.actorName = f.actor;
+        if (f.owner != null && !f.owner.isBlank()) q.owner = f.owner;
         if (f.limit != null) q.limit = Math.max(1, Math.min(200, f.limit));
+        q.debugSource = "command-last";
 
         if (f.types != null && !f.types.isEmpty()) {
             q.types = f.types;
@@ -2125,18 +2121,16 @@ public final class LoggerCommands {
             q.untilTs = System.currentTimeMillis();
         }
 
-        if (f.radius != null) {
+        if (worldOverride) {
+            q.exactPos = null;
+            q.minPos = null;
+            q.maxPos = null;
+        } else if (f.radius != null) {
             int radius = f.radius;
             BlockPos center = sp.blockPosition();
-            if (radius <= 0) {
-                q.exactPos = center;
-                q.minPos = null;
-                q.maxPos = null;
-            } else {
-                q.exactPos = null;
-                q.minPos = center.offset(-radius, -radius, -radius);
-                q.maxPos = center.offset(radius, radius, radius);
-            }
+            q.exactPos = null;
+            q.minPos = center.offset(-radius, -radius, -radius);
+            q.maxPos = center.offset(radius, radius, radius);
         }
 
         String title = "Last (override)";

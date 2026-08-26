@@ -156,7 +156,11 @@ public final class LogText {
                 || t == ActionType.ITEM_PICKUP
                 || t == ActionType.ITEM_DROP
                 || t == ActionType.ITEM_CRAFT
-                || t == ActionType.ITEM_SMELT;
+                || t == ActionType.ITEM_SMELT
+                || t == ActionType.ITEM_USE
+                || t == ActionType.ITEM_USE_START
+                || t == ActionType.ITEM_USE_STOP
+                || t == ActionType.ITEM_CONSUME;
     }
 
     private static ChatFormatting actionColor(ActionType t) {
@@ -164,18 +168,18 @@ public final class LogText {
         return switch (t) {
             case BLOCK_BREAK -> ChatFormatting.RED;
             case BLOCK_PLACE -> ChatFormatting.GREEN;
-            case BLOCK_INTERACT, CONTAINER_OPEN -> ChatFormatting.GOLD;
+            case BLOCK_INTERACT, BLOCK_USE, CONTAINER_OPEN -> ChatFormatting.GOLD;
             case BLOCK_ENTITY_NBT_CHANGE -> ChatFormatting.YELLOW;
 
-            case CONTAINER_PUT, ITEM_PICKUP, ITEM_CRAFT, ITEM_SMELT -> ChatFormatting.GREEN;
-            case CONTAINER_TAKE, ITEM_DROP -> ChatFormatting.RED;
+            case CONTAINER_PUT, ITEM_PICKUP, ITEM_CRAFT, ITEM_SMELT, ITEM_CONSUME, ITEM_USE_START, PROJECTILE_SHOOT -> ChatFormatting.GREEN;
+            case CONTAINER_TAKE, ITEM_DROP, ITEM_USE_STOP -> ChatFormatting.RED;
 
-            case PLAYER_JOIN -> ChatFormatting.GREEN;
+            case PLAYER_JOIN, PLAYER_RESPAWN, PLAYER_DIMENSION_CHANGE, GUI_OPEN -> ChatFormatting.GREEN;
             case PLAYER_LEAVE -> ChatFormatting.RED;
             case PLAYER_DEATH, ENTITY_DEATH -> ChatFormatting.DARK_RED;
 
             case ENTITY_SPAWN -> ChatFormatting.LIGHT_PURPLE;
-            case ENTITY_INTERACT -> ChatFormatting.GOLD;
+            case ENTITY_INTERACT, ENTITY_ATTACK, PROJECTILE_HIT -> ChatFormatting.GOLD;
             case ENTITY_OWNER_SET -> ChatFormatting.YELLOW;
             case CHAT_MESSAGE -> ChatFormatting.AQUA;
 
@@ -203,7 +207,8 @@ public final class LogText {
         return switch (t) {
             case BLOCK_BREAK -> "сломал";
             case BLOCK_PLACE -> "поставил";
-            case BLOCK_INTERACT -> "использовал";
+            case BLOCK_INTERACT -> "изменил через использование";
+            case BLOCK_USE -> "использовал";
             case BLOCK_ENTITY_NBT_CHANGE -> "изменил";
             case CONTAINER_OPEN -> "открыл";
 
@@ -214,6 +219,12 @@ public final class LogText {
             case ITEM_DROP -> "выбросил";
             case ITEM_CRAFT -> "скрафтил";
             case ITEM_SMELT -> "переплавил";
+            case ITEM_USE -> "использовал";
+            case ITEM_USE_START -> "начал использовать";
+            case ITEM_USE_STOP -> "отпустил/прервал";
+            case ITEM_CONSUME -> "съел/выпил";
+            case PROJECTILE_SHOOT -> "выстрелил";
+            case PROJECTILE_HIT -> "попал";
 
             case ENTITY_DEATH -> "убил";
             case ENTITY_SPAWN -> "заспавнил";
@@ -221,6 +232,7 @@ public final class LogText {
             case ENTITY_DISMOUNT -> "вышел";
             case ENTITY_CONTAINER_OPEN -> "открыл";
             case ENTITY_INTERACT -> "взаимодействовал с";
+            case ENTITY_ATTACK -> "ударил";
             case ENTITY_OWNER_SET -> "сменил владельца";
 
             case PLANE_PLACE -> "поставил самолёт";
@@ -231,6 +243,9 @@ public final class LogText {
             case PLAYER_DEATH -> "умер";
             case PLAYER_JOIN -> "вошёл";
             case PLAYER_LEAVE -> "вышел";
+            case PLAYER_DIMENSION_CHANGE -> "сменил измерение";
+            case PLAYER_RESPAWN -> "возродился";
+            case GUI_OPEN -> "открыл интерфейс";
             case CHAT_MESSAGE -> "написал";
 
             case TRAIN_ASSEMBLE -> "собрал поезд";
@@ -252,10 +267,10 @@ public final class LogText {
 
             // blocks
             case BLOCK_BREAK -> blockNameComponent(level, e.blockBefore);
-            case BLOCK_PLACE, BLOCK_INTERACT, CONTAINER_OPEN, BLOCK_ENTITY_NBT_CHANGE -> blockNameComponent(level, e.blockAfter);
+            case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, CONTAINER_OPEN, BLOCK_ENTITY_NBT_CHANGE -> blockNameComponent(level, e.blockAfter);
 
             // container/item diffs
-            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT, PLANE_PICKUP ->
+            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
                     itemNameComponent(level, e.itemStackNbt);
 
             // schedule: и забрал, и поставил показываем предметом
@@ -270,15 +285,22 @@ public final class LogText {
                 yield Component.literal(tn);
             }
 
+            case PROJECTILE_SHOOT -> {
+                MutableComponent src = itemNameComponent(level, e.itemStackNbt);
+                yield src != null ? src : Component.literal(e.entityType != null ? e.entityType : "projectile");
+            }
+            case PROJECTILE_HIT -> Component.literal(e.entityType != null ? e.entityType : "projectile");
+
             // entities / planes / etc (оставь как у тебя было — ниже максимально безопасный вариант)
-            case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN, ENTITY_INTERACT,
+            case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN, ENTITY_INTERACT, ENTITY_ATTACK,
                  PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT, ENTITY_OWNER_SET -> {
                 // если у тебя уже есть логика для самолётов/энтити — можно вернуть её обратно.
                 yield Component.literal(e.entityType != null ? e.entityType : "entity");
             }
 
-            // player events / chat
-            case PLAYER_DEATH, PLAYER_JOIN, PLAYER_LEAVE -> null;
+            // player events / chat / gui
+            case GUI_OPEN -> Component.literal(e.extra != null ? e.extra.replaceFirst("^gui_open\\s+", "") : "интерфейс");
+            case PLAYER_DEATH, PLAYER_JOIN, PLAYER_LEAVE, PLAYER_DIMENSION_CHANGE, PLAYER_RESPAWN -> null;
             case CHAT_MESSAGE -> Component.literal(e.extra != null ? e.extra : "");
 
             // ВАЖНО: чтобы компилилось при добавлении новых ActionType в будущем

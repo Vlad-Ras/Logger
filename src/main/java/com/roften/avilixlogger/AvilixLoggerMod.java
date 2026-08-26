@@ -2,6 +2,7 @@ package com.roften.avilixlogger;
 
 import com.mojang.logging.LogUtils;
 import com.roften.avilixlogger.command.LoggerCommands;
+import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LoggerEventHandlers;
 import com.roften.avilixlogger.core.LoggerRuntime;
 import com.roften.avilixlogger.net.LoggerNetwork;
@@ -62,6 +63,7 @@ public final class AvilixLoggerMod {
     private void onServerStopping(ServerStoppingEvent event) {
         // Ensure we flush writers and stop GUI/database helper executors.
         LoggerEventHandlers.shutdownBackground();
+        ChatLogPager.shutdown();
         LoggerNetwork.shutdown();
         LoggerRuntime.shutdown();
     }

@@ -33,7 +33,8 @@ import java.util.concurrent.TimeUnit;
  *
  * The optimized default schema is split by event domain instead of writing every event into one
  * generic table. This keeps hot GUI/rollback queries on narrow tables and avoids scanning a giant
- * compressed JSON blob for every filter. The old unified table can still be read for migration.
+ * compressed JSON blob for every filter. A previous unified ClickHouse table can optionally remain
+ * readable, but MySQL is never read or migrated.
  */
 public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
@@ -58,6 +59,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 ActionType.BLOCK_BREAK,
                 ActionType.BLOCK_PLACE,
                 ActionType.BLOCK_INTERACT,
+                ActionType.BLOCK_USE,
                 ActionType.BLOCK_ENTITY_NBT_CHANGE);
         map(TableKind.CONTAINERS,
                 ActionType.CONTAINER_OPEN,
@@ -70,16 +72,26 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 ActionType.ENTITY_MOUNT,
                 ActionType.ENTITY_DISMOUNT,
                 ActionType.ENTITY_INTERACT,
+                ActionType.ENTITY_ATTACK,
+                ActionType.PROJECTILE_SHOOT,
+                ActionType.PROJECTILE_HIT,
                 ActionType.ENTITY_OWNER_SET);
         map(TableKind.ITEMS,
                 ActionType.ITEM_DROP,
                 ActionType.ITEM_PICKUP,
                 ActionType.ITEM_CRAFT,
-                ActionType.ITEM_SMELT);
+                ActionType.ITEM_SMELT,
+                ActionType.ITEM_USE,
+                ActionType.ITEM_USE_START,
+                ActionType.ITEM_USE_STOP,
+                ActionType.ITEM_CONSUME);
         map(TableKind.PLAYERS,
                 ActionType.PLAYER_DEATH,
                 ActionType.PLAYER_JOIN,
-                ActionType.PLAYER_LEAVE);
+                ActionType.PLAYER_LEAVE,
+                ActionType.PLAYER_DIMENSION_CHANGE,
+                ActionType.PLAYER_RESPAWN,
+                ActionType.GUI_OPEN);
         map(TableKind.CHAT,
                 ActionType.CHAT_MESSAGE);
         map(TableKind.COMPAT,
@@ -124,6 +136,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private volatile long lastCleanupAt;
     private volatile long unhealthyUntilMs;
     private volatile Throwable lastFailure;
+    private volatile boolean useActorNameLcFilter = true;
+    private volatile boolean useSpatialHelperColumns = true;
 
     public ClickHouseLogStorage() {
         this.endpoint = normalizeHttpEndpoint(LoggerConfig.VALUES.clickHouseUrl.get());
@@ -172,7 +186,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         lastFailure = t;
         long cooldown;
         try {
-            cooldown = Math.max(1000L, LoggerConfig.VALUES.dualFallbackCooldownMs.get());
+            cooldown = Math.max(1000L, LoggerConfig.VALUES.clickHouseHealthCooldownMs.get());
         } catch (Throwable ignored) {
             cooldown = 10_000L;
         }
@@ -186,10 +200,13 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             if (splitSchema) {
                 if (useFeedTable) ensureFeedTable();
                 for (TableKind kind : splitKinds()) ensureSplitTable(kind);
+                ensureSplitSchemaCompatibility();
                 if (addSkippingIndexes) ensureSkippingIndexes();
+                ensureRetentionPolicies();
                 AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse split+feed schema ready. DB={}, prefix={}, feed={}, detailMode={}", database, tablePrefix, useFeedTable, detailMode);
             } else {
                 ensureLegacyTable();
+                ensureRetentionPolicies();
                 AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse legacy unified schema ready. DB={}, table={}", database, legacyTable);
             }
             markHealthy();
@@ -322,6 +339,103 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 " SETTINGS index_granularity = 8192", timeoutSec());
     }
 
+    /**
+     * Older split-schema builds created a subset of the columns used by the current reader.
+     * CREATE TABLE IF NOT EXISTS does not evolve those tables, so a WORLD/player lookup could be
+     * killed by a single missing column inside the UNION and the GUI would simply show no rows.
+     *
+     * Keep these ALTERs best-effort: logging must continue even if a ClickHouse version rejects a
+     * codec/default expression. Runtime query code also avoids relying on actor_name_lc directly.
+     */
+    private void ensureSplitSchemaCompatibility() {
+        if (useFeedTable) {
+            String feed = qualifiedFeedTable();
+            addCommonCompatColumns(feed);
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS category LowCardinality(String) DEFAULT ''");
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS target_kind LowCardinality(String) DEFAULT ''");
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS target_id String DEFAULT ''" + largeCodec());
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS item_count Int32 DEFAULT 0");
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS short_text String DEFAULT ''" + largeCodec());
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS has_details UInt8 DEFAULT 0");
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS source_table LowCardinality(String) DEFAULT ''");
+            tryExecute("ALTER TABLE " + feed + " ADD COLUMN IF NOT EXISTS source_id UInt64 DEFAULT id");
+        }
+
+        for (TableKind kind : splitKinds()) {
+            String table = qualifiedSplitTable(kind);
+            addCommonCompatColumns(table);
+            switch (kind) {
+                case BLOCKS -> addBlockCompatColumns(table);
+                case CONTAINERS -> {
+                    addBlockCompatColumns(table);
+                    addEntityCompatColumns(table, false);
+                    addItemCompatColumns(table);
+                    addContainerCompatColumns(table);
+                }
+                case ENTITIES -> {
+                    addEntityCompatColumns(table, true);
+                    addItemCompatColumns(table);
+                }
+                case ITEMS -> {
+                    addItemCompatColumns(table);
+                    addPlayerInventoryCompatColumns(table);
+                }
+                case PLAYERS -> {
+                    tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS entity_uuid String DEFAULT ''");
+                    tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS entity_nbt String DEFAULT ''" + largeCodec());
+                    addPlayerInventoryCompatColumns(table);
+                }
+                case CHAT -> tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS message String DEFAULT ''" + largeCodec());
+                case COMPAT -> {
+                    addBlockCompatColumns(table);
+                    addEntityCompatColumns(table, true);
+                    addItemCompatColumns(table);
+                    addPlayerInventoryCompatColumns(table);
+                    addContainerCompatColumns(table);
+                }
+                default -> {}
+            }
+        }
+    }
+
+    private void addCommonCompatColumns(String table) {
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS chunk_x Int32 DEFAULT intDiv(x, 16)");
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS chunk_z Int32 DEFAULT intDiv(z, 16)");
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS region_x Int32 DEFAULT intDiv(x, 512)");
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS region_z Int32 DEFAULT intDiv(z, 512)");
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS actor_name_lc LowCardinality(String) DEFAULT lowerUTF8(actor_name)");
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS source LowCardinality(String) DEFAULT ''");
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS extra String DEFAULT ''" + largeCodec());
+    }
+
+    private void addBlockCompatColumns(String table) {
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS block_before String DEFAULT ''" + largeCodec());
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS be_before String DEFAULT ''" + largeCodec());
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS block_after String DEFAULT ''" + largeCodec());
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS be_after String DEFAULT ''" + largeCodec());
+    }
+
+    private void addEntityCompatColumns(String table, boolean includeNbt) {
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS entity_type LowCardinality(String) DEFAULT ''");
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS entity_uuid String DEFAULT ''");
+        if (includeNbt) tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS entity_nbt String DEFAULT ''" + largeCodec());
+    }
+
+    private void addItemCompatColumns(String table) {
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS item_stack String DEFAULT ''" + largeCodec());
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS count Int32 DEFAULT 0");
+    }
+
+    private void addPlayerInventoryCompatColumns(String table) {
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS player_inv_before String DEFAULT ''" + largeCodec());
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS player_inv_after String DEFAULT ''" + largeCodec());
+    }
+
+    private void addContainerCompatColumns(String table) {
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS container_slots_before String DEFAULT ''" + largeCodec());
+        tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS container_slots_after String DEFAULT ''" + largeCodec());
+    }
+
     private String commonColumns() {
         return "id UInt64," +
                 "ts_ms UInt64," +
@@ -419,30 +533,38 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
     private void maybeCleanup(long now) {
         if (!running) return;
-        long everyMs = 6L * 60L * 60_000L;
+        long everyMs = 24L * 60L * 60_000L;
         if ((now - lastCleanupAt) < everyMs) return;
         lastCleanupAt = now;
 
         try {
-            if (splitSchema) {
-                if (useFeedTable) cleanupTable(qualifiedFeedTable(), retentionDaysFor(TableKind.FEED), now);
-                for (TableKind kind : splitKinds()) {
-                    cleanupTable(qualifiedSplitTable(kind), retentionDaysFor(kind), now);
-                }
-            } else {
-                cleanupTable(qualifiedLegacyTable(), LoggerConfig.VALUES.keepDays.get(), now);
-            }
+            // Native TTL cleanup is asynchronous inside ClickHouse and avoids repeated heavy
+            // ALTER ... DELETE mutations competing with live inserts and history searches.
+            ensureRetentionPolicies();
         } catch (Throwable e) {
             markUnhealthy(e);
-            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse cleanup mutation failed", e);
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse TTL synchronization failed", e);
         }
     }
 
+    private void ensureRetentionPolicies() {
+        if (splitSchema) {
+            if (useFeedTable) syncTableTtl(qualifiedFeedTable(), retentionDaysFor(TableKind.FEED));
+            for (TableKind kind : splitKinds()) syncTableTtl(qualifiedSplitTable(kind), retentionDaysFor(kind));
+        } else {
+            syncTableTtl(qualifiedLegacyTable(), LoggerConfig.VALUES.keepDays.get());
+        }
+    }
 
-    private void cleanupTable(String table, int keepDays, long now) throws IOException {
-        if (keepDays <= 0) return;
-        long cutoff = now - (long) keepDays * 24L * 60L * 60_000L;
-        execute("ALTER TABLE " + table + " DELETE WHERE ts_ms < " + cutoff, timeoutSec());
+    private void syncTableTtl(String table, int keepDays) {
+        String sql = keepDays <= 0
+                ? "ALTER TABLE " + table + " REMOVE TTL"
+                : "ALTER TABLE " + table + " MODIFY TTL toDateTime(intDiv(ts_ms, 1000)) + INTERVAL " + keepDays + " DAY";
+        try {
+            execute(sql, timeoutSec());
+        } catch (IOException error) {
+            throw new IllegalStateException("Failed to synchronize ClickHouse TTL for " + table, error);
+        }
     }
 
     private void insertBatch(List<LogEntry> batch) throws IOException {
@@ -655,23 +777,34 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private List<LogEntry> select(LogQuery q, boolean reverse) {
         if (q == null) return List.of();
         if (!splitSchema) return selectLegacy(q, reverse);
-        if (useFeedTable && !reverse) return selectFeed(q, false);
+        if (useFeedTable && !q.requireDetails) {
+            List<LogEntry> feedRows = selectFeed(q, reverse);
+            if (feedRows != null && !feedRows.isEmpty()) {
+                ArrayList<LogEntry> merged = new ArrayList<>(feedRows);
+                if (readLegacyUnifiedTable) {
+                    merged.addAll(selectLegacy(q, reverse));
+                    merged = dedupeById(merged);
+                }
+                merged.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+                int limit = Math.max(1, q.limit);
+                if (merged.size() > limit) return new ArrayList<>(merged.subList(0, limit));
+                return merged;
+            }
+            // Empty can be a real result, but on upgraded servers it can also mean the feed table is
+            // missing/old/broken. Fall through to detail tables as a correctness fallback.
+        }
 
         List<TableKind> kinds = tablesForQuery(q);
         ArrayList<LogEntry> out = new ArrayList<>();
         try {
             if (!kinds.isEmpty()) {
                 String sql = buildSplitSelectSql(q, reverse, kinds);
-                out.addAll(parseSplitJsonEachRow(execute(sql, timeoutSec())));
+                out.addAll(parseSplitJsonEachRow(execute(sql, queryTimeoutSec(q))));
             }
             if (readLegacyUnifiedTable) {
-                // Existing rows written by older ClickHouse builds remain visible during migration.
-                // Errors are ignored because fresh split installations do not have the legacy table.
-                try {
-                    out.addAll(selectLegacy(q, reverse));
-                } catch (Throwable ignored) {}
+                out.addAll(selectLegacy(q, reverse));
             }
-            if (reverse && useFeedTable && (out.isEmpty() || Math.max(1, q.limit) <= 128)) {
+            if (!q.requireDetails && reverse && useFeedTable && (out.isEmpty() || Math.max(1, q.limit) <= 128)) {
                 // Details may be disabled for non-rollback events; still return lightweight rows for GUI/details.
                 // Do not use this path for large rollback scans.
                 out.addAll(selectFeed(q, true));
@@ -683,10 +816,63 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             markHealthy();
             return out;
         } catch (Throwable e) {
+            if (disableActorNameLcOnSchemaError(e) || disableSpatialHelperColumnsOnSchemaError(e)) {
+                return select(q, reverse);
+            }
             markUnhealthy(e);
             AvilixLoggerMod.LOGGER.error("[AvilixLogger] ClickHouse split query failed", e);
-            return List.of();
+            return selectSplitTablesIndividually(q, reverse, kinds);
         }
+    }
+
+    private List<LogEntry> selectSplitTablesIndividually(LogQuery q, boolean reverse, List<TableKind> kinds) {
+        if (q == null || kinds == null || kinds.isEmpty()) return List.of();
+        ArrayList<LogEntry> out = new ArrayList<>();
+        for (TableKind kind : kinds) {
+            try {
+                StringBuilder sql = new StringBuilder(2048);
+                sql.append(selectFromSplitTable(kind, q, reverse))
+                        .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                        .append(" LIMIT ").append(Math.max(1, q.limit))
+                        .append(" FORMAT JSONEachRow");
+                out.addAll(parseSplitJsonEachRow(execute(sql.toString(), queryTimeoutSec(q))));
+            } catch (Throwable tableError) {
+                if (disableActorNameLcOnSchemaError(tableError) || disableSpatialHelperColumnsOnSchemaError(tableError)) {
+                    try {
+                        StringBuilder retrySql = new StringBuilder(2048);
+                        retrySql.append(selectFromSplitTable(kind, q, reverse))
+                                .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                                .append(" LIMIT ").append(Math.max(1, q.limit))
+                                .append(" FORMAT JSONEachRow");
+                        out.addAll(parseSplitJsonEachRow(execute(retrySql.toString(), queryTimeoutSec(q))));
+                        continue;
+                    } catch (Throwable retryError) {
+                        tableError = retryError;
+                    }
+                }
+                try {
+                    StringBuilder minimalSql = new StringBuilder(2048);
+                    minimalSql.append(selectFromSplitTableMinimal(kind, q, reverse))
+                            .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                            .append(" LIMIT ").append(Math.max(1, q.limit))
+                            .append(" FORMAT JSONEachRow");
+                    out.addAll(parseSplitJsonEachRow(execute(minimalSql.toString(), queryTimeoutSec(q))));
+                    AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse split table query used minimal fallback. table={}, error={}", kind.suffix, tableError.toString());
+                } catch (Throwable minimalError) {
+                    throw new IllegalStateException("ClickHouse could not read table " + kind.suffix
+                            + "; refusing to return a partial page", minimalError);
+                }
+            }
+        }
+        if (readLegacyUnifiedTable) {
+            out.addAll(selectLegacy(q, reverse));
+            out = dedupeById(out);
+        }
+        out.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+        int limit = Math.max(1, q.limit);
+        if (out.size() > limit) return new ArrayList<>(out.subList(0, limit));
+        if (!out.isEmpty()) markHealthy();
+        return out;
     }
 
 
@@ -699,14 +885,65 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 .append(" LIMIT ").append(Math.max(1, q.limit))
                 .append(" FORMAT JSONEachRow");
         try {
-            List<LogEntry> rows = parseFeedJsonEachRow(execute(sql.toString(), timeoutSec()));
+            List<LogEntry> rows = parseFeedJsonEachRow(execute(sql.toString(), queryTimeoutSec(q)));
             markHealthy();
             return rows;
         } catch (Throwable e) {
+            if (disableActorNameLcOnSchemaError(e) || disableSpatialHelperColumnsOnSchemaError(e)) {
+                return selectFeed(q, reverse);
+            }
+            List<LogEntry> fallback = selectFeedMinimal(q, reverse, e);
+            if (fallback != null) return fallback;
             markUnhealthy(e);
             AvilixLoggerMod.LOGGER.error("[AvilixLogger] ClickHouse feed query failed", e);
-            return List.of();
+            throw new IllegalStateException("ClickHouse feed query failed; refusing to return a partial page", e);
         }
+    }
+
+    private List<LogEntry> selectFeedMinimal(LogQuery q, boolean reverse, Throwable original) {
+        try {
+            StringBuilder sql = new StringBuilder(1536);
+            sql.append("SELECT id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, ")
+                    .append("'' AS target_kind, '' AS target_id, 0 AS item_count, '' AS source, '' AS short_text, '' AS extra, 0 AS has_details ")
+                    .append("FROM ").append(qualifiedFeedTable());
+            appendFeedWhere(sql, q, reverse, false);
+            sql.append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                    .append(" LIMIT ").append(Math.max(1, q.limit))
+                    .append(" FORMAT JSONEachRow");
+            List<LogEntry> rows = parseFeedJsonEachRow(execute(sql.toString(), queryTimeoutSec(q)));
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse feed query used minimal fallback after schema/read error: {}", original == null ? "unknown" : original.toString());
+            markHealthy();
+            return rows;
+        } catch (Throwable fallbackError) {
+            if (disableActorNameLcOnSchemaError(fallbackError) || disableSpatialHelperColumnsOnSchemaError(fallbackError)) {
+                return selectFeedMinimal(q, reverse, original);
+            }
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse feed minimal fallback failed: {}", fallbackError.toString());
+            return null;
+        }
+    }
+
+    private boolean disableActorNameLcOnSchemaError(Throwable t) {
+        if (!useActorNameLcFilter || t == null) return false;
+        String msg = String.valueOf(t.getMessage()).toLowerCase(Locale.ROOT);
+        if (msg.contains("actor_name_lc")) {
+            useActorNameLcFilter = false;
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse actor_name_lc is unavailable; falling back to lowerUTF8(actor_name) filters.");
+            return true;
+        }
+        return false;
+    }
+
+
+    private boolean disableSpatialHelperColumnsOnSchemaError(Throwable t) {
+        if (!useSpatialHelperColumns || t == null) return false;
+        String msg = String.valueOf(t.getMessage()).toLowerCase(Locale.ROOT);
+        if (msg.contains("region_x") || msg.contains("region_z") || msg.contains("chunk_x") || msg.contains("chunk_z")) {
+            useSpatialHelperColumns = false;
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse spatial helper columns are unavailable; falling back to x/y/z-only position filters.");
+            return true;
+        }
+        return false;
     }
 
     private String buildSplitSelectSql(LogQuery q, boolean reverse, List<TableKind> kinds) {
@@ -729,7 +966,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private String selectFromSplitTable(TableKind kind, LogQuery q, boolean reverse) {
         StringBuilder sql = new StringBuilder(1024);
         sql.append("SELECT ")
-                .append("id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, source, extra, ")
+                .append("id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, source, ")
+                .append(extraSelectExpr(kind)).append(" AS extra, ")
                 .append(selectExpr(kind, "block_before")).append(" AS block_before, ")
                 .append(selectExpr(kind, "be_before")).append(" AS be_before, ")
                 .append(selectExpr(kind, "block_after")).append(" AS block_after, ")
@@ -744,8 +982,31 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 .append(selectExpr(kind, "container_slots_before")).append(" AS container_slots_before, ")
                 .append(selectExpr(kind, "container_slots_after")).append(" AS container_slots_after ")
                 .append("FROM ").append(qualifiedSplitTable(kind));
-        appendWhere(sql, q, reverse);
+        appendWhere(sql, q, reverse, kind);
         return sql.toString();
+    }
+
+    private String selectFromSplitTableMinimal(TableKind kind, LogQuery q, boolean reverse) {
+        StringBuilder sql = new StringBuilder(768);
+        sql.append("SELECT ")
+                .append("id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, '' AS source, ")
+                .append("'' AS extra, ")
+                .append("'' AS block_before, '' AS be_before, '' AS block_after, '' AS be_after, ")
+                .append("'' AS entity_type, '' AS entity_uuid, '' AS entity_nbt, ")
+                .append("'' AS item_stack, 0 AS count, ")
+                .append("'' AS player_inv_before, '' AS player_inv_after, ")
+                .append("'' AS container_slots_before, '' AS container_slots_after ")
+                .append("FROM ").append(qualifiedSplitTable(kind));
+        appendWhere(sql, q, reverse, kind, false);
+        return sql.toString();
+    }
+
+    private String extraSelectExpr(TableKind kind) {
+        if (kind == TableKind.CHAT) {
+            // Some upgraded tables have historical chat text in `message` while `extra` was added later.
+            return "if(empty(extra), message, extra)";
+        }
+        return "extra";
     }
 
     private String selectExpr(TableKind kind, String column) {
@@ -765,10 +1026,14 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
 
     private void appendFeedWhere(StringBuilder sql, LogQuery q, boolean reverse) {
+        appendFeedWhere(sql, q, reverse, true);
+    }
+
+    private void appendFeedWhere(StringBuilder sql, LogQuery q, boolean reverse, boolean includeOptionalFilters) {
         sql.append(" WHERE ts_ms >= ").append(Math.max(0L, q.sinceTs))
                 .append(" AND ts_ms <= ").append(Math.max(0L, q.untilTs));
 
-        boolean allDims = q.dim == null || "*".equals(q.dim);
+        boolean allDims = isAllDimensions(q.dim);
         if (!allDims) sql.append(" AND dim = ").append(sqlString(q.dim));
 
         if (q.types != null && !q.types.isEmpty()) {
@@ -784,10 +1049,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         }
 
         if (q.actorName != null && !q.actorName.isBlank()) {
-            sql.append(" AND actor_name_lc = ").append(sqlString(q.actorName.toLowerCase(Locale.ROOT)));
+            appendActorWhere(sql, q.actorName);
         }
 
         appendPositionWhere(sql, q);
+        if (includeOptionalFilters) appendFeedOptionalFilters(sql, q);
 
         if (reverse) {
             if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
@@ -796,11 +1062,15 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         }
     }
 
-    private void appendWhere(StringBuilder sql, LogQuery q, boolean reverse) {
+    private void appendWhere(StringBuilder sql, LogQuery q, boolean reverse, TableKind kind) {
+        appendWhere(sql, q, reverse, kind, true);
+    }
+
+    private void appendWhere(StringBuilder sql, LogQuery q, boolean reverse, TableKind kind, boolean includeOptionalFilters) {
         sql.append(" WHERE ts_ms >= ").append(Math.max(0L, q.sinceTs))
                 .append(" AND ts_ms <= ").append(Math.max(0L, q.untilTs));
 
-        boolean allDims = q.dim == null || "*".equals(q.dim);
+        boolean allDims = isAllDimensions(q.dim);
         if (!allDims) sql.append(" AND dim = ").append(sqlString(q.dim));
 
         if (q.types != null && !q.types.isEmpty()) {
@@ -816,15 +1086,96 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         }
 
         if (q.actorName != null && !q.actorName.isBlank()) {
-            sql.append(" AND actor_name_lc = ").append(sqlString(q.actorName.toLowerCase(Locale.ROOT)));
+            appendActorWhere(sql, q.actorName);
         }
 
         appendPositionWhere(sql, q);
+        if (includeOptionalFilters) appendSplitOptionalFilters(sql, q, kind);
 
         if (reverse) {
             if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
         } else {
             if (q.afterId > 0) sql.append(" AND id > ").append(q.afterId);
+        }
+    }
+
+
+    private void appendFeedOptionalFilters(StringBuilder sql, LogQuery q) {
+        if (q == null) return;
+        String block = normalizeSqlNeedle(q.blockIdFilter);
+        if (!block.isBlank()) {
+            appendInsensitiveContainsAny(sql, block, "target_id", "short_text", "extra");
+        }
+        String planeName = normalizeSqlNeedle(q.planeNameFilter);
+        if (!planeName.isBlank()) {
+            appendInsensitiveContainsAny(sql, planeName, "target_id", "short_text", "extra");
+        }
+        String text = normalizeSqlNeedle(q.extraTextFilter);
+        if (!text.isBlank()) {
+            appendInsensitiveContainsAny(sql, text, "target_id", "short_text", "extra", "source");
+        }
+    }
+
+    private void appendSplitOptionalFilters(StringBuilder sql, LogQuery q, TableKind kind) {
+        if (q == null || kind == null) return;
+        String block = normalizeSqlNeedle(q.blockIdFilter);
+        if (!block.isBlank()) {
+            switch (kind) {
+                case BLOCKS, CONTAINERS, COMPAT -> appendInsensitiveContainsAny(sql, block, "block_before", "block_after", "extra", "source");
+                default -> appendInsensitiveContainsAny(sql, block, "extra", "source");
+            }
+        }
+
+        String planeName = normalizeSqlNeedle(q.planeNameFilter);
+        if (!planeName.isBlank()) {
+            switch (kind) {
+                case ENTITIES, COMPAT -> appendInsensitiveContainsAny(sql, planeName, "entity_type", "entity_nbt", "extra", "source");
+                default -> appendInsensitiveContainsAny(sql, planeName, "extra", "source");
+            }
+        }
+
+        String text = normalizeSqlNeedle(q.extraTextFilter);
+        if (!text.isBlank()) {
+            appendInsensitiveContainsAny(sql, text, "extra", "source");
+        }
+    }
+
+    private static void appendInsensitiveContainsAny(StringBuilder sql, String needle, String... columns) {
+        if (sql == null || needle == null || needle.isBlank() || columns == null || columns.length == 0) return;
+        sql.append(" AND (");
+        int n = 0;
+        String lit = sqlString(needle.toLowerCase(Locale.ROOT));
+        for (String column : columns) {
+            if (column == null || column.isBlank()) continue;
+            if (n++ > 0) sql.append(" OR ");
+            sql.append("positionCaseInsensitiveUTF8(").append(column).append(", ").append(lit).append(") > 0");
+        }
+        if (n == 0) sql.append("1");
+        sql.append(')');
+    }
+
+    private static String normalizeSqlNeedle(String s) {
+        if (s == null) return "";
+        String out = s.trim().toLowerCase(Locale.ROOT);
+        while (!out.isEmpty()) {
+            char c0 = out.charAt(0);
+            if (c0 == '\'' || c0 == '"' || c0 == '`' || Character.isWhitespace(c0)) out = out.substring(1).trim();
+            else break;
+        }
+        while (!out.isEmpty()) {
+            char c1 = out.charAt(out.length() - 1);
+            if (c1 == '\'' || c1 == '"' || c1 == '`' || Character.isWhitespace(c1)) out = out.substring(0, out.length() - 1).trim();
+            else break;
+        }
+        return out;
+    }
+
+    private void appendActorWhere(StringBuilder sql, String actorName) {
+        String normalized = safeString(actorName).toLowerCase(Locale.ROOT);
+        if (useActorNameLcFilter) {
+            sql.append(" AND actor_name_lc = ").append(sqlString(normalized));
+        } else {
+            sql.append(" AND lowerUTF8(actor_name) = ").append(sqlString(normalized));
         }
     }
 
@@ -834,11 +1185,13 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             int x = q.exactPos.getX();
             int y = q.exactPos.getY();
             int z = q.exactPos.getZ();
-            sql.append(" AND region_x = ").append(floorDiv(x, 512))
-                    .append(" AND region_z = ").append(floorDiv(z, 512))
-                    .append(" AND chunk_x = ").append(floorDiv(x, 16))
-                    .append(" AND chunk_z = ").append(floorDiv(z, 16))
-                    .append(" AND x = ").append(x)
+            if (useSpatialHelperColumns) {
+                sql.append(" AND region_x = ").append(floorDiv(x, 512))
+                        .append(" AND region_z = ").append(floorDiv(z, 512))
+                        .append(" AND chunk_x = ").append(floorDiv(x, 16))
+                        .append(" AND chunk_z = ").append(floorDiv(z, 16));
+            }
+            sql.append(" AND x = ").append(x)
                     .append(" AND y = ").append(y)
                     .append(" AND z = ").append(z);
         } else if (q.minPos != null && q.maxPos != null) {
@@ -850,11 +1203,13 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             int maxY = Math.max(min.getY(), max.getY());
             int minZ = Math.min(min.getZ(), max.getZ());
             int maxZ = Math.max(min.getZ(), max.getZ());
-            sql.append(" AND region_x BETWEEN ").append(floorDiv(minX, 512)).append(" AND ").append(floorDiv(maxX, 512))
-                    .append(" AND region_z BETWEEN ").append(floorDiv(minZ, 512)).append(" AND ").append(floorDiv(maxZ, 512))
-                    .append(" AND chunk_x BETWEEN ").append(floorDiv(minX, 16)).append(" AND ").append(floorDiv(maxX, 16))
-                    .append(" AND chunk_z BETWEEN ").append(floorDiv(minZ, 16)).append(" AND ").append(floorDiv(maxZ, 16))
-                    .append(" AND x BETWEEN ").append(minX).append(" AND ").append(maxX)
+            if (useSpatialHelperColumns) {
+                sql.append(" AND region_x BETWEEN ").append(floorDiv(minX, 512)).append(" AND ").append(floorDiv(maxX, 512))
+                        .append(" AND region_z BETWEEN ").append(floorDiv(minZ, 512)).append(" AND ").append(floorDiv(maxZ, 512))
+                        .append(" AND chunk_x BETWEEN ").append(floorDiv(minX, 16)).append(" AND ").append(floorDiv(maxX, 16))
+                        .append(" AND chunk_z BETWEEN ").append(floorDiv(minZ, 16)).append(" AND ").append(floorDiv(maxZ, 16));
+            }
+            sql.append(" AND x BETWEEN ").append(minX).append(" AND ").append(maxX)
                     .append(" AND y BETWEEN ").append(minY).append(" AND ").append(maxY)
                     .append(" AND z BETWEEN ").append(minZ).append(" AND ").append(maxZ);
         }
@@ -862,7 +1217,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
     private List<LogEntry> selectLegacy(LogQuery q, boolean reverse) {
         StringBuilder sql = new StringBuilder();
-        boolean allDims = q.dim == null || "*".equals(q.dim);
+        boolean allDims = isAllDimensions(q.dim);
         sql.append("SELECT id, data FROM ").append(qualifiedLegacyTable())
                 .append(" WHERE ts_ms >= ").append(Math.max(0L, q.sinceTs))
                 .append(" AND ts_ms <= ").append(Math.max(0L, q.untilTs));
@@ -882,7 +1237,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         }
 
         if (q.actorName != null && !q.actorName.isBlank()) {
-            sql.append(" AND actor_name = ").append(sqlString(q.actorName));
+            sql.append(" AND lowerUTF8(actor_name) = ").append(sqlString(q.actorName.toLowerCase(Locale.ROOT)));
         }
 
         if (q.exactPos != null) {
@@ -909,32 +1264,33 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
         List<LogEntry> out = new ArrayList<>();
         try {
-            String response = execute(sql.toString(), timeoutSec());
+            String response = execute(sql.toString(), queryTimeoutSec(q));
             if (response == null || response.isBlank()) {
                 markHealthy();
                 return out;
             }
             String[] lines = response.split("\\R");
-            for (String line : lines) {
+            for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+                String line = lines[lineNumber];
                 if (line == null || line.isBlank()) continue;
                 int tab = line.indexOf('\t');
-                if (tab <= 0) continue;
+                if (tab <= 0) throw new IllegalStateException("Invalid unified ClickHouse row at response line " + (lineNumber + 1));
                 long id;
                 try { id = Long.parseLong(line.substring(0, tab).trim()); }
-                catch (NumberFormatException ignored) { continue; }
+                catch (NumberFormatException invalidId) {
+                    throw new IllegalStateException("Invalid unified ClickHouse id at response line " + (lineNumber + 1), invalidId);
+                }
                 String data = line.substring(tab + 1).trim();
-                if (data.isBlank()) continue;
+                if (data.isBlank()) throw new IllegalStateException("Missing unified ClickHouse payload at response line " + (lineNumber + 1));
                 byte[] gz = Base64.getDecoder().decode(data);
                 LogEntry e = GzipJson.fromGzippedJsonBytes(gz, LogEntry.class);
+                if (e == null) throw new IllegalStateException("Empty unified ClickHouse payload at response line " + (lineNumber + 1));
                 e.id = id;
                 out.add(e);
             }
             markHealthy();
         } catch (Throwable e) {
-            if (!splitSchema || readLegacyUnifiedTable) {
-                // In split mode this is expected for fresh installs without the old table.
-                AvilixLoggerMod.LOGGER.debug("[AvilixLogger] ClickHouse legacy query skipped/failed", e);
-            }
+            throw new IllegalStateException("ClickHouse unified-table query failed; refusing to return an empty/partial page", e);
         }
         return out;
     }
@@ -966,23 +1322,24 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         if (response == null || response.isBlank()) return List.of();
         ArrayList<LogEntry> out = new ArrayList<>();
         String[] lines = response.split("\\R");
-        for (String line : lines) {
+        for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+            String line = lines[lineNumber];
             if (line == null || line.isBlank()) continue;
             try {
                 JsonObject o = JsonParser.parseString(line).getAsJsonObject();
                 LogEntry e = new LogEntry();
-                e.id = getLong(o, "id");
-                e.ts = getLong(o, "ts_ms");
+                e.id = getRequiredLong(o, "id");
+                e.ts = getRequiredLong(o, "ts_ms");
                 e.dim = nullIfBlank(getString(o, "dim"));
-                int action = (int) getLong(o, "action");
+                int action = (int) getRequiredLong(o, "action");
                 ActionType[] values = ActionType.values();
-                e.type = action >= 0 && action < values.length ? values[action] : ActionType.BLOCK_INTERACT;
+                e.type = action >= 0 && action < values.length ? values[action] : null;
                 e.actorName = nullIfBlank(getString(o, "actor_name"));
                 e.actorUuid = parseUuid(getString(o, "actor_uuid"));
                 e.source = nullIfBlank(getString(o, "source"));
-                e.x = (int) getLong(o, "x");
-                e.y = (int) getLong(o, "y");
-                e.z = (int) getLong(o, "z");
+                e.x = (int) getRequiredLong(o, "x");
+                e.y = (int) getRequiredLong(o, "y");
+                e.z = (int) getRequiredLong(o, "z");
                 String targetKind = getString(o, "target_kind");
                 String targetId = getString(o, "target_id");
                 String shortText = getString(o, "short_text");
@@ -991,7 +1348,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 e.extra = nullIfBlank(getString(o, "extra"));
                 if (e.type == ActionType.CHAT_MESSAGE && e.extra == null) e.extra = shortText;
                 out.add(e);
-            } catch (Throwable ignored) {}
+            } catch (Throwable parseError) {
+                throw new IllegalStateException("Invalid ClickHouse feed row at response line " + (lineNumber + 1), parseError);
+            }
         }
         return out;
     }
@@ -1017,30 +1376,33 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         if (response == null || response.isBlank()) return List.of();
         ArrayList<LogEntry> out = new ArrayList<>();
         String[] lines = response.split("\\R");
-        for (String line : lines) {
+        for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+            String line = lines[lineNumber];
             if (line == null || line.isBlank()) continue;
             try {
                 JsonObject o = JsonParser.parseString(line).getAsJsonObject();
                 out.add(fromJson(o));
-            } catch (Throwable ignored) {}
+            } catch (Throwable parseError) {
+                throw new IllegalStateException("Invalid ClickHouse detail row at response line " + (lineNumber + 1), parseError);
+            }
         }
         return out;
     }
 
     private LogEntry fromJson(JsonObject o) {
         LogEntry e = new LogEntry();
-        e.id = getLong(o, "id");
-        e.ts = getLong(o, "ts_ms");
+        e.id = getRequiredLong(o, "id");
+        e.ts = getRequiredLong(o, "ts_ms");
         e.dim = nullIfBlank(getString(o, "dim"));
-        int action = (int) getLong(o, "action");
+        int action = (int) getRequiredLong(o, "action");
         ActionType[] values = ActionType.values();
         e.type = action >= 0 && action < values.length ? values[action] : null;
         e.actorName = nullIfBlank(getString(o, "actor_name"));
         e.actorUuid = parseUuid(getString(o, "actor_uuid"));
         e.source = nullIfBlank(getString(o, "source"));
-        e.x = (int) getLong(o, "x");
-        e.y = (int) getLong(o, "y");
-        e.z = (int) getLong(o, "z");
+        e.x = (int) getRequiredLong(o, "x");
+        e.y = (int) getRequiredLong(o, "y");
+        e.z = (int) getRequiredLong(o, "z");
         e.blockBefore = nullIfBlank(getString(o, "block_before"));
         e.beBefore = nullIfBlank(getString(o, "be_before"));
         e.blockAfter = nullIfBlank(getString(o, "block_after"));
@@ -1139,6 +1501,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         for (TableKind kind : splitKinds()) tables.add(qualifiedSplitTable(kind));
 
         for (String table : tables) {
+            tryExecute("ALTER TABLE " + table + " ADD INDEX IF NOT EXISTS idx_ts_ms ts_ms TYPE minmax GRANULARITY 1");
+            tryExecute("ALTER TABLE " + table + " ADD INDEX IF NOT EXISTS idx_id id TYPE minmax GRANULARITY 1");
             tryExecute("ALTER TABLE " + table + " ADD INDEX IF NOT EXISTS idx_actor_uuid actor_uuid TYPE bloom_filter(0.01) GRANULARITY 4");
             tryExecute("ALTER TABLE " + table + " ADD INDEX IF NOT EXISTS idx_actor_name_lc actor_name_lc TYPE bloom_filter(0.01) GRANULARITY 4");
             tryExecute("ALTER TABLE " + table + " ADD INDEX IF NOT EXISTS idx_source source TYPE set(1024) GRANULARITY 4");
@@ -1178,7 +1542,30 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
     private static int timeoutSec() {
         try { return Math.max(1, LoggerConfig.VALUES.clickHouseSelectQueryTimeoutSec.get()); }
-        catch (Throwable ignored) { return 5; }
+        catch (Throwable ignored) { return 15; }
+    }
+
+    private static boolean isAllDimensions(String dim) {
+        return dim == null || dim.isBlank() || "*".equals(dim);
+    }
+
+    private static boolean isLongOrGlobalQuery(LogQuery q) {
+        if (q == null) return false;
+        boolean wholeDimension = q.exactPos == null && q.minPos == null && q.maxPos == null;
+        boolean interactiveWholeWorld = wholeDimension && q.debugSource != null
+                && (q.debugSource.startsWith("gui") || q.debugSource.startsWith("command"));
+        return isAllDimensions(q.dim)
+                || interactiveWholeWorld
+                || (q.untilTs > q.sinceTs && q.untilTs - q.sinceTs >= 30L * 24L * 60L * 60_000L)
+                || (q.debugSource != null && q.debugSource.startsWith("rollback"));
+    }
+
+    private static int queryTimeoutSec(LogQuery q) {
+        if (isLongOrGlobalQuery(q)) {
+            try { return Math.max(timeoutSec(), LoggerConfig.VALUES.clickHouseWorldQueryTimeoutSec.get()); }
+            catch (Throwable ignored) {}
+        }
+        return timeoutSec();
     }
 
     private static String normalizeHttpEndpoint(String configured) {
@@ -1245,16 +1632,16 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         if (e == null || e.type == null) return new TargetInfo("unknown", "", "");
         return switch (e.type) {
             case BLOCK_BREAK -> targetBlock(e.blockBefore, e.extra);
-            case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> targetBlock(e.blockAfter, e.extra);
+            case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> targetBlock(e.blockAfter, e.extra);
             case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT,
-                 PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
+                 ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 ENTITY_INTERACT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
+                 ENTITY_INTERACT, ENTITY_ATTACK, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
             case CHAT_MESSAGE -> new TargetInfo("chat", "", safeString(e.extra));
             case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, TRAIN_CONTROL_START, TRAIN_CONTROL_STOP ->
                     new TargetInfo("train", extractExtraName(e.extra, "trainName", "поезд"), safeString(e.extra));
-            case PLAYER_DEATH, PLAYER_JOIN, PLAYER_LEAVE ->
+            case PLAYER_DEATH, PLAYER_JOIN, PLAYER_LEAVE, PLAYER_DIMENSION_CHANGE, PLAYER_RESPAWN, GUI_OPEN ->
                     new TargetInfo("player", safeString(e.actorName), safeString(e.actorName));
             default -> new TargetInfo("other", "", safeString(e.extra));
         };
@@ -1324,6 +1711,13 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private static long getLong(JsonObject o, String key) {
         try { return o != null && o.has(key) && !o.get(key).isJsonNull() ? o.get(key).getAsLong() : 0L; }
         catch (Throwable ignored) { return 0L; }
+    }
+
+    private static long getRequiredLong(JsonObject o, String key) {
+        if (o == null || !o.has(key) || o.get(key).isJsonNull()) {
+            throw new IllegalArgumentException("Missing numeric ClickHouse field: " + key);
+        }
+        return o.get(key).getAsLong();
     }
 
     private static String getString(JsonObject o, String key) {

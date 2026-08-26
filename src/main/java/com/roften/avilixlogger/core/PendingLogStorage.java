@@ -8,12 +8,12 @@ import java.util.concurrent.ArrayBlockingQueue;
 /**
  * Non-blocking placeholder storage used while the real DB-backed storage is
  * being initialized on a background thread. This prevents player login / tick
- * thread stalls when MySQL is slow or temporarily unavailable.
+ * thread stalls while ClickHouse is starting or temporarily unavailable.
  */
 public final class PendingLogStorage implements LogStorage {
 
     private final ArrayBlockingQueue<LogEntry> pending =
-            new ArrayBlockingQueue<>(Math.max(10_000, LoggerConfig.VALUES.dbQueueCapacity.get()));
+            new ArrayBlockingQueue<>(Math.max(10_000, LoggerConfig.VALUES.clickHouseQueueCapacity.get()));
 
     private volatile LogStorage delegate;
 
@@ -32,13 +32,15 @@ public final class PendingLogStorage implements LogStorage {
     @Override
     public List<LogEntry> query(LogQuery q) {
         LogStorage d = delegate;
-        return d != null ? d.query(q) : List.of();
+        if (d == null) throw new IllegalStateException("ClickHouse storage is still initializing");
+        return d.query(q);
     }
 
     @Override
     public List<LogEntry> queryReverse(LogQuery q) {
         LogStorage d = delegate;
-        return d != null ? d.queryReverse(q) : List.of();
+        if (d == null) throw new IllegalStateException("ClickHouse storage is still initializing");
+        return d.queryReverse(q);
     }
 
     @Override

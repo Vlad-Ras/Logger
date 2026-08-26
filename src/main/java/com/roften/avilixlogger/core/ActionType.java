@@ -59,5 +59,20 @@ public enum ActionType {
     TRAIN_SCHEDULE_PUT,
 
     // Append-only: generic entity interaction (villagers / NPCs / storekeepers / etc.)
-    ENTITY_INTERACT
+    ENTITY_INTERACT,
+
+    // Append-only: expanded player/world/item coverage
+    BLOCK_USE,
+    ITEM_USE,
+    ITEM_CONSUME,
+    ENTITY_ATTACK,
+    PLAYER_DIMENSION_CHANGE,
+    PLAYER_RESPAWN,
+
+    // Append-only: detailed item/projectile/menu audit coverage
+    ITEM_USE_START,
+    ITEM_USE_STOP,
+    PROJECTILE_SHOOT,
+    PROJECTILE_HIT,
+    GUI_OPEN
 }

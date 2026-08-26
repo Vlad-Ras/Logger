@@ -19,38 +19,20 @@ public final class LoggerConfig {
     public static final class Values {
         public final ModConfigSpec.BooleanValue enabled;
         public final ModConfigSpec.IntValue keepDays;
-        public final ModConfigSpec.ConfigValue<String> storageBackend;
-
-        public final ModConfigSpec.ConfigValue<String> dbHost;
-        public final ModConfigSpec.IntValue dbPort;
-        public final ModConfigSpec.ConfigValue<String> dbName;
-        public final ModConfigSpec.ConfigValue<String> dbUser;
-        public final ModConfigSpec.ConfigValue<String> dbPassword;
-        public final ModConfigSpec.IntValue dbPoolSize;
-        public final ModConfigSpec.IntValue dbBatchSize;
-        public final ModConfigSpec.IntValue dbFlushIntervalMs;
-        public final ModConfigSpec.IntValue dbQueueCapacity;
-        public final ModConfigSpec.IntValue dbCleanupBatchSize;
-        public final ModConfigSpec.IntValue dbCleanupMaxBatchesPerRun;
-        public final ModConfigSpec.IntValue dbCleanupQueryTimeoutSec;
-        public final ModConfigSpec.IntValue dbSelectQueryTimeoutSec;
 
         public final ModConfigSpec.ConfigValue<String> clickHouseUrl;
         public final ModConfigSpec.ConfigValue<String> clickHouseDatabase;
         public final ModConfigSpec.ConfigValue<String> clickHouseTable;
         public final ModConfigSpec.ConfigValue<String> clickHouseUser;
         public final ModConfigSpec.ConfigValue<String> clickHousePassword;
-        public final ModConfigSpec.IntValue clickHousePoolSize;
         public final ModConfigSpec.IntValue clickHouseBatchSize;
         public final ModConfigSpec.IntValue clickHouseFlushIntervalMs;
         public final ModConfigSpec.IntValue clickHouseQueueCapacity;
         public final ModConfigSpec.IntValue clickHouseSelectQueryTimeoutSec;
+        public final ModConfigSpec.IntValue clickHouseWorldQueryTimeoutSec;
         public final ModConfigSpec.BooleanValue clickHouseAsyncInsert;
         public final ModConfigSpec.BooleanValue clickHouseWaitForAsyncInsert;
-        public final ModConfigSpec.BooleanValue dualPreferClickHouseReads;
-        public final ModConfigSpec.ConfigValue<String> dualWriteMode;
-        public final ModConfigSpec.ConfigValue<String> dualReadMode;
-        public final ModConfigSpec.IntValue dualFallbackCooldownMs;
+        public final ModConfigSpec.IntValue clickHouseHealthCooldownMs;
         public final ModConfigSpec.ConfigValue<String> clickHouseSchemaMode;
         public final ModConfigSpec.ConfigValue<String> clickHouseTablePrefix;
         public final ModConfigSpec.BooleanValue clickHouseReadLegacyUnifiedTable;
@@ -73,6 +55,16 @@ public final class LoggerConfig {
         public final ModConfigSpec.BooleanValue logContainers;
         public final ModConfigSpec.BooleanValue logItemCraftSmelt;
         public final ModConfigSpec.BooleanValue logChat;
+        public final ModConfigSpec.BooleanValue logPlayerLifecycle;
+        public final ModConfigSpec.BooleanValue logItemUse;
+        public final ModConfigSpec.BooleanValue logItemConsume;
+        public final ModConfigSpec.BooleanValue logItemUsePhases;
+        public final ModConfigSpec.BooleanValue logProjectileShots;
+        public final ModConfigSpec.BooleanValue logProjectileHits;
+        public final ModConfigSpec.BooleanValue logGuiOpen;
+        public final ModConfigSpec.BooleanValue logEntityAttacks;
+        public final ModConfigSpec.BooleanValue logGenericBlockUse;
+        public final ModConfigSpec.IntValue genericActionCooldownMs;
         public final ModConfigSpec.IntValue interactionScanTicks;
         public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInDeltaLogs;
         public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInInteractLogs;
@@ -87,48 +79,23 @@ public final class LoggerConfig {
         Values(ModConfigSpec.Builder b) {
             b.push("general");
             enabled = b.comment("Master switch.").define("enabled", true);
-            keepDays = b.comment("Delete log rows older than N days. Set to 0 to disable automatic cleanup.")
-                    .defineInRange("keepDays", 30, 0, 365);
-            storageBackend = b.comment("Storage backend: mysql, clickhouse, dual. Recommended migration mode: dual + dualWriteMode=primary_only + dualReadMode=smart_merge, so new logs go only to ClickHouse while old MySQL logs remain readable with minimal MySQL load.")
-                    .define("storageBackend", "dual");
-            b.pop();
-
-            b.push("mysql");
-            dbHost = b.comment("MySQL host (XAMPP default: 127.0.0.1)").define("host", "127.0.0.1");
-            dbPort = b.comment("MySQL port (XAMPP default: 3306)").defineInRange("port", 3306, 1, 65535);
-            dbName = b.comment("Database name. Must exist (create it in phpMyAdmin or via SQL).")
-                    .define("database", "minecraft");
-            dbUser = b.comment("Database user (XAMPP default: root)").define("user", "root");
-            dbPassword = b.comment("Database password (XAMPP default: empty)").define("password", "");
-            dbPoolSize = b.comment("Connection pool size.").defineInRange("poolSize", 5, 1, 50);
-            dbBatchSize = b.comment("Rows per INSERT batch.").defineInRange("batchSize", 1000, 1, 5000);
-            dbFlushIntervalMs = b.comment("Force flush interval for the writer thread (ms).")
-                    .defineInRange("flushIntervalMs", 500, 50, 5000);
-            dbQueueCapacity = b.comment("In-memory queue capacity. If full, new logs will be dropped to protect TPS.")
-                    .defineInRange("queueCapacity", 200000, 10000, 1000000);
-            dbCleanupBatchSize = b.comment("How many old rows to delete per cleanup statement. Smaller values reduce lock pressure.")
-                    .defineInRange("cleanupBatchSize", 2000, 100, 50000);
-            dbCleanupMaxBatchesPerRun = b.comment("How many cleanup DELETE batches may run in one periodic cleanup pass.")
-                    .defineInRange("cleanupMaxBatchesPerRun", 4, 1, 100);
-            dbCleanupQueryTimeoutSec = b.comment("Statement timeout for cleanup DELETE queries. Keeps shutdown responsive when DB is under load.")
-                    .defineInRange("cleanupQueryTimeoutSec", 3, 1, 60);
-            dbSelectQueryTimeoutSec = b.comment("Statement timeout for SELECT queries used by lookup / GUI. Prevents the GUI from hanging forever on heavy scans.")
-                    .defineInRange("selectQueryTimeoutSec", 5, 1, 60);
+            keepDays = b.comment("Delete log rows older than N days. Set to 0 to keep history indefinitely.")
+                    .defineInRange("keepDays", 365, 0, 3650);
             b.pop();
 
             b.push("clickhouse");
-            clickHouseUrl = b.comment("ClickHouse JDBC URL. Keep /default here if the logger should auto-create the database.")
-                    .define("url", "jdbc:clickhouse:http://127.0.0.1:8123/default");
+            clickHouseUrl = b.comment("ClickHouse HTTP endpoint. The database below is created automatically.")
+                    .define("url", "http://127.0.0.1:8123");
             clickHouseDatabase = b.comment("ClickHouse database name for logger tables.")
                     .define("database", "avilix_logger");
-            clickHouseTable = b.comment("Legacy ClickHouse unified table name. In split schema this is used only for optional migration reads.")
+            clickHouseTable = b.comment("Previous unified ClickHouse table name. Used only when compatibility reads are enabled.")
                     .define("table", "avilixlogger_actions");
             clickHouseSchemaMode = b.comment("ClickHouse schema mode: split = optimized separate tables by log domain; legacy = old single-table storage.")
                     .define("schemaMode", "split");
             clickHouseTablePrefix = b.comment("Prefix for split ClickHouse tables. The logger creates: <prefix>_blocks, _containers, _entities, _items, _players, _chat, _compat.")
                     .define("tablePrefix", "avilixlogger");
-            clickHouseReadLegacyUnifiedTable = b.comment("When schemaMode=split, also read the old unified ClickHouse table for migration/backward compatibility.")
-                    .define("readLegacyUnifiedTable", true);
+            clickHouseReadLegacyUnifiedTable = b.comment("Compatibility read for the old unified ClickHouse table. Disabled by default; this does not read or migrate MySQL.")
+                    .define("readLegacyUnifiedTable", false);
             clickHouseUseZstdCodec = b.comment("Use ZSTD codecs on large ClickHouse String columns. Reduces disk usage for SNBT/JSON-heavy logs.")
                     .define("useZstdCodec", true);
             clickHouseUseFeedTable = b.comment("Use a lightweight <prefix>_feed table for GUI/list queries. Details and rollback still read from detail tables.")
@@ -140,39 +107,33 @@ public final class LoggerConfig {
             clickHouseStoreNonRollbackDetails = b.comment("Store full details for non-rollback events too. Disable to reduce database weight.")
                     .define("storeNonRollbackDetails", false);
             clickHouseFeedKeepDays = b.comment("Retention for the lightweight feed table. 0 = use general keepDays.")
-                    .defineInRange("feedKeepDays", 90, 0, 3650);
+                    .defineInRange("feedKeepDays", 0, 0, 3650);
             clickHouseDetailKeepDays = b.comment("Retention for heavy detail/rollback tables. 0 = use general keepDays.")
-                    .defineInRange("detailKeepDays", 30, 0, 3650);
+                    .defineInRange("detailKeepDays", 0, 0, 3650);
             clickHouseChatKeepDays = b.comment("Retention for chat logs in ClickHouse. 0 = use detailKeepDays/general keepDays.")
-                    .defineInRange("chatKeepDays", 14, 0, 3650);
+                    .defineInRange("chatKeepDays", 0, 0, 3650);
             clickHouseCompatKeepDays = b.comment("Retention for compat logs such as planes/trains/aeronautics. 0 = use detailKeepDays/general keepDays.")
-                    .defineInRange("compatKeepDays", 60, 0, 3650);
+                    .defineInRange("compatKeepDays", 0, 0, 3650);
             clickHouseAddSkippingIndexes = b.comment("Create ClickHouse data skipping indexes for actor/target/block/item/entity filters.")
                     .define("addSkippingIndexes", true);
             clickHouseUser = b.comment("ClickHouse user.").define("user", "default");
             clickHousePassword = b.comment("ClickHouse password.").define("password", "");
-            clickHousePoolSize = b.comment("ClickHouse connection pool size. Usually 1-3 is enough for one writer plus GUI queries.")
-                    .defineInRange("poolSize", 3, 1, 20);
-            clickHouseBatchSize = b.comment("Rows per ClickHouse INSERT batch. ClickHouse likes larger batches than MySQL.")
+            clickHouseBatchSize = b.comment("Rows per ClickHouse INSERT batch.")
                     .defineInRange("batchSize", 5000, 100, 100000);
             clickHouseFlushIntervalMs = b.comment("Force flush interval for ClickHouse writer thread (ms).")
                     .defineInRange("flushIntervalMs", 1000, 100, 10000);
             clickHouseQueueCapacity = b.comment("In-memory ClickHouse queue capacity. If full, new logs are dropped to protect TPS.")
                     .defineInRange("queueCapacity", 500000, 10000, 2000000);
             clickHouseSelectQueryTimeoutSec = b.comment("Statement timeout for ClickHouse SELECT queries used by lookup / GUI.")
-                    .defineInRange("selectQueryTimeoutSec", 5, 1, 120);
+                    .defineInRange("selectQueryTimeoutSec", 15, 1, 600);
+            clickHouseWorldQueryTimeoutSec = b.comment("Timeout for whole-world, all-dimension and 30+ day queries. They run outside the server tick.")
+                    .defineInRange("worldQueryTimeoutSec", 600, 5, 3600);
             clickHouseAsyncInsert = b.comment("Enable ClickHouse server-side async inserts with wait_for_async_insert control.")
                     .define("asyncInsert", true);
             clickHouseWaitForAsyncInsert = b.comment("When asyncInsert is enabled, wait until ClickHouse confirms the buffered insert.")
                     .define("waitForAsyncInsert", true);
-            dualPreferClickHouseReads = b.comment("In storageBackend=dual, prefer ClickHouse for GUI/rollback reads. If false, MySQL is read first.")
-                    .define("dualPreferClickHouseReads", true);
-            dualWriteMode = b.comment("Dual write mode: primary_only/clickhouse_only = write new logs only to preferred storage (ClickHouse by default) and keep MySQL read-only; mirror = write every log to ClickHouse and MySQL; failover = write to ClickHouse while healthy, otherwise write to MySQL only.")
-                    .define("dualWriteMode", "primary_only");
-            dualReadMode = b.comment("Dual read mode: smart_merge = read ClickHouse first and query MySQL only when ClickHouse cannot fill the page; merge = always query ClickHouse and MySQL, then deduplicate/sort results; primary_fallback = use MySQL only if ClickHouse fails/returns empty.")
-                    .define("dualReadMode", "smart_merge");
-            dualFallbackCooldownMs = b.comment("After a ClickHouse/MySQL writer or query failure, keep that backend marked unhealthy for this many milliseconds before using it for new failover writes again.")
-                    .defineInRange("dualFallbackCooldownMs", 10000, 1000, 300000);
+            clickHouseHealthCooldownMs = b.comment("How long ClickHouse remains marked unhealthy after a failed request (ms).")
+                    .defineInRange("healthCooldownMs", 10000, 1000, 300000);
             b.pop();
 
             b.push("async");
@@ -189,6 +150,26 @@ public final class LoggerConfig {
             logItemCraftSmelt = b.define("logItemCraftSmelt", true);
             logChat = b.comment("Log chat messages (vanilla server chat packets).")
                     .define("logChat", true);
+            logPlayerLifecycle = b.comment("Log low-noise player lifecycle events: dimension change and respawn.")
+                    .define("logPlayerLifecycle", true);
+            logItemUse = b.comment("Log right-click item use. Protected by genericActionCooldownMs to prevent spam.")
+                    .define("logItemUse", true);
+            logItemConsume = b.comment("Log finished item usage such as eating/drinking/consuming.")
+                    .define("logItemConsume", true);
+            logItemUsePhases = b.comment("Log long item use phases: bow/crossbow charge/release, drinking potions, shields and similar hold-use actions.")
+                    .define("logItemUsePhases", true);
+            logProjectileShots = b.comment("Log player projectile launches: arrows, crossbow shots, thrown potions, tridents, snowballs and similar projectiles.")
+                    .define("logProjectileShots", true);
+            logProjectileHits = b.comment("Log projectile impacts/hits when NeoForge exposes ProjectileImpactEvent or damage source data.")
+                    .define("logProjectileHits", true);
+            logGuiOpen = b.comment("Log non-container GUI/menu opens such as crafting table, anvil, villager trading and modded menus. Container opens stay under CONTAINER_OPEN.")
+                    .define("logGuiOpen", true);
+            logEntityAttacks = b.comment("Log player attacks on entities. Protected by genericActionCooldownMs to prevent combat spam.")
+                    .define("logEntityAttacks", true);
+            logGenericBlockUse = b.comment("Log right-click block use even when the block state does not change. Useful for audits, but noisy; protected by genericActionCooldownMs.")
+                    .define("logGenericBlockUse", true);
+            genericActionCooldownMs = b.comment("Per-player cooldown for generic ITEM_USE/BLOCK_USE/ENTITY_ATTACK logs. Keeps expanded logging from flooding ClickHouse.")
+                    .defineInRange("genericActionCooldownMs", 500, 0, 10000);
             interactionScanTicks = b.comment("How many delayed ticks to watch after block interaction for state/NBT changes. Lower = less TPS impact.")
                     .defineInRange("interactionScanTicks", 1, 1, 10);
             storeVerboseBeSnapshotsInDeltaLogs = b.comment("Store full before/after block-entity NBT inside each CONTAINER_PUT/CONTAINER_TAKE delta log. Disabling removes large duplicate payloads.")
