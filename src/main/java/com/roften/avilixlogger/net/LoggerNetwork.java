@@ -7,6 +7,7 @@ import com.roften.avilixlogger.core.LogEntry;
 import com.roften.avilixlogger.core.LogQuery;
 import com.roften.avilixlogger.core.LoggerServerData;
 import com.roften.avilixlogger.core.LoggerRuntime;
+import com.roften.avilixlogger.core.RollbackPlanManager;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -121,6 +122,7 @@ public final class LoggerNetwork {
             PENDING_GUI_DETAILS_SEQ.remove(uuid);
             LastQueryManager.clear(player);
             ChatLogPager.clear(player);
+            RollbackPlanManager.clear(uuid);
             pruneQueuedPageTasks(uuid);
             pruneQueuedDetailsTasks(uuid);
         }
@@ -276,6 +278,7 @@ public final class LoggerNetwork {
         r.playToClient(S2CLogPagePayload.TYPE, S2CLogPagePayload.STREAM_CODEC, LoggerNetwork::handleLogPageClient);
         r.playToClient(S2CLogDetailsPayload.TYPE, S2CLogDetailsPayload.STREAM_CODEC, LoggerNetwork::handleDetailsClient);
         r.playToClient(S2CInspectToolPayload.TYPE, S2CInspectToolPayload.STREAM_CODEC, LoggerNetwork::handleInspectToolClient);
+        r.playToClient(S2CRollbackPreviewPayload.TYPE, S2CRollbackPreviewPayload.STREAM_CODEC, LoggerNetwork::handleRollbackPreviewClient);
     }
 
     // -------- client handlers (reflection-dispatched) --------
@@ -294,6 +297,10 @@ public final class LoggerNetwork {
 
     private static void handleInspectToolClient(S2CInspectToolPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> invokeClientHook("acceptInspectTool", new Class<?>[] { S2CInspectToolPayload.class }, new Object[] { payload }));
+    }
+
+    private static void handleRollbackPreviewClient(S2CRollbackPreviewPayload payload, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> invokeClientHook("acceptRollbackPreview", new Class<?>[] { S2CRollbackPreviewPayload.class }, new Object[] { payload }));
     }
 
     private static void invokeClientHook(String method, Class<?>[] sig, Object[] args) {

@@ -2,6 +2,7 @@ package com.roften.avilixlogger.client;
 
 import com.roften.avilixlogger.client.gui.LogViewerClientHooks;
 import com.roften.avilixlogger.client.gui.LogViewerKeybinds;
+import com.roften.avilixlogger.client.gui.RollbackPreviewRenderer;
 
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.api.distmarker.Dist;
@@ -26,5 +27,6 @@ public final class ClientBootstrap {
         NeoForge.EVENT_BUS.addListener(LogViewerClientHooks::onLogin);
         NeoForge.EVENT_BUS.addListener(LogViewerClientHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(LogViewerKeybinds::onClientTick);
+        NeoForge.EVENT_BUS.addListener(RollbackPreviewRenderer::onRenderLevel);
     }
 }

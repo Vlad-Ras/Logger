@@ -124,7 +124,7 @@ public final class RollbackEngine {
         // For block/BE-related actions we only need the oldest "before" snapshot per position.
         // Applying per-entry creates huge lag for radius rollbacks (same position may be written many times).
         // We therefore collect a final snapshot per position and apply once at the end.
-        java.util.HashMap<BlockPos, BlockSnapshot> blockSnapshots = apply ? new java.util.HashMap<>() : null;
+        java.util.HashMap<BlockPos, BlockSnapshot> blockSnapshots = new java.util.HashMap<>();
 
         long beforeId = Long.MAX_VALUE;
         while (true) {
@@ -135,7 +135,7 @@ public final class RollbackEngine {
             if (batch.isEmpty()) break;
 
             for (LogEntry e : batch) {
-                if (apply && isBlockRestoreType(e.type)) {
+                if (isBlockRestoreType(e.type)) {
                     BlockPos pos = new BlockPos(e.x, e.y, e.z);
                     // Overwrite as we go backwards in time; the last value wins => oldest snapshot.
                     blockSnapshots.put(pos, new BlockSnapshot(e.blockBefore, e.beBefore, e.containerSlotsBefore, e.type));
@@ -152,7 +152,7 @@ public final class RollbackEngine {
         // 1) all blockstates first
         // 2) all block entities / inventories second
         // This is much safer for Create and other multiblock/modded blocks than restoring one position fully at a time.
-        if (apply && blockSnapshots != null && !blockSnapshots.isEmpty()) {
+        if (!blockSnapshots.isEmpty()) {
             java.util.ArrayList<java.util.Map.Entry<BlockPos, BlockSnapshot>> ordered = new java.util.ArrayList<>(blockSnapshots.entrySet());
             ordered.sort((a, b) -> {
                 BlockPos pa = a.getKey();
@@ -177,7 +177,7 @@ public final class RollbackEngine {
                     BlockState before = NbtSerde.readBlockState(level, snap.blockBeforeSnbt);
                     if (before != null) {
                         int flags = rollbackSetBlockFlags(before);
-                        level.setBlock(pos, before, flags);
+                        if (apply) level.setBlock(pos, before, flags);
                         report.blocksRestored++;
                         appliedAny.add(pos);
                         if (isCreateState(before) || looksLikeCreateStateSnbt(snap.blockBeforeSnbt)) createTouched.add(pos.immutable());
@@ -193,13 +193,13 @@ public final class RollbackEngine {
 
                 boolean any = appliedAny.contains(pos);
                 if (snap.beBeforeSnbt != null) {
-                    NbtSerde.readBlockEntity(level, pos, snap.beBeforeSnbt);
+                    if (apply) NbtSerde.readBlockEntity(level, pos, snap.beBeforeSnbt);
                     report.blockEntitiesRestored++;
                     any = true;
                     if (looksLikeCreatePayload(snap.beBeforeSnbt)) createTouched.add(pos.immutable());
                 }
                 if (snap.containerSlotsBeforeSnbt != null) {
-                    ContainerSlotSnapshot.apply(level, pos, snap.containerSlotsBeforeSnbt);
+                    if (apply) ContainerSlotSnapshot.apply(level, pos, snap.containerSlotsBeforeSnbt);
                     report.containersRestored++;
                     any = true;
                     if (isCreateState(level.getBlockState(pos))) createTouched.add(pos.immutable());
@@ -208,7 +208,7 @@ public final class RollbackEngine {
                 else report.onSkipped("no_snapshot");
             }
 
-            if (!createTouched.isEmpty()) {
+            if (apply && !createTouched.isEmpty()) {
                 for (BlockPos pos : createTouched) {
                     if (pos == null || !level.hasChunkAt(pos)) continue;
                     try {

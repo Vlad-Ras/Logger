@@ -6,6 +6,7 @@ import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
 import com.roften.avilixlogger.net.S2CLogPagePayload;
 import com.roften.avilixlogger.net.S2CLogDetailsPayload;
 import com.roften.avilixlogger.net.S2CInspectToolPayload;
+import com.roften.avilixlogger.net.S2CRollbackPreviewPayload;
 
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
@@ -24,12 +25,14 @@ public final class LogViewerClientHooks {
 
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
         OPEN_SCREEN = null;
+        RollbackPreviewRenderer.clear();
         // Inform server that this player supports the GUI payloads.
         PacketDistributor.sendToServer(new C2SHelloPayload());
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
         OPEN_SCREEN = null;
+        RollbackPreviewRenderer.clear();
     }
 
     public static void open() {
@@ -54,5 +57,9 @@ public final class LogViewerClientHooks {
     public static void acceptInspectTool(S2CInspectToolPayload payload) {
         if (payload == null) return;
         if (OPEN_SCREEN != null) OPEN_SCREEN.applyInspectTool(payload);
+    }
+
+    public static void acceptRollbackPreview(S2CRollbackPreviewPayload payload) {
+        RollbackPreviewRenderer.accept(payload);
     }
 }

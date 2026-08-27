@@ -307,6 +307,23 @@ public final class LoggerCommands {
         return new long[]{start, end};
     }
 
+    /** Parses an absolute rollback target moment in the server timezone. */
+    private static Long parseTargetMomentMillis(String value) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim().replace('_', 'T').replace('@', 'T');
+        ZoneId zone = ZoneId.systemDefault();
+        try {
+            if (!normalized.contains("T")) {
+                return LocalDate.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE)
+                        .atStartOfDay(zone).toInstant().toEpochMilli();
+            }
+            return java.time.LocalDateTime.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                    .atZone(zone).toInstant().toEpochMilli();
+        } catch (DateTimeParseException ignored) {
+            return null;
+        }
+    }
+
     private static String formatDuration(int seconds) {
         int s = Math.max(0, seconds);
         if (s < 60) return s + "s";
@@ -1459,11 +1476,12 @@ public final class LoggerCommands {
         src.sendSystemMessage(Component.literal("  /log i [флаги...]   |   /log last [флаги...]" ).withStyle(ChatFormatting.GRAY));
 
         src.sendSystemMessage(Component.literal("Откат").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log rollback --t 2h --r 30 --m grief   (предпросмотр)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log rollback --t 2h --r 30 --m grief --c   (применить)" ).withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("  /log rollback --t 2h --r 30 --m grief   (состояние 2 часа назад)" ).withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("  /log rollback --at 2026-08-27T12:30 --we   (состояние на точный момент)" ).withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("  /log rollback --confirm   |   /log rollback --cancel" ).withStyle(ChatFormatting.GRAY));
 
         src.sendSystemMessage(Component.literal("Флаги (коротко)").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  --t time | --d date | --r radius (0 = WORLD) | --m mode | --p player | --di dim | --ad all-dims | --c confirm" ).withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("  --t time | --at yyyy-MM-ddTHH:mm | --d date (00:00) | --r radius | --we | --block" ).withStyle(ChatFormatting.GRAY));
         src.sendSystemMessage(Component.literal("  mode: grief | theft | combat | planes | all   |   types: --ty break,place,container_take" ).withStyle(ChatFormatting.GRAY));
         src.sendSystemMessage(Component.literal("  dim: overworld | nether | end   (или полный id: minecraft:overworld)" ).withStyle(ChatFormatting.GRAY));
 
@@ -1474,6 +1492,7 @@ public final class LoggerCommands {
     private static final class ParsedFlags {
         Integer seconds;           // from --time
         long[] dayRange;           // from --date/--day
+        Long targetMoment;         // from --at (absolute server time)
         Integer radius;            // from --radius
         boolean allDims;           // --all-dims
         String dim;                // --dim
@@ -1486,6 +1505,7 @@ public final class LoggerCommands {
         Integer limit;             // --limit
         String preset;             // --preset
         boolean confirm;           // --confirm
+        boolean cancel;            // --cancel
         boolean weSelection;       // --we (use WorldEdit selection)
         boolean targetBlock;       // --block (targeted block)
 
@@ -1493,6 +1513,7 @@ public final class LoggerCommands {
             ParsedFlags p = new ParsedFlags();
             p.seconds = this.seconds;
             p.dayRange = this.dayRange;
+            p.targetMoment = this.targetMoment;
             p.radius = this.radius;
             p.allDims = this.allDims;
             p.dim = this.dim;
@@ -1505,6 +1526,7 @@ public final class LoggerCommands {
             p.limit = this.limit;
             p.preset = this.preset;
             p.confirm = this.confirm;
+            p.cancel = this.cancel;
             p.weSelection = this.weSelection;
             p.targetBlock = this.targetBlock;
             return p;
@@ -1554,6 +1576,12 @@ public final class LoggerCommands {
                     if (r == null) errors.add("Неверный --date: " + val);
                     else out.dayRange = r;
                 }
+                case "at", "moment", "to" -> {
+                    if (val == null) { errors.add("--at требует момент, например 2026-08-27T12:30"); break; }
+                    Long target = parseTargetMomentMillis(val);
+                    if (target == null) errors.add("Неверный --at: " + val + " (ожидается yyyy-MM-ddTHH:mm)");
+                    else out.targetMoment = target;
+                }
                 case "radius", "r" -> {
                     if (val == null) { errors.add("--radius требует число"); break; }
                     try {
@@ -1577,10 +1605,7 @@ public final class LoggerCommands {
                     if (val == null) { errors.add("--owner требует ник или uuid"); break; }
                     out.owner = val;
                 }
-                case "world", "global", "w" -> {
-                    out.world = true;
-                    out.allDims = true;
-                }
+                case "world", "global", "w" -> out.world = true;
                 case "mode", "m" -> {
                     if (val == null) { errors.add("--mode требует значение: grief|theft|combat|planes|all"); break; }
                     out.mode = val;
@@ -1615,6 +1640,7 @@ public final class LoggerCommands {
                     out.preset = val;
                 }
                 case "confirm", "c" -> out.confirm = true;
+                case "cancel" -> out.cancel = true;
                 case "we", "worldedit" -> out.weSelection = true;
                 case "block", "target", "target-block" -> out.targetBlock = true;
                 default -> errors.add("Неизвестный флаг: --" + key);
@@ -1622,8 +1648,12 @@ public final class LoggerCommands {
         }
 
         // Sanity: disallow mixing absolute date range and relative time.
-        if (out.seconds != null && out.dayRange != null) {
-            errors.add("Нельзя использовать вместе --time и --date. Выберите одно.");
+        int timeSelectors = (out.seconds != null ? 1 : 0) + (out.dayRange != null ? 1 : 0) + (out.targetMoment != null ? 1 : 0);
+        if (timeSelectors > 1) {
+            errors.add("Нельзя смешивать --time, --date и --at. Выберите один целевой момент.");
+        }
+        if (out.confirm && out.cancel) {
+            errors.add("Нельзя одновременно подтвердить и отменить план.");
         }
         return out;
     }
@@ -1731,8 +1761,21 @@ public final class LoggerCommands {
         ParsedFlags base = parseFlagsRaw(presetArgs, presetErrors);
         // Merge: direct overrides base
         ParsedFlags merged = base;
-        if (direct.seconds != null) merged.seconds = direct.seconds;
-        if (direct.dayRange != null) merged.dayRange = direct.dayRange;
+        if (direct.seconds != null) {
+            merged.seconds = direct.seconds;
+            merged.dayRange = null;
+            merged.targetMoment = null;
+        }
+        if (direct.dayRange != null) {
+            merged.seconds = null;
+            merged.dayRange = direct.dayRange;
+            merged.targetMoment = null;
+        }
+        if (direct.targetMoment != null) {
+            merged.seconds = null;
+            merged.dayRange = null;
+            merged.targetMoment = direct.targetMoment;
+        }
         if (direct.radius != null) merged.radius = direct.radius;
         if (direct.allDims) merged.allDims = true;
         if (direct.dim != null) merged.dim = direct.dim;
@@ -1744,7 +1787,11 @@ public final class LoggerCommands {
         if (direct.page != null) merged.page = direct.page;
         if (direct.limit != null) merged.limit = direct.limit;
         merged.preset = direct.preset;
-        merged.confirm = direct.confirm || base.confirm;
+        // Safety actions can never be inherited from a stored preset.
+        merged.confirm = direct.confirm;
+        merged.cancel = direct.cancel;
+        merged.weSelection = direct.weSelection || base.weSelection;
+        merged.targetBlock = direct.targetBlock || base.targetBlock;
         if (!presetErrors.isEmpty()) {
             errors.addAll(presetErrors);
         }
@@ -1782,11 +1829,14 @@ public final class LoggerCommands {
         boolean worldLookup = f.world || (f.radius != null && f.radius <= 0);
 
         LogQuery q = new LogQuery();
-        if (f.allDims || (worldLookup && (f.dim == null || f.dim.isBlank()))) q.dim = "*";
+        if (f.allDims) q.dim = "*";
         else if (f.dim != null && !f.dim.isBlank()) q.dim = f.dim;
         else q.dim = level.dimension().location().toString();
 
-        if (f.dayRange != null) {
+        if (f.targetMoment != null) {
+            q.sinceTs = f.targetMoment;
+            q.untilTs = System.currentTimeMillis();
+        } else if (f.dayRange != null) {
             q.sinceTs = f.dayRange[0];
             q.untilTs = f.dayRange[1];
         } else {
@@ -1812,7 +1862,9 @@ public final class LoggerCommands {
         }
 
         String title;
-        if (f.dayRange != null) {
+        if (f.targetMoment != null) {
+            title = "Поиск после " + formatRollbackMoment(f.targetMoment) + ", r=" + radius;
+        } else if (f.dayRange != null) {
             title = "Поиск дата=" + rawDateForTitle(f.dayRange) + ", r=" + radius;
         } else {
             title = "Поиск " + formatDuration(seconds) + ", r=" + radius;
@@ -1845,136 +1897,257 @@ public final class LoggerCommands {
     }
 
     private static int rollbackFromFlags(CommandContext<CommandSourceStack> ctx, String rawArgs) {
-    if (!(ctx.getSource().getEntity() instanceof ServerPlayer sp)) {
-        ctx.getSource().sendFailure(Component.literal("Эту команду может использовать только игрок."));
-        return 0;
+        if (!(ctx.getSource().getEntity() instanceof ServerPlayer sp)) {
+            ctx.getSource().sendFailure(Component.literal("Эту команду может использовать только игрок."));
+            return 0;
+        }
+
+        java.util.ArrayList<String> errors = new java.util.ArrayList<>();
+        ParsedFlags direct = parseFlagsRaw(rawArgs, errors);
+        ParsedFlags f = parseFlagsWithPresets(ctx, direct, errors);
+        if (!errors.isEmpty()) {
+            ctx.getSource().sendFailure(Component.literal(String.join("; ", errors)));
+            return 0;
+        }
+
+        // Confirmation and cancellation intentionally use no recalculated arguments.
+        if (f.cancel) {
+            RollbackPlanManager.Plan removed = RollbackPlanManager.clear(sp.getUUID());
+            clearRollbackPreview(sp);
+            if (removed == null) {
+                ctx.getSource().sendFailure(Component.literal("Нет активного плана отката."));
+                return 0;
+            }
+            ctx.getSource().sendSuccess(() -> Component.literal("План отката #" + removed.id() + " отменён.").withStyle(ChatFormatting.YELLOW), false);
+            return 1;
+        }
+        if (f.confirm) {
+            RollbackPlanManager.Plan plan = RollbackPlanManager.getValid(sp.getUUID());
+            if (plan == null) {
+                clearRollbackPreview(sp);
+                ctx.getSource().sendFailure(Component.literal("Нет активного предпросмотра или он истёк. Сначала создайте новый план без --confirm."));
+                return 0;
+            }
+
+            // Consume before applying so a repeated command cannot execute the same plan twice.
+            RollbackPlanManager.clear(sp.getUUID());
+            clearRollbackPreview(sp);
+            RollbackReport total = applyRollbackPlan(ctx.getSource(), plan);
+            if (total == null) return 0;
+            ctx.getSource().sendSystemMessage(Component.literal("План #" + plan.id() + ", состояние на "
+                    + formatRollbackMoment(plan.targetTs())).withStyle(ChatFormatting.DARK_GRAY));
+            sendRollbackSummary(ctx.getSource(), true, total);
+            return 1;
+        }
+
+        if (f.types == null) {
+            EnumSet<ActionType> byMode = typesForMode(f.mode);
+            if (byMode != null) f.types = byMode;
+        }
+        if (f.seconds == null && f.dayRange == null && f.targetMoment == null) {
+            ctx.getSource().sendFailure(Component.literal("Укажите целевой момент: --time 2h, --at 2026-08-27T12:30 или --date 2026-08-27."));
+            return 0;
+        }
+        if (ctx.getSource().getServer() == null) {
+            ctx.getSource().sendFailure(Component.literal("Сервер недоступен."));
+            return 0;
+        }
+
+        final long cutoffTs = System.currentTimeMillis();
+        final long targetTs = f.targetMoment != null
+                ? f.targetMoment
+                : (f.dayRange != null ? f.dayRange[0] : cutoffTs - (f.seconds * 1000L));
+        if (targetTs <= 0L || targetTs >= cutoffTs) {
+            ctx.getSource().sendFailure(Component.literal("Целевой момент должен находиться в прошлом."));
+            return 0;
+        }
+
+        List<RollbackPlanManager.Scope> scopes = buildRollbackScopes(ctx.getSource(), sp, f);
+        if (scopes == null || scopes.isEmpty()) return 0;
+
+        RollbackPlanManager.clear(sp.getUUID());
+        clearRollbackPreview(sp);
+        RollbackReport total = new RollbackReport();
+        String actor = f.actor != null && !f.actor.isBlank() ? f.actor : null;
+        for (RollbackPlanManager.Scope scope : scopes) {
+            ServerLevel level = resolveLevelForDim(ctx.getSource(), scope.dimension());
+            if (level == null) {
+                ctx.getSource().sendFailure(Component.literal("Измерение недоступно: " + scope.dimension()));
+                return 0;
+            }
+            mergeReports(total, RollbackEngine.previewBoxRangeReport(
+                    level, scope.min(), scope.max(), targetTs, cutoffTs, actor, f.types));
+        }
+
+        RollbackPlanManager.Plan plan = RollbackPlanManager.save(
+                sp.getUUID(), targetTs, cutoffTs, actor, f.types, scopes);
+        if (plan == null) {
+            ctx.getSource().sendFailure(Component.literal("Не удалось сохранить план отката."));
+            return 0;
+        }
+
+        sendRollbackPlanSummary(ctx.getSource(), plan, total);
+        showRollbackPreview(sp, plan);
+        return 1;
     }
 
-    java.util.ArrayList<String> errors = new java.util.ArrayList<>();
-    ParsedFlags direct = parseFlagsRaw(rawArgs, errors);
-    ParsedFlags f = parseFlagsWithPresets(ctx, direct, errors);
+    private static List<RollbackPlanManager.Scope> buildRollbackScopes(CommandSourceStack src, ServerPlayer sp, ParsedFlags f) {
+        java.util.ArrayList<RollbackPlanManager.Scope> scopes = new java.util.ArrayList<>();
+        if (f.weSelection) {
+            if (f.allDims || f.world || f.targetBlock) {
+                src.sendFailure(Component.literal("--we нельзя смешивать с --all-dims, --world или --block."));
+                return null;
+            }
+            BlockPos[] selection = WorldEditIntegration.getSelection(sp);
+            if (selection == null) {
+                src.sendFailure(Component.literal("WorldEdit-выделение не найдено."));
+                return null;
+            }
+            scopes.add(new RollbackPlanManager.Scope(
+                    sp.serverLevel().dimension().location().toString(), selection[0], selection[1]));
+            return scopes;
+        }
 
-    if (f.types == null) {
-        EnumSet<ActionType> byMode = typesForMode(f.mode);
-        if (byMode != null) f.types = byMode;
-    }
+        if (f.targetBlock) {
+            if (f.allDims || f.world) {
+                src.sendFailure(Component.literal("--block нельзя смешивать с --all-dims или --world."));
+                return null;
+            }
+            ServerLevel level = sp.serverLevel();
+            BlockHitResult hit = RayTraceUtil.getPlayerPOVHitResult(sp, level, 6.0);
+            if (hit.getType() != HitResult.Type.BLOCK) {
+                src.sendFailure(Component.literal("Наведитесь на блок и повторите команду."));
+                return null;
+            }
+            BlockPos min = hit.getBlockPos();
+            BlockPos max = min;
+            BlockState state = level.getBlockState(min);
+            if (state.getBlock() instanceof ChestBlock) {
+                BlockPos other = ChestUtil.getConnectedChestPos(level, min, state);
+                if (other != null) max = other;
+            }
+            scopes.add(new RollbackPlanManager.Scope(level.dimension().location().toString(), min, max));
+            return scopes;
+        }
 
-    if (!errors.isEmpty()) {
-        ctx.getSource().sendFailure(Component.literal(String.join("; ", errors)));
-        sendShortHelp(ctx.getSource());
-        return 0;
-    }
-
-    if (f.seconds == null && f.dayRange == null) {
-        ctx.getSource().sendFailure(Component.literal("Для отката нужен --time или --date."));
-        return 0;
-    }
-
-    if (ctx.getSource().getServer() == null) {
-        ctx.getSource().sendFailure(Component.literal("Сервер недоступен."));
-        return 0;
-    }
-
-    final boolean apply = f.confirm; // safe mode by default
-    final int radius = f.radius != null ? f.radius : 5;
-    final String actor = (f.actor != null && !f.actor.isBlank()) ? f.actor : null;
-
-    RollbackReport total = new RollbackReport();
-
-    // Scope shortcut: WorldEdit selection
-    if (f.weSelection) {
+        BlockPos worldMin = new BlockPos(-30_000_000, -2048, -30_000_000);
+        BlockPos worldMax = new BlockPos(30_000_000, 4096, 30_000_000);
         if (f.allDims) {
-            ctx.getSource().sendFailure(Component.literal("--we нельзя использовать вместе с --all-dims."));
-            return 0;
+            for (ServerLevel level : src.getServer().getAllLevels()) {
+                scopes.add(new RollbackPlanManager.Scope(level.dimension().location().toString(), worldMin, worldMax));
+            }
+            return scopes;
         }
-        BlockPos[] sel = WorldEditIntegration.getSelection(sp);
-        if (sel == null) {
-            ctx.getSource().sendFailure(Component.literal("WorldEdit selection not found. Убедитесь, что WorldEdit установлен и у вас есть выделение."));
-            return 0;
-        }
-        ServerLevel lvl = sp.serverLevel(); // selection is bound to player's current world
-        RollbackReport r = (f.dayRange != null)
-                ? (apply ? RollbackEngine.rollbackBoxRangeReport(lvl, sel[0], sel[1], f.dayRange[0], f.dayRange[1], actor, f.types)
-                         : RollbackEngine.previewBoxRangeReport(lvl, sel[0], sel[1], f.dayRange[0], f.dayRange[1], actor, f.types))
-                : (apply ? RollbackEngine.rollbackBoxReport(lvl, sel[0], sel[1], System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types)
-                         : RollbackEngine.previewBoxReport(lvl, sel[0], sel[1], System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types));
-        mergeReports(total, r);
-    }
-    // Scope shortcut: targeted block
-    else if (f.targetBlock) {
-        if (f.allDims) {
-            ctx.getSource().sendFailure(Component.literal("--block нельзя использовать вместе с --all-dims."));
-            return 0;
-        }
-        ServerLevel lvl = sp.serverLevel();
-        BlockHitResult hit = RayTraceUtil.getPlayerPOVHitResult(sp, lvl, 6.0);
-        if (hit.getType() != HitResult.Type.BLOCK) {
-            ctx.getSource().sendFailure(Component.literal("Не выбран блок. Наведитесь на блок и повторите."));
-            return 0;
-        }
-        BlockPos pos = hit.getBlockPos();
-        BlockPos min = pos;
-        BlockPos max = pos;
 
-        // If chest: include both halves if double chest.
-        BlockState state = lvl.getBlockState(pos);
-        if (state.getBlock() instanceof ChestBlock) {
-            BlockPos other = ChestUtil.getConnectedChestPos(lvl, pos, state);
-            if (other != null) {
-                min = new BlockPos(Math.min(pos.getX(), other.getX()), Math.min(pos.getY(), other.getY()), Math.min(pos.getZ(), other.getZ()));
-                max = new BlockPos(Math.max(pos.getX(), other.getX()), Math.max(pos.getY(), other.getY()), Math.max(pos.getZ(), other.getZ()));
+        ServerLevel level = sp.serverLevel();
+        if (f.dim != null && !f.dim.isBlank()) {
+            level = resolveLevelForDim(src, f.dim);
+            if (level == null) {
+                src.sendFailure(Component.literal("Измерение не найдено: " + f.dim));
+                return null;
             }
         }
-
-        RollbackReport r = (f.dayRange != null)
-                ? (apply ? RollbackEngine.rollbackBoxRangeReport(lvl, min, max, f.dayRange[0], f.dayRange[1], actor, f.types)
-                         : RollbackEngine.previewBoxRangeReport(lvl, min, max, f.dayRange[0], f.dayRange[1], actor, f.types))
-                : (apply ? RollbackEngine.rollbackBoxReport(lvl, min, max, System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types)
-                         : RollbackEngine.previewBoxReport(lvl, min, max, System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types));
-        mergeReports(total, r);
-    }
-    // Normal scope: radius box around player (or all dims)
-    else {
-        if (f.allDims) {
-            for (ServerLevel lvl : ctx.getSource().getServer().getAllLevels()) {
-                BlockPos min = new BlockPos(-30_000_000, -2048, -30_000_000);
-                BlockPos max = new BlockPos(30_000_000, 4096, 30_000_000);
-                RollbackReport r = (f.dayRange != null)
-                        ? (apply ? RollbackEngine.rollbackBoxRangeReport(lvl, min, max, f.dayRange[0], f.dayRange[1], actor, f.types)
-                                 : RollbackEngine.previewBoxRangeReport(lvl, min, max, f.dayRange[0], f.dayRange[1], actor, f.types))
-                        : (apply ? RollbackEngine.rollbackBoxReport(lvl, min, max, System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types)
-                                 : RollbackEngine.previewBoxReport(lvl, min, max, System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types));
-                mergeReports(total, r);
-            }
+        int radius = f.radius != null ? f.radius : 5;
+        if (f.world || radius == 0) {
+            scopes.add(new RollbackPlanManager.Scope(level.dimension().location().toString(), worldMin, worldMax));
         } else {
-            ServerLevel lvl;
-            if (f.dim != null && !f.dim.isBlank()) {
-                lvl = resolveLevelForDim(ctx.getSource(), f.dim);
-                if (lvl == null) lvl = sp.serverLevel();
-            } else {
-                lvl = sp.serverLevel();
-            }
             BlockPos center = sp.blockPosition();
-            BlockPos min = center.offset(-radius, -radius, -radius);
-            BlockPos max = center.offset(radius, radius, radius);
+            scopes.add(new RollbackPlanManager.Scope(
+                    level.dimension().location().toString(),
+                    center.offset(-radius, -radius, -radius),
+                    center.offset(radius, radius, radius)));
+        }
+        return scopes;
+    }
 
-            RollbackReport r = (f.dayRange != null)
-                    ? (apply ? RollbackEngine.rollbackBoxRangeReport(lvl, min, max, f.dayRange[0], f.dayRange[1], actor, f.types)
-                             : RollbackEngine.previewBoxRangeReport(lvl, min, max, f.dayRange[0], f.dayRange[1], actor, f.types))
-                    : (apply ? RollbackEngine.rollbackBoxReport(lvl, min, max, System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types)
-                             : RollbackEngine.previewBoxReport(lvl, min, max, System.currentTimeMillis() - (f.seconds * 1000L), actor, f.types));
-            mergeReports(total, r);
+    private static RollbackReport applyRollbackPlan(CommandSourceStack src, RollbackPlanManager.Plan plan) {
+        RollbackReport total = new RollbackReport();
+        for (RollbackPlanManager.Scope scope : plan.scopes()) {
+            ServerLevel level = resolveLevelForDim(src, scope.dimension());
+            if (level == null) {
+                src.sendFailure(Component.literal("Измерение из плана больше недоступно: " + scope.dimension()));
+                return null;
+            }
+            mergeReports(total, RollbackEngine.rollbackBoxRangeReport(
+                    level, scope.min(), scope.max(), plan.targetTs(), plan.cutoffTs(), plan.actor(), plan.types()));
+        }
+        return total;
+    }
+
+    private static void sendRollbackPlanSummary(CommandSourceStack src, RollbackPlanManager.Plan plan, RollbackReport report) {
+        src.sendSystemMessage(Component.literal("Предпросмотр плана #" + plan.id()).withStyle(ChatFormatting.AQUA));
+        src.sendSystemMessage(Component.literal("Цель: вернуть состояние на " + formatRollbackMoment(plan.targetTs()))
+                .withStyle(ChatFormatting.YELLOW));
+        src.sendSystemMessage(Component.literal("Будут отменены действия после цели и до снимка предпросмотра "
+                + formatRollbackMoment(plan.cutoffTs()) + ".").withStyle(ChatFormatting.GRAY));
+
+        if (plan.scopes().size() == 1) {
+            RollbackPlanManager.Scope scope = plan.scopes().get(0);
+            src.sendSystemMessage(Component.literal("Область: " + scope.dimension() + " ["
+                    + scope.min().getX() + " " + scope.min().getY() + " " + scope.min().getZ() + "] → ["
+                    + scope.max().getX() + " " + scope.max().getY() + " " + scope.max().getZ() + "]")
+                    .withStyle(ChatFormatting.GRAY));
+        } else {
+            src.sendSystemMessage(Component.literal("Область: " + plan.scopes().size() + " измерений (глобальный план)")
+                    .withStyle(ChatFormatting.GRAY));
+        }
+
+        sendRollbackSummary(src, false, report);
+        long ttlSeconds = Math.max(1L, (plan.expiresAt() - System.currentTimeMillis()) / 1000L);
+        src.sendSystemMessage(Component.literal("План действует " + ttlSeconds + " сек. Параметры и позиция уже зафиксированы.")
+                .withStyle(ChatFormatting.DARK_GRAY));
+
+        MutableComponent confirm = Component.literal("[ПОДТВЕРДИТЬ ОТКАТ]").withStyle(style -> style
+                .withColor(ChatFormatting.GREEN)
+                .withClickEvent(new net.minecraft.network.chat.ClickEvent(
+                        net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/log rollback --confirm")));
+        MutableComponent cancel = Component.literal("  [ОТМЕНИТЬ]").withStyle(style -> style
+                .withColor(ChatFormatting.RED)
+                .withClickEvent(new net.minecraft.network.chat.ClickEvent(
+                        net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/log rollback --cancel")));
+        src.sendSystemMessage(confirm.append(cancel));
+    }
+
+    private static String formatRollbackMoment(long timestamp) {
+        try {
+            return java.time.Instant.ofEpochMilli(timestamp)
+                    .atZone(ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z", Locale.ROOT));
+        } catch (Throwable ignored) {
+            return String.valueOf(timestamp);
         }
     }
 
-    if (apply) {
-        sendRollbackSummary(ctx.getSource(), true, total);
-    } else {
-        sendRollbackSummary(ctx.getSource(), false, total);
-        ctx.getSource().sendSystemMessage(Component.literal("Применить: повторите команду с флагом --c (или --confirm)." ).withStyle(ChatFormatting.GRAY));
+    private static void showRollbackPreview(ServerPlayer player, RollbackPlanManager.Plan plan) {
+        if (player == null || plan == null || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
+        if (plan.scopes().size() != 1) {
+            clearRollbackPreview(player);
+            player.sendSystemMessage(Component.literal("Глобальный план нельзя показать одной рамкой; точные измерения сохранены в плане.")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+            return;
+        }
+        RollbackPlanManager.Scope scope = plan.scopes().get(0);
+        // A full-world box is intentionally not sent to the renderer because its coordinates lose precision on the GPU.
+        if (scope.min().getX() <= -1_000_000 || scope.max().getX() >= 1_000_000
+                || scope.min().getZ() <= -1_000_000 || scope.max().getZ() >= 1_000_000) {
+            clearRollbackPreview(player);
+            player.sendSystemMessage(Component.literal("Откат всего измерения не имеет конечной отображаемой рамки.")
+                    .withStyle(ChatFormatting.DARK_GRAY));
+            return;
+        }
+        net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
+                new com.roften.avilixlogger.net.S2CRollbackPreviewPayload(
+                        true, plan.id(), scope.dimension(),
+                        scope.min().getX(), scope.min().getY(), scope.min().getZ(),
+                        scope.max().getX(), scope.max().getY(), scope.max().getZ(),
+                        plan.targetTs(), plan.expiresAt()));
     }
-    return 1;
-}
+
+    private static void clearRollbackPreview(ServerPlayer player) {
+        if (player == null || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
+        net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
+                player, com.roften.avilixlogger.net.S2CRollbackPreviewPayload.clear());
+    }
 
 
     private static void mergeReports(RollbackReport into, RollbackReport add) {
