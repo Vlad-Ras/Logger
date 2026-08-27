@@ -53,5 +53,13 @@
   "gui.avilixlogger.type.cannon": "Пушки",
   "gui.avilixlogger.type.chat": "Чат",
   "gui.avilixlogger.type.plane": "Самолёты",
-  "gui.avilixlogger.filter.search": "Поиск"
+  "gui.avilixlogger.filter.search": "Поиск",
+  "gui.avilixlogger.inspect_tool": "Инструмент",
+  "gui.avilixlogger.inspect_tool.hint": "minecraft:stick",
+  "gui.avilixlogger.inspect_tool.save": "Сохранить",
+  "gui.avilixlogger.inspect_tool.reset": "Сбросить",
+  "gui.avilixlogger.inspect_tool.saved": "Установлен: %s",
+  "gui.avilixlogger.inspect_tool.reset_done": "Сброшен: %s",
+  "gui.avilixlogger.inspect_tool.invalid": "Предмет не найден: %s",
+  "gui.avilixlogger.inspect_tool.no_permission": "Нет права avilixlogger.command.admin"
 }

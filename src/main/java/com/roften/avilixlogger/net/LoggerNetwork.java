@@ -5,6 +5,7 @@ import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LastQueryManager;
 import com.roften.avilixlogger.core.LogEntry;
 import com.roften.avilixlogger.core.LogQuery;
+import com.roften.avilixlogger.core.LoggerServerData;
 import com.roften.avilixlogger.core.LoggerRuntime;
 
 import net.minecraft.network.chat.Component;
@@ -268,11 +269,13 @@ public final class LoggerNetwork {
         r.playToServer(C2SOpenGuiPayload.TYPE, C2SOpenGuiPayload.STREAM_CODEC, LoggerNetwork::handleOpenGuiRequest);
         r.playToServer(C2SRequestPagePayload.TYPE, C2SRequestPagePayload.STREAM_CODEC, LoggerNetwork::handleRequestPage);
         r.playToServer(C2SRequestDetailsPayload.TYPE, C2SRequestDetailsPayload.STREAM_CODEC, LoggerNetwork::handleRequestDetails);
+        r.playToServer(C2SInspectToolPayload.TYPE, C2SInspectToolPayload.STREAM_CODEC, LoggerNetwork::handleInspectTool);
 
         // Server -> Client (отправляются только тем, у кого есть клиент-мод; запрос приходит с клиента)
         r.playToClient(S2COpenGuiPayload.TYPE, S2COpenGuiPayload.STREAM_CODEC, LoggerNetwork::handleOpenGuiClient);
         r.playToClient(S2CLogPagePayload.TYPE, S2CLogPagePayload.STREAM_CODEC, LoggerNetwork::handleLogPageClient);
         r.playToClient(S2CLogDetailsPayload.TYPE, S2CLogDetailsPayload.STREAM_CODEC, LoggerNetwork::handleDetailsClient);
+        r.playToClient(S2CInspectToolPayload.TYPE, S2CInspectToolPayload.STREAM_CODEC, LoggerNetwork::handleInspectToolClient);
     }
 
     // -------- client handlers (reflection-dispatched) --------
@@ -287,6 +290,10 @@ public final class LoggerNetwork {
 
     private static void handleDetailsClient(S2CLogDetailsPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> invokeClientHook("acceptDetails", new Class<?>[] { S2CLogDetailsPayload.class }, new Object[] { payload }));
+    }
+
+    private static void handleInspectToolClient(S2CInspectToolPayload payload, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> invokeClientHook("acceptInspectTool", new Class<?>[] { S2CInspectToolPayload.class }, new Object[] { payload }));
     }
 
     private static void invokeClientHook(String method, Class<?>[] sig, Object[] args) {
@@ -441,6 +448,54 @@ public final class LoggerNetwork {
             if (!Boolean.TRUE.equals(CLIENT_PRESENT.get(sp.getUUID()))) return; // client addon absent
             if (!hasGuiPermission(sp)) return;
             PacketDistributor.sendToPlayer(sp, new S2COpenGuiPayload());
+        });
+    }
+
+    private static void handleInspectTool(C2SInspectToolPayload payload, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> {
+            if (!(ctx.player() instanceof ServerPlayer sp)) return;
+            if (!hasGuiPermission(sp)) return;
+
+            boolean canEdit = hasAdminPermission(sp);
+            LoggerServerData data = LoggerServerData.get(sp.serverLevel());
+            C2SInspectToolPayload.Action action = payload == null || payload.action() == null
+                    ? C2SInspectToolPayload.Action.QUERY
+                    : payload.action();
+            Component result = Component.empty();
+            boolean success = true;
+
+            if (action == C2SInspectToolPayload.Action.SET) {
+                if (!canEdit) {
+                    success = false;
+                    result = Component.translatable("gui.avilixlogger.inspect_tool.no_permission")
+                            .withStyle(net.minecraft.ChatFormatting.RED);
+                } else {
+                    String rawId = payload.itemId() == null ? "" : payload.itemId().trim().toLowerCase(java.util.Locale.ROOT);
+                    ResourceLocation id = ResourceLocation.tryParse(rawId);
+                    if (id == null || net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id) == net.minecraft.world.item.Items.AIR) {
+                        success = false;
+                        result = Component.translatable("gui.avilixlogger.inspect_tool.invalid", rawId)
+                                .withStyle(net.minecraft.ChatFormatting.RED);
+                    } else {
+                        data.setInspectToolItemId(id.toString());
+                        result = Component.translatable("gui.avilixlogger.inspect_tool.saved", id.toString())
+                                .withStyle(net.minecraft.ChatFormatting.GREEN);
+                    }
+                }
+            } else if (action == C2SInspectToolPayload.Action.RESET) {
+                if (!canEdit) {
+                    success = false;
+                    result = Component.translatable("gui.avilixlogger.inspect_tool.no_permission")
+                            .withStyle(net.minecraft.ChatFormatting.RED);
+                } else {
+                    data.resetInspectToolItemId();
+                    result = Component.translatable("gui.avilixlogger.inspect_tool.reset_done", data.getInspectToolItemId())
+                            .withStyle(net.minecraft.ChatFormatting.GREEN);
+                }
+            }
+
+            PacketDistributor.sendToPlayer(sp, new S2CInspectToolPayload(
+                    data.getInspectToolItemId(), canEdit, success, result));
         });
     }
 
@@ -992,6 +1047,14 @@ public final class LoggerNetwork {
     private static boolean hasGuiPermission(ServerPlayer sp) {
         try {
             return com.roften.avilixlogger.core.PermissionUtil.has(sp.createCommandSourceStack(), "avilixlogger.gui", 2);
+        } catch (Throwable t) {
+            return sp.hasPermissions(2);
+        }
+    }
+
+    private static boolean hasAdminPermission(ServerPlayer sp) {
+        try {
+            return com.roften.avilixlogger.core.PermissionUtil.has(sp.createCommandSourceStack(), "avilixlogger.command.admin", 2);
         } catch (Throwable t) {
             return sp.hasPermissions(2);
         }

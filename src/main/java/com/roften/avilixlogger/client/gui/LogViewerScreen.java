@@ -1,11 +1,13 @@
 package com.roften.avilixlogger.client.gui;
 
+import com.roften.avilixlogger.net.C2SInspectToolPayload;
 import com.roften.avilixlogger.net.C2SRequestPagePayload;
 import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
 import com.roften.avilixlogger.net.GuiFilters;
 import com.roften.avilixlogger.net.LogRow;
 import com.roften.avilixlogger.net.S2CLogDetailsPayload;
 import com.roften.avilixlogger.net.S2CLogPagePayload;
+import com.roften.avilixlogger.net.S2CInspectToolPayload;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
@@ -121,8 +123,18 @@ public final class LogViewerScreen extends Screen {
     private EditBox trainBox;
     private EditBox planeNameBox;
     private EditBox blockIdBox;
+    private EditBox inspectToolBox;
     private Button btnApply;
     private Button btnBlockId;
+    private Button btnInspectToolLabel;
+    private Button btnInspectToolApply;
+    private Button btnInspectToolReset;
+
+    private boolean inspectToolSettingsLoaded = false;
+    private boolean canEditInspectTool = false;
+    private String inspectToolItemId = "";
+    private Component inspectToolStatus = Component.empty();
+    private int inspectToolStatusY = 0;
 
     private boolean typeDropdownOpen = false;
     private StringWidget titleWidget;
@@ -367,6 +379,27 @@ public final class LogViewerScreen extends Screen {
 
         this.btnApply = addButton(Component.translatable("gui.avilixlogger.apply"), b -> applyCustomInputs(),
                 leftX, y, leftPanelW, leftRowH);
+        y += leftRowH + leftGap;
+
+        // Server-side inspect-tool setting. The server decides whether this player may edit it.
+        this.btnInspectToolLabel = addButton(Component.translatable("gui.avilixlogger.inspect_tool"), b -> {},
+                leftX, y, btnW, leftRowH);
+        this.btnInspectToolLabel.active = false;
+        this.inspectToolBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH,
+                Component.translatable("gui.avilixlogger.inspect_tool"));
+        this.inspectToolBox.setHint(Component.translatable("gui.avilixlogger.inspect_tool.hint"));
+        this.inspectToolBox.setMaxLength(256);
+        this.inspectToolBox.setValue(this.inspectToolItemId);
+        this.inspectToolBox.active = false;
+        this.addRenderableWidget(this.inspectToolBox);
+        y += leftRowH + leftGap;
+
+        int toolHalf = (leftPanelW - leftGap) / 2;
+        this.btnInspectToolApply = addButton(Component.translatable("gui.avilixlogger.inspect_tool.save"), b -> setInspectTool(),
+                leftX, y, toolHalf, leftRowH);
+        this.btnInspectToolReset = addButton(Component.translatable("gui.avilixlogger.inspect_tool.reset"), b -> resetInspectTool(),
+                leftX + toolHalf + leftGap, y, leftPanelW - toolHalf - leftGap, leftRowH);
+        this.inspectToolStatusY = y + leftRowH + leftGap;
 
         // Row action buttons (operate on selected row) - right sidebar.
         // On large Minecraft GUI scale these are compact two-column rows, so the details panel keeps room.
@@ -557,6 +590,39 @@ public final class LogViewerScreen extends Screen {
         PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, currentFilters()));
     }
 
+    /** Called once after Minecraft has initialized all widgets for this screen. */
+    public void requestInitialData() {
+        sendPage(C2SRequestPagePayload.Nav.FIRST);
+        PacketDistributor.sendToServer(new C2SInspectToolPayload(C2SInspectToolPayload.Action.QUERY, ""));
+    }
+
+    public void applyInspectTool(S2CInspectToolPayload payload) {
+        if (payload == null) return;
+        this.inspectToolSettingsLoaded = true;
+        this.canEditInspectTool = payload.canEdit();
+        this.inspectToolItemId = payload.itemId() == null ? "" : payload.itemId();
+        if (this.inspectToolBox != null) {
+            // Preserve an invalid value so the admin can correct it after a rejected SET.
+            if (payload.success() || this.inspectToolBox.getValue().isBlank()) {
+                this.inspectToolBox.setValue(this.inspectToolItemId);
+            }
+            this.inspectToolBox.active = this.canEditInspectTool;
+        }
+        this.inspectToolStatus = payload.message() == null ? Component.empty() : payload.message();
+        updateButtons();
+    }
+
+    private void setInspectTool() {
+        if (!inspectToolSettingsLoaded || !canEditInspectTool || inspectToolBox == null) return;
+        String itemId = inspectToolBox.getValue() == null ? "" : inspectToolBox.getValue().trim();
+        PacketDistributor.sendToServer(new C2SInspectToolPayload(C2SInspectToolPayload.Action.SET, itemId));
+    }
+
+    private void resetInspectTool() {
+        if (!inspectToolSettingsLoaded || !canEditInspectTool) return;
+        PacketDistributor.sendToServer(new C2SInspectToolPayload(C2SInspectToolPayload.Action.RESET, ""));
+    }
+
     public void apply(S2CLogPagePayload payload) {
         this.title = payload.title() == null ? "" : payload.title();
         this.pageIndex = payload.pageIndex();
@@ -614,6 +680,9 @@ public final class LogViewerScreen extends Screen {
             boolean can = selected >= 0 && selected < rows.size() && rows.get(selected).rawIds() != null && rows.get(selected).rawIds().length > 0;
             btnShowRaw.active = can;
         }
+        if (inspectToolBox != null) inspectToolBox.active = inspectToolSettingsLoaded && canEditInspectTool;
+        if (btnInspectToolApply != null) btnInspectToolApply.active = inspectToolSettingsLoaded && canEditInspectTool;
+        if (btnInspectToolReset != null) btnInspectToolReset.active = inspectToolSettingsLoaded && canEditInspectTool;
     }
 
     private void setAggregatedMode(boolean aggregated) {
@@ -766,6 +835,7 @@ public final class LogViewerScreen extends Screen {
 
         // Right-side details panel
         renderDetailsPanel(g);
+        renderInspectToolStatus(g);
 
         // Render widgets after rows/details so an active adaptive input field stays readable above the log list.
         // Do this manually instead of super.render(...): on some 1.21.x mappings/modpacks
@@ -790,6 +860,20 @@ public final class LogViewerScreen extends Screen {
         for (net.minecraft.client.gui.components.Renderable renderable : this.renderables) {
             renderable.render(g, mouseX, mouseY, partialTick);
         }
+    }
+
+    private void renderInspectToolStatus(GuiGraphics g) {
+        if (inspectToolStatus == null || inspectToolStatus.getString().isBlank() || inspectToolStatusY <= 0) return;
+        int left = 10;
+        int right = left + leftPanelW();
+        float scale = clampFloat(controlScale(), 0.50f, 1.0f);
+        g.enableScissor(left, inspectToolStatusY, right, inspectToolStatusY + Math.max(8, controlH()));
+        g.pose().pushPose();
+        g.pose().translate(left, inspectToolStatusY, 0);
+        g.pose().scale(scale, scale, 1.0f);
+        g.drawString(this.font, inspectToolStatus, 0, 0, 0xFFFFFF, false);
+        g.pose().popPose();
+        g.disableScissor();
     }
 
     private void renderDetailsPanel(GuiGraphics g) {
@@ -868,6 +952,7 @@ public final class LogViewerScreen extends Screen {
         adaptInputBox(planeNameBox, baseX, baseW);
         adaptInputBox(blockIdBox, baseX, baseW);
         adaptInputBox(searchBox, baseX, baseW);
+        adaptInputBox(inspectToolBox, baseX, baseW);
     }
 
     private float inputTextScaleFor(int h) {
@@ -895,7 +980,8 @@ public final class LogViewerScreen extends Screen {
                 || mouseInsideInput(trainBox, mouseX, mouseY)
                 || mouseInsideInput(planeNameBox, mouseX, mouseY)
                 || mouseInsideInput(blockIdBox, mouseX, mouseY)
-                || mouseInsideInput(searchBox, mouseX, mouseY);
+                || mouseInsideInput(searchBox, mouseX, mouseY)
+                || mouseInsideInput(inspectToolBox, mouseX, mouseY);
     }
 
     private boolean mouseInsideInput(EditBox box, double mouseX, double mouseY) {
@@ -1285,6 +1371,10 @@ public final class LogViewerScreen extends Screen {
 
         // Enter applies custom inputs.
         if (keyCode == 257 /* GLFW_KEY_ENTER */ || keyCode == 335 /* GLFW_KEY_KP_ENTER */) {
+            if (inspectToolBox != null && inspectToolBox.isFocused()) {
+                setInspectTool();
+                return true;
+            }
             if ((timeBox != null && timeBox.isFocused())
                     || (radiusBox != null && radiusBox.isFocused())
                     || (actorBox != null && actorBox.isFocused())

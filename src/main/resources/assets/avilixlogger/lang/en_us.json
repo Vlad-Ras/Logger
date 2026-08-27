@@ -53,5 +53,13 @@
   "gui.avilixlogger.type.cannon": "Cannons",
   "gui.avilixlogger.type.chat": "Chat",
   "gui.avilixlogger.type.plane": "Planes",
-  "gui.avilixlogger.filter.search": "Search"
+  "gui.avilixlogger.filter.search": "Search",
+  "gui.avilixlogger.inspect_tool": "Inspect tool",
+  "gui.avilixlogger.inspect_tool.hint": "minecraft:stick",
+  "gui.avilixlogger.inspect_tool.save": "Save",
+  "gui.avilixlogger.inspect_tool.reset": "Reset",
+  "gui.avilixlogger.inspect_tool.saved": "Set to: %s",
+  "gui.avilixlogger.inspect_tool.reset_done": "Reset to: %s",
+  "gui.avilixlogger.inspect_tool.invalid": "Item not found: %s",
+  "gui.avilixlogger.inspect_tool.no_permission": "Missing avilixlogger.command.admin permission"
 }

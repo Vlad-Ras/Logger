@@ -3,10 +3,9 @@ package com.roften.avilixlogger.client.gui;
 import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.net.C2SHelloPayload;
 import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
-import com.roften.avilixlogger.net.C2SRequestPagePayload;
-import com.roften.avilixlogger.net.GuiFilters;
 import com.roften.avilixlogger.net.S2CLogPagePayload;
 import com.roften.avilixlogger.net.S2CLogDetailsPayload;
+import com.roften.avilixlogger.net.S2CInspectToolPayload;
 
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
@@ -38,8 +37,8 @@ public final class LogViewerClientHooks {
         if (mc == null) return;
         OPEN_SCREEN = new LogViewerScreen();
         mc.setScreen(OPEN_SCREEN);
-        // Load first page immediately.
-        PacketDistributor.sendToServer(new C2SRequestPagePayload(C2SRequestPagePayload.Nav.FIRST, true, GuiFilters.DEFAULT));
+        // Load using the filters/mode restored by the screen, not hard-coded defaults.
+        OPEN_SCREEN.requestInitialData();
     }
 
     public static void acceptPage(S2CLogPagePayload payload) {
@@ -50,5 +49,10 @@ public final class LogViewerClientHooks {
     public static void acceptDetails(S2CLogDetailsPayload payload) {
         if (payload == null) return;
         if (OPEN_SCREEN != null) OPEN_SCREEN.applyDetails(payload);
+    }
+
+    public static void acceptInspectTool(S2CInspectToolPayload payload) {
+        if (payload == null) return;
+        if (OPEN_SCREEN != null) OPEN_SCREEN.applyInspectTool(payload);
     }
 }
