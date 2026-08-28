@@ -143,11 +143,13 @@ public final class LoggerEventHandlers {
         final String dim;
         final BlockPos pos;
         final String beforeSlots;
+        final String beforeBe;
 
-        ContainerCtx(String dim, BlockPos pos, String beforeSlots) {
+        ContainerCtx(String dim, BlockPos pos, String beforeSlots, String beforeBe) {
             this.dim = dim;
             this.pos = pos;
             this.beforeSlots = beforeSlots;
+            this.beforeBe = beforeBe;
         }
     }
 
@@ -159,13 +161,15 @@ public final class LoggerEventHandlers {
         final String dim;
         final BlockPos pos;
         final String blockAfter;
+        final String beforeBe;
         final boolean openLogged;
 
-        PendingBlockContainerOpen(long ts, String dim, BlockPos pos, String blockAfter, boolean openLogged) {
+        PendingBlockContainerOpen(long ts, String dim, BlockPos pos, String blockAfter, String beforeBe, boolean openLogged) {
             this.ts = ts;
             this.dim = dim;
             this.pos = pos;
             this.blockAfter = blockAfter;
+            this.beforeBe = beforeBe;
             this.openLogged = openLogged;
         }
     }
@@ -189,6 +193,24 @@ public final class LoggerEventHandlers {
 
     // player uuid -> last opened ENTITY container context (best-effort)
     private static final Map<UUID, EntityContainerCtx> OPEN_ENTITY_CONTAINER = new ConcurrentHashMap<>();
+
+    private static final class GenericMenuCtx {
+        final String dim;
+        final BlockPos playerPos;
+        final int containerId;
+        final String menuClass;
+        final String beforeSlots;
+
+        GenericMenuCtx(String dim, BlockPos playerPos, int containerId, String menuClass, String beforeSlots) {
+            this.dim = dim;
+            this.playerPos = playerPos;
+            this.containerId = containerId;
+            this.menuClass = menuClass;
+            this.beforeSlots = beforeSlots;
+        }
+    }
+
+    private static final Map<UUID, GenericMenuCtx> OPEN_GENERIC_MENU = new ConcurrentHashMap<>();
 
     private static final class PendingEntityContainerOpen {
         final long ts;
@@ -280,25 +302,8 @@ public final class LoggerEventHandlers {
         try (var scope = CauseContext.push(p, CauseContext.Kind.BREAK_BLOCK, event.getPos(), used0)) {
 
         BlockPos pos = event.getPos();
-        BlockState before = level.getBlockState(pos);
-        BlockEntity be = level.getBlockEntity(pos);
-
-        LogEntry e = new LogEntry();
-        e.ts = System.currentTimeMillis();
-        e.dim = level.dimension().location().toString();
-        e.type = ActionType.BLOCK_BREAK;
-        e.actorUuid = p.getUUID();
-        e.actorName = p.getName().getString();
-        e.x = pos.getX();
-        e.y = pos.getY();
-        e.z = pos.getZ();
-        e.blockBefore = NbtSerde.writeBlockState(before);
-        e.beBefore = NbtSerde.writeBlockEntity(level, be);
-        e.blockAfter = NbtSerde.writeBlockState(level.getBlockState(pos)); // may still be before, but ok
-        e.extra = "break " + BuiltInRegistries.BLOCK.getKey(before.getBlock()).toString();
-        LoggerRuntime.storage(level).append(e);
-
-        // remember for delayed attribution
+        // The actual mutation is recorded by ServerLevelSetBlockMixin after it succeeds. Keeping
+        // an event-side row here used to store the old state as both before and after.
         try {
             if (p instanceof ServerPlayer sp2) RecentPlayerActionTracker.note(level, sp2, pos, RecentPlayerActionTracker.ActionKind.BREAK_BLOCK, sp2.getMainHandItem());
         } catch (Throwable ignored) {}
@@ -324,41 +329,7 @@ public final class LoggerEventHandlers {
         try (var scope = CauseContext.push(p, CauseContext.Kind.PLACE_BLOCK, event.getPos(), used0)) {
 
         BlockPos pos = event.getPos();
-        BlockState placed = event.getPlacedBlock();
-        BlockState replaced = event.getBlockSnapshot().getState();
-        BlockEntity beAfter = level.getBlockEntity(pos);
-
-        // Best-effort old block-entity snapshot (BlockSnapshot API differs across NeoForge builds).
-        String beBeforeSnbt = null;
-        try {
-            Object snap = event.getBlockSnapshot();
-            if (snap != null) {
-                var m = snap.getClass().getMethod("getTag");
-                Object tag = m.invoke(snap);
-                if (tag instanceof net.minecraft.nbt.CompoundTag ct) {
-                    beBeforeSnbt = ct.toString();
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-
-        LogEntry e = new LogEntry();
-        e.ts = System.currentTimeMillis();
-        e.dim = level.dimension().location().toString();
-        e.type = ActionType.BLOCK_PLACE;
-        e.actorUuid = p.getUUID();
-        e.actorName = p.getName().getString();
-        e.x = pos.getX();
-        e.y = pos.getY();
-        e.z = pos.getZ();
-        e.blockBefore = NbtSerde.writeBlockState(replaced);
-        e.beBefore = beBeforeSnbt;
-        e.blockAfter = NbtSerde.writeBlockState(placed);
-        e.beAfter = NbtSerde.writeBlockEntity(level, beAfter);
-        e.extra = "place " + BuiltInRegistries.BLOCK.getKey(placed.getBlock()) + " (was " + BuiltInRegistries.BLOCK.getKey(replaced.getBlock()) + ")";
-        LoggerRuntime.storage(level).append(e);
-
-        // remember for delayed attribution
+        // The universal setBlock hook owns the successful before/after snapshot.
         try {
             if (p instanceof ServerPlayer sp2) RecentPlayerActionTracker.note(level, sp2, pos, RecentPlayerActionTracker.ActionKind.PLACE_BLOCK, sp2.getMainHandItem());
         } catch (Throwable ignored) {}
@@ -447,11 +418,14 @@ public final class LoggerEventHandlers {
             try { inventoryLike = isInventoryLike(level, pos, state); } catch (Throwable ignored) {}
             String blockAfter = null;
             try { blockAfter = NbtSerde.writeBlockState(state); } catch (Throwable ignored) {}
+            String beforeBe = null;
+            try { beforeBe = NbtSerde.writeBlockEntity(level, level.getBlockEntity(pos)); } catch (Throwable ignored) {}
             PENDING_BLOCK_CONTAINER_OPEN.put(p.getUUID(), new PendingBlockContainerOpen(
                     System.currentTimeMillis(),
                     dim,
                     pos.immutable(),
                     blockAfter,
+                    beforeBe,
                     inventoryLike && LoggerConfig.VALUES.logBlocks.get()
             ));
 
@@ -478,7 +452,7 @@ public final class LoggerEventHandlers {
         final String dim = level.dimension().location().toString();
         final String beforeState = NbtSerde.writeBlockState(state);
         final BlockEntity be0 = level.getBlockEntity(pos);
-        final String beforeBe = (LoggerConfig.VALUES.logContainers.get() && be0 != null) ? NbtSerde.writeBlockEntity(level, be0) : null;
+        final String beforeBe = be0 != null ? NbtSerde.writeBlockEntity(level, be0) : null;
         final ItemStack used = event.getItemStack() != null ? event.getItemStack().copy() : ItemStack.EMPTY;
         final String usedItemSnbt = (!used.isEmpty()) ? NbtSerde.writeItemStackHotPath(used, level.registryAccess()) : null;
         final UUID actorUuid = p.getUUID();
@@ -495,7 +469,7 @@ public final class LoggerEventHandlers {
                 BlockState afterState0 = level.getBlockState(pos);
                 String afterState = NbtSerde.writeBlockState(afterState0);
                 BlockEntity be1 = level.getBlockEntity(pos);
-                String afterBe = (LoggerConfig.VALUES.logContainers.get() && be1 != null) ? NbtSerde.writeBlockEntity(level, be1) : null;
+                String afterBe = be1 != null ? NbtSerde.writeBlockEntity(level, be1) : null;
 
                 boolean stateChanged = beforeState != null && afterState != null && !afterState.equals(beforeState);
                 boolean beChanged = beforeBe != null && afterBe != null && !afterBe.equals(beforeBe);
@@ -550,7 +524,7 @@ public final class LoggerEventHandlers {
 
                     final var registryAccess = level.registryAccess();
                     final LogStorage storage = LoggerRuntime.storage(level);
-                    AsyncLogProcessor.submit(() -> {
+                    if (LoggerConfig.VALUES.logContainers.get()) AsyncLogProcessor.submit(() -> {
                         var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
                         if (diffs == null || diffs.isEmpty()) return;
                         long ts = System.currentTimeMillis();
@@ -711,8 +685,8 @@ public final class LoggerEventHandlers {
                 trackedMenu = true;
 
                 String beforeSlots = ContainerSlotSnapshot.snapshot(level, pending.pos);
-                if (beforeSlots != null) {
-                    OPEN_CONTAINER.put(sp.getUUID(), new ContainerCtx(dim, pending.pos, beforeSlots));
+                if (beforeSlots != null || pending.beforeBe != null) {
+                    OPEN_CONTAINER.put(sp.getUUID(), new ContainerCtx(dim, pending.pos, beforeSlots, pending.beforeBe));
                 }
             }
             }
@@ -752,6 +726,16 @@ public final class LoggerEventHandlers {
         // 3) Generic GUI/menu open fallback: crafting table/anvil/villager trade/modded menus.
         // Containers already logged above as CONTAINER_OPEN/ENTITY_CONTAINER_OPEN, so do not duplicate them.
         if (!trackedMenu) {
+            if (wantContainers) {
+                try {
+                    var menu = event.getContainer();
+                    String before = GenericMenuSnapshot.write(menu, level.registryAccess());
+                    if (before != null) {
+                        OPEN_GENERIC_MENU.put(sp.getUUID(), new GenericMenuCtx(dim, sp.blockPosition().immutable(),
+                                menu.containerId, menu.getClass().getName(), before));
+                    }
+                } catch (Throwable ignored) {}
+            }
             logGuiOpenIfNeeded(level, sp, event);
         }
     }
@@ -892,14 +876,36 @@ public final class LoggerEventHandlers {
             }
         } catch (Throwable ignored) {}
 
+        // Generic self-adaptive menu fallback. It captures non-player slots of an unknown menu,
+        // including future mods, while deliberately excluding the player's own inventory slots.
+        try {
+            GenericMenuCtx generic = OPEN_GENERIC_MENU.remove(sp.getUUID());
+            if (generic != null && generic.dim.equals(level.dimension().location().toString())
+                    && event.getContainer() != null && event.getContainer().containerId == generic.containerId) {
+                String after = GenericMenuSnapshot.write(event.getContainer(), level.registryAccess());
+                if (after != null && !after.equals(generic.beforeSlots)) {
+                    final var registryAccess = level.registryAccess();
+                    final LogStorage storage = LoggerRuntime.storage(level);
+                    final UUID actorUuid = sp.getUUID();
+                    final String actorName = sp.getName().getString();
+                    AsyncLogProcessor.submit(() -> emitContainerChanges(
+                            generic.beforeSlots, after, registryAccess, storage,
+                            generic.dim, generic.playerPos, actorUuid, actorName,
+                            "menu:" + generic.menuClass, null));
+                }
+            }
+        } catch (Throwable ignored) {}
+
         ContainerCtx ctx = OPEN_CONTAINER.remove(sp.getUUID());
         if (ctx == null) return;
         if (!ctx.dim.equals(level.dimension().location().toString())) return;
 
         // Strict slot snapshot diff from real storage.
         String afterSlots = ContainerSlotSnapshot.snapshot(level, ctx.pos);
-        if (afterSlots == null) return;
-        if (afterSlots.equals(ctx.beforeSlots)) return;
+        String afterBe = NbtSerde.writeBlockEntity(level, level.getBlockEntity(ctx.pos));
+        boolean slotsChanged = ctx.beforeSlots != null && afterSlots != null && !afterSlots.equals(ctx.beforeSlots);
+        boolean beChanged = ctx.beforeBe != null && afterBe != null && !afterBe.equals(ctx.beforeBe);
+        if (!slotsChanged && !beChanged) return;
 
         final String capturedBlockAfter = NbtSerde.writeBlockState(level.getBlockState(ctx.pos));
         final var registryAccess = level.registryAccess();
@@ -908,32 +914,9 @@ public final class LoggerEventHandlers {
         final String actorName = sp.getName().getString();
 
         // Emit human-friendly aggregated put/take events off-thread.
-        AsyncLogProcessor.submit(() -> {
-            var agg = ContainerSlotDiffUtil.diffAggregated(ctx.beforeSlots, afterSlots, registryAccess);
-            if (agg == null || agg.isEmpty()) return;
-            long ts = System.currentTimeMillis();
-            for (var ent : agg.entrySet()) {
-                int delta = ent.getValue();
-                if (delta == 0) continue;
-                LogEntry de = new LogEntry();
-                de.ts = ts;
-                de.dim = ctx.dim;
-                de.type = (delta > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
-                de.actorUuid = actorUuid;
-                de.actorName = actorName;
-                de.x = ctx.pos.getX();
-                de.y = ctx.pos.getY();
-                de.z = ctx.pos.getZ();
-                de.blockAfter = capturedBlockAfter;
-                de.count = Math.abs(delta);
-                // IMPORTANT: keep the normalized stack SNBT (Count=1) as the item key,
-                // and store the real amount in "count". This avoids DB truncation and
-                // guarantees we can always decode item id for UI/details.
-                de.itemStackNbt = ent.getKey();
-                de.extra = "container delta";
-                storage.append(de);
-            }
-        });
+        if (slotsChanged) AsyncLogProcessor.submit(() -> emitContainerChanges(
+                ctx.beforeSlots, afterSlots, registryAccess, storage,
+                ctx.dim, ctx.pos, actorUuid, actorName, null, capturedBlockAfter));
 
         // Always keep a deterministic snapshot entry for rollback tools.
         LogEntry e = new LogEntry();
@@ -946,10 +929,85 @@ public final class LoggerEventHandlers {
         e.y = ctx.pos.getY();
         e.z = ctx.pos.getZ();
         e.blockAfter = capturedBlockAfter;
-        e.containerSlotsBefore = ctx.beforeSlots;
-        e.containerSlotsAfter = afterSlots;
+        if (beChanged) {
+            e.beBefore = ctx.beforeBe;
+            e.beAfter = afterBe;
+        }
+        if (slotsChanged) {
+            e.containerSlotsBefore = ctx.beforeSlots;
+            e.containerSlotsAfter = afterSlots;
+        }
         e.extra = "container change " + BuiltInRegistries.BLOCK.getKey(level.getBlockState(ctx.pos).getBlock());
         LoggerRuntime.storage(level).append(e);
+    }
+
+    /**
+     * Emits normal aggregate deltas, and falls back to strict slot changes when total item counts
+     * are unchanged. The fallback is what makes pure rearrangements in arbitrary mod menus visible.
+     */
+    private static void emitContainerChanges(
+            String beforeSlots,
+            String afterSlots,
+            net.minecraft.core.HolderLookup.Provider registryAccess,
+            LogStorage storage,
+            String dim,
+            BlockPos pos,
+            UUID actorUuid,
+            String actorName,
+            String source,
+            String blockAfter) {
+        var aggregate = ContainerSlotDiffUtil.diffAggregated(beforeSlots, afterSlots, registryAccess);
+        long ts = System.currentTimeMillis();
+        if (aggregate != null && !aggregate.isEmpty()) {
+            for (var change : aggregate.entrySet()) {
+                int delta = change.getValue();
+                if (delta == 0) continue;
+                LogEntry entry = containerDeltaEntry(ts, dim, pos, actorUuid, actorName, source, blockAfter,
+                        delta > 0 ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE,
+                        change.getKey(), Math.abs(delta), "container delta");
+                storage.append(entry);
+            }
+            return;
+        }
+
+        for (var change : ContainerSlotDiffUtil.diffSlots(beforeSlots, afterSlots, registryAccess)) {
+            ItemStack before = change.before();
+            if (before != null && !before.isEmpty()) {
+                ItemStack normalized = before.copy();
+                normalized.setCount(1);
+                storage.append(containerDeltaEntry(ts, dim, pos, actorUuid, actorName, source, blockAfter,
+                        ActionType.CONTAINER_TAKE, NbtSerde.writeItemStackHotPath(normalized, registryAccess),
+                        before.getCount(), "container slot " + change.slot()));
+            }
+            ItemStack after = change.after();
+            if (after != null && !after.isEmpty()) {
+                ItemStack normalized = after.copy();
+                normalized.setCount(1);
+                storage.append(containerDeltaEntry(ts, dim, pos, actorUuid, actorName, source, blockAfter,
+                        ActionType.CONTAINER_PUT, NbtSerde.writeItemStackHotPath(normalized, registryAccess),
+                        after.getCount(), "container slot " + change.slot()));
+            }
+        }
+    }
+
+    private static LogEntry containerDeltaEntry(
+            long ts, String dim, BlockPos pos, UUID actorUuid, String actorName,
+            String source, String blockAfter, ActionType type, String itemSnbt, int count, String extra) {
+        LogEntry entry = new LogEntry();
+        entry.ts = ts;
+        entry.dim = dim;
+        entry.type = type;
+        entry.actorUuid = actorUuid;
+        entry.actorName = actorName;
+        entry.x = pos.getX();
+        entry.y = pos.getY();
+        entry.z = pos.getZ();
+        entry.source = source;
+        entry.blockAfter = blockAfter;
+        entry.itemStackNbt = itemSnbt;
+        entry.count = Math.max(1, count);
+        entry.extra = extra;
+        return entry;
     }
 
     
@@ -1208,9 +1266,13 @@ public final class LoggerEventHandlers {
             return;
         }
 
-        // 3) Non-living / misc entities (vehicles, plane mods, etc.).
+        // 3) Generic entities. Natural living spawns stay quiet, while any entity created inside
+        // a player action or an arbitrary external mod call is captured automatically.
         if (ent instanceof ExperienceOrb) return;
-        if (ent.getType().getCategory() != MobCategory.MISC) return;
+        CauseContext.Cause cause = CauseContext.peek();
+        String mutationSource = MutationSourceResolver.resolveExternalSource();
+        boolean miscEntity = ent.getType().getCategory() == MobCategory.MISC;
+        if (!miscEntity && cause == null && mutationSource == null) return;
 
         boolean isPlane = false;
         try { isPlane = AirplanesCompatHooks.isPlaneEntity(ent); } catch (Throwable ignored) {}
@@ -1228,6 +1290,12 @@ public final class LoggerEventHandlers {
         e.entityType = EntityType.getKey(ent.getType()).toString();
         e.entityUuid = ent.getUUID();
         e.entityNbt = NbtSerde.writeEntity(level, ent);
+        e.source = mutationSource != null ? mutationSource
+                : (cause != null ? "player:" + cause.kind().name().toLowerCase(java.util.Locale.ROOT) : null);
+        if (cause != null && cause.actorUuid() != null) {
+            e.actorUuid = cause.actorUuid();
+            e.actorName = cause.actorName();
+        }
 
         // Best-effort attribution for entity placements that don't preserve a placer.
         // (frames, decorative entities, many modded MISC spawns).
@@ -1505,6 +1573,14 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        UUID playerId = event.getEntity().getUUID();
+        OPEN_CONTAINER.remove(playerId);
+        PENDING_BLOCK_CONTAINER_OPEN.remove(playerId);
+        OPEN_ENTITY_CONTAINER.remove(playerId);
+        PENDING_ENTITY_CONTAINER_OPEN.remove(playerId);
+        OPEN_GENERIC_MENU.remove(playerId);
+        ChatAuditLogger.discardPlayer(playerId);
+
         if (!LoggerConfig.VALUES.enabled.get()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
@@ -1512,7 +1588,7 @@ public final class LoggerEventHandlers {
         e.ts = System.currentTimeMillis();
         e.dim = level.dimension().location().toString();
         e.type = ActionType.PLAYER_LEAVE;
-        e.actorUuid = event.getEntity().getUUID();
+        e.actorUuid = playerId;
         e.actorName = event.getEntity().getName().getString();
         e.x = event.getEntity().blockPosition().getX();
         e.y = event.getEntity().blockPosition().getY();
@@ -1941,9 +2017,6 @@ public final class LoggerEventHandlers {
     private static boolean shouldTrackDelayedInteraction(ServerLevel level, BlockPos pos, BlockState state) {
         if (state == null) return false;
         try {
-            if (isInventoryLike(level, pos, state)) return false;
-        } catch (Throwable ignored) {}
-        try {
             if (level.getBlockEntity(pos) != null) return true;
         } catch (Throwable ignored) {}
         try {
@@ -2187,19 +2260,27 @@ public final class LoggerEventHandlers {
         if (ent == null) return;
         if (ent instanceof Player) return;
 
-        // Non-living / misc entities (vehicles, plane mods, etc.) are not caught by LivingDeathEvent.
-        // We capture removals for minecarts and other MISC entities.
-        if (!(ent instanceof AbstractMinecart) && ent.getType().getCategory() != MobCategory.MISC) return;
         if (ent instanceof Projectile || ent instanceof ExperienceOrb || ent instanceof ItemEntity) return;
 
         // Отфильтровываем выгрузку чанка/переход измерений и т.п. — логируем только реальные удаления.
+        Entity.RemovalReason removalReason;
         try {
             Entity.RemovalReason rr = ent.getRemovalReason();
             if (rr != Entity.RemovalReason.KILLED && rr != Entity.RemovalReason.DISCARDED) return;
+            removalReason = rr;
         } catch (Throwable ignored) {
             // Если API изменилось, лучше не шуметь в логах.
             return;
         }
+
+        // LivingDeathEvent owns normal deaths. DISCARDED living entities are only interesting when
+        // a player or an external mod caused them; natural despawns must not flood the database.
+        if (ent instanceof net.minecraft.world.entity.LivingEntity && removalReason == Entity.RemovalReason.KILLED) return;
+        CauseContext.Cause cause = CauseContext.peek();
+        String mutationSource = MutationSourceResolver.resolveExternalSource();
+        ActorTracker.ActorRef knownActor = ActorTracker.getRecent(ent.getUUID(), 15_000L);
+        boolean miscEntity = ent instanceof AbstractMinecart || ent.getType().getCategory() == MobCategory.MISC;
+        if (!miscEntity && cause == null && mutationSource == null && knownActor == null) return;
 
         boolean isPlane = false;
         try { isPlane = AirplanesCompatHooks.isPlaneEntity(ent); } catch (Throwable ignored) {}
@@ -2223,8 +2304,14 @@ public final class LoggerEventHandlers {
             }
         } catch (Throwable ignored) {}
         e.entityNbt = (preRemoveSnapshot != null) ? preRemoveSnapshot : NbtSerde.writeEntity(level, ent);
+        e.source = mutationSource != null ? mutationSource
+                : (cause != null ? "player:" + cause.kind().name().toLowerCase(java.util.Locale.ROOT) : null);
+        if (cause != null && cause.actorUuid() != null) {
+            e.actorUuid = cause.actorUuid();
+            e.actorName = cause.actorName();
+        }
 
-        ActorTracker.ActorRef ar = resolveActorForEntity(level, ent, e.entityNbt);
+        ActorTracker.ActorRef ar = knownActor != null ? knownActor : resolveActorForEntity(level, ent, e.entityNbt);
         if (ar != null) {
             e.actorUuid = ar.actorUuid();
             e.actorName = ar.actorName();

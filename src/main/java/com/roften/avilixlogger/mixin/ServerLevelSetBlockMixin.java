@@ -6,6 +6,7 @@ import com.roften.avilixlogger.compat.aeronautics.AeronauticsCompatHooks;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,18 +17,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.Optional;
+import java.util.Objects;
 
 /**
  * Catch block changes that bypass NeoForge events (WorldEdit, Create Schematicannon, creative tools, etc.).
  *
- * We keep it narrow and only record when the call stack indicates a known external editor/automation.
- * This avoids duplicating normal player logs.
+ * External sources are resolved from their call-site dynamically. This makes the hook work for
+ * mods that were not known when the logger was built; the central storage gate removes overlap
+ * with normal NeoForge events.
  */
-@Mixin(ServerLevel.class)
+@Mixin(Level.class)
 public abstract class ServerLevelSetBlockMixin {
 
     @Unique
-    private static final ThreadLocal<Deque<SetBlockCapture>> AVILIXLOGGER$CAPTURE_STACK = ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ThreadLocal<Deque<Optional<SetBlockCapture>>> AVILIXLOGGER$CAPTURE_STACK = ThreadLocal.withInitial(ArrayDeque::new);
 
     @Unique
     private static final ThreadLocal<Boolean> AVILIXLOGGER$REENTRY_GUARD = ThreadLocal.withInitial(() -> Boolean.FALSE);
@@ -35,24 +39,12 @@ public abstract class ServerLevelSetBlockMixin {
     // NOTE: Do NOT declare helper record/class in this mixin package.
     // Mixin packages are restricted and cannot be referenced by transformed target classes.
 
-    // Signature (BlockPos, BlockState, int)
-    @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;I)Z",
-            at = @At("HEAD"), require = 0)
-    private void avilixlogger$capture3(BlockPos pos, BlockState newState, int flags, CallbackInfoReturnable<Boolean> cir) {
-        capture(pos, newState);
-    }
-
-    // Signature (BlockPos, BlockState, int, int)
+    // The three-argument Level#setBlock delegates here. Hooking both overloads would serialize
+    // every ordinary block change twice before the central deduplicator can remove the second row.
     @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
             at = @At("HEAD"), require = 0)
     private void avilixlogger$capture4(BlockPos pos, BlockState newState, int flags, int recursionLeft, CallbackInfoReturnable<Boolean> cir) {
         capture(pos, newState);
-    }
-
-    @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;I)Z",
-            at = @At("RETURN"), require = 0)
-    private void avilixlogger$after3(BlockPos pos, BlockState newState, int flags, CallbackInfoReturnable<Boolean> cir) {
-        after(pos, newState, cir.getReturnValueZ());
     }
 
     @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
@@ -63,17 +55,20 @@ public abstract class ServerLevelSetBlockMixin {
 
     @Unique
     private void capture(BlockPos pos, BlockState newState) {
+        Deque<Optional<SetBlockCapture>> stack = AVILIXLOGGER$CAPTURE_STACK.get();
+        stack.addLast(Optional.empty());
         try {
             // Config lives in root package (not in core).
             if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logBlocks.get()) return;
             if (pos == null || newState == null) return;
             if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return;
 
-            ServerLevel level = (ServerLevel) (Object) this;
-            if (level.isClientSide) return;
+            if (!((Object) this instanceof ServerLevel level)) return;
 
-            String source = detectExternalSource();
-            if (source == null) return; // keep narrow to avoid duplicates
+            CauseContext.Cause cause = CauseContext.peek();
+            String source = MutationSourceResolver.resolveExternalSource();
+            if (source == null && cause == null) return;
+            if (source == null) source = "player:" + cause.kind().name().toLowerCase(java.util.Locale.ROOT);
 
             BlockState before = level.getBlockState(pos);
             if (before == null) return;
@@ -84,19 +79,19 @@ public abstract class ServerLevelSetBlockMixin {
             String beforeState = NbtSerde.writeBlockState(before);
             BlockEntity be = level.getBlockEntity(pos);
             String beforeBe = (be != null || newState.hasBlockEntity()) ? NbtSerde.writeBlockEntity(level, be) : null;
+            String beforeSlots = be != null ? ContainerSlotSnapshot.snapshot(level, pos) : null;
 
             java.util.UUID actorUuid = null;
             String actorName = null;
 
             try {
-                CauseContext.Cause c = CauseContext.peek();
-                if (c != null && c.actorUuid() != null) {
-                    actorUuid = c.actorUuid();
-                    actorName = c.actorName();
+                if (cause != null && cause.actorUuid() != null) {
+                    actorUuid = cause.actorUuid();
+                    actorName = cause.actorName();
                 }
             } catch (Throwable ignored) {}
 
-            if ((actorUuid == null && actorName == null) && source.startsWith("aeronautics")) {
+            if ((actorUuid == null && actorName == null) && source.contains("aeronautics")) {
                 var ar = AeronauticsCompatHooks.resolveActorForBlock(level, pos);
                 if (ar != null) {
                     actorUuid = ar.actorUuid();
@@ -104,7 +99,7 @@ public abstract class ServerLevelSetBlockMixin {
                 }
             }
 
-            if ((actorUuid == null && actorName == null) && source.startsWith("create")) {
+            if ((actorUuid == null && actorName == null) && source.contains("create")) {
                 var ra = CreateOwnershipTracker.resolveForSystemChange(level, pos, null);
                 if (ra != null) {
                     actorUuid = ra.uuid();
@@ -112,20 +107,32 @@ public abstract class ServerLevelSetBlockMixin {
                     source = ra.source();
                 }
             }
-            if (actorName == null) {
-                actorName = source.startsWith("worldedit") ? "WorldEdit" : (source.startsWith("aeronautics") ? "Aeronautics" : (source.startsWith("create") ? "Create" : "SYSTEM"));
+            if (actorUuid == null && actorName == null) {
+                var recent = RecentPlayerActionTracker.resolveBest(level, pos, 4, 2_500L, null);
+                if (recent != null && recent.confidence() >= 0.55) {
+                    actorUuid = recent.actorUuid();
+                    actorName = recent.actorName();
+                    source = source + ":" + recent.source();
+                }
             }
-            AVILIXLOGGER$CAPTURE_STACK.get().addLast(new SetBlockCapture(new BlockPos(pos.getX(), pos.getY(), pos.getZ()), level.dimension().location().toString(), beforeState, beforeBe, source, actorUuid, actorName));
+            if (actorName == null) {
+                actorName = "SYSTEM[" + source + "]";
+            }
+            stack.removeLast();
+            stack.addLast(Optional.of(new SetBlockCapture(new BlockPos(pos.getX(), pos.getY(), pos.getZ()),
+                    level.dimension().location().toString(), beforeState, beforeBe, beforeSlots,
+                    source, cause == null ? null : cause.kind(), actorUuid, actorName)));
         } catch (Throwable ignored) {
         }
     }
 
     @Unique
     private void after(BlockPos pos, BlockState newState, boolean ok) {
-        Deque<SetBlockCapture> st = AVILIXLOGGER$CAPTURE_STACK.get();
+        Deque<Optional<SetBlockCapture>> st = AVILIXLOGGER$CAPTURE_STACK.get();
         if (st.isEmpty()) return;
-        SetBlockCapture cap = st.removeLast();
-        if (cap == null) return;
+        Optional<SetBlockCapture> captured = st.removeLast();
+        if (captured.isEmpty()) return;
+        SetBlockCapture cap = captured.get();
         if (!ok) return;
         if (pos == null || !pos.equals(cap.pos())) {
             // Should not happen, but keep stack consistent.
@@ -133,8 +140,7 @@ public abstract class ServerLevelSetBlockMixin {
         }
 
         try {
-            ServerLevel level = (ServerLevel) (Object) this;
-            if (level.isClientSide) return;
+            if (!((Object) this instanceof ServerLevel level)) return;
 
             AVILIXLOGGER$REENTRY_GUARD.set(Boolean.TRUE);
 
@@ -142,13 +148,24 @@ public abstract class ServerLevelSetBlockMixin {
             String afterState = NbtSerde.writeBlockState(after);
             BlockEntity beAfter = level.getBlockEntity(pos);
             String afterBe = (beAfter != null || cap.beforeBe() != null) ? NbtSerde.writeBlockEntity(level, beAfter) : null;
+            String afterSlots = beAfter != null || cap.beforeSlots() != null ? ContainerSlotSnapshot.snapshot(level, pos) : null;
+
+            if (Objects.equals(cap.beforeState(), afterState)
+                    && Objects.equals(cap.beforeBe(), afterBe)
+                    && Objects.equals(cap.beforeSlots(), afterSlots)) return;
 
             ActionType type;
             boolean beforeAir = beforeIsAir(cap.beforeState());
             boolean afterAir = after == null || after.isAir();
             if (beforeAir && !afterAir) type = ActionType.BLOCK_PLACE;
             else if (!beforeAir && afterAir) type = ActionType.BLOCK_BREAK;
-            else type = ActionType.BLOCK_ENTITY_NBT_CHANGE;
+            else if (cap.causeKind() == CauseContext.Kind.USE_BLOCK || cap.causeKind() == CauseContext.Kind.USE_ITEM) {
+                type = ActionType.BLOCK_INTERACT;
+            } else if (!Objects.equals(cap.beforeState(), afterState)) {
+                type = ActionType.BLOCK_PLACE;
+            } else {
+                type = ActionType.BLOCK_ENTITY_NBT_CHANGE;
+            }
 
             LogEntry e = new LogEntry();
             e.ts = System.currentTimeMillis();
@@ -163,6 +180,8 @@ public abstract class ServerLevelSetBlockMixin {
             e.beBefore = cap.beforeBe();
             e.blockAfter = afterState;
             e.beAfter = afterBe;
+            e.containerSlotsBefore = cap.beforeSlots();
+            e.containerSlotsAfter = afterSlots;
             e.source = cap.source();
 
             try {
@@ -187,31 +206,4 @@ public abstract class ServerLevelSetBlockMixin {
         return beforeStateSnbt.contains("minecraft:air") || beforeStateSnbt.contains("minecraft:cave_air") || beforeStateSnbt.contains("minecraft:void_air");
     }
 
-    @Unique
-    private static String detectExternalSource() {
-        try {
-            final boolean[] create = {false};
-            final boolean[] aero = {false};
-            final boolean[] we = {false};
-
-            java.lang.StackWalker.getInstance().walk(s -> {
-                s.limit(36).forEach(f -> {
-                    String cn = f.getClassName();
-                    if (cn == null) return;
-                    if (!aero[0] && (cn.startsWith("dev.eriksonn.aeronautics")
-                            || cn.startsWith("dev.ryanhcode.sable")
-                            || cn.startsWith("dev.simulated_team.simulated"))) aero[0] = true;
-                    if (!create[0] && cn.startsWith("com.simibubi.create")) create[0] = true;
-                    if (!we[0] && cn.startsWith("com.sk89q.worldedit")) we[0] = true;
-                });
-                return null;
-            });
-
-            if (we[0]) return "worldedit";
-            if (aero[0]) return "aeronautics";
-            if (create[0]) return "create";
-        } catch (Throwable ignored) {
-        }
-        return null;
-    }
 }

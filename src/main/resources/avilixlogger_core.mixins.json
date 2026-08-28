@@ -6,7 +6,8 @@
   "mixins": [
     "ServerLevelSetBlockMixin",
     "ServerChatListenerMixin",
-    "ServerCommandListenerMixin"
+    "ServerCommandListenerMixin",
+    "ServerPlayerGameModeCauseMixin"
   ],
   "injectors": {
     "defaultRequire": 0

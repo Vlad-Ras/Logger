@@ -3,12 +3,14 @@ package com.roften.avilixlogger.core;
 import net.minecraft.world.level.Level;
 
 import com.roften.avilixlogger.AvilixLoggerMod;
+import com.roften.avilixlogger.api.LogAdapterRegistry;
 
 /**
  * Lazy-initialized runtime context.
  */
 public final class LoggerRuntime {
     private static final PendingLogStorage PENDING = new PendingLogStorage();
+    private static final DeduplicatingLogStorage FRONT = new DeduplicatingLogStorage(PENDING);
 
     private static volatile LogStorage STORAGE;
     private static volatile boolean INIT_STARTED;
@@ -16,11 +18,8 @@ public final class LoggerRuntime {
     private LoggerRuntime() {}
 
     public static LogStorage storage(Level level) {
-        LogStorage s = STORAGE;
-        if (s != null) return s;
-
-        startAsyncInit();
-        return PENDING;
+        if (STORAGE == null) startAsyncInit();
+        return FRONT;
     }
 
     public static void warmupAsync() {
@@ -36,6 +35,7 @@ public final class LoggerRuntime {
             Thread t = new Thread(() -> {
                 LogStorage real;
                 try {
+                    LogAdapterRegistry.discover();
                     real = createConfiguredStorage();
                 } catch (Throwable t1) {
                     AvilixLoggerMod.LOGGER.error(
@@ -60,6 +60,8 @@ public final class LoggerRuntime {
 
     public static void shutdown() {
         AsyncLogProcessor.shutdown();
+        ChatAuditLogger.clearPending();
+        AdaptiveLogDiagnostics.logSummary();
         LogStorage s = STORAGE;
         if (s != null) {
             s.shutdown();
@@ -69,5 +71,6 @@ public final class LoggerRuntime {
         STORAGE = null;
         INIT_STARTED = false;
         PENDING.reset();
+        FRONT.clear();
     }
 }

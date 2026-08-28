@@ -10,6 +10,6 @@ import java.util.UUID;
  * <p>IMPORTANT: This class must NOT live in the mixin package. Mixin packages are restricted and
  * classes from them cannot be referenced by transformed target classes.</p>
  */
-public record SetBlockCapture(BlockPos pos, String dim, String beforeState, String beforeBe, String source,
-                              UUID actorUuid, String actorName) {
+public record SetBlockCapture(BlockPos pos, String dim, String beforeState, String beforeBe, String beforeSlots,
+                              String source, CauseContext.Kind causeKind, UUID actorUuid, String actorName) {
 }
