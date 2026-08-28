@@ -24,7 +24,7 @@ public final class EntityContainerSerde {
                 ItemStack st = c.getItem(i);
                 if (st == null || st.isEmpty()) continue;
                 CompoundTag it = new CompoundTag();
-                it.putByte("Slot", (byte) i);
+                it.putInt("Slot", i);
                 // write full stack (includes Count)
                 CompoundTag stackTag = (CompoundTag) st.save(provider);
                 // merge

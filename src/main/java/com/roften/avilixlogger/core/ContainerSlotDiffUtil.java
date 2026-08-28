@@ -76,7 +76,7 @@ public final class ContainerSlotDiffUtil {
         ListTag items = tag.getList("Items", Tag.TAG_COMPOUND);
         for (int i = 0; i < items.size(); i++) {
             CompoundTag it = items.getCompound(i);
-            int slot = it.contains("Slot") ? (it.getByte("Slot") & 0xFF) : -1;
+            int slot = ContainerSlotSnapshot.readSlot(it);
             if (slot < 0 || slot >= arr.length) continue;
             arr[slot] = ItemStack.parse(provider, it).orElse(ItemStack.EMPTY);
         }

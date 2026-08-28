@@ -23,6 +23,8 @@ public final class RollbackReport {
     public int blocksRestored;
     public int blockEntitiesRestored;
     public int containersRestored;
+    public int createStructuresRestored;
+    public int createBlocksRestored;
     public int entitiesRespawned;
     public int entitiesRemoved;
     public int itemsGivenOrSpawned;

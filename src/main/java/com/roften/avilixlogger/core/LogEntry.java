@@ -48,7 +48,7 @@ public final class LogEntry {
     /**
      * Optional strict container slot snapshots (SNBT CompoundTag).
      *
-     * Format: {Size:int, Items:[{Slot:byte, ...ItemStack...}, ...]}
+     * Format: {Size:int, Items:[{Slot:int, ...ItemStack...}, ...]}
      *
      * This is intentionally independent from block-entity NBT, because many modded storages
      * (e.g. Create) do not reliably expose their contents via BE NBT diffs.

@@ -120,11 +120,9 @@ public final class RollbackEngine {
 
     private static RollbackReport rollbackByQueryPaged(ServerLevel level, LogQuery q, boolean apply) {
         RollbackReport report = new RollbackReport();
-        // Optimization:
-        // For block/BE-related actions we only need the oldest "before" snapshot per position.
-        // Applying per-entry creates huge lag for radius rollbacks (same position may be written many times).
-        // We therefore collect a final snapshot per position and apply once at the end.
         java.util.HashMap<BlockPos, BlockSnapshot> blockSnapshots = new java.util.HashMap<>();
+        java.util.ArrayList<LogEntry> entityRemovals = new java.util.ArrayList<>();
+        java.util.ArrayList<LogEntry> deferred = new java.util.ArrayList<>();
 
         long beforeId = Long.MAX_VALUE;
         while (true) {
@@ -139,8 +137,11 @@ public final class RollbackEngine {
                     BlockPos pos = new BlockPos(e.x, e.y, e.z);
                     // Overwrite as we go backwards in time; the last value wins => oldest snapshot.
                     blockSnapshots.put(pos, new BlockSnapshot(e.blockBefore, e.beBefore, e.containerSlotsBefore, e.type));
+                } else if (isEntityRemovalType(e.type)) {
+                    // Undo spawned moving entities before stationary blocks are put back.
+                    entityRemovals.add(e);
                 } else {
-                    applyRollback(level, e, report, apply);
+                    deferred.add(e);
                 }
             }
 
@@ -148,80 +149,138 @@ public final class RollbackEngine {
             if (batch.size() < PAGE) break;
         }
 
-        // Apply consolidated snapshots in phases:
-        // 1) all blockstates first
-        // 2) all block entities / inventories second
-        // This is much safer for Create and other multiblock/modded blocks than restoring one position fully at a time.
-        if (!blockSnapshots.isEmpty()) {
-            java.util.ArrayList<java.util.Map.Entry<BlockPos, BlockSnapshot>> ordered = new java.util.ArrayList<>(blockSnapshots.entrySet());
-            ordered.sort((a, b) -> {
-                BlockPos pa = a.getKey();
-                BlockPos pb = b.getKey();
-                int cy = Integer.compare(pa.getY(), pb.getY());
-                if (cy != 0) return cy;
-                int cx = Integer.compare(pa.getX(), pb.getX());
-                if (cx != 0) return cx;
-                return Integer.compare(pa.getZ(), pb.getZ());
-            });
+        // Safe order: restore stationary blocks and their payloads transactionally, then remove
+        // entities created by assembly, then respawn killed entities/Create structures.
+        // A failed block transaction therefore cannot leave a required moving entity deleted.
+        applyConsolidatedBlocks(level, blockSnapshots, report, apply);
+        for (LogEntry entry : entityRemovals) applyRollback(level, entry, report, apply);
+        for (LogEntry entry : deferred) applyRollback(level, entry, report, apply);
+        return report;
+    }
 
-            java.util.HashSet<BlockPos> createTouched = new java.util.HashSet<>();
-            java.util.HashSet<BlockPos> appliedAny = new java.util.HashSet<>();
+    private static void applyConsolidatedBlocks(ServerLevel level, java.util.Map<BlockPos, BlockSnapshot> snapshots,
+                                                RollbackReport report, boolean apply) {
+        if (snapshots == null || snapshots.isEmpty()) return;
+        java.util.ArrayList<java.util.Map.Entry<BlockPos, BlockSnapshot>> ordered = new java.util.ArrayList<>(snapshots.entrySet());
+        ordered.sort((a, b) -> {
+            BlockPos pa = a.getKey();
+            BlockPos pb = b.getKey();
+            int cy = Integer.compare(pa.getY(), pb.getY());
+            if (cy != 0) return cy;
+            int cx = Integer.compare(pa.getX(), pb.getX());
+            return cx != 0 ? cx : Integer.compare(pa.getZ(), pb.getZ());
+        });
 
-            for (var ent : ordered) {
-                BlockPos pos = ent.getKey();
-                BlockSnapshot snap = ent.getValue();
-                if (pos == null || snap == null) continue;
-                if (!level.hasChunkAt(pos)) { report.onSkipped("chunk_unloaded"); continue; }
+        java.util.ArrayList<PreparedBlock> prepared = new java.util.ArrayList<>(ordered.size());
+        for (var entry : ordered) {
+            BlockPos pos = entry.getKey();
+            BlockSnapshot snap = entry.getValue();
+            if (pos == null || snap == null) continue;
+            if (!level.hasChunkAt(pos)) { report.onSkipped("chunk_unloaded"); continue; }
 
-                if (snap.blockBeforeSnbt != null) {
-                    BlockState before = NbtSerde.readBlockState(level, snap.blockBeforeSnbt);
-                    if (before != null) {
-                        int flags = rollbackSetBlockFlags(before);
-                        if (apply) level.setBlock(pos, before, flags);
-                        report.blocksRestored++;
-                        appliedAny.add(pos);
-                        if (isCreateState(before) || looksLikeCreateStateSnbt(snap.blockBeforeSnbt)) createTouched.add(pos.immutable());
+            BlockState state = null;
+            if (snap.blockBeforeSnbt != null) {
+                state = NbtSerde.readBlockState(level, snap.blockBeforeSnbt);
+                if (state == null) { report.onSkipped("invalid_block_snapshot"); continue; }
+            }
+            if (snap.beBeforeSnbt != null && NbtSerde.fromSnbt(snap.beBeforeSnbt) == null) {
+                report.onSkipped("invalid_block_entity_nbt");
+                continue;
+            }
+            if (snap.containerSlotsBeforeSnbt != null && !ContainerSlotSnapshot.isValid(snap.containerSlotsBeforeSnbt)) {
+                report.onSkipped("invalid_container_snapshot");
+                continue;
+            }
+            if (state == null && snap.beBeforeSnbt == null && snap.containerSlotsBeforeSnbt == null) {
+                report.onSkipped("no_snapshot");
+                continue;
+            }
+            prepared.add(new PreparedBlock(pos, snap, state));
+        }
+
+        if (!apply) {
+            for (PreparedBlock block : prepared) countPreparedBlock(report, block);
+            return;
+        }
+
+        java.util.ArrayList<BlockBackup> backups = new java.util.ArrayList<>(prepared.size());
+        for (PreparedBlock block : prepared) {
+            backups.add(new BlockBackup(block.pos, level.getBlockState(block.pos),
+                    NbtSerde.writeBlockEntity(level, level.getBlockEntity(block.pos)),
+                    ContainerSlotSnapshot.snapshot(level, block.pos)));
+        }
+
+        String failure = null;
+        java.util.HashSet<BlockPos> createTouched = new java.util.HashSet<>();
+        for (PreparedBlock block : prepared) {
+            if (block.state == null) continue;
+            try {
+                level.setBlock(block.pos, block.state, rollbackSetBlockFlags(block.state));
+                if (!level.getBlockState(block.pos).equals(block.state)) { failure = "block_state_verification_failed"; break; }
+                if (isCreateState(block.state) || looksLikeCreateStateSnbt(block.snapshot.blockBeforeSnbt)) createTouched.add(block.pos);
+            } catch (Throwable ignored) {
+                failure = "block_state_restore_failed";
+                break;
+            }
+        }
+
+        if (failure == null) {
+            for (PreparedBlock block : prepared) {
+                if (block.snapshot.beBeforeSnbt != null) {
+                    if (!NbtSerde.readBlockEntity(level, block.pos, block.snapshot.beBeforeSnbt)) {
+                        failure = "block_entity_restore_failed";
+                        break;
                     }
+                    if (looksLikeCreatePayload(block.snapshot.beBeforeSnbt)) createTouched.add(block.pos);
                 }
-            }
-
-            for (var ent : ordered) {
-                BlockPos pos = ent.getKey();
-                BlockSnapshot snap = ent.getValue();
-                if (pos == null || snap == null) continue;
-                if (!level.hasChunkAt(pos)) continue;
-
-                boolean any = appliedAny.contains(pos);
-                if (snap.beBeforeSnbt != null) {
-                    if (apply) NbtSerde.readBlockEntity(level, pos, snap.beBeforeSnbt);
-                    report.blockEntitiesRestored++;
-                    any = true;
-                    if (looksLikeCreatePayload(snap.beBeforeSnbt)) createTouched.add(pos.immutable());
-                }
-                if (snap.containerSlotsBeforeSnbt != null) {
-                    if (apply) ContainerSlotSnapshot.apply(level, pos, snap.containerSlotsBeforeSnbt);
-                    report.containersRestored++;
-                    any = true;
-                    if (isCreateState(level.getBlockState(pos))) createTouched.add(pos.immutable());
-                }
-                if (any) report.onApplied(snap.type);
-                else report.onSkipped("no_snapshot");
-            }
-
-            if (apply && !createTouched.isEmpty()) {
-                for (BlockPos pos : createTouched) {
-                    if (pos == null || !level.hasChunkAt(pos)) continue;
-                    try {
-                        BlockState st = level.getBlockState(pos);
-                        if (st == null) continue;
-                        level.sendBlockUpdated(pos, st, st, 3);
-                        level.blockUpdated(pos, st.getBlock());
-                        level.updateNeighborsAt(pos, st.getBlock());
-                    } catch (Throwable ignored) {}
+                if (block.snapshot.containerSlotsBeforeSnbt != null) {
+                    if (!ContainerSlotSnapshot.apply(level, block.pos, block.snapshot.containerSlotsBeforeSnbt)) {
+                        failure = "container_restore_failed";
+                        break;
+                    }
+                    if (isCreateState(level.getBlockState(block.pos))) createTouched.add(block.pos);
                 }
             }
         }
-        return report;
+
+        if (failure != null) {
+            restoreBlockBackups(level, backups);
+            for (int i = 0; i < prepared.size(); i++) report.onSkipped(failure);
+            return;
+        }
+
+        for (PreparedBlock block : prepared) countPreparedBlock(report, block);
+        for (BlockPos pos : createTouched) {
+            try {
+                BlockState state = level.getBlockState(pos);
+                level.sendBlockUpdated(pos, state, state, 3);
+                level.blockUpdated(pos, state.getBlock());
+                level.updateNeighborsAt(pos, state.getBlock());
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void countPreparedBlock(RollbackReport report, PreparedBlock block) {
+        if (block.state != null) report.blocksRestored++;
+        if (block.snapshot.beBeforeSnbt != null) report.blockEntitiesRestored++;
+        if (block.snapshot.containerSlotsBeforeSnbt != null) report.containersRestored++;
+        report.onApplied(block.snapshot.type);
+    }
+
+    private static void restoreBlockBackups(ServerLevel level, java.util.List<BlockBackup> backups) {
+        for (BlockBackup backup : backups) {
+            try { level.setBlock(backup.pos, backup.state, 2); } catch (Throwable ignored) {}
+        }
+        for (BlockBackup backup : backups) {
+            try {
+                if (backup.beSnbt != null) NbtSerde.readBlockEntity(level, backup.pos, backup.beSnbt);
+                if (backup.containerSnbt != null) ContainerSlotSnapshot.apply(level, backup.pos, backup.containerSnbt);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static boolean isEntityRemovalType(ActionType type) {
+        return type == ActionType.ENTITY_SPAWN || type == ActionType.PLANE_PLACE;
     }
 
     private static boolean isBlockRestoreType(ActionType t) {
@@ -271,6 +330,9 @@ public final class RollbackEngine {
         }
     }
 
+    private record PreparedBlock(BlockPos pos, BlockSnapshot snapshot, BlockState state) {}
+    private record BlockBackup(BlockPos pos, BlockState state, String beSnbt, String containerSnbt) {}
+
     private static void applyRollback(ServerLevel level, LogEntry e, RollbackReport report, boolean apply) {
         try {
             BlockPos pos = new BlockPos(e.x, e.y, e.z);
@@ -309,36 +371,52 @@ public final class RollbackEngine {
                     else report.onSkipped("no_snapshot");
                     return;
                 }
-                case ENTITY_DEATH -> {
-                    // Best-effort respawn. Create contraptions are special-cased:
-                    // instead of respawning the moving entity we ask Create to place the
-                    // contraption blocks back into the world from the saved snapshot.
+                case ENTITY_DEATH, PLANE_REMOVE -> {
                     if (e.entityType != null && e.entityNbt != null) {
-                        if (apply && NbtSerde.restoreCreateContraptionAsBlocks(level, e.entityType, e.entityNbt, e.x + 0.5, e.y, e.z + 0.5)) {
+                        String invalid = NbtSerde.validateEntitySnapshot(e.entityType, e.entityUuid, e.entityNbt);
+                        if (invalid != null) { report.onSkipped(invalid); return; }
+                        if (!apply) {
+                            if (NbtSerde.isCreateContraptionSnapshot(e.entityType, e.entityNbt)) report.createStructuresRestored++;
+                            else report.entitiesRespawned++;
                             report.onApplied(e.type);
                             return;
                         }
 
-                        Entity spawned = null;
-                        if (apply) spawned = NbtSerde.spawnEntityFromSnapshot(level, e.entityType, e.entityNbt, e.x + 0.5, e.y, e.z + 0.5);
-                        if (!apply || spawned != null) {
-                            report.entitiesRespawned++;
-                            report.onApplied(e.type);
+                        boolean createSnapshot = NbtSerde.isCreateContraptionSnapshot(e.entityType, e.entityNbt);
+                        NbtSerde.EntityRestoreResult result = createSnapshot
+                                ? NbtSerde.restoreCreateContraptionAsBlocks(level, e.entityType, e.entityUuid, e.entityNbt)
+                                : NbtSerde.restoreEntityFromSnapshot(level, e.entityType, e.entityUuid, e.entityNbt);
+                        if (!result.success()) { report.onSkipped(result.reason()); return; }
+                        if (createSnapshot) {
+                            report.createStructuresRestored++;
+                            report.createBlocksRestored += result.affected();
                         } else {
-                            report.onSkipped("unsafe_entity_snapshot");
+                            report.entitiesRespawned += result.affected();
                         }
+                        report.onApplied(e.type);
                         return;
                     }
                     report.onSkipped("no_entity_snapshot");
                     return;
                 }
-                case ENTITY_SPAWN -> {
-                    // Remove spawned entity (only if we can find it). Best-effort.
+                case ENTITY_SPAWN, PLANE_PLACE -> {
                     if (e.entityUuid != null) {
                         Entity ent = level.getEntity(e.entityUuid);
                         if (ent != null) {
-                            if (apply) ent.discard();
-                            report.entitiesRemoved++;
+                            java.util.List<Entity> tree = ent.getSelfAndPassengers().toList();
+                            int affected = tree.size();
+                            if (apply) {
+                                for (int i = tree.size() - 1; i >= 0; i--) tree.get(i).discard();
+                                boolean remains = false;
+                                for (Entity member : tree) {
+                                    if (level.getEntity(member.getUUID()) != null) { remains = true; break; }
+                                }
+                                if (remains) {
+                                    report.onSkipped("entity_remove_failed");
+                                    return;
+                                }
+                            }
+                            report.entitiesRemoved += Math.max(1, affected);
                             report.onApplied(e.type);
                             return;
                         }
@@ -370,7 +448,7 @@ public final class RollbackEngine {
                     report.onApplied(e.type);
                     return;
                 }
-                case ITEM_PICKUP -> {
+                case ITEM_PICKUP, PLANE_PICKUP -> {
                     // Remove picked item from inventory (best-effort).
                     ItemStack target = NbtSerde.readItemStack(e.itemStackNbt, level.registryAccess());
                     if (target.isEmpty()) { report.onSkipped("invalid_stack"); return; }

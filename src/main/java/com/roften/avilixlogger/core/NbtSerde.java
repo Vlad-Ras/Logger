@@ -7,6 +7,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.Tag;
 import net.minecraft.nbt.TagParser;
@@ -23,7 +24,13 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -84,28 +91,39 @@ public final class NbtSerde {
     }
 
     /** Restore a block entity snapshot (must already exist at pos after state set). */
-    public static void readBlockEntity(ServerLevel level, BlockPos pos, String beSnbt) {
-        if (beSnbt == null || beSnbt.isEmpty()) return;
+    public static boolean readBlockEntity(ServerLevel level, BlockPos pos, String beSnbt) {
+        if (beSnbt == null || beSnbt.isEmpty()) return false;
         BlockEntity be = level.getBlockEntity(pos);
-        if (be == null) return;
+        if (be == null) return false;
 
         CompoundTag tag = fromSnbt(beSnbt);
-        if (tag == null) return;
+        if (tag == null) return false;
         // Ensure coords (some serializers rely on them)
         tag.putInt("x", pos.getX());
         tag.putInt("y", pos.getY());
         tag.putInt("z", pos.getZ());
 
-        invokeBlockEntityLoad(level, be, tag);
+        if (!invokeBlockEntityLoad(level, be, tag)) return false;
         be.setChanged();
+        BlockState state = level.getBlockState(pos);
+        level.sendBlockUpdated(pos, state, state, 3);
+        return true;
     }
 
     /** Entity snapshot without hard dependency on exact save signature. */
     public static String writeEntity(ServerLevel level, Entity ent) {
         if (ent == null) return null;
         CompoundTag tag = new CompoundTag();
-        // Entity#save is stable across many versions
-        ent.save(tag);
+        try {
+            ResourceLocation key = BuiltInRegistries.ENTITY_TYPE.getKey(ent.getType());
+            if (key == null) return null;
+            tag.putString("id", key.toString());
+            // save() intentionally refuses removed entities and passengers. Logger snapshots must still
+            // be complete in EntityLeaveLevelEvent, therefore use the unconditional payload writer.
+            ent.saveWithoutId(tag);
+        } catch (Throwable ignored) {
+            return null;
+        }
 
         // Create contraptions are a special case: during removal/disassembly the generic save path may
         // produce a half-empty snapshot where Contraption.Type is already missing. For rollback we need
@@ -123,53 +141,76 @@ public final class NbtSerde {
         return toSnbt(tag);
     }
 
-    public static Entity spawnEntityFromSnapshot(ServerLevel level, String entityTypeId, String entSnbt, double x, double y, double z) {
-        if (entityTypeId == null || entSnbt == null) return null;
+    public record EntityRestoreResult(boolean success, String reason, Entity entity, int affected) {
+        static EntityRestoreResult ok(Entity entity, int affected) {
+            return new EntityRestoreResult(true, "", entity, Math.max(1, affected));
+        }
+
+        static EntityRestoreResult fail(String reason) {
+            return new EntityRestoreResult(false, reason == null || reason.isBlank() ? "entity_restore_failed" : reason, null, 0);
+        }
+    }
+
+    /** Validate an entity snapshot without constructing or adding anything to the world. */
+    public static String validateEntitySnapshot(String entityTypeId, UUID expectedUuid, String entSnbt) {
         ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
-        if (key == null) return null;
-        EntityType<?> type = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.get(key);
-        if (type == null) return null;
-
+        if (key == null || BuiltInRegistries.ENTITY_TYPE.getOptional(key).isEmpty()) return "unknown_entity_type";
         CompoundTag tag = fromSnbt(entSnbt);
-        if (tag == null) return null;
-
-        // Create contraptions are restored as blocks via a dedicated path in rollback.
-        // Spawning them as entities from raw NBT is fragile and can crash clients.
+        if (tag == null || tag.isEmpty()) return "invalid_entity_nbt";
         if (isUnsafeEntityRollback(key, tag)) {
-            return null;
+            if (!CreateContraptionSnapshotStore.hasCompleteContraptionSnapshot(entSnbt)) return "incomplete_create_snapshot";
+        }
+        return validateEntityTree(tag, key, expectedUuid, true);
+    }
+
+    /**
+     * Restore exact entity state, including UUID, precise position/rotation/motion and passengers.
+     * No approximate block-position fallback is used: an incomplete snapshot is rejected explicitly.
+     */
+    public static EntityRestoreResult restoreEntityFromSnapshot(ServerLevel level, String entityTypeId,
+                                                                  UUID expectedUuid, String entSnbt) {
+        String invalid = validateEntitySnapshot(entityTypeId, expectedUuid, entSnbt);
+        if (invalid != null) return EntityRestoreResult.fail(invalid);
+
+        ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
+        CompoundTag tag = fromSnbt(entSnbt);
+        if (key == null || tag == null || isUnsafeEntityRollback(key, tag)) {
+            return EntityRestoreResult.fail("unsafe_entity_snapshot");
         }
 
-        // Strip runtime-only fields that should be regenerated for rollback-spawned entities.
-        tag.remove("UUID");
-        tag.remove("Pos");
-        tag.remove("Motion");
-        tag.remove("Rotation");
-        tag.remove("Passengers");
-        tag.remove("Leash");
-        tag.remove("RootVehicle");
+        tag = tag.copy();
+        tag.putString("id", key.toString());
+        if (expectedUuid != null) tag.putUUID("UUID", expectedUuid);
 
-        Entity ent = type.create(level);
-        if (ent == null) return null;
+        Set<UUID> snapshotUuids = new HashSet<>();
+        collectEntityUuids(tag, snapshotUuids);
+        for (UUID uuid : snapshotUuids) {
+            if (uuid != null && level.getEntity(uuid) != null) return EntityRestoreResult.fail("entity_uuid_collision");
+        }
 
-        boolean loaded = false;
+        Entity root;
         try {
-            Method m = Entity.class.getMethod("load", CompoundTag.class);
-            m.invoke(ent, tag);
-            loaded = true;
+            root = EntityType.loadEntityRecursive(tag, level, entity -> entity);
         } catch (Throwable ignored) {
-            try {
-                Method m = Entity.class.getMethod("load", CompoundTag.class, HolderLookup.Provider.class);
-                m.invoke(ent, tag, level.registryAccess());
-                loaded = true;
-            } catch (Throwable ignored2) {
-                loaded = false;
-            }
+            return EntityRestoreResult.fail("entity_nbt_load_failed");
         }
+        if (root == null) return EntityRestoreResult.fail("entity_nbt_load_failed");
+        if (expectedUuid != null && !expectedUuid.equals(root.getUUID())) return EntityRestoreResult.fail("entity_uuid_mismatch");
 
-        if (!loaded) return null;
-
-        ent.moveTo(x, y, z, ent.getYRot(), ent.getXRot());
-        return level.addFreshEntity(ent) ? ent : null;
+        List<Entity> tree = root.getSelfAndPassengers().toList();
+        try {
+            if (!level.tryAddFreshEntityWithPassengers(root)) return EntityRestoreResult.fail("entity_add_rejected");
+            for (Entity entity : tree) {
+                if (level.getEntity(entity.getUUID()) != entity) {
+                    removeRestoredEntityTree(level, tree);
+                    return EntityRestoreResult.fail("entity_add_incomplete");
+                }
+            }
+            return EntityRestoreResult.ok(root, tree.size());
+        } catch (Throwable ignored) {
+            removeRestoredEntityTree(level, tree);
+            return EntityRestoreResult.fail("entity_add_exception");
+        }
     }
 
     /**
@@ -179,37 +220,66 @@ public final class NbtSerde {
      * we reconstruct the Create contraption from the saved NBT and ask Create to place its blocks back
      * into the world using the entity's saved transform.
      */
-    public static boolean restoreCreateContraptionAsBlocks(ServerLevel level, String entityTypeId, String entSnbt,
-                                                           double fallbackX, double fallbackY, double fallbackZ) {
+    public static EntityRestoreResult restoreCreateContraptionAsBlocks(ServerLevel level, String entityTypeId,
+                                                                        UUID expectedUuid, String entSnbt) {
+        List<WorldBlockBackup> backups = List.of();
         try {
             ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
             CompoundTag entityTag = fromSnbt(entSnbt);
-            if (key == null || entityTag == null || !isUnsafeEntityRollback(key, entityTag)) return false;
-            EntityType<?> type = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.get(key);
-            if (type == null) return false;
+            if (key == null || entityTag == null || !isUnsafeEntityRollback(key, entityTag)) return EntityRestoreResult.fail("not_create_snapshot");
+            Optional<EntityType<?>> typeOpt = BuiltInRegistries.ENTITY_TYPE.getOptional(key);
+            if (typeOpt.isEmpty()) return EntityRestoreResult.fail("unknown_entity_type");
 
             CompoundTag contraptionTag = entityTag.getCompound("Contraption");
-            if (contraptionTag == null || contraptionTag.isEmpty()) return false;
+            if (contraptionTag == null || contraptionTag.isEmpty()) return EntityRestoreResult.fail("incomplete_create_snapshot");
             String contraptionType = contraptionTag.getString("Type");
-            if (contraptionType == null || contraptionType.isBlank()) return false;
+            if (contraptionType == null || contraptionType.isBlank()) return EntityRestoreResult.fail("incomplete_create_snapshot");
+            if (expectedUuid != null && entityTag.hasUUID("UUID") && !expectedUuid.equals(entityTag.getUUID("UUID"))) {
+                return EntityRestoreResult.fail("entity_uuid_mismatch");
+            }
 
             Object contraption = createCreateContraptionFromNbt(level, contraptionTag);
-            if (contraption == null) return false;
+            if (contraption == null) return EntityRestoreResult.fail("create_nbt_load_failed");
 
-            Entity shell = instantiateCreateRollbackShell(level, key, type, entityTag, fallbackX, fallbackY, fallbackZ);
-            if (shell == null) return false;
+            Entity shell = instantiateCreateRollbackShell(level, key, typeOpt.get(), entityTag);
+            if (shell == null) return EntityRestoreResult.fail("create_transform_unavailable");
 
             Object transform = invokeNoArg(shell, "makeStructureTransform");
-            if (transform == null) return false;
+            if (transform == null) return EntityRestoreResult.fail("create_transform_unavailable");
+
+            List<CreateTarget> targets = collectCreateTargets(contraption, transform);
+            if (targets.isEmpty()) return EntityRestoreResult.fail("create_blocks_missing");
+            for (CreateTarget target : targets) {
+                if (target.pos == null || !level.isInWorldBounds(target.pos)) return EntityRestoreResult.fail("create_target_out_of_world");
+                if (!level.hasChunkAt(target.pos)) return EntityRestoreResult.fail("create_chunk_unloaded");
+            }
+
+            backups = new ArrayList<>(targets.size());
+            for (CreateTarget target : targets) {
+                BlockPos pos = target.pos;
+                backups.add(new WorldBlockBackup(pos, level.getBlockState(pos),
+                        writeBlockEntity(level, level.getBlockEntity(pos)), ContainerSlotSnapshot.snapshot(level, pos)));
+            }
 
             try {
                 invokeNamed(contraption, "stop", level);
             } catch (Throwable ignored) {}
 
-            if (!invokeNamed(contraption, "addBlocksToWorld", level, transform)) return false;
-            return true;
+            if (!invokeNamed(contraption, "addBlocksToWorld", level, transform)) {
+                restoreWorldBackups(level, backups);
+                return EntityRestoreResult.fail("create_place_failed");
+            }
+            for (CreateTarget target : targets) {
+                BlockState actual = level.getBlockState(target.pos);
+                if (target.expectedState != null && actual.getBlock() != target.expectedState.getBlock()) {
+                    restoreWorldBackups(level, backups);
+                    return EntityRestoreResult.fail("create_verification_failed");
+                }
+            }
+            return EntityRestoreResult.ok(null, targets.size());
         } catch (Throwable ignored) {
-            return false;
+            restoreWorldBackups(level, backups);
+            return EntityRestoreResult.fail("create_restore_exception");
         }
     }
 
@@ -273,6 +343,12 @@ public final class NbtSerde {
         return false;
     }
 
+    public static boolean isCreateContraptionSnapshot(String entityTypeId, String entSnbt) {
+        ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
+        CompoundTag tag = fromSnbt(entSnbt);
+        return key != null && tag != null && isUnsafeEntityRollback(key, tag);
+    }
+
     private static boolean looksLikeCreateContraptionEntity(Entity ent) {
         if (ent == null) return false;
         try {
@@ -330,7 +406,7 @@ public final class NbtSerde {
     }
 
     private static Entity instantiateCreateRollbackShell(ServerLevel level, ResourceLocation key, EntityType<?> type,
-                                                         CompoundTag entityTag, double fallbackX, double fallbackY, double fallbackZ) {
+                                                         CompoundTag entityTag) {
         try {
             String className = createRollbackShellClassName(key);
             if (className == null) return null;
@@ -340,17 +416,12 @@ public final class NbtSerde {
             Object raw = ctor.newInstance(type, level);
             if (!(raw instanceof Entity shell)) return null;
 
-            double px = fallbackX;
-            double py = fallbackY;
-            double pz = fallbackZ;
-            try {
-                var pos = entityTag.getList("Pos", 6);
-                if (pos.size() >= 3) {
-                    px = pos.getDouble(0);
-                    py = pos.getDouble(1);
-                    pz = pos.getDouble(2);
-                }
-            } catch (Throwable ignored) {}
+            var pos = entityTag.getList("Pos", Tag.TAG_DOUBLE);
+            if (pos.size() < 3) return null;
+            double px = pos.getDouble(0);
+            double py = pos.getDouble(1);
+            double pz = pos.getDouble(2);
+            if (!Double.isFinite(px) || !Double.isFinite(py) || !Double.isFinite(pz)) return null;
 
             float yaw = 0.0F;
             float pitch = 0.0F;
@@ -390,6 +461,102 @@ public final class NbtSerde {
             return null;
         }
     }
+
+    private static String validateEntityTree(CompoundTag tag, ResourceLocation rootType, UUID expectedRootUuid, boolean root) {
+        if (tag == null || tag.isEmpty()) return "invalid_entity_nbt";
+        String rawId = tag.getString("id");
+        ResourceLocation id = rawId == null || rawId.isBlank() ? rootType : ResourceLocation.tryParse(rawId);
+        if (id == null || BuiltInRegistries.ENTITY_TYPE.getOptional(id).isEmpty()) return "unknown_entity_type";
+        if (root && rootType != null && !rootType.equals(id)) return "entity_type_mismatch";
+        if (!tag.hasUUID("UUID")) return "entity_missing_uuid";
+        if (root && expectedRootUuid != null && !expectedRootUuid.equals(tag.getUUID("UUID"))) return "entity_uuid_mismatch";
+
+        ListTag pos = tag.getList("Pos", Tag.TAG_DOUBLE);
+        if (pos.size() < 3 || !Double.isFinite(pos.getDouble(0)) || !Double.isFinite(pos.getDouble(1)) || !Double.isFinite(pos.getDouble(2))) {
+            return "entity_missing_position";
+        }
+        ListTag rotation = tag.getList("Rotation", Tag.TAG_FLOAT);
+        if (rotation.size() < 2 || !Float.isFinite(rotation.getFloat(0)) || !Float.isFinite(rotation.getFloat(1))) {
+            return "entity_missing_rotation";
+        }
+
+        if (tag.contains("Passengers", Tag.TAG_LIST)) {
+            ListTag passengers = tag.getList("Passengers", Tag.TAG_COMPOUND);
+            for (int i = 0; i < passengers.size(); i++) {
+                String invalid = validateEntityTree(passengers.getCompound(i), null, null, false);
+                if (invalid != null) return invalid;
+            }
+        }
+        return null;
+    }
+
+    private static void collectEntityUuids(CompoundTag tag, Set<UUID> out) {
+        if (tag == null || out == null) return;
+        if (tag.hasUUID("UUID")) out.add(tag.getUUID("UUID"));
+        if (!tag.contains("Passengers", Tag.TAG_LIST)) return;
+        ListTag passengers = tag.getList("Passengers", Tag.TAG_COMPOUND);
+        for (int i = 0; i < passengers.size(); i++) collectEntityUuids(passengers.getCompound(i), out);
+    }
+
+    private static void removeRestoredEntityTree(ServerLevel level, List<Entity> tree) {
+        if (level == null || tree == null) return;
+        for (Entity entity : tree) {
+            try {
+                if (entity != null && level.getEntity(entity.getUUID()) == entity) entity.discard();
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static List<CreateTarget> collectCreateTargets(Object contraption, Object transform) {
+        Object rawBlocks = readField(contraption, "blocks");
+        if (!(rawBlocks instanceof Map<?, ?> blocks) || blocks.isEmpty()) return List.of();
+
+        ArrayList<CreateTarget> out = new ArrayList<>(blocks.size());
+        HashSet<BlockPos> unique = new HashSet<>();
+        for (Map.Entry<?, ?> entry : blocks.entrySet()) {
+            if (!(entry.getKey() instanceof BlockPos localPos)) return List.of();
+            Object transformed = invokeCompatible(transform, "apply", localPos);
+            if (!(transformed instanceof BlockPos worldPos) || !unique.add(worldPos)) return List.of();
+
+            BlockState expected = null;
+            Object info = entry.getValue();
+            Object rawState = invokeNoArg(info, "state");
+            if (!(rawState instanceof BlockState)) rawState = readField(info, "state");
+            if (rawState instanceof BlockState state) {
+                Object transformedState = invokeCompatible(transform, "apply", state);
+                expected = transformedState instanceof BlockState bs ? bs : state;
+            }
+            out.add(new CreateTarget(worldPos.immutable(), expected));
+        }
+        return out;
+    }
+
+    private static void restoreWorldBackups(ServerLevel level, List<WorldBlockBackup> backups) {
+        if (level == null || backups == null) return;
+        for (WorldBlockBackup backup : backups) {
+            try { level.setBlock(backup.pos, backup.state, 2); } catch (Throwable ignored) {}
+        }
+        for (WorldBlockBackup backup : backups) {
+            try {
+                if (backup.beSnbt != null) readBlockEntity(level, backup.pos, backup.beSnbt);
+                if (backup.containerSnbt != null) ContainerSlotSnapshot.apply(level, backup.pos, backup.containerSnbt);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static Object invokeCompatible(Object target, String name, Object... args) {
+        if (target == null || name == null) return null;
+        Method method = findCompatibleMethod(target.getClass(), name, args);
+        if (method == null) return null;
+        try {
+            return method.invoke(target, args);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private record CreateTarget(BlockPos pos, BlockState expectedState) {}
+    private record WorldBlockBackup(BlockPos pos, BlockState state, String beSnbt, String containerSnbt) {}
 
     private static String createRollbackShellClassName(ResourceLocation key) {
         if (key == null) return null;
@@ -708,12 +875,12 @@ public final class NbtSerde {
         }
     }
 
-    private static void invokeBlockEntityLoad(ServerLevel level, BlockEntity be, CompoundTag tag) {
+    private static boolean invokeBlockEntityLoad(ServerLevel level, BlockEntity be, CompoundTag tag) {
         // Preferred: loadWithComponents(tag, provider)
         try {
             Method m = BlockEntity.class.getMethod("loadWithComponents", CompoundTag.class, HolderLookup.Provider.class);
             m.invoke(be, tag, level.registryAccess());
-            return;
+            return true;
         } catch (NoSuchMethodException ignored) {
         } catch (Throwable ignored) {
         }
@@ -722,7 +889,7 @@ public final class NbtSerde {
         try {
             Method m = BlockEntity.class.getMethod("load", CompoundTag.class, HolderLookup.Provider.class);
             m.invoke(be, tag, level.registryAccess());
-            return;
+            return true;
         } catch (NoSuchMethodException ignored) {
         } catch (Throwable ignored) {
         }
@@ -731,7 +898,9 @@ public final class NbtSerde {
         try {
             Method m = BlockEntity.class.getMethod("load", CompoundTag.class);
             m.invoke(be, tag);
+            return true;
         } catch (Throwable ignored) {
+            return false;
         }
     }
 

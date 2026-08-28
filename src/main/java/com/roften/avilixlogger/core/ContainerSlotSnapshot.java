@@ -16,6 +16,8 @@ import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.items.IItemHandler;
 import net.neoforged.neoforge.items.IItemHandlerModifiable;
 
+import java.util.HashSet;
+
 /**
  * Strict slot snapshots for containers.
  *
@@ -52,7 +54,30 @@ public final class ContainerSlotSnapshot {
         if (level == null || pos == null) return false;
         if (snapshotSnbt == null || snapshotSnbt.isBlank()) return false;
         CompoundTag tag = NbtSerde.fromSnbt(snapshotSnbt);
-        if (tag == null) return false;
+        if (!isStructurallyValid(tag)) return false;
+
+        // A capability may reject a write after several slots were already changed. Keep a
+        // local backup and verify the resulting snapshot byte-for-byte at the NBT level.
+        CompoundTag backup = NbtSerde.fromSnbt(snapshot(level, pos));
+        if (!isStructurallyValid(backup)) return false;
+
+        if (!applyUnchecked(level, pos, tag)) {
+            applyUnchecked(level, pos, backup);
+            return false;
+        }
+        CompoundTag actual = NbtSerde.fromSnbt(snapshot(level, pos));
+        if (equivalent(tag, actual)) return true;
+
+        applyUnchecked(level, pos, backup);
+        return false;
+    }
+
+    /** Parse-only validation used before a rollback starts changing the world. */
+    public static boolean isValid(String snapshotSnbt) {
+        return isStructurallyValid(NbtSerde.fromSnbt(snapshotSnbt));
+    }
+
+    private static boolean applyUnchecked(ServerLevel level, BlockPos pos, CompoundTag tag) {
 
         // 1) Prefer modifiable capability
         BlockEntity be = level.getBlockEntity(pos);
@@ -69,7 +94,7 @@ public final class ContainerSlotSnapshot {
         // 2) Container fallback (including double chest combined container)
         Container cont = containerForPos(level, pos);
         if (cont != null) {
-            readContainer(cont, level.registryAccess(), tag);
+            if (!readContainer(cont, level.registryAccess(), tag)) return false;
             if (cont instanceof BlockEntity be2) {
                 be2.setChanged();
             } else {
@@ -80,6 +105,43 @@ public final class ContainerSlotSnapshot {
             return true;
         }
         return false;
+    }
+
+    private static boolean isStructurallyValid(CompoundTag tag) {
+        if (tag == null || !tag.contains("Size", Tag.TAG_INT) || !tag.contains("Items", Tag.TAG_LIST)) return false;
+        int size = tag.getInt("Size");
+        if (size < 0) return false;
+        HashSet<Integer> seen = new HashSet<>();
+        ListTag items = tag.getList("Items", Tag.TAG_COMPOUND);
+        for (int i = 0; i < items.size(); i++) {
+            CompoundTag item = items.getCompound(i);
+            if (!item.contains("Slot", Tag.TAG_ANY_NUMERIC)) return false;
+            int slot = readSlot(item);
+            if (slot < 0 || slot >= size || !seen.add(slot)) return false;
+        }
+        return true;
+    }
+
+    private static boolean equivalent(CompoundTag expected, CompoundTag actual) {
+        if (!isStructurallyValid(expected) || !isStructurallyValid(actual)) return false;
+        return normalizeSlots(expected).equals(normalizeSlots(actual));
+    }
+
+    private static CompoundTag normalizeSlots(CompoundTag source) {
+        CompoundTag copy = source.copy();
+        ListTag items = copy.getList("Items", Tag.TAG_COMPOUND);
+        for (int i = 0; i < items.size(); i++) {
+            CompoundTag item = items.getCompound(i);
+            if (item.contains("Slot", Tag.TAG_ANY_NUMERIC)) item.putInt("Slot", readSlot(item));
+        }
+        return copy;
+    }
+
+    /** Old snapshots used a byte and therefore need unsigned decoding; new snapshots use an int. */
+    public static int readSlot(CompoundTag item) {
+        if (item == null || !item.contains("Slot", Tag.TAG_ANY_NUMERIC)) return -1;
+        Tag raw = item.get("Slot");
+        return raw != null && raw.getId() == Tag.TAG_BYTE ? (item.getByte("Slot") & 0xFF) : item.getInt("Slot");
     }
 
     // ---------------- internals ----------------
@@ -103,7 +165,7 @@ public final class ContainerSlotSnapshot {
                 ItemStack st = h.getStackInSlot(i);
                 if (st == null || st.isEmpty()) continue;
                 CompoundTag it = new CompoundTag();
-                it.putByte("Slot", (byte) i);
+                it.putInt("Slot", i);
                 Tag saved = st.save(level.registryAccess());
                 if (saved instanceof CompoundTag ct) it.merge(ct);
                 items.add(it);
@@ -124,18 +186,19 @@ public final class ContainerSlotSnapshot {
             }
             if (!(h instanceof IItemHandlerModifiable mh)) return false;
 
-            int size = snapshot.contains("Size") ? snapshot.getInt("Size") : mh.getSlots();
-            int max = Math.min(mh.getSlots(), Math.max(0, size));
+            int size = snapshot.getInt("Size");
+            if (size != mh.getSlots()) return false;
 
             // clear
-            for (int i = 0; i < max; i++) mh.setStackInSlot(i, ItemStack.EMPTY);
+            for (int i = 0; i < size; i++) mh.setStackInSlot(i, ItemStack.EMPTY);
 
             ListTag items = snapshot.getList("Items", Tag.TAG_COMPOUND);
             for (int i = 0; i < items.size(); i++) {
                 CompoundTag it = items.getCompound(i);
-                int slot = it.contains("Slot") ? (it.getByte("Slot") & 0xFF) : -1;
-                if (slot < 0 || slot >= max) continue;
+                int slot = readSlot(it);
+                if (slot < 0 || slot >= size) return false;
                 ItemStack st = ItemStack.parse(level.registryAccess(), it).orElse(ItemStack.EMPTY);
+                if (st.isEmpty()) return false;
                 mh.setStackInSlot(slot, st);
             }
             return true;
@@ -228,7 +291,7 @@ public final class ContainerSlotSnapshot {
             ItemStack st = c.getItem(i);
             if (st == null || st.isEmpty()) continue;
             CompoundTag it = new CompoundTag();
-            it.putByte("Slot", (byte) i);
+            it.putInt("Slot", i);
             Tag saved = st.save(provider);
             if (saved instanceof CompoundTag ct) it.merge(ct);
             items.add(it);
@@ -237,19 +300,21 @@ public final class ContainerSlotSnapshot {
         return out;
     }
 
-    private static void readContainer(Container c, net.minecraft.core.HolderLookup.Provider provider, CompoundTag snapshot) {
-        int size = snapshot.contains("Size") ? snapshot.getInt("Size") : c.getContainerSize();
-        int max = Math.min(c.getContainerSize(), Math.max(0, size));
+    private static boolean readContainer(Container c, net.minecraft.core.HolderLookup.Provider provider, CompoundTag snapshot) {
+        int size = snapshot.getInt("Size");
+        if (size != c.getContainerSize()) return false;
 
-        for (int i = 0; i < max; i++) c.setItem(i, ItemStack.EMPTY);
+        for (int i = 0; i < size; i++) c.setItem(i, ItemStack.EMPTY);
 
         ListTag items = snapshot.getList("Items", Tag.TAG_COMPOUND);
         for (int i = 0; i < items.size(); i++) {
             CompoundTag it = items.getCompound(i);
-            int slot = it.contains("Slot") ? (it.getByte("Slot") & 0xFF) : -1;
-            if (slot < 0 || slot >= max) continue;
+            int slot = readSlot(it);
+            if (slot < 0 || slot >= size) return false;
             ItemStack st = ItemStack.parse(provider, it).orElse(ItemStack.EMPTY);
+            if (st.isEmpty()) return false;
             c.setItem(slot, st);
         }
+        return true;
     }
 }

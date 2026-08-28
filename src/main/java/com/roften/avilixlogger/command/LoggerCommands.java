@@ -2157,6 +2157,9 @@ public final class LoggerCommands {
         into.skipped += add.skipped;
         into.blocksRestored += add.blocksRestored;
         into.blockEntitiesRestored += add.blockEntitiesRestored;
+        into.containersRestored += add.containersRestored;
+        into.createStructuresRestored += add.createStructuresRestored;
+        into.createBlocksRestored += add.createBlocksRestored;
         into.entitiesRespawned += add.entitiesRespawned;
         into.entitiesRemoved += add.entitiesRemoved;
         into.itemsGivenOrSpawned += add.itemsGivenOrSpawned;
@@ -2179,6 +2182,8 @@ public final class LoggerCommands {
 
         String line2 = "Блоки: " + r.blocksRestored
                 + ", BE: " + r.blockEntitiesRestored
+                + ", Контейнеры: " + r.containersRestored
+                + ", Create: " + r.createStructuresRestored + " (" + r.createBlocksRestored + " блоков)"
                 + ", Сущности: +" + r.entitiesRespawned + "/-" + r.entitiesRemoved
                 + ", Предметы: +" + r.itemsGivenOrSpawned + "/-" + r.itemsRemovedFromInventory;
         src.sendSystemMessage(Component.literal(line2).withStyle(ChatFormatting.GRAY));
@@ -2214,6 +2219,30 @@ public final class LoggerCommands {
             case "no_snapshot" -> "нет снимка";
             case "no_entity_snapshot" -> "нет снимка сущности";
             case "unsafe_entity_snapshot" -> "опасная сущность Create/contraption";
+            case "unknown_entity_type" -> "тип сущности не установлен";
+            case "invalid_entity_nbt" -> "битый NBT сущности";
+            case "incomplete_create_snapshot" -> "неполный снимок Create";
+            case "entity_type_mismatch" -> "тип сущности не совпал";
+            case "entity_missing_uuid" -> "в снимке нет UUID";
+            case "entity_uuid_mismatch" -> "UUID снимка не совпал";
+            case "entity_uuid_collision" -> "UUID уже существует в мире";
+            case "entity_missing_position" -> "в снимке нет точной позиции";
+            case "entity_missing_rotation" -> "в снимке нет поворота";
+            case "entity_nbt_load_failed" -> "NBT сущности не загрузился";
+            case "entity_add_rejected", "entity_add_incomplete", "entity_add_exception" -> "сущность не добавлена целиком";
+            case "entity_remove_failed" -> "сущность не удалена целиком";
+            case "invalid_block_snapshot" -> "битый снимок блока";
+            case "invalid_block_entity_nbt" -> "битый NBT блока";
+            case "invalid_container_snapshot" -> "битый снимок контейнера";
+            case "block_state_verification_failed", "block_state_restore_failed" -> "блок не восстановлен";
+            case "block_entity_restore_failed" -> "NBT блока не восстановлен";
+            case "container_restore_failed" -> "контейнер не восстановлен целиком";
+            case "create_nbt_load_failed" -> "Create не прочитал снимок";
+            case "create_transform_unavailable" -> "нет преобразования Create";
+            case "create_blocks_missing" -> "в снимке Create нет блоков";
+            case "create_target_out_of_world" -> "Create выходит за границы мира";
+            case "create_chunk_unloaded" -> "чанк Create не загружен";
+            case "create_place_failed", "create_verification_failed", "create_restore_exception" -> "Create не восстановлен целиком";
             case "entity_not_found" -> "сущность не найдена";
             case "missing_uuid" -> "нет UUID";
             case "invalid_stack" -> "битый предмет";
@@ -2232,6 +2261,8 @@ public final class LoggerCommands {
                 + ", processed=" + r.processed
                 + " | blocks=" + r.blocksRestored
                 + ", be=" + r.blockEntitiesRestored
+                + ", containers=" + r.containersRestored
+                + ", create=" + r.createStructuresRestored + "/" + r.createBlocksRestored
                 + ", ent+=" + r.entitiesRespawned
                 + ", ent-=" + r.entitiesRemoved
                 + ", items+=" + r.itemsGivenOrSpawned
