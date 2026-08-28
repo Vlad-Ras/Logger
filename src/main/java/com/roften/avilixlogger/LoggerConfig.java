@@ -28,6 +28,7 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue clickHouseBatchSize;
         public final ModConfigSpec.IntValue clickHouseFlushIntervalMs;
         public final ModConfigSpec.IntValue clickHouseQueueCapacity;
+        public final ModConfigSpec.IntValue clickHouseMaxQueuedPayloadMiB;
         public final ModConfigSpec.IntValue clickHouseSelectQueryTimeoutSec;
         public final ModConfigSpec.IntValue clickHouseWorldQueryTimeoutSec;
         public final ModConfigSpec.BooleanValue clickHouseAsyncInsert;
@@ -49,6 +50,13 @@ public final class LoggerConfig {
 
         public final ModConfigSpec.IntValue asyncWorkerThreads;
         public final ModConfigSpec.IntValue asyncQueueCapacity;
+        public final ModConfigSpec.IntValue asyncMaxQueuedPayloadMiB;
+
+        public final ModConfigSpec.IntValue rollbackOperationsPerTick;
+        public final ModConfigSpec.IntValue rollbackBlockBatchSize;
+        public final ModConfigSpec.IntValue rollbackChunkLoadsPerTick;
+        public final ModConfigSpec.IntValue rollbackMaxMillisPerTick;
+        public final ModConfigSpec.IntValue rollbackMaxPreparedPayloadMiB;
 
         public final ModConfigSpec.BooleanValue logBlocks;
         public final ModConfigSpec.BooleanValue logEntities;
@@ -124,6 +132,8 @@ public final class LoggerConfig {
                     .defineInRange("flushIntervalMs", 1000, 100, 10000);
             clickHouseQueueCapacity = b.comment("In-memory ClickHouse queue capacity. If full, new logs are dropped to protect TPS.")
                     .defineInRange("queueCapacity", 500000, 10000, 2000000);
+            clickHouseMaxQueuedPayloadMiB = b.comment("Maximum estimated SNBT/text payload retained by the ClickHouse queue. Protects the JVM from large modded NBT bursts even when row capacity is not reached.")
+                    .defineInRange("maxQueuedPayloadMiB", 256, 16, 8192);
             clickHouseSelectQueryTimeoutSec = b.comment("Statement timeout for ClickHouse SELECT queries used by lookup / GUI.")
                     .defineInRange("selectQueryTimeoutSec", 15, 1, 600);
             clickHouseWorldQueryTimeoutSec = b.comment("Timeout for whole-world, all-dimension and 30+ day queries. They run outside the server tick.")
@@ -141,6 +151,21 @@ public final class LoggerConfig {
                     .defineInRange("workerThreads", 2, 1, 16);
             asyncQueueCapacity = b.comment("Queue capacity for expensive CPU post-processing tasks. If this is full, increase workerThreads or investigate spammy mods.")
                     .defineInRange("queueCapacity", 100000, 10000, 1000000);
+            asyncMaxQueuedPayloadMiB = b.comment("Maximum estimated snapshot payload retained by queued CPU tasks. New expensive tasks are rejected before they can exhaust heap.")
+                    .defineInRange("maxQueuedPayloadMiB", 128, 16, 4096);
+            b.pop();
+
+            b.push("rollbackPerformance");
+            rollbackOperationsPerTick = b.comment("Maximum ordinary rollback operations applied per server tick.")
+                    .defineInRange("operationsPerTick", 100, 1, 10000);
+            rollbackBlockBatchSize = b.comment("Maximum same-chunk block snapshots restored as one atomic batch.")
+                    .defineInRange("blockBatchSize", 32, 1, 1000);
+            rollbackChunkLoadsPerTick = b.comment("Maximum synchronous chunk loads requested by rollback per tick. Set to 0 to wait for already loaded chunks only.")
+                    .defineInRange("chunkLoadsPerTick", 1, 0, 64);
+            rollbackMaxMillisPerTick = b.comment("Soft wall-clock budget for rollback work during one server tick.")
+                    .defineInRange("maxMillisPerTick", 2, 1, 25);
+            rollbackMaxPreparedPayloadMiB = b.comment("Maximum estimated in-memory size of one fully prepared rollback plan. Exceeding it fails explicitly instead of risking JVM OOM; narrow the scope/time or raise this value deliberately.")
+                    .defineInRange("maxPreparedPayloadMiB", 512, 64, 8192);
             b.pop();
 
             b.push("capture");
@@ -173,13 +198,13 @@ public final class LoggerConfig {
             interactionScanTicks = b.comment("How many delayed ticks to watch after block interaction for state/NBT changes. Lower = less TPS impact.")
                     .defineInRange("interactionScanTicks", 1, 1, 10);
             storeVerboseBeSnapshotsInDeltaLogs = b.comment("Store full before/after block-entity NBT inside each CONTAINER_PUT/CONTAINER_TAKE delta log. Disabling removes large duplicate payloads.")
-                    .define("storeVerboseBeSnapshotsInDeltaLogs", true);
+                    .define("storeVerboseBeSnapshotsInDeltaLogs", false);
             storeVerboseBeSnapshotsInInteractLogs = b.comment("Store full before/after block-entity NBT inside BLOCK_INTERACT logs when a separate snapshot entry is also written. Disabling reduces duplicate payloads.")
-                    .define("storeVerboseBeSnapshotsInInteractLogs", true);
-            storeVerboseEntitySnapshotsInInteractLogs = b.comment("Store full entity NBT on every entity right-click interaction. Very expensive with NPCs/keepers; enabled by default; disable only if you intentionally want smaller rows.")
-                    .define("storeVerboseEntitySnapshotsInInteractLogs", true);
-            storeVerboseEntitySnapshotsInMountLogs = b.comment("Store full entity NBT on every mount/dismount/container-open interaction. Very expensive with vehicles; enabled by default; disable only if you intentionally want smaller rows.")
-                    .define("storeVerboseEntitySnapshotsInMountLogs", true);
+                    .define("storeVerboseBeSnapshotsInInteractLogs", false);
+            storeVerboseEntitySnapshotsInInteractLogs = b.comment("Store full entity NBT on every entity right-click interaction. The action/type/UUID are still logged when disabled; enable only for deep diagnostics.")
+                    .define("storeVerboseEntitySnapshotsInInteractLogs", false);
+            storeVerboseEntitySnapshotsInMountLogs = b.comment("Store full entity NBT on every mount/dismount/container-open interaction. The action/type/UUID remain logged when disabled.")
+                    .define("storeVerboseEntitySnapshotsInMountLogs", false);
             b.pop();
 
             b.push("commands");

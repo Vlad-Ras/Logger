@@ -33,7 +33,7 @@ public final class RollbackReport {
     public void onApplied(ActionType type) {
         applied++;
         processed++;
-        appliedByType.merge(type, 1, Integer::sum);
+        if (type != null) appliedByType.merge(type, 1, Integer::sum);
     }
 
     public void onSkipped(String reason) {
@@ -41,5 +41,23 @@ public final class RollbackReport {
         processed++;
         if (reason == null || reason.isBlank()) reason = "unknown";
         skippedReasons.merge(reason, 1, Integer::sum);
+    }
+
+    public void merge(RollbackReport other) {
+        if (other == null || other == this) return;
+        processed += other.processed;
+        applied += other.applied;
+        skipped += other.skipped;
+        blocksRestored += other.blocksRestored;
+        blockEntitiesRestored += other.blockEntitiesRestored;
+        containersRestored += other.containersRestored;
+        createStructuresRestored += other.createStructuresRestored;
+        createBlocksRestored += other.createBlocksRestored;
+        entitiesRespawned += other.entitiesRespawned;
+        entitiesRemoved += other.entitiesRemoved;
+        itemsGivenOrSpawned += other.itemsGivenOrSpawned;
+        itemsRemovedFromInventory += other.itemsRemovedFromInventory;
+        other.appliedByType.forEach((type, count) -> appliedByType.merge(type, count, Integer::sum));
+        other.skippedReasons.forEach((reason, count) -> skippedReasons.merge(reason, count, Integer::sum));
     }
 }

@@ -5,6 +5,7 @@ import com.roften.avilixlogger.command.LoggerCommands;
 import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LoggerEventHandlers;
 import com.roften.avilixlogger.core.LoggerRuntime;
+import com.roften.avilixlogger.core.RollbackCoordinator;
 import com.roften.avilixlogger.net.LoggerNetwork;
 import com.roften.avilixlogger.net.LoggerNetworkHooks;
 import org.slf4j.Logger;
@@ -49,6 +50,7 @@ public final class AvilixLoggerMod {
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
+        NeoForge.EVENT_BUS.addListener(RollbackCoordinator::onServerTick);
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
@@ -65,6 +67,7 @@ public final class AvilixLoggerMod {
         LoggerEventHandlers.shutdownBackground();
         ChatLogPager.shutdown();
         LoggerNetwork.shutdown();
+        RollbackCoordinator.shutdown();
         LoggerRuntime.shutdown();
     }
 

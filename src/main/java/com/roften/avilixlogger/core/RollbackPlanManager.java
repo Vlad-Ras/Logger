@@ -13,7 +13,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class RollbackPlanManager {
 
-    public static final long PLAN_TTL_MS = 2L * 60_000L;
+    // Whole-world ClickHouse previews can legitimately take longer than two minutes. The cutoff
+    // timestamp keeps the plan immutable, so a longer confirmation window does not change scope.
+    public static final long PLAN_TTL_MS = 15L * 60_000L;
 
     public record Scope(String dimension, BlockPos min, BlockPos max) {
         public Scope {

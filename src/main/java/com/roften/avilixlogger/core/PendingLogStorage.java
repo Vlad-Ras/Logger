@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.core;
 
+import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.LoggerConfig;
 
 import java.util.List;
@@ -14,6 +15,9 @@ public final class PendingLogStorage implements LogStorage {
 
     private final ArrayBlockingQueue<LogEntry> pending =
             new ArrayBlockingQueue<>(Math.max(10_000, LoggerConfig.VALUES.clickHouseQueueCapacity.get()));
+    private final long maxPayloadBytes = Math.max(16L, LoggerConfig.VALUES.clickHouseMaxQueuedPayloadMiB.get()) * 1024L * 1024L;
+    private final java.util.concurrent.atomic.AtomicLong payloadBytes = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong dropped = new java.util.concurrent.atomic.AtomicLong();
 
     private volatile LogStorage delegate;
 
@@ -25,7 +29,15 @@ public final class PendingLogStorage implements LogStorage {
             return;
         }
         if (entry != null) {
-            pending.offer(entry);
+            long weight = PayloadSizeEstimator.estimate(entry);
+            if (!reserve(weight)) {
+                warnDropped();
+                return;
+            }
+            if (!pending.offer(entry)) {
+                payloadBytes.addAndGet(-weight);
+                warnDropped();
+            }
         }
     }
 
@@ -50,6 +62,7 @@ public final class PendingLogStorage implements LogStorage {
             d.shutdown();
         }
         pending.clear();
+        payloadBytes.set(0L);
     }
 
     public void setDelegate(LogStorage delegate) {
@@ -58,6 +71,7 @@ public final class PendingLogStorage implements LogStorage {
 
         LogEntry entry;
         while ((entry = pending.poll()) != null) {
+            payloadBytes.addAndGet(-PayloadSizeEstimator.estimate(entry));
             delegate.append(entry);
         }
     }
@@ -65,5 +79,22 @@ public final class PendingLogStorage implements LogStorage {
     public void reset() {
         delegate = null;
         pending.clear();
+        payloadBytes.set(0L);
+    }
+
+    private boolean reserve(long bytes) {
+        while (true) {
+            long current = payloadBytes.get();
+            if (bytes > maxPayloadBytes || current > maxPayloadBytes - bytes) return false;
+            if (payloadBytes.compareAndSet(current, current + bytes)) return true;
+        }
+    }
+
+    private void warnDropped() {
+        long count = dropped.incrementAndGet();
+        if (count == 1L || count % 1_000L == 0L) {
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Startup queue rejected {} rows while ClickHouse initializes; queuedRows={}, estimatedPayloadMiB={}",
+                    count, pending.size(), payloadBytes.get() / (1024L * 1024L));
+        }
     }
 }

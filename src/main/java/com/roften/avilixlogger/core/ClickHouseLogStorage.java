@@ -131,7 +131,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private final boolean waitForAsyncInsert;
 
     private volatile boolean running = true;
-    private volatile long dropped;
+    private final java.util.concurrent.atomic.AtomicLong queuedPayloadBytes = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong dropped = new java.util.concurrent.atomic.AtomicLong();
+    private final long maxQueuedPayloadBytes;
     private volatile long written;
     private volatile long lastCleanupAt;
     private volatile long unhealthyUntilMs;
@@ -157,10 +159,13 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         this.asyncInsert = LoggerConfig.VALUES.clickHouseAsyncInsert.get();
         this.waitForAsyncInsert = LoggerConfig.VALUES.clickHouseWaitForAsyncInsert.get();
         this.queue = new ArrayBlockingQueue<>(Math.max(10_000, LoggerConfig.VALUES.clickHouseQueueCapacity.get()));
+        this.maxQueuedPayloadBytes = Math.max(16L, LoggerConfig.VALUES.clickHouseMaxQueuedPayloadMiB.get()) * 1024L * 1024L;
 
         ensureSchema();
-        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse connected successfully. endpoint={}, database={}, schemaMode={}, feed={}, queueCapacity={}, batchSize={}",
-                endpoint, database, splitSchema ? "split" : "legacy", useFeedTable, queue.remainingCapacity() + queue.size(), LoggerConfig.VALUES.clickHouseBatchSize.get());
+        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse connected successfully. endpoint={}, database={}, schemaMode={}, feed={}, queueCapacity={}, queuePayloadMiB={}, batchSize={}",
+                endpoint, database, splitSchema ? "split" : "legacy", useFeedTable,
+                queue.remainingCapacity() + queue.size(), maxQueuedPayloadBytes / (1024L * 1024L),
+                LoggerConfig.VALUES.clickHouseBatchSize.get());
 
         this.writer = new Thread(this::runWriter, "avilixlogger-clickhouse-writer");
         this.writer.setDaemon(true);
@@ -485,8 +490,32 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     @Override
     public void append(LogEntry entry) {
         if (!running || entry == null) return;
+        long weight = PayloadSizeEstimator.estimate(entry);
+        if (!reservePayload(weight)) {
+            onDropped("payload budget");
+            return;
+        }
         boolean ok = queue.offer(entry);
-        if (!ok) dropped++;
+        if (!ok) {
+            queuedPayloadBytes.addAndGet(-weight);
+            onDropped("row capacity");
+        }
+    }
+
+    private boolean reservePayload(long bytes) {
+        while (true) {
+            long current = queuedPayloadBytes.get();
+            if (bytes > maxQueuedPayloadBytes || current > maxQueuedPayloadBytes - bytes) return false;
+            if (queuedPayloadBytes.compareAndSet(current, current + bytes)) return true;
+        }
+    }
+
+    private void onDropped(String reason) {
+        long count = dropped.incrementAndGet();
+        if (count == 1L || count % 1_000L == 0L) {
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse queue rejected {} log rows ({}). queuedRows={}, estimatedPayloadMiB={}",
+                    count, reason, queue.size(), queuedPayloadBytes.get() / (1024L * 1024L));
+        }
     }
 
     private void runWriter() {
@@ -494,12 +523,24 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         final long flushEveryMs = Math.max(100, LoggerConfig.VALUES.clickHouseFlushIntervalMs.get());
         final List<LogEntry> batch = new ArrayList<>(batchSize);
         long lastFlush = System.currentTimeMillis();
+        long retryDelayMs = 250L;
 
         while (running || !queue.isEmpty()) {
             try {
                 LogEntry first = queue.poll(50, TimeUnit.MILLISECONDS);
-                if (first != null) batch.add(first);
-                queue.drainTo(batch, Math.max(0, batchSize - batch.size()));
+                if (first != null) {
+                    batch.add(first);
+                    queuedPayloadBytes.addAndGet(-PayloadSizeEstimator.estimate(first));
+                }
+                int room = Math.max(0, batchSize - batch.size());
+                if (room > 0) {
+                    java.util.ArrayList<LogEntry> drained = new java.util.ArrayList<>(room);
+                    queue.drainTo(drained, room);
+                    for (LogEntry entry : drained) {
+                        batch.add(entry);
+                        queuedPayloadBytes.addAndGet(-PayloadSizeEstimator.estimate(entry));
+                    }
+                }
 
                 long now = System.currentTimeMillis();
                 boolean timeFlush = (now - lastFlush) >= flushEveryMs;
@@ -508,6 +549,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                     written += batch.size();
                     batch.clear();
                     lastFlush = now;
+                    retryDelayMs = 250L;
                 }
 
                 if (timeFlush) maybeCleanup(now);
@@ -516,7 +558,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             } catch (Throwable t) {
                 markUnhealthy(t);
                 AvilixLoggerMod.LOGGER.error("[AvilixLogger] ClickHouse writer failure", t);
-                try { Thread.sleep(250L); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(retryDelayMs); } catch (InterruptedException ignored) {}
+                retryDelayMs = Math.min(5_000L, retryDelayMs * 2L);
             }
         }
 
@@ -1426,7 +1469,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         writer.interrupt();
         try { writer.join(5_000L); } catch (InterruptedException ignored) {}
         if (writer.isAlive()) AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse writer thread did not stop within timeout.");
-        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse HTTP storage shutdown. written={}, dropped={}", written, dropped);
+        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse HTTP storage shutdown. written={}, dropped={}", written, dropped.get());
     }
 
     private String execute(String sql, int timeoutSec) throws IOException {

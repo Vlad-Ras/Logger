@@ -102,8 +102,22 @@ public final class DeduplicatingLogStorage implements LogStorage {
             int hash = 1;
             if (values == null) return hash;
             for (String value : values) {
-                hash = 31 * hash + (value == null ? 0 : value.hashCode());
+                hash = 31 * hash + sampledHash(value);
                 hash = 31 * hash + (value == null ? 0 : value.length());
+            }
+            return hash;
+        }
+
+        /** Avoid rescanning multi-megabyte modded NBT on the server thread just for deduplication. */
+        private static int sampledHash(String value) {
+            if (value == null) return 0;
+            int length = value.length();
+            if (length <= 256) return value.hashCode();
+            int hash = length;
+            int samples = 32;
+            for (int i = 0; i < samples; i++) {
+                int index = (int) (((long) i * (length - 1)) / (samples - 1));
+                hash = 31 * hash + value.charAt(index);
             }
             return hash;
         }

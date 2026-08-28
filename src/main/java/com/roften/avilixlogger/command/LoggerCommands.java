@@ -1913,12 +1913,20 @@ public final class LoggerCommands {
         // Confirmation and cancellation intentionally use no recalculated arguments.
         if (f.cancel) {
             RollbackPlanManager.Plan removed = RollbackPlanManager.clear(sp.getUUID());
+            RollbackCoordinator.CancelResult cancelled = RollbackCoordinator.cancel(sp.getUUID());
             clearRollbackPreview(sp);
-            if (removed == null) {
+            if (removed == null && cancelled == RollbackCoordinator.CancelResult.NONE) {
                 ctx.getSource().sendFailure(Component.literal("Нет активного плана отката."));
                 return 0;
             }
-            ctx.getSource().sendSuccess(() -> Component.literal("План отката #" + removed.id() + " отменён.").withStyle(ChatFormatting.YELLOW), false);
+            if (cancelled == RollbackCoordinator.CancelResult.ACTIVE) {
+                ctx.getSource().sendSuccess(() -> Component.literal("Активный откат остановлен. Уже применённые порции не отменены.")
+                        .withStyle(ChatFormatting.YELLOW), false);
+            } else if (cancelled == RollbackCoordinator.CancelResult.PREPARATION) {
+                ctx.getSource().sendSuccess(() -> Component.literal("Подготовка отката отменена.").withStyle(ChatFormatting.YELLOW), false);
+            } else {
+                ctx.getSource().sendSuccess(() -> Component.literal("План отката #" + removed.id() + " отменён.").withStyle(ChatFormatting.YELLOW), false);
+            }
             return 1;
         }
         if (f.confirm) {
@@ -1932,11 +1940,18 @@ public final class LoggerCommands {
             // Consume before applying so a repeated command cannot execute the same plan twice.
             RollbackPlanManager.clear(sp.getUUID());
             clearRollbackPreview(sp);
-            RollbackReport total = applyRollbackPlan(ctx.getSource(), plan);
-            if (total == null) return 0;
-            ctx.getSource().sendSystemMessage(Component.literal("План #" + plan.id() + ", состояние на "
-                    + formatRollbackMoment(plan.targetTs())).withStyle(ChatFormatting.DARK_GRAY));
-            sendRollbackSummary(ctx.getSource(), true, total);
+            CommandSourceStack src = ctx.getSource();
+            src.sendSystemMessage(Component.literal("План #" + plan.id() + " принят. ClickHouse готовит точный список операций вне серверного тика…")
+                    .withStyle(ChatFormatting.YELLOW));
+            RollbackCoordinator.startRollback(src.getServer(), sp.getUUID(), plan,
+                    () -> src.sendSystemMessage(Component.literal("План подготовлен. Откат выполняется небольшими порциями; сервер продолжает работать.")
+                            .withStyle(ChatFormatting.AQUA)),
+                    total -> {
+                        src.sendSystemMessage(Component.literal("План #" + plan.id() + ", состояние на "
+                                + formatRollbackMoment(plan.targetTs())).withStyle(ChatFormatting.DARK_GRAY));
+                        sendRollbackSummary(src, true, total);
+                    },
+                    message -> src.sendFailure(Component.literal(message)));
             return 1;
         }
 
@@ -1964,10 +1979,14 @@ public final class LoggerCommands {
 
         List<RollbackPlanManager.Scope> scopes = buildRollbackScopes(ctx.getSource(), sp, f);
         if (scopes == null || scopes.isEmpty()) return 0;
+        if (RollbackCoordinator.hasActiveRollback()) {
+            ctx.getSource().sendFailure(Component.literal("Сейчас уже выполняется откат. Дождитесь завершения или остановите его через --cancel."));
+            return 0;
+        }
 
         RollbackPlanManager.clear(sp.getUUID());
+        RollbackCoordinator.cancelPreparation(sp.getUUID());
         clearRollbackPreview(sp);
-        RollbackReport total = new RollbackReport();
         String actor = f.actor != null && !f.actor.isBlank() ? f.actor : null;
         for (RollbackPlanManager.Scope scope : scopes) {
             ServerLevel level = resolveLevelForDim(ctx.getSource(), scope.dimension());
@@ -1975,8 +1994,6 @@ public final class LoggerCommands {
                 ctx.getSource().sendFailure(Component.literal("Измерение недоступно: " + scope.dimension()));
                 return 0;
             }
-            mergeReports(total, RollbackEngine.previewBoxRangeReport(
-                    level, scope.min(), scope.max(), targetTs, cutoffTs, actor, f.types));
         }
 
         RollbackPlanManager.Plan plan = RollbackPlanManager.save(
@@ -1986,8 +2003,22 @@ public final class LoggerCommands {
             return 0;
         }
 
-        sendRollbackPlanSummary(ctx.getSource(), plan, total);
+        CommandSourceStack src = ctx.getSource();
         showRollbackPreview(sp, plan);
+        src.sendSystemMessage(Component.literal("Считаю точный предпросмотр в ClickHouse вне серверного тика…")
+                .withStyle(ChatFormatting.YELLOW));
+        RollbackCoordinator.preparePreview(src.getServer(), sp.getUUID(), plan,
+                total -> {
+                    RollbackPlanManager.Plan current = RollbackPlanManager.getValid(sp.getUUID());
+                    if (current == null || !current.id().equals(plan.id())) return;
+                    sendRollbackPlanSummary(src, plan, total);
+                },
+                message -> {
+                    RollbackPlanManager.Plan current = RollbackPlanManager.getValid(sp.getUUID());
+                    if (current != null && current.id().equals(plan.id())) RollbackPlanManager.clear(sp.getUUID());
+                    clearRollbackPreview(sp);
+                    src.sendFailure(Component.literal(message));
+                });
         return 1;
     }
 
@@ -2058,20 +2089,6 @@ public final class LoggerCommands {
                     center.offset(radius, radius, radius)));
         }
         return scopes;
-    }
-
-    private static RollbackReport applyRollbackPlan(CommandSourceStack src, RollbackPlanManager.Plan plan) {
-        RollbackReport total = new RollbackReport();
-        for (RollbackPlanManager.Scope scope : plan.scopes()) {
-            ServerLevel level = resolveLevelForDim(src, scope.dimension());
-            if (level == null) {
-                src.sendFailure(Component.literal("Измерение из плана больше недоступно: " + scope.dimension()));
-                return null;
-            }
-            mergeReports(total, RollbackEngine.rollbackBoxRangeReport(
-                    level, scope.min(), scope.max(), plan.targetTs(), plan.cutoffTs(), plan.actor(), plan.types()));
-        }
-        return total;
     }
 
     private static void sendRollbackPlanSummary(CommandSourceStack src, RollbackPlanManager.Plan plan, RollbackReport report) {
@@ -2149,24 +2166,6 @@ public final class LoggerCommands {
                 player, com.roften.avilixlogger.net.S2CRollbackPreviewPayload.clear());
     }
 
-
-    private static void mergeReports(RollbackReport into, RollbackReport add) {
-        if (into == null || add == null) return;
-        into.processed += add.processed;
-        into.applied += add.applied;
-        into.skipped += add.skipped;
-        into.blocksRestored += add.blocksRestored;
-        into.blockEntitiesRestored += add.blockEntitiesRestored;
-        into.containersRestored += add.containersRestored;
-        into.createStructuresRestored += add.createStructuresRestored;
-        into.createBlocksRestored += add.createBlocksRestored;
-        into.entitiesRespawned += add.entitiesRespawned;
-        into.entitiesRemoved += add.entitiesRemoved;
-        into.itemsGivenOrSpawned += add.itemsGivenOrSpawned;
-        into.itemsRemovedFromInventory += add.itemsRemovedFromInventory;
-        for (var e : add.appliedByType.entrySet()) into.appliedByType.merge(e.getKey(), e.getValue(), Integer::sum);
-        for (var e : add.skippedReasons.entrySet()) into.skippedReasons.merge(e.getKey(), e.getValue(), Integer::sum);
-    }
 
     private static void sendRollbackSummary(CommandSourceStack src, boolean applied, RollbackReport r) {
         if (src == null || r == null) return;

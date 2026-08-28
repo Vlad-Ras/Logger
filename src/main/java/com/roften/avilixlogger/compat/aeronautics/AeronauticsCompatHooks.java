@@ -193,7 +193,7 @@ public final class AeronauticsCompatHooks {
                 final String actorName = before.actorName != null && !before.actorName.isBlank() ? before.actorName : "Aeronautics";
                 final var registryAccess = level.registryAccess();
                 final LogStorage storage = LoggerRuntime.storage(level);
-                AsyncLogProcessor.submit(() -> {
+                AsyncLogProcessor.submit(com.roften.avilixlogger.core.PayloadSizeEstimator.estimateStrings(beforeBe, capturedAfterBe), () -> {
                     var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
                     if (diffs == null || diffs.isEmpty()) return;
                     long ts = System.currentTimeMillis();

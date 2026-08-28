@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.core;
 
+import com.roften.avilixlogger.LoggerConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -118,44 +119,216 @@ public final class RollbackEngine {
         return previewBoxRangeReport(level, min, max, sinceTs, System.currentTimeMillis(), actorName, types);
     }
 
-    private static RollbackReport rollbackByQueryPaged(ServerLevel level, LogQuery q, boolean apply) {
+    /**
+     * Immutable database result used by the tick-budgeted rollback coordinator. It deliberately
+     * contains no live world objects, so ClickHouse paging can safely happen on a worker thread.
+     */
+    public record PreparedBlockSnapshot(BlockPos pos, String blockBeforeSnbt, String beBeforeSnbt,
+                                        String containerSlotsBeforeSnbt, ActionType type) {
+        public PreparedBlockSnapshot {
+            pos = pos == null ? BlockPos.ZERO : pos.immutable();
+        }
+    }
+
+    public record PreparedRollback(List<PreparedBlockSnapshot> blocks,
+                                   List<LogEntry> entityRemovals,
+                                   List<LogEntry> deferred,
+                                   long estimatedBytes) {
+        public PreparedRollback {
+            blocks = blocks == null ? List.of() : List.copyOf(blocks);
+            entityRemovals = entityRemovals == null ? List.of() : List.copyOf(entityRemovals);
+            deferred = deferred == null ? List.of() : List.copyOf(deferred);
+        }
+
+        public int operationCount() {
+            return blocks.size() + entityRemovals.size() + deferred.size();
+        }
+    }
+
+    public static PreparedRollback prepareBoxRange(LogStorage storage, String dimension,
+                                                    BlockPos min, BlockPos max,
+                                                    long fromTs, long untilTs, String actorName,
+                                                    java.util.EnumSet<ActionType> types) {
+        if (storage == null) throw new IllegalArgumentException("storage");
+        LogQuery q = new LogQuery();
+        q.dim = dimension;
+        q.sinceTs = fromTs;
+        q.untilTs = untilTs;
+        q.minPos = new BlockPos(Math.min(min.getX(), max.getX()), Math.min(min.getY(), max.getY()), Math.min(min.getZ(), max.getZ()));
+        q.maxPos = new BlockPos(Math.max(min.getX(), max.getX()), Math.max(min.getY(), max.getY()), Math.max(min.getZ(), max.getZ()));
+        q.actorName = actorName;
+        q.types = types == null ? null : types.clone();
+        q.limit = PAGE;
+        q.debugSource = "rollback_prepare";
+        return prepareByQueryPaged(storage, q);
+    }
+
+    /** Counts a prepared plan without reading chunks, registries or any other live world state. */
+    public static RollbackReport previewPrepared(PreparedRollback prepared) {
         RollbackReport report = new RollbackReport();
+        if (prepared == null) return report;
+        for (PreparedBlockSnapshot block : prepared.blocks()) {
+            boolean any = block.blockBeforeSnbt() != null || block.beBeforeSnbt() != null
+                    || block.containerSlotsBeforeSnbt() != null;
+            if (!any) {
+                report.onSkipped("no_snapshot");
+                continue;
+            }
+            if (block.blockBeforeSnbt() != null) report.blocksRestored++;
+            if (block.beBeforeSnbt() != null) report.blockEntitiesRestored++;
+            if (block.containerSlotsBeforeSnbt() != null) report.containersRestored++;
+            report.onApplied(block.type());
+        }
+        for (LogEntry entry : prepared.entityRemovals()) countPreparedEntry(entry, report);
+        for (LogEntry entry : prepared.deferred()) countPreparedEntry(entry, report);
+        return report;
+    }
+
+    /** Applies one small, atomic block group on the server thread. */
+    public static RollbackReport applyPreparedBlockBatch(ServerLevel level, List<PreparedBlockSnapshot> blocks) {
+        RollbackReport report = new RollbackReport();
+        if (level == null || blocks == null || blocks.isEmpty()) return report;
+        java.util.LinkedHashMap<BlockPos, BlockSnapshot> snapshots = new java.util.LinkedHashMap<>();
+        for (PreparedBlockSnapshot block : blocks) {
+            if (block == null) continue;
+            snapshots.put(block.pos(), new BlockSnapshot(block.blockBeforeSnbt(), block.beBeforeSnbt(),
+                    block.containerSlotsBeforeSnbt(), block.type()));
+        }
+        applyConsolidatedBlocks(level, snapshots, report, true);
+        return report;
+    }
+
+    /** Applies a single non-block rollback operation on the server thread. */
+    public static RollbackReport applyPreparedEntry(ServerLevel level, LogEntry entry) {
+        RollbackReport report = new RollbackReport();
+        if (level == null || entry == null) return report;
+        applyRollback(level, entry, report, true);
+        return report;
+    }
+
+    private static RollbackReport rollbackByQueryPaged(ServerLevel level, LogQuery q, boolean apply) {
+        PreparedRollback prepared = prepareByQueryPaged(LoggerRuntime.storage(level), q);
+        if (!apply) return previewPrepared(prepared);
+        RollbackReport report = new RollbackReport();
+        report.merge(applyPreparedBlockBatch(level, prepared.blocks()));
+        for (LogEntry entry : prepared.entityRemovals()) report.merge(applyPreparedEntry(level, entry));
+        for (LogEntry entry : prepared.deferred()) report.merge(applyPreparedEntry(level, entry));
+        return report;
+    }
+
+    private static void countPreparedEntry(LogEntry entry, RollbackReport report) {
+        if (entry == null || entry.type == null) {
+            report.onSkipped("not_rollbackable");
+            return;
+        }
+        switch (entry.type) {
+            case ENTITY_DEATH, PLANE_REMOVE -> {
+                if (entry.entityType == null || entry.entityNbt == null) {
+                    report.onSkipped("no_entity_snapshot");
+                    return;
+                }
+                String invalid = NbtSerde.validateEntitySnapshot(entry.entityType, entry.entityUuid, entry.entityNbt);
+                if (invalid != null) {
+                    report.onSkipped(invalid);
+                    return;
+                }
+                if (NbtSerde.isCreateContraptionSnapshot(entry.entityType, entry.entityNbt)) report.createStructuresRestored++;
+                else report.entitiesRespawned++;
+                report.onApplied(entry.type);
+            }
+            case ENTITY_SPAWN, PLANE_PLACE -> {
+                if (entry.entityUuid == null) report.onSkipped("missing_uuid");
+                else {
+                    report.entitiesRemoved++;
+                    report.onApplied(entry.type);
+                }
+            }
+            case ITEM_DROP -> {
+                if (entry.itemStackNbt == null || entry.itemStackNbt.isBlank()) report.onSkipped("invalid_stack");
+                else {
+                    report.itemsGivenOrSpawned++;
+                    report.onApplied(entry.type);
+                }
+            }
+            case ITEM_PICKUP, PLANE_PICKUP, ITEM_CRAFT, ITEM_SMELT -> {
+                if (entry.itemStackNbt == null || entry.itemStackNbt.isBlank()) report.onSkipped("invalid_stack");
+                else {
+                    report.itemsRemovedFromInventory += Math.max(1, entry.count);
+                    report.onApplied(entry.type);
+                }
+            }
+            default -> report.onSkipped("not_rollbackable");
+        }
+    }
+
+    private static PreparedRollback prepareByQueryPaged(LogStorage storage, LogQuery q) {
         java.util.HashMap<BlockPos, BlockSnapshot> blockSnapshots = new java.util.HashMap<>();
         java.util.ArrayList<LogEntry> entityRemovals = new java.util.ArrayList<>();
         java.util.ArrayList<LogEntry> deferred = new java.util.ArrayList<>();
+        long retainedBytes = 0L;
+        long maxPreparedBytes;
+        try {
+            maxPreparedBytes = Math.max(64L, LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get()) * 1024L * 1024L;
+        } catch (Throwable ignored) {
+            maxPreparedBytes = 512L * 1024L * 1024L;
+        }
 
         long beforeId = Long.MAX_VALUE;
         while (true) {
             q.beforeId = beforeId;
             q.limit = PAGE;
             q.requireDetails = true;
-            List<LogEntry> batch = LoggerRuntime.storage(level).queryReverse(q);
+            List<LogEntry> batch = storage.queryReverse(q);
             if (batch.isEmpty()) break;
 
             for (LogEntry e : batch) {
                 if (isBlockRestoreType(e.type)) {
                     BlockPos pos = new BlockPos(e.x, e.y, e.z);
                     // Overwrite as we go backwards in time; the last value wins => oldest snapshot.
-                    blockSnapshots.put(pos, new BlockSnapshot(e.blockBefore, e.beBefore, e.containerSlotsBefore, e.type));
+                    BlockSnapshot replacement = new BlockSnapshot(e.blockBefore, e.beBefore, e.containerSlotsBefore, e.type);
+                    BlockSnapshot previous = blockSnapshots.put(pos, replacement);
+                    retainedBytes += blockSnapshotWeight(replacement) - blockSnapshotWeight(previous);
                 } else if (isEntityRemovalType(e.type)) {
                     // Undo spawned moving entities before stationary blocks are put back.
                     entityRemovals.add(e);
+                    retainedBytes += PayloadSizeEstimator.estimate(e);
                 } else {
                     deferred.add(e);
+                    retainedBytes += PayloadSizeEstimator.estimate(e);
+                }
+                if (retainedBytes > maxPreparedBytes) {
+                    throw new IllegalStateException("план превышает "
+                            + (maxPreparedBytes / (1024L * 1024L)) + " MiB; сузьте область или период");
                 }
             }
 
-            beforeId = batch.get(batch.size() - 1).id;
+            long nextBeforeId = batch.get(batch.size() - 1).id;
+            if (nextBeforeId <= 0L || nextBeforeId >= beforeId) break;
+            beforeId = nextBeforeId;
             if (batch.size() < PAGE) break;
         }
 
-        // Safe order: restore stationary blocks and their payloads transactionally, then remove
-        // entities created by assembly, then respawn killed entities/Create structures.
-        // A failed block transaction therefore cannot leave a required moving entity deleted.
-        applyConsolidatedBlocks(level, blockSnapshots, report, apply);
-        for (LogEntry entry : entityRemovals) applyRollback(level, entry, report, apply);
-        for (LogEntry entry : deferred) applyRollback(level, entry, report, apply);
-        return report;
+        java.util.ArrayList<PreparedBlockSnapshot> blocks = new java.util.ArrayList<>(blockSnapshots.size());
+        for (var entry : blockSnapshots.entrySet()) {
+            BlockSnapshot snap = entry.getValue();
+            blocks.add(new PreparedBlockSnapshot(entry.getKey(), snap.blockBeforeSnbt, snap.beBeforeSnbt,
+                    snap.containerSlotsBeforeSnbt, snap.type));
+        }
+        // Keep block batches chunk-local where possible. This reduces synchronous chunk loads and
+        // preserves the existing per-batch transaction/verification semantics.
+        blocks.sort(java.util.Comparator
+                .comparingInt((PreparedBlockSnapshot b) -> b.pos().getX() >> 4)
+                .thenComparingInt(b -> b.pos().getZ() >> 4)
+                .thenComparingInt(b -> b.pos().getY())
+                .thenComparingInt(b -> b.pos().getX())
+                .thenComparingInt(b -> b.pos().getZ()));
+        return new PreparedRollback(blocks, entityRemovals, deferred, Math.max(0L, retainedBytes));
+    }
+
+    private static long blockSnapshotWeight(BlockSnapshot snapshot) {
+        if (snapshot == null) return 0L;
+        return 160L + PayloadSizeEstimator.estimateStrings(snapshot.blockBeforeSnbt,
+                snapshot.beBeforeSnbt, snapshot.containerSlotsBeforeSnbt);
     }
 
     private static void applyConsolidatedBlocks(ServerLevel level, java.util.Map<BlockPos, BlockSnapshot> snapshots,

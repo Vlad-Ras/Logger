@@ -409,6 +409,11 @@ public final class LoggerEventHandlers {
 
         logBlockUseIfNeeded(level, p, pos, state, used0, event.getFace());
 
+        String stagedDim = null;
+        String stagedBlockState = null;
+        String stagedBeforeBe = null;
+        boolean stagedSnapshot = false;
+
         // 1) Stage a possible menu/container open for any block interaction.
         // Some modded storages / "кладовщики" open a menu but do not expose a vanilla Container/MenuProvider
         // on the block itself, so relying only on isInventoryLike() misses them completely.
@@ -420,6 +425,10 @@ public final class LoggerEventHandlers {
             try { blockAfter = NbtSerde.writeBlockState(state); } catch (Throwable ignored) {}
             String beforeBe = null;
             try { beforeBe = NbtSerde.writeBlockEntity(level, level.getBlockEntity(pos)); } catch (Throwable ignored) {}
+            stagedDim = dim;
+            stagedBlockState = blockAfter;
+            stagedBeforeBe = beforeBe;
+            stagedSnapshot = true;
             PENDING_BLOCK_CONTAINER_OPEN.put(p.getUUID(), new PendingBlockContainerOpen(
                     System.currentTimeMillis(),
                     dim,
@@ -449,10 +458,10 @@ public final class LoggerEventHandlers {
         //    We snapshot the blockstate and, if present, block-entity NBT BEFORE interaction and compare next tick.
         if (!LoggerConfig.VALUES.logBlocks.get()) return;
         if (!shouldTrackDelayedInteraction(level, pos, state)) return;
-        final String dim = level.dimension().location().toString();
-        final String beforeState = NbtSerde.writeBlockState(state);
-        final BlockEntity be0 = level.getBlockEntity(pos);
-        final String beforeBe = be0 != null ? NbtSerde.writeBlockEntity(level, be0) : null;
+        final String dim = stagedDim != null ? stagedDim : level.dimension().location().toString();
+        final String beforeState = stagedSnapshot ? stagedBlockState : NbtSerde.writeBlockState(state);
+        final BlockEntity be0 = stagedSnapshot ? null : level.getBlockEntity(pos);
+        final String beforeBe = stagedSnapshot ? stagedBeforeBe : (be0 != null ? NbtSerde.writeBlockEntity(level, be0) : null);
         final ItemStack used = event.getItemStack() != null ? event.getItemStack().copy() : ItemStack.EMPTY;
         final String usedItemSnbt = (!used.isEmpty()) ? NbtSerde.writeItemStackHotPath(used, level.registryAccess()) : null;
         final UUID actorUuid = p.getUUID();
@@ -524,7 +533,8 @@ public final class LoggerEventHandlers {
 
                     final var registryAccess = level.registryAccess();
                     final LogStorage storage = LoggerRuntime.storage(level);
-                    if (LoggerConfig.VALUES.logContainers.get()) AsyncLogProcessor.submit(() -> {
+                    if (LoggerConfig.VALUES.logContainers.get()) AsyncLogProcessor.submit(
+                            PayloadSizeEstimator.estimateStrings(beforeBe, capturedAfterBe), () -> {
                         var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
                         if (diffs == null || diffs.isEmpty()) return;
                         long ts = System.currentTimeMillis();
@@ -845,7 +855,7 @@ public final class LoggerEventHandlers {
                         final UUID actorUuid = sp.getUUID();
                         final String actorName = sp.getName().getString();
                         final BlockPos entityPos = ent.blockPosition();
-                        AsyncLogProcessor.submit(() -> {
+                        AsyncLogProcessor.submit(PayloadSizeEstimator.estimateStrings(ectx.beforeInv, capturedAfterInv), () -> {
                             var diffs = InventoryDiffUtil.diff(ectx.beforeInv, capturedAfterInv, registryAccess);
                             if (diffs == null || diffs.isEmpty()) return;
                             long ts = System.currentTimeMillis();
@@ -888,7 +898,7 @@ public final class LoggerEventHandlers {
                     final LogStorage storage = LoggerRuntime.storage(level);
                     final UUID actorUuid = sp.getUUID();
                     final String actorName = sp.getName().getString();
-                    AsyncLogProcessor.submit(() -> emitContainerChanges(
+                    AsyncLogProcessor.submit(PayloadSizeEstimator.estimateStrings(generic.beforeSlots, after), () -> emitContainerChanges(
                             generic.beforeSlots, after, registryAccess, storage,
                             generic.dim, generic.playerPos, actorUuid, actorName,
                             "menu:" + generic.menuClass, null));
@@ -914,7 +924,7 @@ public final class LoggerEventHandlers {
         final String actorName = sp.getName().getString();
 
         // Emit human-friendly aggregated put/take events off-thread.
-        if (slotsChanged) AsyncLogProcessor.submit(() -> emitContainerChanges(
+        if (slotsChanged) AsyncLogProcessor.submit(PayloadSizeEstimator.estimateStrings(ctx.beforeSlots, afterSlots), () -> emitContainerChanges(
                 ctx.beforeSlots, afterSlots, registryAccess, storage,
                 ctx.dim, ctx.pos, actorUuid, actorName, null, capturedBlockAfter));
 
@@ -1270,7 +1280,7 @@ public final class LoggerEventHandlers {
         // a player action or an arbitrary external mod call is captured automatically.
         if (ent instanceof ExperienceOrb) return;
         CauseContext.Cause cause = CauseContext.peek();
-        String mutationSource = MutationSourceResolver.resolveExternalSource();
+        String mutationSource = cause == null ? MutationSourceResolver.resolveExternalSource() : null;
         boolean miscEntity = ent.getType().getCategory() == MobCategory.MISC;
         if (!miscEntity && cause == null && mutationSource == null) return;
 
@@ -2277,7 +2287,7 @@ public final class LoggerEventHandlers {
         // a player or an external mod caused them; natural despawns must not flood the database.
         if (ent instanceof net.minecraft.world.entity.LivingEntity && removalReason == Entity.RemovalReason.KILLED) return;
         CauseContext.Cause cause = CauseContext.peek();
-        String mutationSource = MutationSourceResolver.resolveExternalSource();
+        String mutationSource = cause == null ? MutationSourceResolver.resolveExternalSource() : null;
         ActorTracker.ActorRef knownActor = ActorTracker.getRecent(ent.getUUID(), 15_000L);
         boolean miscEntity = ent instanceof AbstractMinecart || ent.getType().getCategory() == MobCategory.MISC;
         if (!miscEntity && cause == null && mutationSource == null && knownActor == null) return;

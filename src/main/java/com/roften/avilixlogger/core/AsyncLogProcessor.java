@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class AsyncLogProcessor {
     private static final AtomicInteger THREAD_ID = new AtomicInteger(1);
     private static final AtomicLong REJECTED = new AtomicLong();
+    private static final AtomicLong QUEUED_PAYLOAD_BYTES = new AtomicLong();
     private static volatile ThreadPoolExecutor executor;
 
     private AsyncLogProcessor() {}
@@ -55,12 +56,7 @@ public final class AsyncLogProcessor {
                     TimeUnit.MILLISECONDS,
                     new LinkedBlockingQueue<>(queueCapacity),
                     tf,
-                    (r, pool) -> {
-                        long n = REJECTED.incrementAndGet();
-                        if (n == 1 || n % 1000 == 0) {
-                            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Async CPU queue is full; rejected {} expensive post-processing tasks. Increase async.queueCapacity/workerThreads.", n);
-                        }
-                    }
+                    new ThreadPoolExecutor.AbortPolicy()
             );
             ex.prestartAllCoreThreads();
             executor = ex;
@@ -69,17 +65,55 @@ public final class AsyncLogProcessor {
     }
 
     public static void submit(Runnable task) {
+        submit(1_024L, task);
+    }
+
+    public static void submit(long estimatedPayloadBytes, Runnable task) {
         if (task == null) return;
+        long weight = Math.max(128L, estimatedPayloadBytes);
+        if (!reservePayload(weight)) {
+            onRejected("payload budget");
+            return;
+        }
         try {
             executor().execute(() -> {
                 try {
                     task.run();
                 } catch (Throwable t) {
                     AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Async log post-processing failed", t);
+                } finally {
+                    QUEUED_PAYLOAD_BYTES.addAndGet(-weight);
                 }
             });
+        } catch (java.util.concurrent.RejectedExecutionException rejected) {
+            QUEUED_PAYLOAD_BYTES.addAndGet(-weight);
+            onRejected("task capacity");
         } catch (Throwable t) {
+            QUEUED_PAYLOAD_BYTES.addAndGet(-weight);
             AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Cannot submit async log task", t);
+        }
+    }
+
+    private static boolean reservePayload(long bytes) {
+        long maxBytes;
+        try {
+            maxBytes = Math.max(16L, LoggerConfig.VALUES.asyncMaxQueuedPayloadMiB.get()) * 1024L * 1024L;
+        } catch (Throwable ignored) {
+            maxBytes = 128L * 1024L * 1024L;
+        }
+        while (true) {
+            long current = QUEUED_PAYLOAD_BYTES.get();
+            if (bytes > maxBytes || current > maxBytes - bytes) return false;
+            if (QUEUED_PAYLOAD_BYTES.compareAndSet(current, current + bytes)) return true;
+        }
+    }
+
+    private static void onRejected(String reason) {
+        long n = REJECTED.incrementAndGet();
+        if (n == 1 || n % 1_000 == 0) {
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Async CPU queue rejected {} expensive tasks ({}). queuedTasks={}, estimatedPayloadMiB={}",
+                    n, reason, executor == null ? 0 : executor.getQueue().size(),
+                    QUEUED_PAYLOAD_BYTES.get() / (1024L * 1024L));
         }
     }
 
@@ -96,5 +130,6 @@ public final class AsyncLogProcessor {
             Thread.currentThread().interrupt();
             ex.shutdownNow();
         }
+        QUEUED_PAYLOAD_BYTES.set(0L);
     }
 }

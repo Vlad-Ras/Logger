@@ -66,7 +66,9 @@ public abstract class ServerLevelSetBlockMixin {
             if (!((Object) this instanceof ServerLevel level)) return;
 
             CauseContext.Cause cause = CauseContext.peek();
-            String source = MutationSourceResolver.resolveExternalSource();
+            // StackWalker is useful for unknown mod mutations, but wasteful for the overwhelmingly
+            // common player path where the cause context already gives us exact attribution.
+            String source = cause == null ? MutationSourceResolver.resolveExternalSource() : null;
             if (source == null && cause == null) return;
             if (source == null) source = "player:" + cause.kind().name().toLowerCase(java.util.Locale.ROOT);
 
