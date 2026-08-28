@@ -2326,11 +2326,11 @@ public final class LoggerEventHandlers {
                 ownerName = com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks.ownerNameFromTag(tag);
                 ownerUuid = com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks.ownerUuidFromTag(tag);
             } catch (Throwable ignored) {}
-            String cause = null;
-            try { cause = CauseTracker.pop(ent.getUUID()); } catch (Throwable ignored) {}
+            String removalCause = null;
+            try { removalCause = CauseTracker.pop(ent.getUUID()); } catch (Throwable ignored) {}
             String safeName = (ownerName == null ? "" : ownerName.replace("\"", "\\\""));
             String safeUuid = (ownerUuid == null ? "" : ownerUuid);
-            String safeCause = (cause == null ? "" : cause.replace("\"", "\\\""));
+            String safeCause = (removalCause == null ? "" : removalCause.replace("\"", "\\\""));
             e.extra = "{\"kind\":\"plane_remove\",\"ownerName\":\"" + safeName + "\",\"ownerUuid\":\"" + safeUuid + "\",\"cause\":\"" + safeCause + "\"}";
         } else {
             e.extra = "remove " + e.entityType;
