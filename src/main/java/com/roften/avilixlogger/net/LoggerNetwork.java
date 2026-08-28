@@ -25,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -56,7 +58,7 @@ public final class LoggerNetwork {
                 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<>(queueSize),
                 tf,
-                new ThreadPoolExecutor.DiscardPolicy()
+                new ThreadPoolExecutor.AbortPolicy()
         );
         executor.prestartAllCoreThreads();
         return executor;
@@ -64,6 +66,15 @@ public final class LoggerNetwork {
 
     private static final ThreadPoolExecutor PAGE_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-PAGE-", 2, 256);
     private static final ThreadPoolExecutor DETAILS_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-DETAILS-", 2, 128);
+    private static final ScheduledExecutorService GUI_WATCHDOG_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "AvilixLogger-GUI-WATCHDOG");
+        t.setDaemon(true);
+        t.setPriority(Thread.NORM_PRIORITY - 1);
+        return t;
+    });
+
+    private static final long GUI_PAGE_LONG_QUERY_WARNING_MS = 6_500L;
+    private static final long GUI_DETAILS_LONG_QUERY_WARNING_MS = 4_500L;
 
     private static final java.util.Map<java.util.UUID, Long> LAST_GUI_PAGE_REQUEST_AT =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -76,6 +87,10 @@ public final class LoggerNetwork {
     private static final java.util.Map<java.util.UUID, Long> LATEST_GUI_PAGE_SEQ =
             new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.Map<java.util.UUID, Long> LATEST_GUI_DETAILS_SEQ =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, Long> PENDING_GUI_PAGE_SEQ =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<java.util.UUID, Long> PENDING_GUI_DETAILS_SEQ =
             new java.util.concurrent.ConcurrentHashMap<>();
     private static final AtomicLong GUI_PAGE_SEQ_GENERATOR = new AtomicLong();
     private static final AtomicLong GUI_DETAILS_SEQ_GENERATOR = new AtomicLong();
@@ -101,6 +116,8 @@ public final class LoggerNetwork {
             LAST_GUI_DETAILS_REQUEST_SIG.remove(uuid);
             LATEST_GUI_PAGE_SEQ.remove(uuid);
             LATEST_GUI_DETAILS_SEQ.remove(uuid);
+            PENDING_GUI_PAGE_SEQ.remove(uuid);
+            PENDING_GUI_DETAILS_SEQ.remove(uuid);
             LastQueryManager.clear(player);
             pruneQueuedPageTasks(uuid);
             pruneQueuedDetailsTasks(uuid);
@@ -110,6 +127,7 @@ public final class LoggerNetwork {
     public static void shutdown() {
         PAGE_EXECUTOR.shutdownNow();
         DETAILS_EXECUTOR.shutdownNow();
+        GUI_WATCHDOG_EXECUTOR.shutdownNow();
         LAST_GUI_PAGE_REQUEST_AT.clear();
         LAST_GUI_PAGE_REQUEST_SIG.clear();
         LAST_GUI_DETAILS_REQUEST_AT.clear();
@@ -118,18 +136,30 @@ public final class LoggerNetwork {
         GUI_FILTERS.clear();
         LATEST_GUI_PAGE_SEQ.clear();
         LATEST_GUI_DETAILS_SEQ.clear();
+        PENDING_GUI_PAGE_SEQ.clear();
+        PENDING_GUI_DETAILS_SEQ.clear();
     }
 
     private static long nextGuiPageSeq(UUID playerId) {
         long seq = GUI_PAGE_SEQ_GENERATOR.incrementAndGet();
         LATEST_GUI_PAGE_SEQ.put(playerId, seq);
+        PENDING_GUI_PAGE_SEQ.put(playerId, seq);
         return seq;
     }
 
     private static long nextGuiDetailsSeq(UUID playerId) {
         long seq = GUI_DETAILS_SEQ_GENERATOR.incrementAndGet();
         LATEST_GUI_DETAILS_SEQ.put(playerId, seq);
+        PENDING_GUI_DETAILS_SEQ.put(playerId, seq);
         return seq;
+    }
+
+    private static void completeGuiPageSeq(UUID playerId, long seq) {
+        if (playerId != null) PENDING_GUI_PAGE_SEQ.remove(playerId, seq);
+    }
+
+    private static void completeGuiDetailsSeq(UUID playerId, long seq) {
+        if (playerId != null) PENDING_GUI_DETAILS_SEQ.remove(playerId, seq);
     }
 
     private static void pruneQueuedPageTasks(UUID playerId) {
@@ -140,6 +170,97 @@ public final class LoggerNetwork {
     private static void pruneQueuedDetailsTasks(UUID playerId) {
         if (playerId == null) return;
         DETAILS_EXECUTOR.getQueue().removeIf(r -> r instanceof GuiDetailsTask task && playerId.equals(task.playerId));
+    }
+
+    private static LogRow statusRow(ServerLevel level, Component text) {
+        String dim = level == null ? "" : level.dimension().location().toString();
+        return new LogRow(0L, dim, 0, 0, 0, text, false, new long[0]);
+    }
+
+    private static void sendGuiPageStatus(ServerPlayer sp, ServerLevel level, LastQueryManager.State state, Component text) {
+        if (sp == null) return;
+        String title = state == null || state.title == null ? "Логи" : state.title;
+        int page = state == null ? 1 : state.pageIndex();
+        boolean hasPrev = state != null && state.hasPrev();
+        PacketDistributor.sendToPlayer(sp, new S2CLogPagePayload(title, page, hasPrev, false, List.of(statusRow(level, text))));
+    }
+
+    private static Component longPageQueryMessage() {
+        return Component.literal("Не удалось быстро получить информацию: запрос обрабатывается слишком долго. Попробуй сузить время, радиус, тип или игрока.")
+                .withStyle(net.minecraft.ChatFormatting.YELLOW);
+    }
+
+    private static Component longDetailsQueryMessage() {
+        return Component.literal("Не удалось быстро получить детали: запрос обрабатывается слишком долго. Попробуй открыть запись позже или сузить поиск.")
+                .withStyle(net.minecraft.ChatFormatting.YELLOW);
+    }
+
+    private static Component longDetailsFinalMessage() {
+        return Component.literal("Не удалось получить детали: запрос обрабатывался слишком долго и не вернул данные.")
+                .withStyle(net.minecraft.ChatFormatting.YELLOW);
+    }
+
+    private static Component partialDetailsFinalMessage() {
+        return Component.literal("Часть деталей могла не загрузиться: запрос обрабатывался слишком долго.")
+                .withStyle(net.minecraft.ChatFormatting.YELLOW);
+    }
+
+    private static boolean isNoDataDetails(List<Component> lines) {
+        if (lines == null || lines.isEmpty()) return true;
+        if (lines.size() != 1 || lines.get(0) == null) return false;
+        String plain = lines.get(0).getString();
+        return plain == null || plain.isBlank() || plain.contains("нет данных") || plain.contains("Loading");
+    }
+
+    private static void scheduleLongPageWarning(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State state) {
+        if (sp == null) return;
+        final UUID playerId = sp.getUUID();
+        final java.lang.ref.WeakReference<ServerPlayer> ref = new java.lang.ref.WeakReference<>(sp);
+        GUI_WATCHDOG_EXECUTOR.schedule(() -> {
+            Long latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+            Long pendingSeq = PENDING_GUI_PAGE_SEQ.get(playerId);
+            if (latestSeq == null || latestSeq.longValue() != seq || pendingSeq == null || pendingSeq.longValue() != seq) return;
+            ServerPlayer p = ref.get();
+            if (p == null || p.server == null || !p.isAlive()) return;
+            p.server.execute(() -> {
+                Long serverLatestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+                Long serverPendingSeq = PENDING_GUI_PAGE_SEQ.get(playerId);
+                if (serverLatestSeq == null || serverLatestSeq.longValue() != seq || serverPendingSeq == null || serverPendingSeq.longValue() != seq) return;
+                ServerPlayer live = ref.get();
+                if (live == null || live.server == null || !live.isAlive()) return;
+                sendGuiPageStatus(live, level, state, longPageQueryMessage());
+            });
+        }, GUI_PAGE_LONG_QUERY_WARNING_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private static void scheduleLongDetailsWarning(ServerPlayer sp, long seq, C2SRequestDetailsPayload payload) {
+        if (sp == null || payload == null) return;
+        final UUID playerId = sp.getUUID();
+        final java.lang.ref.WeakReference<ServerPlayer> ref = new java.lang.ref.WeakReference<>(sp);
+        GUI_WATCHDOG_EXECUTOR.schedule(() -> {
+            Long latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+            Long pendingSeq = PENDING_GUI_DETAILS_SEQ.get(playerId);
+            if (latestSeq == null || latestSeq.longValue() != seq || pendingSeq == null || pendingSeq.longValue() != seq) return;
+            ServerPlayer p = ref.get();
+            if (p == null || p.server == null || !p.isAlive()) return;
+            p.server.execute(() -> {
+                Long serverLatestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+                Long serverPendingSeq = PENDING_GUI_DETAILS_SEQ.get(playerId);
+                if (serverLatestSeq == null || serverLatestSeq.longValue() != seq || serverPendingSeq == null || serverPendingSeq.longValue() != seq) return;
+                ServerPlayer live = ref.get();
+                if (live == null || live.server == null || !live.isAlive()) return;
+                PacketDistributor.sendToPlayer(live, new S2CLogDetailsPayload(payload.entryId(), payload.mode(), List.of(longDetailsQueryMessage())));
+            });
+        }, GUI_DETAILS_LONG_QUERY_WARNING_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private static Page errorPage(ServerLevel level, LastQueryManager.State state, String message) {
+        String title = state == null || state.title == null ? "Логи" : state.title;
+        int page = state == null ? 1 : state.pageIndex();
+        boolean hasPrev = state != null && state.hasPrev();
+        Component line = Component.literal(message == null || message.isBlank() ? "Ошибка запроса логов." : message)
+                .withStyle(net.minecraft.ChatFormatting.RED);
+        return new Page(title, page, hasPrev, false, List.of(statusRow(level, line)));
     }
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
@@ -215,39 +336,50 @@ public final class LoggerNetwork {
 
         @Override
         public void run() {
-            Long latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
-            if (latestSeq == null || latestSeq.longValue() != seq) return;
+            try {
+                Long latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+                if (latestSeq == null || latestSeq.longValue() != seq) return;
 
-            Page page = buildPage(level, snapshotState, aggregated, filters);
-
-            latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
-            if (latestSeq == null || latestSeq.longValue() != seq) return;
-
-            ServerPlayer sp = playerRef.get();
-            if (sp == null || sp.server == null || !sp.isAlive()) return;
-
-            sp.server.execute(() -> {
-                Long serverLatestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
-                if (serverLatestSeq == null || serverLatestSeq.longValue() != seq) return;
-
-                ServerPlayer livePlayer = playerRef.get();
-                if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
-
-                LastQueryManager.State current = LastQueryManager.get(livePlayer);
-                if (current != null) {
-                    current.nextCursorCandidate = snapshotState.nextCursorCandidate();
-                    current.hasNext = snapshotState.hasNext();
+                Page page;
+                try {
+                    page = buildPage(level, snapshotState, aggregated, filters);
+                } catch (Throwable t) {
+                    AvilixLoggerMod.LOGGER.error("[AvilixLogger] GUI page query failed", t);
+                    page = errorPage(level, snapshotState, "Ошибка запроса логов. Смотри server log.");
                 }
 
-                PacketDistributor.sendToPlayer(livePlayer,
-                        new S2CLogPagePayload(
-                                page.title,
-                                page.pageIndex,
-                                page.hasPrev,
-                                page.hasNext,
-                                page.rows
-                        ));
-            });
+                latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+                if (latestSeq == null || latestSeq.longValue() != seq) return;
+
+                ServerPlayer sp = playerRef.get();
+                if (sp == null || sp.server == null || !sp.isAlive()) return;
+
+                final Page pageToSend = page;
+                sp.server.execute(() -> {
+                    Long serverLatestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
+                    if (serverLatestSeq == null || serverLatestSeq.longValue() != seq) return;
+
+                    ServerPlayer livePlayer = playerRef.get();
+                    if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
+
+                    LastQueryManager.State current = LastQueryManager.get(livePlayer);
+                    if (current != null) {
+                        current.nextCursorCandidate = snapshotState.nextCursorCandidate();
+                        current.hasNext = snapshotState.hasNext();
+                    }
+
+                    PacketDistributor.sendToPlayer(livePlayer,
+                            new S2CLogPagePayload(
+                                    pageToSend.title,
+                                    pageToSend.pageIndex,
+                                    pageToSend.hasPrev,
+                                    pageToSend.hasNext,
+                                    pageToSend.rows
+                            ));
+                });
+            } finally {
+                completeGuiPageSeq(playerId, seq);
+            }
         }
     }
 
@@ -268,31 +400,54 @@ public final class LoggerNetwork {
 
         @Override
         public void run() {
-            Long latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
-            if (latestSeq == null || latestSeq.longValue() != seq) return;
+            try {
+                Long latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+                if (latestSeq == null || latestSeq.longValue() != seq) return;
 
-            List<Component> lines = switch (payload.mode()) {
-                case RAW -> buildRawLines(level, payload.entryId(), payload.rawIds());
-                case DETAILS -> buildDetailsLines(level, payload.entryId(), payload.rawIds());
-                case JSON -> buildJsonLines(level, payload.entryId());
-            };
+                List<Component> lines;
+                long detailsStartedNs = System.nanoTime();
+                try {
+                    lines = switch (payload.mode()) {
+                        case RAW -> buildRawLines(level, payload.entryId(), payload.rawIds());
+                        case DETAILS -> buildDetailsLines(level, payload.entryId(), payload.rawIds());
+                        case JSON -> buildJsonLines(level, payload.entryId());
+                    };
+                    long elapsedMs = (System.nanoTime() - detailsStartedNs) / 1_000_000L;
+                    if (elapsedMs >= GUI_DETAILS_LONG_QUERY_WARNING_MS) {
+                        if (isNoDataDetails(lines)) {
+                            lines = List.of(longDetailsFinalMessage());
+                        } else {
+                            ArrayList<Component> withWarning = new ArrayList<>(lines.size() + 1);
+                            withWarning.add(partialDetailsFinalMessage());
+                            withWarning.addAll(lines);
+                            lines = List.copyOf(withWarning);
+                        }
+                    }
+                } catch (Throwable t) {
+                    AvilixLoggerMod.LOGGER.error("[AvilixLogger] GUI details query failed", t);
+                    lines = List.of(Component.literal("Ошибка загрузки деталей. Смотри server log.").withStyle(net.minecraft.ChatFormatting.RED));
+                }
 
-            latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
-            if (latestSeq == null || latestSeq.longValue() != seq) return;
+                latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+                if (latestSeq == null || latestSeq.longValue() != seq) return;
 
-            ServerPlayer sp = playerRef.get();
-            if (sp == null || sp.server == null || !sp.isAlive()) return;
+                ServerPlayer sp = playerRef.get();
+                if (sp == null || sp.server == null || !sp.isAlive()) return;
 
-            sp.server.execute(() -> {
-                Long serverLatestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
-                if (serverLatestSeq == null || serverLatestSeq.longValue() != seq) return;
+                final List<Component> linesToSend = lines;
+                sp.server.execute(() -> {
+                    Long serverLatestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
+                    if (serverLatestSeq == null || serverLatestSeq.longValue() != seq) return;
 
-                ServerPlayer livePlayer = playerRef.get();
-                if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
+                    ServerPlayer livePlayer = playerRef.get();
+                    if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
 
-                PacketDistributor.sendToPlayer(livePlayer,
-                        new S2CLogDetailsPayload(payload.entryId(), payload.mode(), lines));
-            });
+                    PacketDistributor.sendToPlayer(livePlayer,
+                            new S2CLogDetailsPayload(payload.entryId(), payload.mode(), linesToSend));
+                });
+            } finally {
+                completeGuiDetailsSeq(playerId, seq);
+            }
         }
     }
 
@@ -387,10 +542,14 @@ public final class LoggerNetwork {
                 pruneQueuedPageTasks(sp.getUUID());
             }
 
+            sendGuiPageStatus(sp, finalLvl, snapshotState, Component.literal("Загрузка логов...").withStyle(net.minecraft.ChatFormatting.AQUA));
+
             try {
                 PAGE_EXECUTOR.execute(new GuiPageTask(sp, seq, finalLvl, snapshotState, payload.aggregated(), finalGf));
-            } catch (java.util.concurrent.RejectedExecutionException ignored) {
-                // queue saturated or shutting down; newest request will be retried by the client on next action
+                scheduleLongPageWarning(sp, seq, finalLvl, snapshotState);
+            } catch (java.util.concurrent.RejectedExecutionException rejected) {
+                completeGuiPageSeq(sp.getUUID(), seq);
+                sendGuiPageStatus(sp, finalLvl, snapshotState, Component.literal("Очередь GUI-запросов перегружена. Повтори запрос через пару секунд.").withStyle(net.minecraft.ChatFormatting.RED));
             }
         });
     }
@@ -426,8 +585,11 @@ public final class LoggerNetwork {
             }
             try {
                 DETAILS_EXECUTOR.execute(new GuiDetailsTask(sp, seq, finalLvl, payload));
-            } catch (java.util.concurrent.RejectedExecutionException ignored) {
-                // details queue saturated or shutting down
+                scheduleLongDetailsWarning(sp, seq, payload);
+            } catch (java.util.concurrent.RejectedExecutionException rejected) {
+                completeGuiDetailsSeq(sp.getUUID(), seq);
+                PacketDistributor.sendToPlayer(sp, new S2CLogDetailsPayload(payload.entryId(), payload.mode(),
+                        List.of(Component.literal("Очередь деталей GUI перегружена. Повтори запрос.").withStyle(net.minecraft.ChatFormatting.RED))));
             }
         });
     }
@@ -497,11 +659,24 @@ public final class LoggerNetwork {
             q.owner = gf.train().trim();
         }
 
+        if (gf != null) {
+            String blockNeedle = normalizeFilterNeedle(gf.blockId());
+            if (!blockNeedle.isBlank()) q.blockIdFilter = blockNeedle;
+
+            String planeNeedle = normalizeFilterNeedle(gf.planeName());
+            if (!planeNeedle.isBlank()) q.planeNameFilter = planeNeedle;
+
+            if (gf.typePresetIdx() == 5) q.extraTextFilter = "train";
+            else if (gf.typePresetIdx() == 6) q.extraTextFilter = "cannon";
+        }
+
         // Types (preset index)
         q.types = mapTypePreset(gf != null ? gf.typePresetIdx() : 0);
 
         // GUI has its own page size; keep chat page size independent.
         q.limit = Math.max(1, com.roften.avilixlogger.LoggerConfig.VALUES.guiPageSize.get());
+        q.softBudgetMs = 4500;
+        q.debugSource = "gui";
         return q;
     }
 
@@ -513,6 +688,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.BLOCK_BREAK,
                     com.roften.avilixlogger.core.ActionType.BLOCK_PLACE,
                     com.roften.avilixlogger.core.ActionType.BLOCK_INTERACT,
+                    com.roften.avilixlogger.core.ActionType.BLOCK_USE,
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE
             );
             case 2 -> java.util.EnumSet.of(
@@ -520,7 +696,8 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ENTITY_CONTAINER_OPEN,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_PUT,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_TAKE,
-                    com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE
+                    com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.GUI_OPEN
             );
             case 3 -> java.util.EnumSet.of(
                     com.roften.avilixlogger.core.ActionType.ENTITY_SPAWN,
@@ -528,39 +705,62 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ENTITY_MOUNT,
                     com.roften.avilixlogger.core.ActionType.ENTITY_DISMOUNT,
                     com.roften.avilixlogger.core.ActionType.ENTITY_INTERACT,
-                    com.roften.avilixlogger.core.ActionType.PLAYER_DEATH
+                    com.roften.avilixlogger.core.ActionType.ENTITY_ATTACK,
+                    com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
+                    com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT,
+                    com.roften.avilixlogger.core.ActionType.PLAYER_DEATH,
+                    com.roften.avilixlogger.core.ActionType.PLAYER_DIMENSION_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.PLAYER_RESPAWN,
+                    com.roften.avilixlogger.core.ActionType.GUI_OPEN
             );
             case 4 -> java.util.EnumSet.of(
                     com.roften.avilixlogger.core.ActionType.ITEM_DROP,
                     com.roften.avilixlogger.core.ActionType.ITEM_PICKUP,
                     com.roften.avilixlogger.core.ActionType.ITEM_CRAFT,
-                    com.roften.avilixlogger.core.ActionType.ITEM_SMELT
+                    com.roften.avilixlogger.core.ActionType.ITEM_SMELT,
+                    com.roften.avilixlogger.core.ActionType.ITEM_USE,
+                    com.roften.avilixlogger.core.ActionType.ITEM_USE_START,
+                    com.roften.avilixlogger.core.ActionType.ITEM_USE_STOP,
+                    com.roften.avilixlogger.core.ActionType.ITEM_CONSUME,
+                    com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
+                    com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT
             );
             // 5: TRAINS, 6: CANNON — we still keep a broad type set and then refine with extra filtering.
             case 5 -> java.util.EnumSet.of(
                     com.roften.avilixlogger.core.ActionType.BLOCK_INTERACT,
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.ENTITY_SPAWN,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_DEATH
+                    com.roften.avilixlogger.core.ActionType.ENTITY_DEATH,
+                    com.roften.avilixlogger.core.ActionType.TRAIN_ASSEMBLE,
+                    com.roften.avilixlogger.core.ActionType.TRAIN_DISASSEMBLE,
+                    com.roften.avilixlogger.core.ActionType.TRAIN_SCHEDULE_TAKE,
+                    com.roften.avilixlogger.core.ActionType.TRAIN_CONTROL_START,
+                    com.roften.avilixlogger.core.ActionType.TRAIN_CONTROL_STOP,
+                    com.roften.avilixlogger.core.ActionType.TRAIN_SCHEDULE_PUT
             );
             case 6 -> java.util.EnumSet.of(
                     com.roften.avilixlogger.core.ActionType.BLOCK_PLACE,
                     com.roften.avilixlogger.core.ActionType.BLOCK_INTERACT,
+                    com.roften.avilixlogger.core.ActionType.BLOCK_USE,
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE
             );
             case 7 -> java.util.EnumSet.of(
                     com.roften.avilixlogger.core.ActionType.CHAT_MESSAGE
             );
             case 8 -> java.util.EnumSet.of(
-                    // Plane GUI must stay cheap even for WORLD lookups.
-                    // Use only dedicated plane actions that are already emitted by our compat hooks.
-                    // Pulling generic ENTITY_* actions here causes huge broad scans and then expensive
-                    // in-memory post-filtering on busy servers, especially with WORLD radius.
+                    // Dedicated plane actions plus old/generic entity rows. The post-filter below
+                    // keeps the GUI correct while ClickHouse/feed keeps the scan bounded.
                     com.roften.avilixlogger.core.ActionType.PLANE_PLACE,
                     com.roften.avilixlogger.core.ActionType.PLANE_REMOVE,
                     com.roften.avilixlogger.core.ActionType.PLANE_MOUNT,
                     com.roften.avilixlogger.core.ActionType.PLANE_PICKUP,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_OWNER_SET
+                    com.roften.avilixlogger.core.ActionType.ENTITY_OWNER_SET,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_SPAWN,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_DEATH,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_MOUNT,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_DISMOUNT,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_INTERACT,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_ATTACK
             );
             default -> null;
         };
@@ -580,8 +780,8 @@ public final class LoggerNetwork {
         int desired = size + 1;
         int fetchLimit = Math.min(5000, desired * 12);
         if (gf != null && gf.typePresetIdx() == 8) {
-            // Plane preset now hits dedicated plane actions only, so we can keep the DB window tight.
-            fetchLimit = Math.min(1500, desired * 8);
+            // Plane preset includes generic legacy entity rows too; keep the first DB slice bounded.
+            fetchLimit = Math.min(2200, desired * 10);
             if (q.owner != null && !q.owner.isBlank()) fetchLimit = Math.min(2500, desired * 12);
             if (hasExtraGuiFilters(gf)) fetchLimit = Math.min(3500, Math.max(fetchLimit, desired * 16));
         } else {
@@ -598,13 +798,27 @@ public final class LoggerNetwork {
         boolean brokeEarly = false;
         int passes = 0;
         int maxPasses = hasExtraGuiFilters(gf) ? 8 : 3;
+        long budgetMs = Math.max(2500L, Math.min(8000L, q.softBudgetMs > 0 ? q.softBudgetMs : 4500L));
+        long deadlineNs = System.nanoTime() + budgetMs * 1_000_000L;
+        boolean timedOut = false;
 
         while (passes < maxPasses && filtered.size() < neededFiltered) {
+            if (System.nanoTime() >= deadlineNs) {
+                timedOut = true;
+                brokeEarly = true;
+                break;
+            }
             LogQuery pageQ = q.copy();
             pageQ.beforeId = scanBeforeId;
+            long queryStartedNs = System.nanoTime();
             List<LogEntry> raw = LoggerRuntime.storage(level).queryReverse(pageQ);
+            long queryElapsedMs = (System.nanoTime() - queryStartedNs) / 1_000_000L;
+            if (queryElapsedMs >= budgetMs) {
+                timedOut = true;
+                brokeEarly = true;
+            }
             if (raw == null || raw.isEmpty()) {
-                exhausted = true;
+                exhausted = !timedOut;
                 break;
             }
 
@@ -661,6 +875,13 @@ public final class LoggerNetwork {
             rows = List.copyOf(rr);
         }
 
+        if (rows.isEmpty()) {
+            // Cursor pagination is based on the last displayed row. Without a visible row there is
+            // no safe cursor to continue from, so do not expose a broken "next" button.
+            hasNext = false;
+            nextCursorCandidate = 0L;
+        }
+
         state.nextCursorCandidate = nextCursorCandidate;
         state.hasNext = hasNext;
 
@@ -668,8 +889,16 @@ public final class LoggerNetwork {
 
         List<com.roften.avilixlogger.net.LogRow> outRows = new ArrayList<>();
         if (rows.isEmpty()) {
-            outRows.add(new com.roften.avilixlogger.net.LogRow(0L, level.dimension().location().toString(), 0, 0, 0, Component.literal("Нет записей."), false, new long[0]));
+            Component empty = timedOut
+                    ? Component.literal("Не удалось получить информацию: запрос обрабатывался слишком долго и не вернул данные. Сузь время, радиус, тип, игрока или повтори запрос.").withStyle(net.minecraft.ChatFormatting.YELLOW)
+                    : Component.literal("Нет записей.");
+            outRows.add(new com.roften.avilixlogger.net.LogRow(0L, level.dimension().location().toString(), 0, 0, 0, empty, false, new long[0]));
         } else {
+            if (timedOut) {
+                outRows.add(new com.roften.avilixlogger.net.LogRow(0L, level.dimension().location().toString(), 0, 0, 0,
+                        Component.literal("Часть информации могла не загрузиться: запрос обрабатывался слишком долго. Сузь фильтры для полного результата.")
+                                .withStyle(net.minecraft.ChatFormatting.YELLOW), false, new long[0]));
+            }
             outRows.addAll(rows);
         }
 
@@ -692,7 +921,7 @@ public final class LoggerNetwork {
 
         final String train = gf.train() == null ? "" : gf.train().trim();
         final boolean wantTrainName = !train.isBlank();
-        final String planeNeedle = gf.planeName() == null ? "" : gf.planeName().trim();
+        final String planeNeedle = normalizeFilterNeedle(gf.planeName());
         final boolean wantPlaneName = !planeNeedle.isBlank();
         final String blockNeedle = normalizeFilterNeedle(gf.blockId());
         final boolean wantBlock = !blockNeedle.isBlank();
@@ -712,12 +941,13 @@ public final class LoggerNetwork {
 
             if (wantBlock && !matchesBlockNeedle(e, blockNeedle)) continue;
 
+            String extraLower = extra.toLowerCase(java.util.Locale.ROOT);
             if (wantCannonOnly) {
                 // Heuristic: our cannon hooks write marker strings to extra.
-                if (!extra.contains("schematic_cannon") && !extra.contains("schematicannon") && !extra.contains("create_cannon")) continue;
+                if (!extraLower.contains("schematic_cannon") && !extraLower.contains("schematicannon") && !extraLower.contains("create_cannon") && !extraLower.contains("cannon")) continue;
             }
             if (wantCreateTrainsOnly) {
-                if (!extra.contains("create_train") && !extra.contains("carriage_contraption") && !extra.contains("train")) continue;
+                if (!extraLower.contains("create_train") && !extraLower.contains("carriage_contraption") && !extraLower.contains("train")) continue;
             }
 
             if (wantPlanesOnly) {
@@ -818,7 +1048,12 @@ public final class LoggerNetwork {
             q.dim = level.dimension().location().toString();
             q.beforeId = anchorId + 1;
             q.limit = 64;
+            q.requireDetails = true;
             List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
+            if (got == null || got.isEmpty()) {
+                q.requireDetails = false;
+                got = LoggerRuntime.storage(level).queryReverse(q);
+            }
             if (got == null) return List.of();
             for (LogEntry e : got) if (e.id == anchorId) return List.of(e);
             return got.isEmpty() ? List.of() : List.of(got.get(0));
@@ -830,7 +1065,12 @@ public final class LoggerNetwork {
         q.dim = level.dimension().location().toString();
         q.beforeId = max + 1;
         q.limit = Math.min(2000, Math.max(64, ids.length * 16));
+        q.requireDetails = true;
         List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
+        if (got == null || got.isEmpty()) {
+            q.requireDetails = false;
+            got = LoggerRuntime.storage(level).queryReverse(q);
+        }
         if (got == null || got.isEmpty()) return List.of();
         java.util.Set<Long> want = new java.util.HashSet<>();
         for (long id : ids) want.add(id);
@@ -954,7 +1194,12 @@ public final class LoggerNetwork {
         q.dim = level.dimension().location().toString();
         q.beforeId = entryId + 1;
         q.limit = 64;
+        q.requireDetails = true;
         List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
+        if (got == null || got.isEmpty()) {
+            q.requireDetails = false;
+            got = LoggerRuntime.storage(level).queryReverse(q);
+        }
         if (got == null) got = List.of();
         LogEntry target = null;
         for (LogEntry e : got) if (e.id == entryId) { target = e; break; }
