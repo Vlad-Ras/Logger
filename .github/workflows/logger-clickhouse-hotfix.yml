@@ -28,10 +28,8 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Apply ClickHouse compatibility patch
-        run: |
-          git apply --check .github/logger-clickhouse-hotfix.patch
-          git apply .github/logger-clickhouse-hotfix.patch
+      - name: Apply ClickHouse compatibility fix
+        run: python3 .github/logger_clickhouse_hotfix.py
 
       - name: Build with Gradle
         run: ./gradlew build --no-daemon
@@ -49,6 +47,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/main/java/com/roften/avilixlogger/core/ClickHouseLogStorage.java
           git rm .github/logger-clickhouse-hotfix.patch
+          git rm .github/logger_clickhouse_hotfix.py
           git rm .github/workflows/logger-clickhouse-hotfix.yml
           git commit -m 'Fix ClickHouse legacy fallback in split schema'
           git push origin HEAD:master
