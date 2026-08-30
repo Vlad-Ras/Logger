@@ -3,6 +3,7 @@ package com.roften.avilixlogger.core;
 import net.minecraft.world.level.Level;
 
 import com.roften.avilixlogger.AvilixLoggerMod;
+import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.api.LogAdapterRegistry;
 
 /**
@@ -14,6 +15,8 @@ public final class LoggerRuntime {
 
     private static volatile LogStorage STORAGE;
     private static volatile boolean INIT_STARTED;
+    private static volatile long INIT_GENERATION;
+    private static volatile Thread INIT_THREAD;
 
     private LoggerRuntime() {}
 
@@ -31,26 +34,90 @@ public final class LoggerRuntime {
         synchronized (LoggerRuntime.class) {
             if (INIT_STARTED) return;
             INIT_STARTED = true;
+            long generation = ++INIT_GENERATION;
 
             Thread t = new Thread(() -> {
-                LogStorage real;
+                int attempt = 0;
                 try {
                     LogAdapterRegistry.discover();
-                    real = createConfiguredStorage();
-                } catch (Throwable t1) {
-                    AvilixLoggerMod.LOGGER.error(
-                            "[AvilixLogger] Storage init failed. Logging will be disabled until the DB is fixed.",
-                            t1
-                    );
-                    real = new NoopLogStorage();
-                }
+                    while (INIT_STARTED && INIT_GENERATION == generation) {
+                        attempt++;
+                        LogStorage real;
+                        try {
+                            real = createConfiguredStorage();
+                        } catch (Throwable failure) {
+                            if (attempt == 1 || attempt % 12 == 0) {
+                                AvilixLoggerMod.LOGGER.error(
+                                        "[AvilixLogger] ClickHouse initialization failed (attempt {}). "
+                                                + "Logging is queued and connection will retry automatically.",
+                                        attempt,
+                                        failure
+                                );
+                            } else {
+                                AvilixLoggerMod.LOGGER.warn(
+                                        "[AvilixLogger] ClickHouse is still unavailable (attempt {}): {}",
+                                        attempt,
+                                        rootMessage(failure)
+                                );
+                            }
+                            if (!sleepBeforeRetry(generation)) return;
+                            continue;
+                        }
 
-                PENDING.setDelegate(real);
-                STORAGE = real;
+                        if (!INIT_STARTED || INIT_GENERATION != generation) {
+                            real.shutdown();
+                            return;
+                        }
+                        PENDING.setDelegate(real);
+                        STORAGE = real;
+                        if (attempt > 1) {
+                            AvilixLoggerMod.LOGGER.info(
+                                    "[AvilixLogger] ClickHouse connection recovered after {} attempts; queued logs are being flushed.",
+                                    attempt
+                            );
+                        }
+                        return;
+                    }
+                } catch (Throwable fatal) {
+                    AvilixLoggerMod.LOGGER.error("[AvilixLogger] Storage initializer stopped unexpectedly.", fatal);
+                } finally {
+                    if (INIT_THREAD == Thread.currentThread()) INIT_THREAD = null;
+                }
             }, "avilixlogger-storage-init");
             t.setDaemon(true);
+            INIT_THREAD = t;
             t.start();
         }
+    }
+
+    private static boolean sleepBeforeRetry(long generation) {
+        long delayMs;
+        try {
+            delayMs = Math.max(1_000L, LoggerConfig.VALUES.clickHouseHealthCooldownMs.get());
+        } catch (Throwable ignored) {
+            delayMs = 10_000L;
+        }
+        try {
+            Thread.sleep(delayMs);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+        return INIT_STARTED && INIT_GENERATION == generation && !Thread.currentThread().isInterrupted();
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current != null && current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current == null ? null : current.getMessage();
+        return message == null || message.isBlank()
+                ? String.valueOf(current == null ? error : current)
+                : message;
+    }
+
+    public static boolean isInitializing() {
+        return INIT_STARTED && STORAGE == null;
     }
 
     private static LogStorage createConfiguredStorage() {
@@ -59,6 +126,10 @@ public final class LoggerRuntime {
     }
 
     public static void shutdown() {
+        INIT_STARTED = false;
+        INIT_GENERATION++;
+        Thread initThread = INIT_THREAD;
+        if (initThread != null) initThread.interrupt();
         AsyncLogProcessor.shutdown();
         ChatAuditLogger.clearPending();
         AdaptiveLogDiagnostics.logSummary();
@@ -69,7 +140,7 @@ public final class LoggerRuntime {
             PENDING.shutdown();
         }
         STORAGE = null;
-        INIT_STARTED = false;
+        INIT_THREAD = null;
         PENDING.reset();
         FRONT.clear();
     }

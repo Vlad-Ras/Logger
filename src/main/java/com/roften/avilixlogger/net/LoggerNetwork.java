@@ -344,8 +344,12 @@ public final class LoggerNetwork {
                             () -> Thread.currentThread().isInterrupted()
                                     || !Long.valueOf(seq).equals(LATEST_GUI_PAGE_SEQ.get(playerId)));
                 } catch (Throwable t) {
-                    AvilixLoggerMod.LOGGER.error("[AvilixLogger] GUI page query failed", t);
-                    page = errorPage(level, snapshotState, "Ошибка запроса логов. Смотри server log.");
+                    if (LoggerRuntime.isInitializing()) {
+                        page = errorPage(level, snapshotState, "ClickHouse подключается. Повтори запрос через несколько секунд.");
+                    } else {
+                        AvilixLoggerMod.LOGGER.error("[AvilixLogger] GUI page query failed", t);
+                        page = errorPage(level, snapshotState, "Ошибка запроса логов. Смотри server log.");
+                    }
                 }
 
                 latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
@@ -412,8 +416,13 @@ public final class LoggerNetwork {
                         case JSON -> buildJsonLines(level, payload.entryId());
                     };
                 } catch (Throwable t) {
-                    AvilixLoggerMod.LOGGER.error("[AvilixLogger] GUI details query failed", t);
-                    lines = List.of(Component.literal("Ошибка загрузки деталей. Смотри server log.").withStyle(net.minecraft.ChatFormatting.RED));
+                    if (LoggerRuntime.isInitializing()) {
+                        lines = List.of(Component.literal("ClickHouse подключается. Повтори запрос через несколько секунд.")
+                                .withStyle(net.minecraft.ChatFormatting.YELLOW));
+                    } else {
+                        AvilixLoggerMod.LOGGER.error("[AvilixLogger] GUI details query failed", t);
+                        lines = List.of(Component.literal("Ошибка загрузки деталей. Смотри server log.").withStyle(net.minecraft.ChatFormatting.RED));
+                    }
                 }
 
                 latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
