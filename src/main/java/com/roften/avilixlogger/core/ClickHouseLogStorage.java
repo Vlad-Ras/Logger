@@ -113,6 +113,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
     private final ArrayBlockingQueue<LogEntry> queue;
     private final Thread writer;
+    private final Thread retentionWorker;
     private final String endpoint;
     private final String user;
     private final String password;
@@ -135,7 +136,6 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private final java.util.concurrent.atomic.AtomicLong dropped = new java.util.concurrent.atomic.AtomicLong();
     private final long maxQueuedPayloadBytes;
     private volatile long written;
-    private volatile long lastCleanupAt;
     private volatile long unhealthyUntilMs;
     private volatile Throwable lastFailure;
     private volatile boolean useActorNameLcFilter = true;
@@ -167,9 +167,17 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 queue.remainingCapacity() + queue.size(), maxQueuedPayloadBytes / (1024L * 1024L),
                 LoggerConfig.VALUES.clickHouseBatchSize.get());
 
+        // Retention DDL is maintenance, not a prerequisite for reading/writing logs. On a large
+        // table ClickHouse may need longer than the HTTP timeout to acknowledge MODIFY TTL even
+        // though the core schema and normal queries are healthy. Keep it on its own daemon so a
+        // slow ALTER cannot disable storage initialization or pause the insert writer.
         this.writer = new Thread(this::runWriter, "avilixlogger-clickhouse-writer");
         this.writer.setDaemon(true);
+        this.retentionWorker = new Thread(this::runRetentionMaintenance, "avilixlogger-clickhouse-retention");
+        this.retentionWorker.setDaemon(true);
+
         this.writer.start();
+        this.retentionWorker.start();
     }
 
     @Override
@@ -207,11 +215,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 for (TableKind kind : splitKinds()) ensureSplitTable(kind);
                 ensureSplitSchemaCompatibility();
                 if (addSkippingIndexes) ensureSkippingIndexes();
-                ensureRetentionPolicies();
                 AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse split+feed schema ready. DB={}, prefix={}, feed={}, detailMode={}", database, tablePrefix, useFeedTable, detailMode);
             } else {
                 ensureLegacyTable();
-                ensureRetentionPolicies();
                 AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse legacy unified schema ready. DB={}, table={}", database, legacyTable);
             }
             markHealthy();
@@ -552,7 +558,6 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                     retryDelayMs = 250L;
                 }
 
-                if (timeFlush) maybeCleanup(now);
             } catch (InterruptedException ignored) {
                 // shutdown wakes the writer up
             } catch (Throwable t) {
@@ -574,19 +579,33 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         }
     }
 
-    private void maybeCleanup(long now) {
-        if (!running) return;
-        long everyMs = 24L * 60L * 60_000L;
-        if ((now - lastCleanupAt) < everyMs) return;
-        lastCleanupAt = now;
+    private void runRetentionMaintenance() {
+        final long successIntervalMs = 24L * 60L * 60_000L;
+        final long retryIntervalMs = 5L * 60_000L;
+        long waitMs = 0L;
 
-        try {
-            // Native TTL cleanup is asynchronous inside ClickHouse and avoids repeated heavy
-            // ALTER ... DELETE mutations competing with live inserts and history searches.
-            ensureRetentionPolicies();
-        } catch (Throwable e) {
-            markUnhealthy(e);
-            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse TTL synchronization failed", e);
+        while (running) {
+            if (waitMs > 0L) {
+                try {
+                    Thread.sleep(waitMs);
+                } catch (InterruptedException ignored) {
+                    if (!running) return;
+                }
+            }
+            if (!running) return;
+
+            try {
+                // Native TTL cleanup is asynchronous inside ClickHouse. A timeout here must not
+                // mark normal inserts/queries unhealthy: ClickHouse can still be fully usable.
+                ensureRetentionPolicies();
+                AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse TTL policies synchronized.");
+                waitMs = successIntervalMs;
+            } catch (Throwable e) {
+                AvilixLoggerMod.LOGGER.warn(
+                        "[AvilixLogger] ClickHouse TTL synchronization timed out/failed; logging remains active and TTL will retry in 5 minutes: {}",
+                        rootMessage(e));
+                waitMs = retryIntervalMs;
+            }
         }
     }
 
@@ -1467,6 +1486,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     public void shutdown() {
         running = false;
         writer.interrupt();
+        retentionWorker.interrupt();
         try { writer.join(5_000L); } catch (InterruptedException ignored) {}
         if (writer.isAlive()) AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse writer thread did not stop within timeout.");
         AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse HTTP storage shutdown. written={}, dropped={}", written, dropped.get());
@@ -1586,6 +1606,17 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private static int timeoutSec() {
         try { return Math.max(1, LoggerConfig.VALUES.clickHouseSelectQueryTimeoutSec.get()); }
         catch (Throwable ignored) { return 15; }
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current != null && current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current == null ? null : current.getMessage();
+        return message == null || message.isBlank()
+                ? String.valueOf(current == null ? error : current)
+                : message;
     }
 
     private static boolean isAllDimensions(String dim) {

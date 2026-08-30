@@ -37,6 +37,16 @@ public final class PendingLogStorage implements LogStorage {
             if (!pending.offer(entry)) {
                 payloadBytes.addAndGet(-weight);
                 warnDropped();
+                return;
+            }
+
+            // The delegate can become available between the first check and pending.offer().
+            // If the startup drainer has not taken this row yet, forward it here so no log remains
+            // stranded in the startup queue after a successful reconnect.
+            d = delegate;
+            if (d != null && pending.remove(entry)) {
+                payloadBytes.addAndGet(-weight);
+                d.append(entry);
             }
         }
     }
