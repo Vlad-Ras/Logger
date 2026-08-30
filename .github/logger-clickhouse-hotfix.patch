@@ -1,0 +1,113 @@
+--- a/src/main/java/com/roften/avilixlogger/core/ClickHouseLogStorage.java
++++ b/src/main/java/com/roften/avilixlogger/core/ClickHouseLogStorage.java
+@@ -122,6 +122,7 @@
+     private final String tablePrefix;
+     private final boolean splitSchema;
+     private final boolean readLegacyUnifiedTable;
++    private volatile boolean legacyUnifiedTableReadable;
+     private final boolean zstd;
+     private final boolean useFeedTable;
+     private final boolean storeRollbackDetails;
+@@ -150,6 +151,7 @@
+         this.tablePrefix = sanitizePrefix(LoggerConfig.VALUES.clickHouseTablePrefix.get(), this.legacyTable);
+         this.splitSchema = !"legacy".equalsIgnoreCase(safeString(LoggerConfig.VALUES.clickHouseSchemaMode.get()).trim());
+         this.readLegacyUnifiedTable = LoggerConfig.VALUES.clickHouseReadLegacyUnifiedTable.get();
++        this.legacyUnifiedTableReadable = this.readLegacyUnifiedTable;
+         this.zstd = LoggerConfig.VALUES.clickHouseUseZstdCodec.get();
+         this.useFeedTable = LoggerConfig.VALUES.clickHouseUseFeedTable.get();
+         this.storeRollbackDetails = LoggerConfig.VALUES.clickHouseStoreRollbackDetails.get();
+@@ -162,6 +164,7 @@
+         this.maxQueuedPayloadBytes = Math.max(16L, LoggerConfig.VALUES.clickHouseMaxQueuedPayloadMiB.get()) * 1024L * 1024L;
+ 
+         ensureSchema();
++        initializeLegacyCompatibilityRead();
+         AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse connected successfully. endpoint={}, database={}, schemaMode={}, feed={}, queueCapacity={}, queuePayloadMiB={}, batchSize={}",
+                 endpoint, database, splitSchema ? "split" : "legacy", useFeedTable,
+                 queue.remainingCapacity() + queue.size(), maxQueuedPayloadBytes / (1024L * 1024L),
+@@ -843,7 +846,7 @@
+             List<LogEntry> feedRows = selectFeed(q, reverse);
+             if (feedRows != null && !feedRows.isEmpty()) {
+                 ArrayList<LogEntry> merged = new ArrayList<>(feedRows);
+-                if (readLegacyUnifiedTable) {
++                if (shouldReadLegacyUnifiedTable()) {
+                     merged.addAll(selectLegacy(q, reverse));
+                     merged = dedupeById(merged);
+                 }
+@@ -863,7 +866,7 @@
+                 String sql = buildSplitSelectSql(q, reverse, kinds);
+                 out.addAll(parseSplitJsonEachRow(execute(sql, queryTimeoutSec(q))));
+             }
+-            if (readLegacyUnifiedTable) {
++            if (shouldReadLegacyUnifiedTable()) {
+                 out.addAll(selectLegacy(q, reverse));
+             }
+             if (!q.requireDetails && reverse && useFeedTable && (out.isEmpty() || Math.max(1, q.limit) <= 128)) {
+@@ -926,7 +929,7 @@
+                 }
+             }
+         }
+-        if (readLegacyUnifiedTable) {
++        if (shouldReadLegacyUnifiedTable()) {
+             out.addAll(selectLegacy(q, reverse));
+             out = dedupeById(out);
+         }
+@@ -1278,6 +1281,7 @@
+     }
+ 
+     private List<LogEntry> selectLegacy(LogQuery q, boolean reverse) {
++        if (splitSchema && !shouldReadLegacyUnifiedTable()) return List.of();
+         StringBuilder sql = new StringBuilder();
+         boolean allDims = isAllDimensions(q.dim);
+         sql.append("SELECT id, data FROM ").append(qualifiedLegacyTable())
+@@ -1352,11 +1356,51 @@
+             }
+             markHealthy();
+         } catch (Throwable e) {
++            if (splitSchema && readLegacyUnifiedTable && isUnknownLegacyTableError(e)) {
++                disableLegacyCompatibilityRead(e);
++                markHealthy();
++                return List.of();
++            }
+             throw new IllegalStateException("ClickHouse unified-table query failed; refusing to return an empty/partial page", e);
+         }
+         return out;
+     }
+ 
++    private void initializeLegacyCompatibilityRead() {
++        if (!splitSchema || !readLegacyUnifiedTable) return;
++        try {
++            String exists = execute("EXISTS TABLE " + qualifiedLegacyTable(), timeoutSec());
++            if (!"1".equals(safeString(exists).trim())) {
++                disableLegacyCompatibilityRead(null);
++            }
++        } catch (Throwable probeError) {
++            // A failed probe must not disable compatibility reads by itself: older ClickHouse builds
++            // or restricted users may reject EXISTS even though the legacy table is readable.
++            AvilixLoggerMod.LOGGER.warn(
++                    "[AvilixLogger] Could not probe optional legacy ClickHouse table {}; compatibility read will be verified lazily: {}",
++                    qualifiedLegacyTable(), rootMessage(probeError));
++        }
++    }
++
++    private boolean shouldReadLegacyUnifiedTable() {
++        return readLegacyUnifiedTable && legacyUnifiedTableReadable;
++    }
++
++    private void disableLegacyCompatibilityRead(Throwable cause) {
++        if (!legacyUnifiedTableReadable) return;
++        legacyUnifiedTableReadable = false;
++        String reason = cause == null ? "table does not exist" : rootMessage(cause);
++        AvilixLoggerMod.LOGGER.warn(
++                "[AvilixLogger] Optional legacy ClickHouse table {} is unavailable; disabling compatibility reads for this runtime. Split/feed logging and GUI queries remain active. reason={}",
++                qualifiedLegacyTable(), reason);
++    }
++
++    private static boolean isUnknownLegacyTableError(Throwable error) {
++        String message = rootMessage(error).toLowerCase(Locale.ROOT);
++        return message.contains("unknown_table")
++                || message.contains("unknown table expression identifier")
++                || message.contains("code: 60");
++    }
++
+ 
+     private static ArrayList<LogEntry> dedupeById(List<LogEntry> in) {
