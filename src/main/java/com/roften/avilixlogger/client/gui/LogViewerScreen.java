@@ -13,6 +13,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.StringWidget;
@@ -41,6 +42,8 @@ public final class LogViewerScreen extends Screen {
     private static final int BUTTON_SCALE_MAX = 125;
     private static final int LOG_TEXT_SCALE_MIN = 55;
     private static final int LOG_TEXT_SCALE_MAX = 140;
+    private static final int BACKGROUND_DIM_MIN = 0;
+    private static final int BACKGROUND_DIM_MAX = 100;
 
     private static boolean guiStateLoaded = false;
     private static int savedTimePresetIdx = GuiFilters.DEFAULT.timePresetIdx();
@@ -60,6 +63,7 @@ public final class LogViewerScreen extends Screen {
     private static String savedSearchInput = "";
     private static int savedButtonScalePercent = 100;
     private static int savedLogTextScalePercent = 100;
+    private static int savedBackgroundDimPercent = 0;
 
     private final List<LogRow> rows = new ArrayList<>();
     private int pageIndex = 1;
@@ -115,6 +119,7 @@ public final class LogViewerScreen extends Screen {
     private Button btnButtonsPlus;
     private Button btnTextMinus;
     private Button btnTextPlus;
+    private BackgroundDimSlider backgroundDimSlider;
 
     private EditBox searchBox;
     private EditBox timeBox;
@@ -431,6 +436,10 @@ public final class LogViewerScreen extends Screen {
                 sx, y2, rightX + rightW - sx, btnH);
 
         y2 += btnH + gap;
+        this.backgroundDimSlider = this.addRenderableWidget(new BackgroundDimSlider(
+                rightX, y2, rightW, btnH, savedBackgroundDimPercent));
+
+        y2 += btnH + gap;
         this.btnCopy = addButton(sideLabel("gui.avilixlogger.copy_xyz", "XYZ"), b -> copySelectedXYZ(),
                 rightX, y2, half, btnH);
         this.btnTp = addButton(sideLabel("gui.avilixlogger.copy_tp", "TP"), b -> runSelectedTpCmd(),
@@ -568,6 +577,36 @@ public final class LogViewerScreen extends Screen {
             }
             g.pose().popPose();
             g.disableScissor();
+        }
+    }
+
+    /**
+     * Client-only background dimmer. It uses a plain black overlay instead of Minecraft's
+     * screen background, so log text remains crisp and no blur shader is enabled.
+     */
+    private final class BackgroundDimSlider extends AbstractSliderButton {
+        private BackgroundDimSlider(int x, int y, int width, int height, int percent) {
+            super(x, y, width, height, Component.empty(), percentToSliderValue(percent));
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.translatable("gui.avilixlogger.background_dim", savedBackgroundDimPercent));
+        }
+
+        @Override
+        protected void applyValue() {
+            int percent = clampInt((int) Math.round(this.value * BACKGROUND_DIM_MAX),
+                    BACKGROUND_DIM_MIN, BACKGROUND_DIM_MAX);
+            if (percent == savedBackgroundDimPercent) return;
+            savedBackgroundDimPercent = percent;
+            updateMessage();
+            saveGuiStateFromInstance();
+        }
+
+        private static double percentToSliderValue(int percent) {
+            return clampInt(percent, BACKGROUND_DIM_MIN, BACKGROUND_DIM_MAX) / (double) BACKGROUND_DIM_MAX;
         }
     }
 
@@ -792,6 +831,7 @@ public final class LogViewerScreen extends Screen {
         // This GUI draws logs/details before widgets, so a late vanilla background pass makes
         // the already-drawn log text look smeared while the buttons stay sharp.
         updateAdaptiveInputWidths();
+        renderBackgroundDim(g);
 
         int listLeft = listLeftX();
         int listTop = listTop();
@@ -853,6 +893,13 @@ public final class LogViewerScreen extends Screen {
             renderTypeDropdown(g, mouseX, mouseY);
             g.pose().popPose();
         }
+    }
+
+    private void renderBackgroundDim(GuiGraphics g) {
+        int percent = clampInt(savedBackgroundDimPercent, BACKGROUND_DIM_MIN, BACKGROUND_DIM_MAX);
+        if (percent <= 0) return;
+        int alpha = Math.round(255.0f * (percent / 100.0f));
+        g.fill(0, 0, this.width, this.height, alpha << 24);
     }
 
 
@@ -1442,6 +1489,7 @@ public final class LogViewerScreen extends Screen {
             savedSearchInput = p.getProperty("searchInput", savedSearchInput);
             savedButtonScalePercent = clampInt(parseInt(p.getProperty("buttonScalePercent"), savedButtonScalePercent), BUTTON_SCALE_MIN, BUTTON_SCALE_MAX);
             savedLogTextScalePercent = clampInt(parseInt(p.getProperty("logTextScalePercent"), savedLogTextScalePercent), LOG_TEXT_SCALE_MIN, LOG_TEXT_SCALE_MAX);
+            savedBackgroundDimPercent = clampInt(parseInt(p.getProperty("backgroundDimPercent"), savedBackgroundDimPercent), BACKGROUND_DIM_MIN, BACKGROUND_DIM_MAX);
         } catch (Throwable ignored) {
             // Broken local client config should never break opening the logger GUI.
         }
@@ -1506,6 +1554,7 @@ public final class LogViewerScreen extends Screen {
         p.setProperty("buttonScalePercent", String.valueOf(savedButtonScalePercent));
         p.setProperty("wideControlScalePercent", String.valueOf(savedButtonScalePercent));
         p.setProperty("logTextScalePercent", String.valueOf(savedLogTextScalePercent));
+        p.setProperty("backgroundDimPercent", String.valueOf(savedBackgroundDimPercent));
         try {
             Path path = guiStatePath();
             Files.createDirectories(path.getParent());

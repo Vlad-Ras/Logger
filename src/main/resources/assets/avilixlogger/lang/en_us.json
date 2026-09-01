@@ -41,6 +41,7 @@
   "gui.avilixlogger.tab.details": "Details",
   "gui.avilixlogger.tab.raw": "Raw",
   "gui.avilixlogger.show_raw": "Show raw",
+  "gui.avilixlogger.background_dim": "Background: %s%%",
   "gui.avilixlogger.hdr.details": "DETAILS",
   "gui.avilixlogger.hdr.raw": "RAW",
   "gui.avilixlogger.hdr.lines": "%s lines",
