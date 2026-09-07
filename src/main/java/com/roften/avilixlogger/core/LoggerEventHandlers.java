@@ -28,6 +28,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.ChestType;
 import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.ProjectileImpactEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
@@ -1097,16 +1098,32 @@ public final class LoggerEventHandlers {
     }
 
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onEntityDeath(LivingDeathEvent event) {
-        if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logEntities.get()) return;
+        if (!LoggerConfig.VALUES.enabled.get()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
         Entity victim = event.getEntity();
+        boolean playerDeath = victim instanceof ServerPlayer;
+
+        // Player deaths belong to the player-lifecycle stream. Keep accepting logEntities as a
+        // compatibility switch for existing configs where deaths used to live under that option.
+        if (playerDeath) {
+            if (!LoggerConfig.VALUES.logPlayerLifecycle.get() && !LoggerConfig.VALUES.logEntities.get()) return;
+        } else if (!LoggerConfig.VALUES.logEntities.get()) {
+            return;
+        }
 
         Entity killer = event.getSource().getEntity();
         UUID actorUuid = null;
         String actorName = null;
-        if (killer instanceof Player p) {
+        if (playerDeath) {
+            // The actor shown for PLAYER_DEATH must always be the victim. Previously a PvP death
+            // was displayed as if the killer had died, while environmental deaths said that the
+            // server had died.
+            ServerPlayer player = (ServerPlayer) victim;
+            actorUuid = player.getUUID();
+            actorName = player.getGameProfile().getName();
+        } else if (killer instanceof Player p) {
             actorUuid = p.getUUID();
             actorName = p.getName().getString();
         }
@@ -1114,7 +1131,7 @@ public final class LoggerEventHandlers {
         LogEntry e = new LogEntry();
         e.ts = System.currentTimeMillis();
         e.dim = level.dimension().location().toString();
-        e.type = (victim instanceof Player) ? ActionType.PLAYER_DEATH : ActionType.ENTITY_DEATH;
+        e.type = playerDeath ? ActionType.PLAYER_DEATH : ActionType.ENTITY_DEATH;
         e.actorUuid = actorUuid;
         e.actorName = actorName;
         e.x = victim.blockPosition().getX();
@@ -1131,8 +1148,15 @@ public final class LoggerEventHandlers {
             }
         }
         e.entityNbt = (preNbt != null) ? preNbt : NbtSerde.writeEntity(level, victim);
-        if (victim instanceof Player vp) {
-            e.extra = "victim " + vp.getName().getString();
+        if (playerDeath) {
+            ServerPlayer player = (ServerPlayer) victim;
+            String deathMessage = "";
+            try {
+                deathMessage = player.getCombatTracker().getDeathMessage().getString().trim();
+            } catch (Throwable ignored) {}
+            if (deathMessage.isBlank()) deathMessage = player.getGameProfile().getName() + " умер";
+            // Prefix distinguishes the new human-readable message from old `victim <name>` rows.
+            e.extra = "death_message:" + deathMessage;
         } else {
             e.extra = "kill " + e.entityType;
         }

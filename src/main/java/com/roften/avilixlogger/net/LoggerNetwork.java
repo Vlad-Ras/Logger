@@ -256,7 +256,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "1");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "2");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
@@ -1384,7 +1384,7 @@ public final class LoggerNetwork {
         for (int i = 0; i < in.size(); i++) {
             LogEntry e = in.get(i);
 
-            BurstKey key = BurstKey.of(e);
+            BurstKey key = BurstKey.of(level, e);
             if (key == null) {
                 // flush pending burst
                 if (burst != null) {
@@ -1444,13 +1444,21 @@ public final class LoggerNetwork {
         CONTAINER,
         ITEM,
         BLOCK,
+        SYSTEM,
     }
 
     private record BurstKey(BurstKind kind, String dim, java.util.UUID actor, int kx, int kz, com.roften.avilixlogger.core.ActionType type, String itemOrBlockKey) {
-        static BurstKey of(LogEntry e) {
+        static BurstKey of(ServerLevel level, LogEntry e) {
             if (e == null || e.type == null) return null;
-            if (e.actorUuid == null) return null; // don't aggregate "system"; keep raw
             String dim = e.dim == null ? "" : e.dim;
+
+            // Non-player events are aggregated only when their visible rows are exactly equal
+            // after removing the timestamp. Because aggregateForGui walks in display order and
+            // flushes on every different key, only consecutive identical system/mod rows merge.
+            if (e.actorUuid == null) {
+                String visible = com.roften.avilixlogger.core.LogText.toChatLine(level, e).getString();
+                return new BurstKey(BurstKind.SYSTEM, dim, null, 0, 0, e.type, withoutTimestamp(visible));
+            }
 
             // Container: merge PUT+TAKE into one burst for the same container.
             if (e.type == com.roften.avilixlogger.core.ActionType.CONTAINER_PUT || e.type == com.roften.avilixlogger.core.ActionType.CONTAINER_TAKE) {
@@ -1476,6 +1484,15 @@ public final class LoggerNetwork {
 
             return null;
         }
+
+        private static String withoutTimestamp(String visible) {
+            if (visible == null) return "";
+            if (visible.startsWith("[")) {
+                int end = visible.indexOf("] ");
+                if (end > 0 && end < 32) return visible.substring(end + 2);
+            }
+            return visible;
+        }
     }
 
     private static final class Burst {
@@ -1495,6 +1512,7 @@ public final class LoggerNetwork {
             if (e == null || k == null) return false;
             // Must match aggregation key.
             if (!k.equals(this.key)) return false;
+            if (this.key.kind == BurstKind.SYSTEM) return true;
             // Window based on newest event time.
             long dt = this.newestTs - e.ts;
             if (dt < 0) dt = 0;
@@ -1530,6 +1548,11 @@ public final class LoggerNetwork {
             net.minecraft.network.chat.MutableComponent line;
 
             switch (key.kind) {
+                case SYSTEM -> {
+                    line = com.roften.avilixlogger.core.LogText.toChatLine(level, first).copy()
+                            .append(Component.literal(" [x" + events.size() + "]")
+                                    .withStyle(net.minecraft.ChatFormatting.GOLD));
+                }
                 case ITEM -> {
                     int total = 0;
                     java.util.LinkedHashMap<String, ItemAgg> top = new java.util.LinkedHashMap<>();
@@ -1586,8 +1609,14 @@ public final class LoggerNetwork {
             }
 
             long[] rawIds = new long[events.size()];
-            for (int i = 0; i < events.size(); i++) rawIds[i] = events.get(i).id;
-            return new com.roften.avilixlogger.net.LogRow(first.id, first.dim, first.x, first.y, first.z, line, true, rawIds);
+            List<Component> groupedLines = new ArrayList<>(events.size());
+            for (int i = 0; i < events.size(); i++) {
+                LogEntry event = events.get(i);
+                rawIds[i] = event.id;
+                groupedLines.add(com.roften.avilixlogger.core.LogText.toChatLine(level, event));
+            }
+            return new com.roften.avilixlogger.net.LogRow(
+                    first.id, first.dim, first.x, first.y, first.z, line, true, rawIds, groupedLines);
         }
 
         private static String safeBlockName(ServerLevel level, String blockStateSnbtOrId) {

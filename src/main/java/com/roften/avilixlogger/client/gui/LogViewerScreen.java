@@ -25,8 +25,10 @@ import net.minecraft.network.chat.ClickEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -72,6 +74,8 @@ public final class LogViewerScreen extends Screen {
     private String title = "";
 
     private int selected = -1;
+    private final Set<Long> expandedRows = new HashSet<>();
+    private int listScroll = 0;
 
     private boolean aggregatedMode = true;
     // Button-driven filters (GUI-only; /log remains raw and unchanged)
@@ -142,6 +146,7 @@ public final class LogViewerScreen extends Screen {
     private int inspectToolStatusY = 0;
 
     private boolean typeDropdownOpen = false;
+    private int typeDropdownScroll = 0;
     private StringWidget titleWidget;
 
     private int detailsPanelTop = 0;
@@ -164,6 +169,30 @@ public final class LogViewerScreen extends Screen {
         // Leave space for the selected-row preview bar. Smaller log text = more visible log rows.
         int available = (this.height - 30) - listTop() - 24;
         return Math.max(8, Math.min(140, available / listRowH()));
+    }
+
+    private record DisplayLine(int rowIndex, Component text, boolean groupHeader, boolean child) {}
+
+    private List<DisplayLine> displayLines() {
+        String filter = this.searchBox == null ? "" : this.searchBox.getValue().trim().toLowerCase(java.util.Locale.ROOT);
+        List<DisplayLine> out = new ArrayList<>();
+        for (int i = 0; i < rows.size(); i++) {
+            LogRow row = rows.get(i);
+            Component line = row.line() == null ? Component.empty() : row.line();
+            if (!filter.isEmpty() && !line.getString().toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
+            boolean expandable = row.aggregated() && row.groupedLines() != null && !row.groupedLines().isEmpty();
+            out.add(new DisplayLine(i, line, expandable, false));
+            if (expandable && expandedRows.contains(row.id())) {
+                for (Component groupedLine : row.groupedLines()) {
+                    out.add(new DisplayLine(i, groupedLine == null ? Component.empty() : groupedLine, false, true));
+                }
+            }
+        }
+        return out;
+    }
+
+    private int maxListScroll(List<DisplayLine> lines) {
+        return Math.max(0, (lines == null ? 0 : lines.size()) - rowsPerPage());
     }
 
     private int leftPanelW() {
@@ -674,6 +703,8 @@ public final class LogViewerScreen extends Screen {
         this.detailLines = List.of();
         this.rawLines = List.of();
         this.detailsScroll = 0;
+        this.expandedRows.clear();
+        this.listScroll = 0;
         this.lastJson = "";
         this.pendingCopyJson = false;
 
@@ -732,6 +763,8 @@ public final class LogViewerScreen extends Screen {
         this.detailLines = List.of();
         this.rawLines = List.of();
         this.detailsScroll = 0;
+        this.expandedRows.clear();
+        this.listScroll = 0;
         this.lastJson = "";
         this.pendingCopyJson = false;
         updateButtons();
@@ -761,13 +794,27 @@ public final class LogViewerScreen extends Screen {
         int rpp = rowsPerPage();
 
         if (mouseX >= listLeft && mouseX <= listLeft + listWidth && mouseY >= listTop && mouseY <= listTop + rpp * rowH) {
-            int idx = (int) ((mouseY - listTop) / rowH);
-            if (idx >= 0 && idx < rows.size()) {
+            List<DisplayLine> visibleLines = displayLines();
+            this.listScroll = clampInt(this.listScroll, 0, maxListScroll(visibleLines));
+            int displayIndex = this.listScroll + (int) ((mouseY - listTop) / rowH);
+            if (displayIndex >= 0 && displayIndex < visibleLines.size()) {
+                DisplayLine clicked = visibleLines.get(displayIndex);
+                int idx = clicked.rowIndex();
+                LogRow clickedRow = rows.get(idx);
+
+                // The chevron is a real disclosure control: clicking it expands/collapses all
+                // underlying rows locally without issuing another database query.
+                if (button == 0 && clicked.groupHeader() && mouseX <= listLeft + 13) {
+                    if (!expandedRows.add(clickedRow.id())) expandedRows.remove(clickedRow.id());
+                    List<DisplayLine> afterToggle = displayLines();
+                    this.listScroll = clampInt(this.listScroll, 0, maxListScroll(afterToggle));
+                    return true;
+                }
+
                 // Quick owner fill: when viewing Plane logs, clicking the actor name auto-fills the Owner filter.
                 if (button == 0 && this.typePresetIdx == 8) {
-                    LogRow rr = rows.get(idx);
-                    Component line = rr.line();
-                    int relX = (int) (mouseX - listLeft);
+                    Component line = clicked.text();
+                    int relX = (int) (mouseX - listLeft - (clicked.child() ? 14 : (clicked.groupHeader() ? 13 : 0)));
                     try {
                         Style st = this.font.getSplitter().componentStyleAtWidth(line, relX);
                         if (st != null && st.getClickEvent() != null) {
@@ -785,12 +832,12 @@ public final class LogViewerScreen extends Screen {
                 }
 
                 this.selected = idx;
-                LogRow r = rows.get(idx);
-                this.selectedEntryId = r.id();
+                this.selectedEntryId = clickedRow.id();
                 this.detailLines = List.of(Component.literal("Loading…").withStyle(ChatFormatting.DARK_GRAY));
                 this.rawLines = List.of();
                 this.detailsScroll = 0;
-                PacketDistributor.sendToServer(new C2SRequestDetailsPayload(r.id(), C2SRequestDetailsPayload.Mode.DETAILS, r.rawIds(), r.dim()));
+                PacketDistributor.sendToServer(new C2SRequestDetailsPayload(
+                        clickedRow.id(), C2SRequestDetailsPayload.Mode.DETAILS, clickedRow.rawIds(), clickedRow.dim()));
                 updateButtons();
                 return true;
             }
@@ -800,7 +847,27 @@ public final class LogViewerScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double deltaX, double deltaY) {
-        if (typeDropdownOpen) return true; // modal
+        if (typeDropdownOpen) {
+            DropdownLayout layout = typeDropdownLayout();
+            if (layout != null) {
+                int maxScroll = Math.max(0, TYPE_COUNT - layout.visibleCount());
+                int step = (int) Math.signum(deltaY);
+                this.typeDropdownScroll = clampInt(this.typeDropdownScroll - step, 0, maxScroll);
+            }
+            return true; // modal
+        }
+
+        int listLeft = listLeftX();
+        int listRight = rightPanelX() - 10;
+        int listTop = listTop();
+        int listBottom = listTop + rowsPerPage() * listRowH();
+        if (mouseX >= listLeft && mouseX <= listRight && mouseY >= listTop && mouseY <= listBottom) {
+            List<DisplayLine> visibleLines = displayLines();
+            int step = (int) Math.signum(deltaY);
+            this.listScroll = clampInt(this.listScroll - step, 0, maxListScroll(visibleLines));
+            return true;
+        }
+
         int rightX = rightPanelX();
         int detailsTop = listTop() + 8;
         int detailsBottom = this.height - 36;
@@ -843,25 +910,47 @@ public final class LogViewerScreen extends Screen {
         g.drawString(this.font, Component.literal("page " + pageIndex).withStyle(ChatFormatting.DARK_GRAY),
                 this.width - 10 - 90, 6, 0xFFFFFF, false);
 
-        // Render rows
-        String filter = this.searchBox == null ? "" : this.searchBox.getValue().trim().toLowerCase();
-        int drawn = 0;
-        for (int i = 0; i < rows.size() && drawn < rpp; i++) {
-            LogRow r = rows.get(i);
-            Component line = r.line();
-            if (!filter.isEmpty()) {
-                String flat = line.getString().toLowerCase();
-                if (!flat.contains(filter)) continue;
-            }
+        // Render base rows plus locally expanded children. The list itself scrolls when disclosed
+        // rows no longer fit, so every hidden instance remains reachable on low resolutions.
+        List<DisplayLine> visibleLines = displayLines();
+        this.listScroll = clampInt(this.listScroll, 0, maxListScroll(visibleLines));
+        int end = Math.min(visibleLines.size(), this.listScroll + rpp);
+        for (int displayIndex = this.listScroll; displayIndex < end; displayIndex++) {
+            DisplayLine displayLine = visibleLines.get(displayIndex);
+            int drawn = displayIndex - this.listScroll;
             int y = listTop + drawn * rowH;
-            if (i == selected) {
+            if (displayLine.rowIndex() == selected) {
                 g.fill(listLeft - 2, y - 1, listLeft + listWidth + 2, y + rowH, 0x55222222);
             }
+
+            int textX = listLeft;
+            if (displayLine.groupHeader()) {
+                boolean expanded = expandedRows.contains(rows.get(displayLine.rowIndex()).id());
+                drawLogString(g, Component.literal(expanded ? "▼" : "▶").withStyle(ChatFormatting.GOLD),
+                        listLeft, y + Math.max(1, (rowH - this.font.lineHeight) / 2), 0xFFFFFF);
+                textX += 13;
+            } else if (displayLine.child()) {
+                drawLogString(g, Component.literal("•").withStyle(ChatFormatting.DARK_GRAY),
+                        listLeft + 4, y + Math.max(1, (rowH - this.font.lineHeight) / 2), 0xFFFFFF);
+                textX += 14;
+            }
             // Keep formatting/colors and native crisp Minecraft font; clip by width.
-            g.enableScissor(listLeft, y, listLeft + listWidth, y + rowH);
-            drawLogString(g, line, listLeft, y + Math.max(1, (rowH - this.font.lineHeight) / 2), 0xFFFFFF);
+            g.enableScissor(textX, y, listLeft + listWidth, y + rowH);
+            drawLogString(g, displayLine.text(), textX,
+                    y + Math.max(1, (rowH - this.font.lineHeight) / 2), 0xFFFFFF);
             g.disableScissor();
-            drawn++;
+        }
+
+        if (visibleLines.size() > rpp && rpp > 0) {
+            int barX = listLeft + listWidth - 2;
+            int barTop = listTop;
+            int barBottom = listTop + rpp * rowH;
+            g.fill(barX, barTop, barX + 2, barBottom, 0x55222222);
+            int maxScroll = maxListScroll(visibleLines);
+            int thumbH = Math.max(8, Math.round((barBottom - barTop) * (rpp / (float) visibleLines.size())));
+            int thumbY = barTop + Math.round((barBottom - barTop - thumbH)
+                    * (maxScroll == 0 ? 0.0f : this.listScroll / (float) maxScroll));
+            g.fill(barX, thumbY, barX + 2, thumbY + thumbH, 0x99AAAAAA);
         }
 
         // Selected row preview (full line) at bottom
@@ -899,7 +988,17 @@ public final class LogViewerScreen extends Screen {
         int percent = clampInt(savedBackgroundDimPercent, BACKGROUND_DIM_MIN, BACKGROUND_DIM_MAX);
         if (percent <= 0) return;
         int alpha = Math.round(255.0f * (percent / 100.0f));
-        g.fill(0, 0, this.width, this.height, alpha << 24);
+        // Dim only the journal/details viewport. Side filters, top controls and the surrounding
+        // world remain untouched. Scissor is kept in addition to exact fill bounds so future
+        // rendering changes cannot leak the overlay back onto the whole screen.
+        int left = clampInt(listLeftX() - 4, 0, this.width);
+        int top = clampInt(listTop() - 3, 0, this.height);
+        int right = clampInt(this.width - 8, left, this.width);
+        int bottom = clampInt(this.height - 10, top, this.height);
+        if (right <= left || bottom <= top) return;
+        g.enableScissor(left, top, right, bottom);
+        g.fill(left, top, right, bottom, alpha << 24);
+        g.disableScissor();
     }
 
 
@@ -1129,19 +1228,66 @@ public final class LogViewerScreen extends Screen {
 
     private void toggleTypeDropdown() {
         typeDropdownOpen = !typeDropdownOpen;
+        if (typeDropdownOpen) {
+            this.typeDropdownScroll = 0;
+            DropdownLayout layout = typeDropdownLayout();
+            if (layout != null) {
+                if (typePresetIdx >= layout.visibleCount()) {
+                    this.typeDropdownScroll = clampInt(
+                            typePresetIdx - layout.visibleCount() + 1,
+                            0,
+                            TYPE_COUNT - layout.visibleCount());
+                }
+            }
+        }
     }
 
     private static final int TYPE_COUNT = 9;
 
+    private record DropdownLayout(int x, int y, int width, int itemHeight, int firstIndex, int visibleCount) {}
+
+    private DropdownLayout typeDropdownLayout() {
+        if (btnType == null) return null;
+        final int margin = 4;
+        int itemH = Math.max(9, Math.round(18 * controlScale()));
+
+        float preferredTextScale = clampFloat(controlScale(), 0.45f, 1.0f);
+        int maxTextW = 1;
+        for (int i = 0; i < TYPE_COUNT; i++) {
+            maxTextW = Math.max(maxTextW,
+                    this.font.width(Component.translatable("gui.avilixlogger.type." + typeKey(i))));
+        }
+        int availableW = Math.max(20, this.width - margin * 2);
+        int desiredW = Math.max(btnType.getWidth(), Math.round(maxTextW * preferredTextScale) + 14);
+        int w = Math.min(availableW, desiredW);
+        int x = clampInt(btnType.getX(), margin, Math.max(margin, this.width - margin - w));
+
+        int belowY = btnType.getY() + btnType.getHeight();
+        int spaceBelow = Math.max(0, this.height - margin - belowY);
+        int spaceAbove = Math.max(0, btnType.getY() - margin);
+        int fullHeight = TYPE_COUNT * itemH;
+        boolean openDown = spaceBelow >= fullHeight || spaceBelow >= spaceAbove;
+        int availableH = openDown ? spaceBelow : spaceAbove;
+
+        // At extreme resolutions keep every pixel inside the screen and expose remaining options
+        // through wheel scrolling instead of letting the popup leave the viewport.
+        if (availableH < itemH) itemH = Math.max(1, availableH);
+        int visible = Math.max(1, Math.min(TYPE_COUNT, availableH / Math.max(1, itemH)));
+        int maxScroll = Math.max(0, TYPE_COUNT - visible);
+        this.typeDropdownScroll = clampInt(this.typeDropdownScroll, 0, maxScroll);
+        int popupH = visible * itemH;
+        int y = openDown ? belowY : btnType.getY() - popupH;
+        y = clampInt(y, margin, Math.max(margin, this.height - margin - popupH));
+        return new DropdownLayout(x, y, w, itemH, this.typeDropdownScroll, visible);
+    }
+
     private boolean handleTypeDropdownClick(double mouseX, double mouseY) {
-        if (btnType == null) return false;
-        int x = btnType.getX();
-        int y = btnType.getY() + btnType.getHeight();
-        int w = btnType.getWidth();
-        int itemH = Math.max(12, Math.round(18 * controlScale()));
-        int h = TYPE_COUNT * itemH;
-        if (mouseX < x || mouseX > x + w || mouseY < y || mouseY > y + h) return false;
-        int idx = (int) ((mouseY - y) / itemH);
+        DropdownLayout layout = typeDropdownLayout();
+        if (layout == null) return false;
+        int h = layout.visibleCount() * layout.itemHeight();
+        if (mouseX < layout.x() || mouseX > layout.x() + layout.width()
+                || mouseY < layout.y() || mouseY > layout.y() + h) return false;
+        int idx = layout.firstIndex() + (int) ((mouseY - layout.y()) / layout.itemHeight());
         if (idx < 0 || idx >= TYPE_COUNT) return false;
         this.typePresetIdx = idx;
         this.typeDropdownOpen = false;
@@ -1151,23 +1297,43 @@ public final class LogViewerScreen extends Screen {
     }
 
     private void renderTypeDropdown(GuiGraphics g, int mouseX, int mouseY) {
-        if (!typeDropdownOpen || btnType == null) return;
-        int x = btnType.getX();
-        int y = btnType.getY() + btnType.getHeight();
-        int w = btnType.getWidth();
-        int itemH = Math.max(12, Math.round(18 * controlScale()));
-        int h = TYPE_COUNT * itemH;
-        g.fill(x, y, x + w, y + h, 0xFF0A0A0A);
-        for (int i = 0; i < TYPE_COUNT; i++) {
-            int yy = y + i * itemH;
-            boolean hover = mouseX >= x && mouseX <= x + w && mouseY >= yy && mouseY <= yy + itemH;
-            if (i == typePresetIdx) g.fill(x, yy, x + w, yy + itemH, 0x55333333);
-            if (hover) g.fill(x, yy, x + w, yy + itemH, 0x55222222);
+        if (!typeDropdownOpen) return;
+        DropdownLayout layout = typeDropdownLayout();
+        if (layout == null) return;
+        int h = layout.visibleCount() * layout.itemHeight();
+        g.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + h, 0xFF0A0A0A);
+        for (int slot = 0; slot < layout.visibleCount(); slot++) {
+            int i = layout.firstIndex() + slot;
+            int yy = layout.y() + slot * layout.itemHeight();
+            boolean hover = mouseX >= layout.x() && mouseX <= layout.x() + layout.width()
+                    && mouseY >= yy && mouseY <= yy + layout.itemHeight();
+            if (i == typePresetIdx) g.fill(layout.x(), yy, layout.x() + layout.width(), yy + layout.itemHeight(), 0x55333333);
+            if (hover) g.fill(layout.x(), yy, layout.x() + layout.width(), yy + layout.itemHeight(), 0x55222222);
             Component label = Component.translatable("gui.avilixlogger.type." + typeKey(i));
-            g.enableScissor(x + 2, yy + 2, x + w - 2, yy + itemH - 2);
-            g.drawString(this.font, label, x + 4, yy + 5, 0xFFFFFF, false);
+            g.enableScissor(layout.x() + 2, yy + 1,
+                    layout.x() + layout.width() - 2, yy + layout.itemHeight() - 1);
+            drawDropdownLabel(g, label, layout.x() + 5, yy, layout.width() - 10, layout.itemHeight());
             g.disableScissor();
         }
+
+        // Thin edge markers indicate that more choices are available with the mouse wheel.
+        if (layout.firstIndex() > 0) g.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + 1, 0xFFFFAA00);
+        if (layout.firstIndex() + layout.visibleCount() < TYPE_COUNT) {
+            g.fill(layout.x(), layout.y() + h - 1, layout.x() + layout.width(), layout.y() + h, 0xFFFFAA00);
+        }
+    }
+
+    private void drawDropdownLabel(GuiGraphics g, Component label, int x, int y, int availableWidth, int itemHeight) {
+        int textW = Math.max(1, this.font.width(label));
+        float scale = Math.min(controlScale(), Math.max(0.20f, (itemHeight - 2) / (float) this.font.lineHeight));
+        scale = Math.min(scale, Math.max(0.20f, availableWidth / (float) textW));
+        scale = clampFloat(scale, 0.20f, 1.10f);
+        g.pose().pushPose();
+        float drawY = y + (itemHeight - this.font.lineHeight * scale) / 2.0f;
+        g.pose().translate(x, drawY, 0);
+        g.pose().scale(scale, scale, 1.0f);
+        g.drawString(this.font, label, 0, 0, 0xFFFFFF, false);
+        g.pose().popPose();
     }
 
     private static String typeKey(int idx) {

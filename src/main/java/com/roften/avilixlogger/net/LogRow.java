@@ -2,6 +2,8 @@ package com.roften.avilixlogger.net;
 
 import net.minecraft.network.chat.Component;
 
+import java.util.List;
+
 /**
  * One row shown in the optional client GUI.
  *
@@ -15,9 +17,21 @@ public record LogRow(long id,
                      int z,
                      Component line,
                      boolean aggregated,
-                     long[] rawIds) {
+                     long[] rawIds,
+                     List<Component> groupedLines) {
+
+    public LogRow {
+        line = line == null ? Component.empty() : line;
+        rawIds = rawIds == null ? new long[0] : rawIds;
+        groupedLines = groupedLines == null ? List.of() : List.copyOf(groupedLines);
+    }
+
+    /** Compatibility constructor for ordinary rows and existing call sites. */
+    public LogRow(long id, String dim, int x, int y, int z, Component line, boolean aggregated, long[] rawIds) {
+        this(id, dim, x, y, z, line, aggregated, rawIds, List.of());
+    }
 
     public static LogRow single(long id, String dim, int x, int y, int z, Component line) {
-        return new LogRow(id, dim, x, y, z, line, false, new long[]{id});
+        return new LogRow(id, dim, x, y, z, line, false, new long[]{id}, List.of());
     }
 }

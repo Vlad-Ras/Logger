@@ -47,6 +47,19 @@ public final class LogText {
         MutableComponent c = Component.empty();
         c.append(Component.literal("[" + ts + "] ").withStyle(ChatFormatting.DARK_GRAY));
 
+        // New player-death rows persist the exact vanilla/modded death text produced by the combat
+        // tracker. Render that text directly instead of rebuilding it from killer/victim fields.
+        if (e.type == ActionType.PLAYER_DEATH && e.extra != null && e.extra.startsWith("death_message:")) {
+            String deathMessage = e.extra.substring("death_message:".length()).trim();
+            if (!deathMessage.isBlank()) {
+                c.append(Component.literal(deathMessage).withStyle(ChatFormatting.DARK_RED));
+                c.append(Component.literal(" (").withStyle(ChatFormatting.DARK_GRAY));
+                c.append(coordComponent(e));
+                c.append(Component.literal(")").withStyle(ChatFormatting.DARK_GRAY));
+                return c;
+            }
+        }
+
         // Actor attribution is not always possible for server-side actions (worldgen, automation, async spawns).
         // In such cases, show a neutral "server" actor instead of "?" to reduce noise without blaming players.
         boolean hasActor = e.actorName != null && !e.actorName.isBlank();
