@@ -10,6 +10,7 @@ import com.roften.avilixlogger.api.LogAdapterRegistry;
  * Lazy-initialized runtime context.
  */
 public final class LoggerRuntime {
+    private static final NoopLogStorage UNAUTHORIZED = new NoopLogStorage();
     private static final PendingLogStorage PENDING = new PendingLogStorage();
     private static final DeduplicatingLogStorage FRONT = new DeduplicatingLogStorage(PENDING);
 
@@ -21,15 +22,18 @@ public final class LoggerRuntime {
     private LoggerRuntime() {}
 
     public static LogStorage storage(Level level) {
+        if (!LoggerConfig.isEnabled()) return UNAUTHORIZED;
         if (STORAGE == null) startAsyncInit();
         return FRONT;
     }
 
     public static void warmupAsync() {
+        if (!LoggerConfig.isEnabled()) return;
         startAsyncInit();
     }
 
     private static void startAsyncInit() {
+        if (!LoggerConfig.isEnabled()) return;
         if (INIT_STARTED) return;
         synchronized (LoggerRuntime.class) {
             if (INIT_STARTED) return;
@@ -40,7 +44,7 @@ public final class LoggerRuntime {
                 int attempt = 0;
                 try {
                     LogAdapterRegistry.discover();
-                    while (INIT_STARTED && INIT_GENERATION == generation) {
+                    while (INIT_STARTED && INIT_GENERATION == generation && LoggerConfig.isEnabled()) {
                         attempt++;
                         LogStorage real;
                         try {
@@ -64,7 +68,7 @@ public final class LoggerRuntime {
                             continue;
                         }
 
-                        if (!INIT_STARTED || INIT_GENERATION != generation) {
+                        if (!INIT_STARTED || INIT_GENERATION != generation || !LoggerConfig.isEnabled()) {
                             real.shutdown();
                             return;
                         }
@@ -81,6 +85,9 @@ public final class LoggerRuntime {
                 } catch (Throwable fatal) {
                     AvilixLoggerMod.LOGGER.error("[AvilixLogger] Storage initializer stopped unexpectedly.", fatal);
                 } finally {
+                    if (INIT_GENERATION == generation && STORAGE == null && !LoggerConfig.isEnabled()) {
+                        INIT_STARTED = false;
+                    }
                     if (INIT_THREAD == Thread.currentThread()) INIT_THREAD = null;
                 }
             }, "avilixlogger-storage-init");
@@ -117,7 +124,7 @@ public final class LoggerRuntime {
     }
 
     public static boolean isInitializing() {
-        return INIT_STARTED && STORAGE == null;
+        return LoggerConfig.isEnabled() && INIT_STARTED && STORAGE == null;
     }
 
     private static LogStorage createConfiguredStorage() {

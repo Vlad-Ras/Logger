@@ -45,6 +45,7 @@ public final class ChatAuditLogger {
      * written twice.
      */
     public static void packetMessage(ServerPlayer player, String raw) {
+        if (!LoggerConfig.isEnabled()) return;
         String message = raw == null ? "" : raw.trim();
         if (player == null || message.isBlank()) return;
         runOnServer(player, () -> {
@@ -60,6 +61,7 @@ public final class ChatAuditLogger {
     }
 
     public static void publicMessage(ServerPlayer player, String raw) {
+        if (!LoggerConfig.isEnabled()) return;
         String message = raw == null ? "" : raw.trim();
         if (player == null || message.isBlank()) return;
         PENDING_PUBLIC.remove(new PendingKey(player.getUUID(), message));
@@ -67,6 +69,7 @@ public final class ChatAuditLogger {
     }
 
     public static void command(ServerPlayer player, String rawCommand) {
+        if (!LoggerConfig.isEnabled()) return;
         String command = trimSlash(rawCommand);
         if (command.isBlank()) return;
 
@@ -100,7 +103,7 @@ public final class ChatAuditLogger {
 
     private static void appendOnServer(ServerPlayer player, String text) {
         try {
-            if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logChat.get()) return;
+            if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logChat.get()) return;
             if (!(player.level() instanceof ServerLevel level)) return;
 
             LogEntry entry = new LogEntry();

@@ -1,3 +1,12 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.guardsquare:proguard-gradle:7.4.0'
+    }
+}
+
 plugins {
     id 'java-library'
     id 'maven-publish'
@@ -193,4 +202,41 @@ idea {
         downloadSources = true
         downloadJavadoc = true
     }
+}
+
+tasks.named('jar', Jar).configure {
+    destinationDirectory = layout.buildDirectory.dir('tmp/unobfuscatedJar')
+}
+
+def releaseJar = layout.buildDirectory.file("libs/${base.archivesName.get()}-${project.version}.jar")
+def proguardMapping = layout.buildDirectory.file('obfuscation/mapping.txt')
+def proguardSeeds = layout.buildDirectory.file('obfuscation/seeds.txt')
+
+tasks.register('obfuscateJar', proguard.gradle.ProGuardTask) {
+    group = 'build'
+    description = 'Obfuscates the production mod JAR after compilation.'
+    notCompatibleWithConfigurationCache('ProGuard 7.4 uses Gradle project state during task execution.')
+    dependsOn tasks.named('jar', Jar)
+
+    doFirst {
+        releaseJar.get().asFile.parentFile.mkdirs()
+        proguardMapping.get().asFile.parentFile.mkdirs()
+        proguardSeeds.get().asFile.parentFile.mkdirs()
+        delete releaseJar.get().asFile
+    }
+
+    // Minecraft/NeoForge and every compile dependency are libraries: their public symbols must
+    // remain untouched while references from this mod are rewritten.
+    configuration file('proguard-rules.pro')
+    injars(tasks.named('jar', Jar).flatMap { it.archiveFile })
+    libraryjars sourceSets.main.compileClasspath
+    libraryjars "${System.getProperty('java.home')}/jmods/java.base.jmod",
+            jarfilter: '!**.jar', filter: '!module-info.class'
+    outjars releaseJar
+    printmapping proguardMapping
+    printseeds proguardSeeds
+}
+
+tasks.named('assemble').configure {
+    dependsOn tasks.named('obfuscateJar')
 }

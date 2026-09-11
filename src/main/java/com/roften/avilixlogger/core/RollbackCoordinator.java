@@ -56,6 +56,10 @@ public final class RollbackCoordinator {
     private static void submitPreparation(MinecraftServer server, UUID playerId, RollbackPlanManager.Plan plan,
                                           boolean apply, Consumer<RollbackReport> onComplete,
                                           Runnable onStarted, Consumer<String> onError) {
+        if (!LoggerConfig.isEnabled()) {
+            onError.accept("AvilixAuthCore не разрешил запуск Logger. Откат отключён.");
+            return;
+        }
         if (server == null || playerId == null || plan == null) {
             onError.accept("Не удалось подготовить откат: сервер или план недоступен.");
             return;
@@ -140,6 +144,10 @@ public final class RollbackCoordinator {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
+        if (!LoggerConfig.isEnabled()) {
+            if (active != null || !PREPARATIONS.isEmpty()) shutdown();
+            return;
+        }
         ActiveJob job = active;
         if (job == null) return;
         // NeoForge's own tick budget is the first guard: under load the rollback simply waits.

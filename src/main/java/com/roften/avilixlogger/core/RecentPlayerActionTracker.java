@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.core;
 
+import com.roften.avilixlogger.LoggerConfig;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -57,6 +59,10 @@ public final class RecentPlayerActionTracker {
     }
 
     public static void note(ServerLevel level, ServerPlayer player, BlockPos pos, ActionKind kind, ItemStack used) {
+        if (!LoggerConfig.isEnabled()) {
+            RECENT.clear();
+            return;
+        }
         if (level == null || player == null || pos == null) return;
         String dim = level.dimension().location().toString();
         String itemKey = null;
@@ -80,6 +86,10 @@ public final class RecentPlayerActionTracker {
     }
 
     public static ActionRef resolveBest(ServerLevel level, BlockPos target, int searchRadiusBlocks, long ttlMs, String expectedItemKey) {
+        if (!LoggerConfig.isEnabled()) {
+            RECENT.clear();
+            return null;
+        }
         if (level == null || target == null) return null;
         long now = System.currentTimeMillis();
         String dim = level.dimension().location().toString();

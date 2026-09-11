@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.core;
 
+import com.roften.avilixlogger.LoggerConfig;
+
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -20,6 +22,10 @@ public final class ActorTracker {
      * Remember the actor for an entity for a short time window.
      */
     public static void note(UUID entityUuid, UUID actorUuid, String actorName) {
+        if (!LoggerConfig.isEnabled()) {
+            ENTITY_ACTOR.clear();
+            return;
+        }
         if (entityUuid == null || actorUuid == null) return;
         ENTITY_ACTOR.put(entityUuid, new ActorRef(System.currentTimeMillis(), actorUuid, actorName));
 
@@ -33,6 +39,10 @@ public final class ActorTracker {
      * Returns a recent actor reference if it is not older than maxAgeMs.
      */
     public static ActorRef getRecent(UUID entityUuid, long maxAgeMs) {
+        if (!LoggerConfig.isEnabled()) {
+            ENTITY_ACTOR.clear();
+            return null;
+        }
         if (entityUuid == null) return null;
         ActorRef r = ENTITY_ACTOR.get(entityUuid);
         if (r == null) return null;

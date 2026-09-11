@@ -46,6 +46,8 @@ public final class LogViewerScreen extends Screen {
     private static final int LOG_TEXT_SCALE_MAX = 140;
     private static final int BACKGROUND_DIM_MIN = 0;
     private static final int BACKGROUND_DIM_MAX = 100;
+    private static final int PAGE_SIZE_MIN = C2SRequestPagePayload.MIN_PAGE_SIZE;
+    private static final int PAGE_SIZE_MAX = C2SRequestPagePayload.MAX_PAGE_SIZE;
 
     private static boolean guiStateLoaded = false;
     private static int savedTimePresetIdx = GuiFilters.DEFAULT.timePresetIdx();
@@ -66,6 +68,7 @@ public final class LogViewerScreen extends Screen {
     private static int savedButtonScalePercent = 100;
     private static int savedLogTextScalePercent = 100;
     private static int savedBackgroundDimPercent = 0;
+    private static int savedPageSize = C2SRequestPagePayload.DEFAULT_PAGE_SIZE;
 
     private final List<LogRow> rows = new ArrayList<>();
     private int pageIndex = 1;
@@ -76,6 +79,13 @@ public final class LogViewerScreen extends Screen {
     private int selected = -1;
     private final Set<Long> expandedRows = new HashSet<>();
     private int listScroll = 0;
+    private int rowsVersion = 0;
+    private int cachedRowsVersion = -1;
+    private int cachedListWidth = -1;
+    private int cachedTextScalePercent = -1;
+    private String cachedDisplayFilter = null;
+    private Set<Long> cachedExpandedRows = Set.of();
+    private List<DisplayLine> cachedDisplayLines = List.of();
 
     private boolean aggregatedMode = true;
     // Button-driven filters (GUI-only; /log remains raw and unchanged)
@@ -119,11 +129,7 @@ public final class LogViewerScreen extends Screen {
     private Button btnTabDetails;
     private Button btnTabRaw;
     private Button btnShowRaw;
-    private Button btnButtonsMinus;
-    private Button btnButtonsPlus;
-    private Button btnTextMinus;
-    private Button btnTextPlus;
-    private BackgroundDimSlider backgroundDimSlider;
+    private Button btnSettings;
 
     private EditBox searchBox;
     private EditBox timeBox;
@@ -132,18 +138,13 @@ public final class LogViewerScreen extends Screen {
     private EditBox trainBox;
     private EditBox planeNameBox;
     private EditBox blockIdBox;
-    private EditBox inspectToolBox;
     private Button btnApply;
     private Button btnBlockId;
-    private Button btnInspectToolLabel;
-    private Button btnInspectToolApply;
-    private Button btnInspectToolReset;
 
     private boolean inspectToolSettingsLoaded = false;
     private boolean canEditInspectTool = false;
     private String inspectToolItemId = "";
     private Component inspectToolStatus = Component.empty();
-    private int inspectToolStatusY = 0;
 
     private boolean typeDropdownOpen = false;
     private int typeDropdownScroll = 0;
@@ -152,7 +153,7 @@ public final class LogViewerScreen extends Screen {
     private int detailsPanelTop = 0;
 
     private int rightPanelW() {
-        // B-/B+ controls both button height and side-panel/input width.
+        // The visual-settings button scale controls both button height and side-panel/input width.
         float wScale = wideControlScale();
         int base = Math.round(190 * wScale);
         int min = Math.max(72, Math.round(105 * wScale));
@@ -171,24 +172,62 @@ public final class LogViewerScreen extends Screen {
         return Math.max(8, Math.min(140, available / listRowH()));
     }
 
-    private record DisplayLine(int rowIndex, Component text, boolean groupHeader, boolean child) {}
+    private record DisplayLine(
+            int rowIndex,
+            net.minecraft.util.FormattedCharSequence text,
+            Component clickSource,
+            boolean groupHeader,
+            boolean child,
+            int indentPixels
+    ) {}
 
     private List<DisplayLine> displayLines() {
         String filter = this.searchBox == null ? "" : this.searchBox.getValue().trim().toLowerCase(java.util.Locale.ROOT);
+        int width = listWidth();
+        if (cachedRowsVersion == rowsVersion
+                && cachedListWidth == width
+                && cachedTextScalePercent == savedLogTextScalePercent
+                && java.util.Objects.equals(cachedDisplayFilter, filter)
+                && cachedExpandedRows.equals(expandedRows)) {
+            return cachedDisplayLines;
+        }
+
         List<DisplayLine> out = new ArrayList<>();
         for (int i = 0; i < rows.size(); i++) {
             LogRow row = rows.get(i);
             Component line = row.line() == null ? Component.empty() : row.line();
             if (!filter.isEmpty() && !line.getString().toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
             boolean expandable = row.aggregated() && row.groupedLines() != null && !row.groupedLines().isEmpty();
-            out.add(new DisplayLine(i, line, expandable, false));
+            appendWrappedDisplayLines(out, i, line, expandable, false);
             if (expandable && expandedRows.contains(row.id())) {
                 for (Component groupedLine : row.groupedLines()) {
-                    out.add(new DisplayLine(i, groupedLine == null ? Component.empty() : groupedLine, false, true));
+                    appendWrappedDisplayLines(out, i,
+                            groupedLine == null ? Component.empty() : groupedLine, false, true);
                 }
             }
         }
-        return out;
+        cachedRowsVersion = rowsVersion;
+        cachedListWidth = width;
+        cachedTextScalePercent = savedLogTextScalePercent;
+        cachedDisplayFilter = filter;
+        cachedExpandedRows = Set.copyOf(expandedRows);
+        cachedDisplayLines = List.copyOf(out);
+        return cachedDisplayLines;
+    }
+
+    private void appendWrappedDisplayLines(List<DisplayLine> out, int rowIndex, Component line,
+                                           boolean groupHeader, boolean child) {
+        int indent = groupHeader ? 13 : (child ? 14 : 0);
+        int pixelWidth = Math.max(20, listWidth() - indent - 6);
+        int splitWidth = Math.max(10, Math.round(pixelWidth / Math.max(0.25f, logTextScale())));
+        List<net.minecraft.util.FormattedCharSequence> wrapped = this.font.split(line, splitWidth);
+        if (wrapped == null || wrapped.isEmpty()) {
+            wrapped = List.of(net.minecraft.util.FormattedCharSequence.EMPTY);
+        }
+        for (int i = 0; i < wrapped.size(); i++) {
+            out.add(new DisplayLine(rowIndex, wrapped.get(i), i == 0 ? line : null,
+                    groupHeader && i == 0, child && i == 0, indent));
+        }
     }
 
     private int maxListScroll(List<DisplayLine> lines) {
@@ -196,7 +235,7 @@ public final class LogViewerScreen extends Screen {
     }
 
     private int leftPanelW() {
-        // B-/B+ controls both button height and side-panel/input width.
+        // The visual-settings button scale controls both button height and side-panel/input width.
         float wScale = wideControlScale();
         int base = Math.min(260, Math.max(150, this.width / 4));
         int scaled = Math.round(base * wScale);
@@ -207,6 +246,10 @@ public final class LogViewerScreen extends Screen {
 
     private int listLeftX() {
         return 10 + leftPanelW() + 10;
+    }
+
+    private int listWidth() {
+        return Math.max(60, (rightPanelX() - 10) - listLeftX());
     }
 
     private int sideInputGap() {
@@ -250,7 +293,7 @@ public final class LogViewerScreen extends Screen {
     }
 
     private float wideControlScale() {
-        // Width is no longer controlled by a separate W-/W+ pair: B-/B+ changes both height and width.
+        // One setting changes both control height and width.
         return controlScale();
     }
 
@@ -276,7 +319,7 @@ public final class LogViewerScreen extends Screen {
     }
 
     private int listRowH() {
-        // T-/T+ controls the real visual size of log rows.
+        // The text-size setting controls the real visual size of log rows.
         // Blur is disabled separately by bypassing Screen#render/renderBackground; do not remove this scaling again.
         int scaledFontH = Math.max(1, Math.round(this.font.lineHeight * logTextScale()));
         return Math.max(5, scaledFontH + Math.max(1, Math.round(3 * logTextScale())));
@@ -415,26 +458,6 @@ public final class LogViewerScreen extends Screen {
                 leftX, y, leftPanelW, leftRowH);
         y += leftRowH + leftGap;
 
-        // Server-side inspect-tool setting. The server decides whether this player may edit it.
-        this.btnInspectToolLabel = addButton(Component.translatable("gui.avilixlogger.inspect_tool"), b -> {},
-                leftX, y, btnW, leftRowH);
-        this.btnInspectToolLabel.active = false;
-        this.inspectToolBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH,
-                Component.translatable("gui.avilixlogger.inspect_tool"));
-        this.inspectToolBox.setHint(Component.translatable("gui.avilixlogger.inspect_tool.hint"));
-        this.inspectToolBox.setMaxLength(256);
-        this.inspectToolBox.setValue(this.inspectToolItemId);
-        this.inspectToolBox.active = false;
-        this.addRenderableWidget(this.inspectToolBox);
-        y += leftRowH + leftGap;
-
-        int toolHalf = (leftPanelW - leftGap) / 2;
-        this.btnInspectToolApply = addButton(Component.translatable("gui.avilixlogger.inspect_tool.save"), b -> setInspectTool(),
-                leftX, y, toolHalf, leftRowH);
-        this.btnInspectToolReset = addButton(Component.translatable("gui.avilixlogger.inspect_tool.reset"), b -> resetInspectTool(),
-                leftX + toolHalf + leftGap, y, leftPanelW - toolHalf - leftGap, leftRowH);
-        this.inspectToolStatusY = y + leftRowH + leftGap;
-
         // Row action buttons (operate on selected row) - right sidebar.
         // On large Minecraft GUI scale these are compact two-column rows, so the details panel keeps room.
         int rightX = rightPanelX();
@@ -449,24 +472,8 @@ public final class LogViewerScreen extends Screen {
                 rightX + half + gap, actionTop, rightW - half - gap, btnH);
 
         int y2 = actionTop + btnH + gap;
-        int scaleButtonCount = 4;
-        int tiny = Math.max(12, (rightW - gap * (scaleButtonCount - 1)) / scaleButtonCount);
-        int sx = rightX;
-        this.btnButtonsMinus = addButton(Component.literal("B-"), b -> adjustButtonScale(-5),
-                sx, y2, tiny, btnH);
-        sx += tiny + gap;
-        this.btnButtonsPlus = addButton(Component.literal("B+"), b -> adjustButtonScale(5),
-                sx, y2, tiny, btnH);
-        sx += tiny + gap;
-        this.btnTextMinus = addButton(Component.literal("T-"), b -> adjustLogTextScale(-5),
-                sx, y2, tiny, btnH);
-        sx += tiny + gap;
-        this.btnTextPlus = addButton(Component.literal("T+"), b -> adjustLogTextScale(5),
-                sx, y2, rightX + rightW - sx, btnH);
-
-        y2 += btnH + gap;
-        this.backgroundDimSlider = this.addRenderableWidget(new BackgroundDimSlider(
-                rightX, y2, rightW, btnH, savedBackgroundDimPercent));
+        this.btnSettings = addButton(Component.translatable("gui.avilixlogger.settings"), b -> openSettings(),
+                rightX, y2, rightW, btnH);
 
         y2 += btnH + gap;
         this.btnCopy = addButton(sideLabel("gui.avilixlogger.copy_xyz", "XYZ"), b -> copySelectedXYZ(),
@@ -546,7 +553,7 @@ public final class LogViewerScreen extends Screen {
     }
 
     /**
-     * EditBox also does not follow our custom B-/B+ scale. We keep its normal input behavior,
+     * EditBox also does not follow our custom button scale. We keep its normal input behavior,
      * but draw the visible text ourselves so long values are clipped and small controls stay readable.
      */
     private final class ScaledEditBox extends EditBox {
@@ -655,7 +662,8 @@ public final class LogViewerScreen extends Screen {
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
         saveGuiStateFromInstance();
-        PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, currentFilters()));
+        PacketDistributor.sendToServer(new C2SRequestPagePayload(
+                nav, aggregatedMode, currentFilters(), savedPageSize));
     }
 
     /** Called once after Minecraft has initialized all widgets for this screen. */
@@ -669,20 +677,17 @@ public final class LogViewerScreen extends Screen {
         this.inspectToolSettingsLoaded = true;
         this.canEditInspectTool = payload.canEdit();
         this.inspectToolItemId = payload.itemId() == null ? "" : payload.itemId();
-        if (this.inspectToolBox != null) {
-            // Preserve an invalid value so the admin can correct it after a rejected SET.
-            if (payload.success() || this.inspectToolBox.getValue().isBlank()) {
-                this.inspectToolBox.setValue(this.inspectToolItemId);
-            }
-            this.inspectToolBox.active = this.canEditInspectTool;
-        }
         this.inspectToolStatus = payload.message() == null ? Component.empty() : payload.message();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null && mc.screen instanceof GuiSettingsScreen settings) {
+            settings.applyInspectToolState(payload.success());
+        }
         updateButtons();
     }
 
-    private void setInspectTool() {
-        if (!inspectToolSettingsLoaded || !canEditInspectTool || inspectToolBox == null) return;
-        String itemId = inspectToolBox.getValue() == null ? "" : inspectToolBox.getValue().trim();
+    private void setInspectTool(String value) {
+        if (!inspectToolSettingsLoaded || !canEditInspectTool) return;
+        String itemId = value == null ? "" : value.trim();
         PacketDistributor.sendToServer(new C2SInspectToolPayload(C2SInspectToolPayload.Action.SET, itemId));
     }
 
@@ -698,6 +703,7 @@ public final class LogViewerScreen extends Screen {
         this.hasNext = payload.hasNext();
         this.rows.clear();
         if (payload.rows() != null) this.rows.addAll(payload.rows());
+        this.rowsVersion++;
         this.selected = -1;
         this.selectedEntryId = -1L;
         this.detailLines = List.of();
@@ -750,9 +756,6 @@ public final class LogViewerScreen extends Screen {
             boolean can = selected >= 0 && selected < rows.size() && rows.get(selected).rawIds() != null && rows.get(selected).rawIds().length > 0;
             btnShowRaw.active = can;
         }
-        if (inspectToolBox != null) inspectToolBox.active = inspectToolSettingsLoaded && canEditInspectTool;
-        if (btnInspectToolApply != null) btnInspectToolApply.active = inspectToolSettingsLoaded && canEditInspectTool;
-        if (btnInspectToolReset != null) btnInspectToolReset.active = inspectToolSettingsLoaded && canEditInspectTool;
     }
 
     private void setAggregatedMode(boolean aggregated) {
@@ -790,7 +793,7 @@ public final class LogViewerScreen extends Screen {
         int listLeft = listLeftX();
         int listTop = listTop();
         int rowH = listRowH();
-        int listWidth = Math.max(60, (rightPanelX() - 10) - listLeft); // leave room for right panel
+        int listWidth = listWidth(); // leave room for right panel
         int rpp = rowsPerPage();
 
         if (mouseX >= listLeft && mouseX <= listLeft + listWidth && mouseY >= listTop && mouseY <= listTop + rpp * rowH) {
@@ -812,9 +815,10 @@ public final class LogViewerScreen extends Screen {
                 }
 
                 // Quick owner fill: when viewing Plane logs, clicking the actor name auto-fills the Owner filter.
-                if (button == 0 && this.typePresetIdx == 8) {
-                    Component line = clicked.text();
-                    int relX = (int) (mouseX - listLeft - (clicked.child() ? 14 : (clicked.groupHeader() ? 13 : 0)));
+                if (button == 0 && this.typePresetIdx == 8 && clicked.clickSource() != null) {
+                    Component line = clicked.clickSource();
+                    int relX = Math.round((float) (mouseX - listLeft - clicked.indentPixels())
+                            / Math.max(0.25f, logTextScale()));
                     try {
                         Style st = this.font.getSplitter().componentStyleAtWidth(line, relX);
                         if (st != null && st.getClickEvent() != null) {
@@ -904,7 +908,7 @@ public final class LogViewerScreen extends Screen {
         int listTop = listTop();
         int rowH = listRowH();
         int rpp = rowsPerPage();
-        int listWidth = Math.max(60, (rightPanelX() - 10) - listLeft);
+        int listWidth = listWidth();
 
         // Small page indicator
         g.drawString(this.font, Component.literal("page " + pageIndex).withStyle(ChatFormatting.DARK_GRAY),
@@ -923,16 +927,14 @@ public final class LogViewerScreen extends Screen {
                 g.fill(listLeft - 2, y - 1, listLeft + listWidth + 2, y + rowH, 0x55222222);
             }
 
-            int textX = listLeft;
+            int textX = listLeft + displayLine.indentPixels();
             if (displayLine.groupHeader()) {
                 boolean expanded = expandedRows.contains(rows.get(displayLine.rowIndex()).id());
                 drawLogString(g, Component.literal(expanded ? "▼" : "▶").withStyle(ChatFormatting.GOLD),
                         listLeft, y + Math.max(1, (rowH - this.font.lineHeight) / 2), 0xFFFFFF);
-                textX += 13;
             } else if (displayLine.child()) {
                 drawLogString(g, Component.literal("•").withStyle(ChatFormatting.DARK_GRAY),
                         listLeft + 4, y + Math.max(1, (rowH - this.font.lineHeight) / 2), 0xFFFFFF);
-                textX += 14;
             }
             // Keep formatting/colors and native crisp Minecraft font; clip by width.
             g.enableScissor(textX, y, listLeft + listWidth, y + rowH);
@@ -956,15 +958,23 @@ public final class LogViewerScreen extends Screen {
         // Selected row preview (full line) at bottom
         if (selected >= 0 && selected < rows.size()) {
             LogRow r = rows.get(selected);
-            Component full = r.line();
-            int y = this.height - 24;
-            g.fill(8, y - 2, this.width - 8, y + 12, 0x66000000);
-            drawLogString(g, full, 10, y, 0xFFFFFF);
+            Component full = r.line() == null ? Component.empty() : r.line();
+            int previewW = Math.max(20, Math.round((this.width - 22) / Math.max(0.25f, logTextScale())));
+            List<net.minecraft.util.FormattedCharSequence> previewLines = this.font.split(full, previewW);
+            int count = Math.min(2, Math.max(1, previewLines.size()));
+            int previewLineH = detailLineH();
+            int y = this.height - 8 - count * previewLineH;
+            g.fill(8, y - 2, this.width - 8, this.height - 6, 0x66000000);
+            for (int i = 0; i < count; i++) {
+                net.minecraft.util.FormattedCharSequence preview = previewLines.isEmpty()
+                        ? net.minecraft.util.FormattedCharSequence.EMPTY
+                        : previewLines.get(i);
+                drawLogString(g, preview, 10, y + i * previewLineH, 0xFFFFFF);
+            }
         }
 
         // Right-side details panel
         renderDetailsPanel(g);
-        renderInspectToolStatus(g);
 
         // Render widgets after rows/details so an active adaptive input field stays readable above the log list.
         // Do this manually instead of super.render(...): on some 1.21.x mappings/modpacks
@@ -1006,20 +1016,6 @@ public final class LogViewerScreen extends Screen {
         for (net.minecraft.client.gui.components.Renderable renderable : this.renderables) {
             renderable.render(g, mouseX, mouseY, partialTick);
         }
-    }
-
-    private void renderInspectToolStatus(GuiGraphics g) {
-        if (inspectToolStatus == null || inspectToolStatus.getString().isBlank() || inspectToolStatusY <= 0) return;
-        int left = 10;
-        int right = left + leftPanelW();
-        float scale = clampFloat(controlScale(), 0.50f, 1.0f);
-        g.enableScissor(left, inspectToolStatusY, right, inspectToolStatusY + Math.max(8, controlH()));
-        g.pose().pushPose();
-        g.pose().translate(left, inspectToolStatusY, 0);
-        g.pose().scale(scale, scale, 1.0f);
-        g.drawString(this.font, inspectToolStatus, 0, 0, 0xFFFFFF, false);
-        g.pose().popPose();
-        g.disableScissor();
     }
 
     private void renderDetailsPanel(GuiGraphics g) {
@@ -1098,7 +1094,6 @@ public final class LogViewerScreen extends Screen {
         adaptInputBox(planeNameBox, baseX, baseW);
         adaptInputBox(blockIdBox, baseX, baseW);
         adaptInputBox(searchBox, baseX, baseW);
-        adaptInputBox(inspectToolBox, baseX, baseW);
     }
 
     private float inputTextScaleFor(int h) {
@@ -1126,8 +1121,7 @@ public final class LogViewerScreen extends Screen {
                 || mouseInsideInput(trainBox, mouseX, mouseY)
                 || mouseInsideInput(planeNameBox, mouseX, mouseY)
                 || mouseInsideInput(blockIdBox, mouseX, mouseY)
-                || mouseInsideInput(searchBox, mouseX, mouseY)
-                || mouseInsideInput(inspectToolBox, mouseX, mouseY);
+                || mouseInsideInput(searchBox, mouseX, mouseY);
     }
 
     private boolean mouseInsideInput(EditBox box, double mouseX, double mouseY) {
@@ -1584,10 +1578,6 @@ public final class LogViewerScreen extends Screen {
 
         // Enter applies custom inputs.
         if (keyCode == 257 /* GLFW_KEY_ENTER */ || keyCode == 335 /* GLFW_KEY_KP_ENTER */) {
-            if (inspectToolBox != null && inspectToolBox.isFocused()) {
-                setInspectTool();
-                return true;
-            }
             if ((timeBox != null && timeBox.isFocused())
                     || (radiusBox != null && radiusBox.isFocused())
                     || (actorBox != null && actorBox.isFocused())
@@ -1656,6 +1646,7 @@ public final class LogViewerScreen extends Screen {
             savedButtonScalePercent = clampInt(parseInt(p.getProperty("buttonScalePercent"), savedButtonScalePercent), BUTTON_SCALE_MIN, BUTTON_SCALE_MAX);
             savedLogTextScalePercent = clampInt(parseInt(p.getProperty("logTextScalePercent"), savedLogTextScalePercent), LOG_TEXT_SCALE_MIN, LOG_TEXT_SCALE_MAX);
             savedBackgroundDimPercent = clampInt(parseInt(p.getProperty("backgroundDimPercent"), savedBackgroundDimPercent), BACKGROUND_DIM_MIN, BACKGROUND_DIM_MAX);
+            savedPageSize = clampInt(parseInt(p.getProperty("pageSize"), savedPageSize), PAGE_SIZE_MIN, PAGE_SIZE_MAX);
         } catch (Throwable ignored) {
             // Broken local client config should never break opening the logger GUI.
         }
@@ -1721,6 +1712,7 @@ public final class LogViewerScreen extends Screen {
         p.setProperty("wideControlScalePercent", String.valueOf(savedButtonScalePercent));
         p.setProperty("logTextScalePercent", String.valueOf(savedLogTextScalePercent));
         p.setProperty("backgroundDimPercent", String.valueOf(savedBackgroundDimPercent));
+        p.setProperty("pageSize", String.valueOf(savedPageSize));
         try {
             Path path = guiStatePath();
             Files.createDirectories(path.getParent());
@@ -1732,18 +1724,6 @@ public final class LogViewerScreen extends Screen {
         }
     }
 
-    private void adjustButtonScale(int delta) {
-        savedButtonScalePercent = clampInt(savedButtonScalePercent + delta, BUTTON_SCALE_MIN, BUTTON_SCALE_MAX);
-        saveGuiStateFromInstance();
-        rebuildGuiSafely();
-    }
-
-    private void adjustLogTextScale(int delta) {
-        savedLogTextScalePercent = clampInt(savedLogTextScalePercent + delta, LOG_TEXT_SCALE_MIN, LOG_TEXT_SCALE_MAX);
-        saveGuiStateFromInstance();
-        rebuildGuiSafely();
-    }
-
     private void rebuildGuiSafely() {
         try {
             this.clearWidgets();
@@ -1751,6 +1731,215 @@ public final class LogViewerScreen extends Screen {
             updateButtons();
         } catch (Throwable ignored) {
             // If a future MC version changes Screen internals, the new scale still applies on reopen.
+        }
+    }
+
+    private void openSettings() {
+        saveGuiStateFromInstance();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null) mc.setScreen(new GuiSettingsScreen(savedPageSize));
+    }
+
+    /** Dedicated window for every setting that changes the GUI appearance and inspect tool. */
+    private final class GuiSettingsScreen extends Screen {
+        private final int pageSizeOnOpen;
+        private Button buttonScaleValue;
+        private Button textScaleValue;
+        private Button pageSizeValue;
+        private Button inspectSave;
+        private Button inspectReset;
+        private EditBox inspectBox;
+        private int settingsStatusY;
+
+        private GuiSettingsScreen(int pageSizeOnOpen) {
+            super(Component.translatable("gui.avilixlogger.settings.title"));
+            this.pageSizeOnOpen = pageSizeOnOpen;
+        }
+
+        @Override
+        protected void init() {
+            super.init();
+            int panelW = Math.min(310, Math.max(230, this.width - 30));
+            int x = (this.width - panelW) / 2;
+            boolean compact = this.height < 260;
+            int y = compact ? 20 : Math.max(28, (this.height - 230) / 2);
+            int rowH = compact ? 16 : 20;
+            int gap = compact ? 2 : 5;
+            int stepW = 34;
+
+            addSettingsButton(Component.literal("−"), b -> changeButtonScale(-5), x, y, stepW, rowH);
+            this.buttonScaleValue = addSettingsButton(buttonScaleLabel(), b -> {},
+                    x + stepW + gap, y, panelW - (stepW + gap) * 2, rowH);
+            this.buttonScaleValue.active = false;
+            addSettingsButton(Component.literal("+"), b -> changeButtonScale(5),
+                    x + panelW - stepW, y, stepW, rowH);
+            y += rowH + gap;
+
+            addSettingsButton(Component.literal("−"), b -> changeTextScale(-5), x, y, stepW, rowH);
+            this.textScaleValue = addSettingsButton(textScaleLabel(), b -> {},
+                    x + stepW + gap, y, panelW - (stepW + gap) * 2, rowH);
+            this.textScaleValue.active = false;
+            addSettingsButton(Component.literal("+"), b -> changeTextScale(5),
+                    x + panelW - stepW, y, stepW, rowH);
+            y += rowH + gap;
+
+            this.addRenderableWidget(new BackgroundDimSlider(x, y, panelW, rowH, savedBackgroundDimPercent));
+            y += rowH + gap;
+
+            addSettingsButton(Component.literal("−10"), b -> changePageSize(-10), x, y, 44, rowH);
+            this.pageSizeValue = addSettingsButton(pageSizeLabel(), b -> {},
+                    x + 49, y, panelW - 98, rowH);
+            this.pageSizeValue.active = false;
+            addSettingsButton(Component.literal("+10"), b -> changePageSize(10),
+                    x + panelW - 44, y, 44, rowH);
+            y += rowH + gap + (compact ? 3 : 8);
+
+            this.inspectBox = new EditBox(this.font, x, y, panelW, rowH,
+                    Component.translatable("gui.avilixlogger.inspect_tool"));
+            this.inspectBox.setHint(Component.translatable("gui.avilixlogger.inspect_tool.hint"));
+            this.inspectBox.setMaxLength(256);
+            this.inspectBox.setValue(inspectToolItemId);
+            this.inspectBox.active = inspectToolSettingsLoaded && canEditInspectTool;
+            this.addRenderableWidget(this.inspectBox);
+            y += rowH + gap;
+
+            int half = (panelW - gap) / 2;
+            this.inspectSave = addSettingsButton(Component.translatable("gui.avilixlogger.inspect_tool.save"),
+                    b -> submitInspectTool(), x, y, half, rowH);
+            this.inspectReset = addSettingsButton(Component.translatable("gui.avilixlogger.inspect_tool.reset"),
+                    b -> resetInspectTool(), x + half + gap, y, panelW - half - gap, rowH);
+            y += rowH + gap;
+
+            addSettingsButton(Component.translatable("gui.avilixlogger.settings.reset_visual"),
+                    b -> resetVisualSettings(), x, y, half, rowH);
+            addSettingsButton(Component.translatable("gui.done"),
+                    b -> closeSettings(), x + half + gap, y, panelW - half - gap, rowH);
+            y += rowH + gap;
+            this.settingsStatusY = y;
+
+            updateInspectButtons();
+        }
+
+        private Button addSettingsButton(Component message, Button.OnPress onPress,
+                                         int x, int y, int width, int height) {
+            return this.addRenderableWidget(Button.builder(message, onPress).bounds(x, y, width, height).build());
+        }
+
+        private Component buttonScaleLabel() {
+            return Component.translatable("gui.avilixlogger.settings.button_scale", savedButtonScalePercent);
+        }
+
+        private Component textScaleLabel() {
+            return Component.translatable("gui.avilixlogger.settings.text_scale", savedLogTextScalePercent);
+        }
+
+        private Component pageSizeLabel() {
+            return Component.translatable("gui.avilixlogger.settings.page_size", savedPageSize);
+        }
+
+        private void changeButtonScale(int delta) {
+            savedButtonScalePercent = clampInt(savedButtonScalePercent + delta, BUTTON_SCALE_MIN, BUTTON_SCALE_MAX);
+            if (buttonScaleValue != null) buttonScaleValue.setMessage(buttonScaleLabel());
+            saveGuiStateToDisk();
+        }
+
+        private void changeTextScale(int delta) {
+            savedLogTextScalePercent = clampInt(savedLogTextScalePercent + delta, LOG_TEXT_SCALE_MIN, LOG_TEXT_SCALE_MAX);
+            if (textScaleValue != null) textScaleValue.setMessage(textScaleLabel());
+            saveGuiStateToDisk();
+        }
+
+        private void changePageSize(int delta) {
+            savedPageSize = clampInt(savedPageSize + delta, PAGE_SIZE_MIN, PAGE_SIZE_MAX);
+            if (pageSizeValue != null) pageSizeValue.setMessage(pageSizeLabel());
+            saveGuiStateToDisk();
+        }
+
+        private void resetVisualSettings() {
+            savedButtonScalePercent = 100;
+            savedLogTextScalePercent = 100;
+            savedBackgroundDimPercent = 0;
+            savedPageSize = C2SRequestPagePayload.DEFAULT_PAGE_SIZE;
+            saveGuiStateToDisk();
+            this.clearWidgets();
+            this.init();
+        }
+
+        private void submitInspectTool() {
+            if (inspectBox == null) return;
+            setInspectTool(inspectBox.getValue());
+        }
+
+        private void applyInspectToolState(boolean success) {
+            if (inspectBox != null && (success || inspectBox.getValue().isBlank())) {
+                inspectBox.setValue(inspectToolItemId);
+            }
+            updateInspectButtons();
+        }
+
+        private void updateInspectButtons() {
+            boolean active = inspectToolSettingsLoaded && canEditInspectTool;
+            if (inspectBox != null) inspectBox.active = active;
+            if (inspectSave != null) inspectSave.active = active;
+            if (inspectReset != null) inspectReset.active = active;
+        }
+
+        private void closeSettings() {
+            saveGuiStateToDisk();
+            Minecraft mc = Minecraft.getInstance();
+            if (mc == null) return;
+            mc.setScreen(LogViewerScreen.this);
+            rebuildGuiSafely();
+            if (savedPageSize != pageSizeOnOpen) sendPage(C2SRequestPagePayload.Nav.FIRST);
+        }
+
+        @Override
+        public void onClose() {
+            closeSettings();
+        }
+
+        @Override
+        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+            if ((keyCode == 257 || keyCode == 335) && inspectBox != null && inspectBox.isFocused()) {
+                submitInspectTool();
+                return true;
+            }
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+
+        @Override
+        public void renderBackground(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+            // The settings dialog uses its own bounded panel and never enables the vanilla blur.
+        }
+
+        @Override
+        public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+            int panelW = Math.min(310, Math.max(230, this.width - 30));
+            int panelH = Math.min(265, this.height - 12);
+            int left = (this.width - panelW) / 2;
+            int top = (this.height - panelH) / 2;
+            g.fill(left, top, left + panelW, top + panelH, 0xE0101010);
+            g.drawCenteredString(this.font, this.title, this.width / 2, top + 9, 0xFFFFAA00);
+
+            if (inspectToolStatus != null && !inspectToolStatus.getString().isBlank()) {
+                int wrapW = Math.max(80, panelW - 22);
+                List<net.minecraft.util.FormattedCharSequence> statusLines = this.font.split(inspectToolStatus, wrapW);
+                int yy = settingsStatusY;
+                for (net.minecraft.util.FormattedCharSequence line : statusLines) {
+                    if (yy + this.font.lineHeight >= this.height - 4) break;
+                    g.drawString(this.font, line, left + 11, yy, 0xFFFFFFFF, false);
+                    yy += this.font.lineHeight + 1;
+                }
+            }
+
+            for (net.minecraft.client.gui.components.Renderable renderable : this.renderables) {
+                renderable.render(g, mouseX, mouseY, partialTick);
+            }
+        }
+
+        @Override
+        public boolean isPauseScreen() {
+            return false;
         }
     }
 

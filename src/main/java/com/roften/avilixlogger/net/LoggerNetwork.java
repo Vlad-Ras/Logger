@@ -1,6 +1,7 @@
 package com.roften.avilixlogger.net;
 
 import com.roften.avilixlogger.AvilixLoggerMod;
+import com.roften.avilixlogger.auth.AuthCoreBridge;
 import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LastQueryManager;
 import com.roften.avilixlogger.core.LogEntry;
@@ -103,6 +104,9 @@ public final class LoggerNetwork {
     /** Per-player GUI filter state (button-driven). */
     private static final Map<UUID, GuiFilters> GUI_FILTERS = new ConcurrentHashMap<>();
 
+    /** Per-player GUI page size. It is supplied by the client and clamped server-side. */
+    private static final Map<UUID, Integer> GUI_PAGE_SIZES = new ConcurrentHashMap<>();
+
     public static boolean isClientPresent(ServerPlayer player) {
         return player != null && Boolean.TRUE.equals(CLIENT_PRESENT.get(player.getUUID()));
     }
@@ -112,6 +116,7 @@ public final class LoggerNetwork {
             UUID uuid = player.getUUID();
             CLIENT_PRESENT.remove(uuid);
             GUI_FILTERS.remove(uuid);
+            GUI_PAGE_SIZES.remove(uuid);
             LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
             LAST_GUI_PAGE_REQUEST_SIG.remove(uuid);
             LAST_GUI_DETAILS_REQUEST_AT.remove(uuid);
@@ -138,6 +143,7 @@ public final class LoggerNetwork {
         LAST_GUI_DETAILS_REQUEST_SIG.clear();
         CLIENT_PRESENT.clear();
         GUI_FILTERS.clear();
+        GUI_PAGE_SIZES.clear();
         LATEST_GUI_PAGE_SEQ.clear();
         LATEST_GUI_DETAILS_SEQ.clear();
         PENDING_GUI_PAGE_SEQ.clear();
@@ -256,7 +262,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "2");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "3");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
@@ -321,8 +327,10 @@ public final class LoggerNetwork {
         private final LastQueryManager.State snapshotState;
         private final boolean aggregated;
         private final GuiFilters filters;
+        private final int pageSize;
 
-        private GuiPageTask(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State snapshotState, boolean aggregated, GuiFilters filters) {
+        private GuiPageTask(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State snapshotState,
+                            boolean aggregated, GuiFilters filters, int pageSize) {
             this.playerId = sp.getUUID();
             this.playerRef = new java.lang.ref.WeakReference<>(sp);
             this.seq = seq;
@@ -330,17 +338,19 @@ public final class LoggerNetwork {
             this.snapshotState = snapshotState;
             this.aggregated = aggregated;
             this.filters = filters;
+            this.pageSize = C2SRequestPagePayload.clampPageSize(pageSize);
         }
 
         @Override
         public void run() {
             try {
+                if (!AuthCoreBridge.isAuthorized(level.getServer())) return;
                 Long latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
                 if (latestSeq == null || latestSeq.longValue() != seq) return;
 
                 Page page;
                 try {
-                    page = buildPage(level, snapshotState, aggregated, filters,
+                    page = buildPage(level, snapshotState, aggregated, filters, pageSize,
                             () -> Thread.currentThread().isInterrupted()
                                     || !Long.valueOf(seq).equals(LATEST_GUI_PAGE_SEQ.get(playerId)));
                 } catch (Throwable t) {
@@ -405,6 +415,7 @@ public final class LoggerNetwork {
         @Override
         public void run() {
             try {
+                if (!AuthCoreBridge.isAuthorized(level.getServer())) return;
                 Long latestSeq = LATEST_GUI_DETAILS_SEQ.get(playerId);
                 if (latestSeq == null || latestSeq.longValue() != seq) return;
 
@@ -453,6 +464,7 @@ public final class LoggerNetwork {
     private static void handleHello(C2SHelloPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> {
             if (ctx.player() instanceof ServerPlayer sp) {
+                if (!AuthCoreBridge.isAuthorized(sp.getServer())) return;
                 CLIENT_PRESENT.put(sp.getUUID(), true);
             }
         });
@@ -520,7 +532,9 @@ public final class LoggerNetwork {
             if (!(ctx.player() instanceof ServerPlayer sp)) return;
 
             long now = System.currentTimeMillis();
-            String requestSig = String.valueOf(payload.nav()) + "|" + payload.aggregated() + "|" + String.valueOf(payload.filters());
+            int pageSize = C2SRequestPagePayload.clampPageSize(payload.pageSize());
+            String requestSig = String.valueOf(payload.nav()) + "|" + payload.aggregated() + "|"
+                    + String.valueOf(payload.filters()) + "|" + pageSize;
             long last = LAST_GUI_PAGE_REQUEST_AT.getOrDefault(sp.getUUID(), 0L);
             String lastSig = LAST_GUI_PAGE_REQUEST_SIG.get(sp.getUUID());
 
@@ -541,13 +555,17 @@ public final class LoggerNetwork {
             GuiFilters gf = payload.filters() == null ? GuiFilters.DEFAULT : payload.filters();
             long seq = nextGuiPageSeq(sp.getUUID());
             GuiFilters prevGf = GUI_FILTERS.get(sp.getUUID());
+            Integer prevPageSize = GUI_PAGE_SIZES.get(sp.getUUID());
 
             // Build (or reuse) a base query. If filters changed, restart pagination.
             LastQueryManager.State st = LastQueryManager.get(sp);
-            if (st == null || prevGf == null || !prevGf.equals(gf) || payload.nav() == C2SRequestPagePayload.Nav.FIRST) {
-                LogQuery q = buildBaseGuiQuery(sp, gf);
+            if (st == null || prevGf == null || !prevGf.equals(gf)
+                    || prevPageSize == null || prevPageSize.intValue() != pageSize
+                    || payload.nav() == C2SRequestPagePayload.Nav.FIRST) {
+                LogQuery q = buildBaseGuiQuery(sp, gf, pageSize);
                 st = LastQueryManager.set(sp, q, "Логи (GUI)");
                 GUI_FILTERS.put(sp.getUUID(), gf);
+                GUI_PAGE_SIZES.put(sp.getUUID(), pageSize);
             }
 
             // Apply navigation.
@@ -590,7 +608,8 @@ public final class LoggerNetwork {
             sendGuiPageStatus(sp, finalLvl, snapshotState, Component.literal("Загрузка логов...").withStyle(net.minecraft.ChatFormatting.AQUA));
 
             try {
-                PAGE_EXECUTOR.execute(new GuiPageTask(sp, seq, finalLvl, snapshotState, payload.aggregated(), finalGf));
+                PAGE_EXECUTOR.execute(new GuiPageTask(
+                        sp, seq, finalLvl, snapshotState, payload.aggregated(), finalGf, pageSize));
                 scheduleLongPageWarning(sp, seq, finalLvl, snapshotState);
             } catch (java.util.concurrent.RejectedExecutionException rejected) {
                 completeGuiPageSeq(sp.getUUID(), seq);
@@ -651,7 +670,7 @@ public final class LoggerNetwork {
         }
     }
 
-    private static LogQuery buildBaseGuiQuery(ServerPlayer sp, GuiFilters gf) {
+    private static LogQuery buildBaseGuiQuery(ServerPlayer sp, GuiFilters gf, int pageSize) {
         LogQuery q = new LogQuery();
         ServerLevel level = sp.serverLevel();
 
@@ -719,7 +738,7 @@ public final class LoggerNetwork {
         q.types = mapTypePreset(gf != null ? gf.typePresetIdx() : 0);
 
         // GUI has its own page size; keep chat page size independent.
-        q.limit = Math.max(1, com.roften.avilixlogger.LoggerConfig.VALUES.guiPageSize.get());
+        q.limit = C2SRequestPagePayload.clampPageSize(pageSize);
         q.debugSource = "gui";
         return q;
     }
@@ -814,8 +833,9 @@ public final class LoggerNetwork {
      * Produces a page similarly to {@link ChatLogPager} but returns components instead of sending to chat.
      */
     private static Page buildPage(ServerLevel level, LastQueryManager.State state, boolean aggregated, GuiFilters gf,
+                                  int requestedPageSize,
                                   java.util.function.BooleanSupplier cancelled) {
-        int size = Math.max(1, com.roften.avilixlogger.LoggerConfig.VALUES.guiPageSize.get());
+        int size = C2SRequestPagePayload.clampPageSize(requestedPageSize);
 
         LogQuery q = state.baseQuery.copy();
         q.beforeId = state.currentBeforeId();
@@ -1061,6 +1081,7 @@ public final class LoggerNetwork {
     }
 
     private static boolean hasGuiPermission(ServerPlayer sp) {
+        if (sp == null || !AuthCoreBridge.isAuthorized(sp.getServer())) return false;
         try {
             return com.roften.avilixlogger.core.PermissionUtil.has(sp.createCommandSourceStack(), "avilixlogger.gui", 2);
         } catch (Throwable t) {
@@ -1069,6 +1090,7 @@ public final class LoggerNetwork {
     }
 
     private static boolean hasAdminPermission(ServerPlayer sp) {
+        if (sp == null || !AuthCoreBridge.isAuthorized(sp.getServer())) return false;
         try {
             return com.roften.avilixlogger.core.PermissionUtil.has(sp.createCommandSourceStack(), "avilixlogger.command.admin", 2);
         } catch (Throwable t) {

@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.core;
 
+import com.roften.avilixlogger.LoggerConfig;
+
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -17,11 +19,19 @@ public final class CauseTracker {
     private CauseTracker() {}
 
     public static void note(UUID entityUuid, String cause) {
+        if (!LoggerConfig.isEnabled()) {
+            CAUSES.clear();
+            return;
+        }
         if (entityUuid == null || cause == null || cause.isBlank()) return;
         CAUSES.put(entityUuid, new Stamp(System.currentTimeMillis(), cause));
     }
 
     public static String pop(UUID entityUuid) {
+        if (!LoggerConfig.isEnabled()) {
+            CAUSES.clear();
+            return null;
+        }
         if (entityUuid == null) return null;
         Stamp s = CAUSES.remove(entityUuid);
         if (s == null) return null;

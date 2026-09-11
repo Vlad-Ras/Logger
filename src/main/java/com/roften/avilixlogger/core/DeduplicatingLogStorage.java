@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.core;
 
+import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.api.LogAdapterRegistry;
 
 import java.util.List;
@@ -24,7 +25,7 @@ public final class DeduplicatingLogStorage implements LogStorage {
 
     @Override
     public void append(LogEntry entry) {
-        if (entry == null) return;
+        if (entry == null || !LoggerConfig.isEnabled()) return;
         LogAdapterRegistry.enrich(entry);
         long window = duplicateWindowMs(entry.type);
         if (window <= 0L) {
@@ -48,11 +49,13 @@ public final class DeduplicatingLogStorage implements LogStorage {
 
     @Override
     public List<LogEntry> query(LogQuery query) {
+        requireEnabled();
         return delegate.query(query);
     }
 
     @Override
     public List<LogEntry> queryReverse(LogQuery query) {
+        requireEnabled();
         return delegate.queryReverse(query);
     }
 
@@ -64,6 +67,12 @@ public final class DeduplicatingLogStorage implements LogStorage {
 
     public void clear() {
         recent.clear();
+    }
+
+    private static void requireEnabled() {
+        if (!LoggerConfig.isEnabled()) {
+            throw new IllegalStateException("AvilixAuthCore denied access to Logger");
+        }
     }
 
     private void cleanup(long cutoff) {

@@ -69,7 +69,7 @@ public final class AsyncLogProcessor {
     }
 
     public static void submit(long estimatedPayloadBytes, Runnable task) {
-        if (task == null) return;
+        if (task == null || !LoggerConfig.isEnabled()) return;
         long weight = Math.max(128L, estimatedPayloadBytes);
         if (!reservePayload(weight)) {
             onRejected("payload budget");
@@ -78,6 +78,7 @@ public final class AsyncLogProcessor {
         try {
             executor().execute(() -> {
                 try {
+                    if (!LoggerConfig.isEnabled()) return;
                     task.run();
                 } catch (Throwable t) {
                     AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Async log post-processing failed", t);

@@ -1,25 +1,22 @@
+# Avilix Logger
 
-Installation information
-=======
+Серверный журнал действий и система отката для Minecraft 1.21.1 / NeoForge.
 
-This template repository can be directly cloned to get you started with a new
-mod. Simply create a new repository cloned from this one, by following the
-instructions provided by [GitHub](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
+## Авторизация сервера
 
-Once you have your clone, simply open the repository in the IDE of your choice. The usual recommendation for an IDE is either IntelliJ IDEA or Eclipse.
+Logger работает только после успешной проверки через AvilixAuthCore 1.0.3 или новее. На сервере должны находиться:
 
-If at any point you are missing libraries in your IDE, or you've run into problems you can
-run `gradlew --refresh-dependencies` to refresh the local cache. `gradlew clean` to reset everything 
-{this does not affect your code} and then start the process again.
+- `mods/avilix_auth_core-1.0.3.jar`;
+- закрытый ключ `config/avilix_auth_core/server-private-key.pk8`, соответствующий открытому ключу в AuthCore.
 
-Mapping Names:
-============
-By default, the MDK is configured to use the official mapping names from Mojang for methods and fields 
-in the Minecraft codebase. These names are covered by a specific license. All modders should be aware of this
-license. For the latest license text, refer to the mapping file itself, or the reference copy here:
-https://github.com/NeoForged/NeoForm/blob/main/Mojang.md
+AuthCore нужен только серверу. Если он отсутствует, повреждён или отклоняет ключ, Logger работает в режиме fail-closed: не пишет и не читает логи, не выполняет команды и откаты, не обслуживает GUI-запросы и не активирует интеграции. Проверить состояние можно командой `/avilixauth status`, перечитать ключ — `/avilixauth reload`.
 
-Additional Resources: 
-==========
-Community Documentation: https://docs.neoforged.net/  
-NeoForged Discord: https://discord.neoforged.net/
+Закрытый ключ нельзя добавлять в репозиторий, модпак или готовый JAR.
+
+## Сборка
+
+```bash
+./gradlew build
+```
+
+Готовый обфусцированный JAR создаётся в `build/libs`. Таблица соответствий имён сохраняется только локально в `build/obfuscation/mapping.txt`.

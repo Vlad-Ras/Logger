@@ -88,7 +88,7 @@ public final class CreateTrainsCompatHooks {
 
     private static boolean enabled() {
         try {
-            return LoggerConfig.VALUES.enabled.get() && LoggerConfig.VALUES.logEntities.get();
+            return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logEntities.get();
         } catch (Throwable t) {
             return false;
         }

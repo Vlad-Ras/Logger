@@ -228,5 +228,14 @@ public final class LoggerConfig {
         }
     }
 
+    /** Master runtime gate: local config cannot bypass a rejected AvilixAuthCore authorization. */
+    public static boolean isEnabled() {
+        try {
+            return com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized() && VALUES.enabled.get();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private LoggerConfig() {}
 }

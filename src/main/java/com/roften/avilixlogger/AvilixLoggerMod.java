@@ -2,6 +2,7 @@ package com.roften.avilixlogger;
 
 import com.mojang.logging.LogUtils;
 import com.roften.avilixlogger.command.LoggerCommands;
+import com.roften.avilixlogger.auth.AuthCoreBridge;
 import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LoggerEventHandlers;
 import com.roften.avilixlogger.core.LoggerRuntime;
@@ -18,6 +19,10 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import net.neoforged.neoforge.event.server.ServerStartingEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 
 /**
  * Avilix Logger: server-side audit log + rollback for blocks/entities/inventories.
@@ -49,6 +54,7 @@ public final class AvilixLoggerMod {
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
+        NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(RollbackCoordinator::onServerTick);
     }
@@ -58,8 +64,22 @@ public final class AvilixLoggerMod {
     }
 
     private void onServerStarting(ServerStartingEvent event) {
-        // Warm up DB storage off-thread so the first player join does not block the server tick.
-        LoggerRuntime.warmupAsync();
+        if (AuthCoreBridge.attach(event.getServer())) {
+            LOGGER.info("[AvilixLogger] AvilixAuthCore accepted this server. Logger mechanisms are enabled.");
+            // Warm up DB storage off-thread so the first player join does not block the server tick.
+            LoggerRuntime.warmupAsync();
+        } else {
+            LOGGER.error("[AvilixLogger] Authorization denied. Every Logger mechanism is disabled: {}",
+                    AuthCoreBridge.failureDescription());
+        }
+    }
+
+    private void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        if (AuthCoreBridge.isAuthorized(player.getServer())) return;
+        player.sendSystemMessage(Component.literal(
+                        "[Avilix Logger] Этот сервер использует чужую или украденную копию мода. Все механики Logger отключены.")
+                .withStyle(ChatFormatting.RED));
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
@@ -69,6 +89,7 @@ public final class AvilixLoggerMod {
         LoggerNetwork.shutdown();
         RollbackCoordinator.shutdown();
         LoggerRuntime.shutdown();
+        AuthCoreBridge.clear(event.getServer());
     }
 
     /**

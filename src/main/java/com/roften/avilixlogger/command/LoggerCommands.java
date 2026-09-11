@@ -194,7 +194,8 @@ public final class LoggerCommands {
 
 
     private static boolean hasAnyLoggerPermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+        return com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
+                && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.use",
                 "avilixlogger.command.lookup",
                 "avilixlogger.command.inspect",
@@ -229,7 +230,8 @@ public final class LoggerCommands {
     }
 
     private static boolean hasAnyPlaneOwnerPermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+        return com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
+                && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.plane",
                 "avilixlogger.command.plane.owner.info",
                 "avilixlogger.command.plane.owner.set",
@@ -493,7 +495,7 @@ public final class LoggerCommands {
     private static void logPlaneOwnerChange(ServerPlayer actor, ItemStack plane, String oldName, String oldUuid, String newName, String newUuid) {
         try {
             ServerLevel level = actor.serverLevel();
-            if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logEntities.get()) return;
+            if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
 
             LogEntry e = new LogEntry();
             e.ts = System.currentTimeMillis();

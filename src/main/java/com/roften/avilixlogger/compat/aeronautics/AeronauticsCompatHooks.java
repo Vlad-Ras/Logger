@@ -74,6 +74,10 @@ public final class AeronauticsCompatHooks {
     }
 
     public static void notePlayerBlockAction(ServerLevel level, ServerPlayer player, BlockPos pos, ItemStack stack, String reason) {
+        if (!LoggerConfig.isEnabled()) {
+            LAST_BLOCK_ACTOR.clear();
+            return;
+        }
         if (level == null || player == null || pos == null) return;
         try {
             RecentPlayerActionTracker.note(level, player, pos, RecentPlayerActionTracker.ActionKind.RIGHT_CLICK_BLOCK, stack == null ? ItemStack.EMPTY : stack.copy());
@@ -86,6 +90,7 @@ public final class AeronauticsCompatHooks {
     }
 
     public static ActorTracker.ActorRef resolveActorForBlock(ServerLevel level, BlockPos pos) {
+        if (!LoggerConfig.isEnabled()) return null;
         try {
             CauseContext.Cause c = CauseContext.peek();
             if (c != null && c.actorUuid() != null) {
@@ -109,6 +114,7 @@ public final class AeronauticsCompatHooks {
     }
 
     public static Snapshot captureBlockEntityBeforeFromBehaviour(Object behaviour, Player player, String reason) {
+        if (!LoggerConfig.isEnabled()) return null;
         try {
             Object beObj = readFieldRecursive(behaviour, "blockEntity");
             if (!(beObj instanceof BlockEntity be)) return null;
@@ -121,6 +127,7 @@ public final class AeronauticsCompatHooks {
     }
 
     public static void finishBlockEntityChangeFromBehaviour(Object behaviour, Snapshot snapshot, Player player, String reason) {
+        if (!LoggerConfig.isEnabled()) return;
         if (snapshot == null) return;
         try {
             Object beObj = readFieldRecursive(behaviour, "blockEntity");
@@ -131,6 +138,7 @@ public final class AeronauticsCompatHooks {
     }
 
     public static Snapshot captureBlockBefore(ServerLevel level, BlockPos pos, Player actor, String source, String reason) {
+        if (!LoggerConfig.isEnabled()) return null;
         if (level == null || pos == null) return null;
         try {
             BlockState state = level.getBlockState(pos);
@@ -155,7 +163,7 @@ public final class AeronauticsCompatHooks {
 
     public static void finishBlockEntityChange(ServerLevel level, Snapshot before, String source, String reason) {
         if (level == null || before == null || before.pos == null) return;
-        if (!LoggerConfig.VALUES.enabled.get()) return;
+        if (!LoggerConfig.isEnabled()) return;
         try {
             BlockState afterState0 = level.getBlockState(before.pos);
             BlockEntity beAfter0 = level.getBlockEntity(before.pos);
@@ -240,7 +248,7 @@ public final class AeronauticsCompatHooks {
 
     public static void logMountedCannonFire(BlockEntity be, Entity projectile) {
         if (be == null || !(be.getLevel() instanceof ServerLevel level) || projectile == null) return;
-        if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logBlocks.get()) return;
+        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
         try {
             BlockPos pos = be.getBlockPos();
             long now = System.currentTimeMillis();

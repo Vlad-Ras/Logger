@@ -34,6 +34,7 @@ public final class AirplanesCompatHooks {
      * Writes owner into ItemStack custom data so it can be transferred into the spawned plane entity.
      */
     public static void ensureOwnerOnItemStack(ItemStack stack, Player player) {
+        if (!LoggerConfig.isEnabled()) return;
         if (stack == null || stack.isEmpty() || player == null) return;
         try {
             CompoundTag tag = new CompoundTag();
@@ -168,6 +169,7 @@ public final class AirplanesCompatHooks {
      * If ownerUuid is null/blank, only owner_name is stored (for offline/manual assignments).
      */
     public static void setOwnerOnItem(ItemStack stack, String ownerName, String ownerUuid) {
+        if (!LoggerConfig.isEnabled()) return;
         if (stack == null || stack.isEmpty()) return;
         try {
             CompoundTag tag = new CompoundTag();
@@ -193,6 +195,7 @@ public final class AirplanesCompatHooks {
 
     /** Clears owner metadata from the plane item. */
     public static void clearOwnerOnItem(ItemStack stack) {
+        if (!LoggerConfig.isEnabled()) return;
         if (stack == null || stack.isEmpty()) return;
         try {
             if (!stack.has(DataComponents.CUSTOM_DATA) || stack.get(DataComponents.CUSTOM_DATA) == null) return;
@@ -209,6 +212,7 @@ public final class AirplanesCompatHooks {
      * LoggerEventHandlers will use this as the primary actor source for removal logs.
      */
     public static void markRecentActor(Entity planeEntity, Player player) {
+        if (!LoggerConfig.isEnabled()) return;
         if (planeEntity == null || player == null) return;
         try {
             ActorTracker.note(planeEntity.getUUID(), player.getUUID(), player.getName().getString());
@@ -221,7 +225,7 @@ public final class AirplanesCompatHooks {
      */
     public static void logPlacement(ServerLevel level, Player player, ItemStack usedStack) {
         if (level == null || player == null || usedStack == null || usedStack.isEmpty()) return;
-        if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logEntities.get()) return;
+        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
 
         try {
             LogEntry e = new LogEntry();
@@ -244,7 +248,7 @@ public final class AirplanesCompatHooks {
     /** Log plane removal (break/pickup) as an explicit action, independent from ENTITY_REMOVE. */
     public static void logRemoval(ServerLevel level, Player player, Entity planeEntity, String reason) {
         if (level == null || player == null || planeEntity == null) return;
-        if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logEntities.get()) return;
+        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
         try {
             LogEntry e = new LogEntry();
             e.ts = System.currentTimeMillis();
@@ -289,7 +293,7 @@ public final class AirplanesCompatHooks {
     /** Log plane mount as an explicit action. */
     public static void logMount(ServerLevel level, Player player, Entity planeEntity) {
         if (level == null || player == null || planeEntity == null) return;
-        if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logEntities.get()) return;
+        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
         try {
             LogEntry e = new LogEntry();
             e.ts = System.currentTimeMillis();
@@ -338,6 +342,10 @@ public final class AirplanesCompatHooks {
     private record Placement(long ts, String dim, BlockPos pos, java.util.UUID actorUuid, String actorName) {}
 
     public static void notePlaneItemUse(ServerLevel level, Player player) {
+        if (!LoggerConfig.isEnabled()) {
+            RECENT_PLACERS.clear();
+            return;
+        }
         if (level == null || player == null) return;
         try {
             RECENT_PLACERS.put(player.getUUID(), new Placement(System.currentTimeMillis(), level.dimension().location().toString(), player.blockPosition(), player.getUUID(), player.getName().getString()));
@@ -348,6 +356,10 @@ public final class AirplanesCompatHooks {
      * If a plane entity appears right after a player used a plane item, attribute the spawn to that player.
      */
     public static ActorTracker.ActorRef consumeRecentPlacer(ServerLevel level, Entity planeEntity) {
+        if (!LoggerConfig.isEnabled()) {
+            RECENT_PLACERS.clear();
+            return null;
+        }
         if (level == null || planeEntity == null) return null;
         try {
             long now = System.currentTimeMillis();

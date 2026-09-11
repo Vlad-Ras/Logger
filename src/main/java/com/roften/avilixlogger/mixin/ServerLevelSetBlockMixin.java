@@ -59,7 +59,7 @@ public abstract class ServerLevelSetBlockMixin {
         stack.addLast(Optional.empty());
         try {
             // Config lives in root package (not in core).
-            if (!LoggerConfig.VALUES.enabled.get() || !LoggerConfig.VALUES.logBlocks.get()) return;
+            if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
             if (pos == null || newState == null) return;
             if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return;
 

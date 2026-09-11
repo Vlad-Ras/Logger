@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.compat.airplanes.mixin;
 
+import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.core.ActorTracker;
 import com.roften.avilixlogger.core.CauseTracker;
 import com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks;
@@ -34,6 +35,7 @@ public class VehicleEntityMixin {
 
     @Inject(method = "hurt", at = @At(value = "HEAD"), require = 0)
     private void avilixlogger$captureActor(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
+        if (!LoggerConfig.isEnabled()) return;
         try {
             if (source == null) return;
 
@@ -68,7 +70,7 @@ public class VehicleEntityMixin {
     @Redirect(method = "hurt", at = @At(value = "INVOKE", target = "Limmersive_aircraft/entity/VehicleEntity;discard()V"), require = 0)
     private void avilixlogger$noteBreakCreative(@Coerce Object instance) {
         try {
-            if (this.avilixlogger$lastPlayer != null) {
+            if (LoggerConfig.isEnabled() && this.avilixlogger$lastPlayer != null) {
                 ActorTracker.note(((Entity) instance).getUUID(), this.avilixlogger$lastPlayer.getUUID(), this.avilixlogger$lastPlayer.getName().getString());
                 try {
                     var e = (Entity) instance;
@@ -84,7 +86,7 @@ public class VehicleEntityMixin {
     @Redirect(method = "applyDamage", at = @At(value = "INVOKE", target = "Limmersive_aircraft/entity/VehicleEntity;discard()V"), require = 0)
     private void avilixlogger$noteBreakSurvival(@Coerce Object instance) {
         try {
-            if (this.avilixlogger$lastPlayer != null) {
+            if (LoggerConfig.isEnabled() && this.avilixlogger$lastPlayer != null) {
                 ActorTracker.note(((Entity) instance).getUUID(), this.avilixlogger$lastPlayer.getUUID(), this.avilixlogger$lastPlayer.getName().getString());
                 try {
                     var e = (Entity) instance;
@@ -100,7 +102,7 @@ public class VehicleEntityMixin {
     @Redirect(method = "interact", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;startRiding(Lnet/minecraft/world/entity/Entity;)Z"), require = 0)
     private boolean avilixlogger$noteMount(Player user, Entity entity) {
         boolean result = user.startRiding(entity);
-        if (result) {
+        if (result && LoggerConfig.isEnabled()) {
             try {
                 ActorTracker.note(entity.getUUID(), user.getUUID(), user.getName().getString());
                 try {
@@ -115,6 +117,7 @@ public class VehicleEntityMixin {
 
     @Inject(method = "readAdditionalSaveData", at = @At(value = "HEAD"), require = 0)
     private void avilixlogger$readOwnerFromEntityNbt(CompoundTag tag, CallbackInfo ci) {
+        if (!LoggerConfig.isEnabled()) return;
         try {
             if (tag == null) return;
             if (tag.contains("owner_uuid")) {
@@ -149,6 +152,7 @@ public class VehicleEntityMixin {
 
     @Inject(method = "readItemTag", at = @At(value = "HEAD"), require = 0)
     private void avilixlogger$readOwnerFromItemTag(ItemStack stack, CallbackInfo ci) {
+        if (!LoggerConfig.isEnabled()) return;
         try {
             if (stack == null) return;
             if (stack.has(DataComponents.CUSTOM_DATA) && stack.get(DataComponents.CUSTOM_DATA) != null) {
@@ -167,6 +171,7 @@ public class VehicleEntityMixin {
 
     @Inject(method = "addAdditionalSaveData", at = @At(value = "HEAD"), require = 0)
     private void avilixlogger$saveOwnerToEntityNbt(CompoundTag tag, CallbackInfo ci) {
+        if (!LoggerConfig.isEnabled()) return;
         try {
             if (tag == null) return;
             if (this.avilixlogger$owner != null && !this.avilixlogger$owner.isBlank()) {
@@ -181,6 +186,7 @@ public class VehicleEntityMixin {
 
     @Inject(method = "addItemTag", at = @At(value = "HEAD"), require = 0)
     private void avilixlogger$saveOwnerToItemTag(ItemStack stack, CallbackInfo ci) {
+        if (!LoggerConfig.isEnabled()) return;
         try {
             if (stack == null) return;
             // Owner UUID is optional (admin can set only a name).
