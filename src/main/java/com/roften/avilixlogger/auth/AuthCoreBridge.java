@@ -9,7 +9,9 @@ import java.lang.reflect.Method;
  * Fail-closed bridge to the server-only AvilixAuthCore API.
  *
  * <p>The call intentionally uses reflection: Logger is also installed on clients, while
- * AvilixAuthCore and its private-key verification exist only on the dedicated server.</p>
+ * AvilixAuthCore and its private-key verification exist only on the dedicated server.
+ * Logger does not inspect or compare the server IP/host; authorization is delegated only
+ * to the API supplied by AvilixAuthCore.</p>
  */
 public final class AuthCoreBridge {
     private static final String API_CLASS = "ru.avilix.authcore.api.AvilixAuthApi";

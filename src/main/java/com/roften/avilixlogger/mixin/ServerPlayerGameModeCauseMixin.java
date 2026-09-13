@@ -26,7 +26,7 @@ public abstract class ServerPlayerGameModeCauseMixin {
     @Shadow @Final protected ServerPlayer player;
 
     @Unique
-    private final Deque<CauseContext.Scope> avilixlogger$causeScopes = new ArrayDeque<>();
+    private Deque<CauseContext.Scope> avilixlogger$causeScopes;
 
     @Inject(method = "destroyBlock", at = @At("HEAD"), require = 0)
     private void avilixlogger$beforeDestroy(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
@@ -68,11 +68,19 @@ public abstract class ServerPlayerGameModeCauseMixin {
 
     @Unique
     private void avilixlogger$push(CauseContext.Scope scope) {
-        if (scope != null) avilixlogger$causeScopes.addLast(scope);
+        if (scope == null) return;
+
+        // Mixin does not guarantee that an instance field initializer is copied into every
+        // target constructor. Initialise lazily so interactions can never fail with an NPE.
+        if (avilixlogger$causeScopes == null) {
+            avilixlogger$causeScopes = new ArrayDeque<>();
+        }
+        avilixlogger$causeScopes.addLast(scope);
     }
 
     @Unique
     private void avilixlogger$pop() {
+        if (avilixlogger$causeScopes == null) return;
         CauseContext.Scope scope = avilixlogger$causeScopes.pollLast();
         if (scope != null) scope.close();
     }

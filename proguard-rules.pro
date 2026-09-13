@@ -9,6 +9,14 @@
 -adaptclassstrings
 -adaptresourcefilecontents META-INF/services/**
 
+# java.lang.Class obtains enum constants by reflectively invoking the generated values()
+# method. Renaming it makes EnumMap/EnumSet see a null key universe and crash at runtime.
+# Enum class names and constants may still be obfuscated; only the JVM contract methods stay.
+-keepclassmembers enum com.roften.avilixlogger.** {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
 # Entrypoints resolved by NeoForge or by explicit reflection in the common network layer.
 -keepnames class com.roften.avilixlogger.AvilixLoggerMod
 -keep class com.roften.avilixlogger.client.ClientBootstrap {

@@ -78,7 +78,7 @@ public final class AvilixLoggerMod {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         if (AuthCoreBridge.isAuthorized(player.getServer())) return;
         player.sendSystemMessage(Component.literal(
-                        "[Avilix Logger] Этот сервер использует чужую или украденную копию мода. Все механики Logger отключены.")
+                        "[Avilix Logger] AvilixAuthCore не подтвердил авторизацию. Все механики Logger отключены.")
                 .withStyle(ChatFormatting.RED));
     }
 

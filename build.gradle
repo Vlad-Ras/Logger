@@ -237,6 +237,37 @@ tasks.register('obfuscateJar', proguard.gradle.ProGuardTask) {
     printseeds proguardSeeds
 }
 
+tasks.register('verifyObfuscatedJar') {
+    group = 'verification'
+    description = 'Checks runtime-sensitive enum metadata in the obfuscated release JAR.'
+    dependsOn tasks.named('obfuscateJar')
+
+    doLast {
+        def mappingText = proguardMapping.get().asFile.getText('UTF-8')
+        def actionTypeMapping = mappingText =~ /(?m)^com\.roften\.avilixlogger\.core\.ActionType -> ([\w.$]+):$/
+        if (!actionTypeMapping.find()) {
+            throw new GradleException('ActionType is missing from the ProGuard mapping')
+        }
+
+        def actionTypeName = actionTypeMapping.group(1)
+        def jarUrl = releaseJar.get().asFile.toURI().toURL()
+        def loader = new URLClassLoader([jarUrl] as URL[], ClassLoader.getPlatformClassLoader())
+        try {
+            def actionType = Class.forName(actionTypeName, true, loader)
+            def constants = actionType.getEnumConstants()
+            if (!actionType.isEnum() || constants == null || constants.length == 0) {
+                throw new GradleException('ProGuard broke ActionType enum reflection required by EnumMap/EnumSet')
+            }
+        } finally {
+            loader.close()
+        }
+    }
+}
+
 tasks.named('assemble').configure {
     dependsOn tasks.named('obfuscateJar')
+}
+
+tasks.named('check').configure {
+    dependsOn tasks.named('verifyObfuscatedJar')
 }
