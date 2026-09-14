@@ -16,7 +16,6 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.UUID;
@@ -29,9 +28,10 @@ import java.util.UUID;
 @Mixin(targets = "immersive_aircraft.entity.VehicleEntity")
 public class VehicleEntityMixin {
 
-    @Unique private Player avilixlogger$lastPlayer = null;
-    @Unique private String avilixlogger$owner = null;
-    @Unique private String avilixlogger$ownerName = null;
+    @Unique private Player avilixlogger$lastPlayer;
+    @Unique private String avilixlogger$owner;
+    @Unique private String avilixlogger$ownerName;
+    @Unique private boolean avilixlogger$removalLogged;
 
     @Inject(method = "hurt", at = @At(value = "HEAD"), require = 0)
     private void avilixlogger$captureActor(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
@@ -67,36 +67,39 @@ public class VehicleEntityMixin {
         } catch (Throwable ignored) {}
     }
 
-    @Redirect(method = "hurt", at = @At(value = "INVOKE", target = "Limmersive_aircraft/entity/VehicleEntity;discard()V"), require = 0)
-    private void avilixlogger$noteBreakCreative(@Coerce Object instance) {
-        try {
-            if (LoggerConfig.isEnabled() && this.avilixlogger$lastPlayer != null) {
-                ActorTracker.note(((Entity) instance).getUUID(), this.avilixlogger$lastPlayer.getUUID(), this.avilixlogger$lastPlayer.getName().getString());
-                try {
-                    var e = (Entity) instance;
-                    if (!e.level().isClientSide && e.level() instanceof net.minecraft.server.level.ServerLevel sl) {
-                        AirplanesCompatHooks.logRemoval(sl, this.avilixlogger$lastPlayer, e, "creative");
-                    }
-                } catch (Throwable ignored2) {}
-            }
-        } catch (Throwable ignored) {}
-        ((Entity) instance).discard();
+    @Inject(method = "hurt", at = @At("RETURN"), require = 0)
+    private void avilixlogger$afterHurt(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
+        String reason = this.avilixlogger$lastPlayer != null
+                && this.avilixlogger$lastPlayer.getAbilities().instabuild ? "creative" : "damage";
+        avilixlogger$logRemovalIfNeeded(reason);
     }
 
-    @Redirect(method = "applyDamage", at = @At(value = "INVOKE", target = "Limmersive_aircraft/entity/VehicleEntity;discard()V"), require = 0)
-    private void avilixlogger$noteBreakSurvival(@Coerce Object instance) {
+    // Immersive Aircraft 1.4.6: private void applyDamage(float amount, boolean force).
+    // A RETURN injection avoids the invalid @Redirect receiver signature that prevented the
+    // complete VehicleEntity mixin from loading on the dedicated server.
+    @Inject(method = "applyDamage(FZ)V", at = @At("RETURN"), require = 0)
+    private void avilixlogger$afterApplyDamage(float amount, boolean force, CallbackInfo ci) {
+        avilixlogger$logRemovalIfNeeded("damage");
+    }
+
+    @Unique
+    private void avilixlogger$logRemovalIfNeeded(String reason) {
         try {
-            if (LoggerConfig.isEnabled() && this.avilixlogger$lastPlayer != null) {
-                ActorTracker.note(((Entity) instance).getUUID(), this.avilixlogger$lastPlayer.getUUID(), this.avilixlogger$lastPlayer.getName().getString());
-                try {
-                    var e = (Entity) instance;
-                    if (!e.level().isClientSide && e.level() instanceof net.minecraft.server.level.ServerLevel sl) {
-                        AirplanesCompatHooks.logRemoval(sl, this.avilixlogger$lastPlayer, e, "damage");
-                    }
-                } catch (Throwable ignored2) {}
+            if (this.avilixlogger$removalLogged || !LoggerConfig.isEnabled()
+                    || this.avilixlogger$lastPlayer == null) return;
+
+            Entity vehicle = (Entity) (Object) this;
+            if (!vehicle.isRemoved()) return;
+
+            this.avilixlogger$removalLogged = true;
+            ActorTracker.note(vehicle.getUUID(), this.avilixlogger$lastPlayer.getUUID(),
+                    this.avilixlogger$lastPlayer.getName().getString());
+            if (!vehicle.level().isClientSide
+                    && vehicle.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                AirplanesCompatHooks.logRemoval(serverLevel, this.avilixlogger$lastPlayer,
+                        vehicle, reason == null ? "damage" : reason);
             }
         } catch (Throwable ignored) {}
-        ((Entity) instance).discard();
     }
 
     @Redirect(method = "interact", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;startRiding(Lnet/minecraft/world/entity/Entity;)Z"), require = 0)

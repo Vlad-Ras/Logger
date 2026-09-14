@@ -27,6 +27,6 @@ jobs:
       - name: Upload AvilixLogger JAR
         uses: actions/upload-artifact@v4
         with:
-          name: AvilixLogger-2.1.6
-          path: build/libs/avilixlogger-2.1.6.jar
+          name: AvilixLogger-2.1.7
+          path: build/libs/avilixlogger-2.1.7.jar
           if-no-files-found: error

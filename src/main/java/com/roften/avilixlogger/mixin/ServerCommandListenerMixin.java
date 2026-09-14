@@ -19,7 +19,7 @@ public abstract class ServerCommandListenerMixin {
     @Shadow public ServerPlayer player;
 
     @Unique
-    private final Deque<CauseContext.Scope> avilixlogger$commandScopes = new ArrayDeque<>();
+    private Deque<CauseContext.Scope> avilixlogger$commandScopes;
 
     @Inject(method = "performUnsignedChatCommand", at = @At("HEAD"), require = 0)
     private void avilixlogger$beforeUnsignedExecution(String command, CallbackInfo ci) {
@@ -50,12 +50,21 @@ public abstract class ServerCommandListenerMixin {
     @Unique
     private void avilixlogger$pushCommandCause() {
         if (player == null) return;
-        avilixlogger$commandScopes.addLast(CauseContext.push(player, CauseContext.Kind.COMMAND,
-                player.blockPosition(), player.getMainHandItem()));
+        CauseContext.Scope scope = CauseContext.push(player, CauseContext.Kind.COMMAND,
+                player.blockPosition(), player.getMainHandItem());
+        if (scope == null) return;
+
+        // Target constructors do not reliably execute mixin instance field initializers.
+        // Lazily create the deque before the first command on this connection.
+        if (avilixlogger$commandScopes == null) {
+            avilixlogger$commandScopes = new ArrayDeque<>();
+        }
+        avilixlogger$commandScopes.addLast(scope);
     }
 
     @Unique
     private void avilixlogger$popCommandCause() {
+        if (avilixlogger$commandScopes == null) return;
         CauseContext.Scope scope = avilixlogger$commandScopes.pollLast();
         if (scope != null) scope.close();
     }

@@ -264,10 +264,28 @@ tasks.register('verifyObfuscatedJar') {
     }
 }
 
+tasks.register('verifyMixinSafety') {
+    group = 'verification'
+    description = 'Rejects instance collection initializers that Mixin may omit from target constructors.'
+
+    doLast {
+        def unsafePattern = ~/(?s)@Unique\s+private\s+final\s+(?:Deque|Queue|List|Set|Map)<[^;]+?=\s*new\s+/
+        def unsafeFiles = fileTree('src/main/java') {
+            include '**/*Mixin.java'
+        }.findAll { unsafePattern.matcher(it.getText('UTF-8')).find() }
+
+        if (!unsafeFiles.isEmpty()) {
+            throw new GradleException('Unsafe mixin instance collection initializer(s): '
+                    + unsafeFiles.collect { project.relativePath(it) }.join(', '))
+        }
+    }
+}
+
 tasks.named('assemble').configure {
     dependsOn tasks.named('obfuscateJar')
 }
 
 tasks.named('check').configure {
     dependsOn tasks.named('verifyObfuscatedJar')
+    dependsOn tasks.named('verifyMixinSafety')
 }
