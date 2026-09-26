@@ -130,6 +130,7 @@ public final class RollbackEngine {
         while (true) {
             q.beforeId = beforeId;
             q.limit = PAGE;
+            q.requireDetails = true;
             List<LogEntry> batch = LoggerRuntime.storage(level).queryReverse(q);
             if (batch.isEmpty()) break;
 

@@ -36,34 +36,70 @@ public final class ChatLogPager {
         q.beforeId = state.currentBeforeId();
 
         // Probe one extra record to know if there is a next page.
-        // If owner filtering is enabled, we need to overfetch because filtering happens after DB read.
+        // Sparse post-filters (owner/block/name) must scan several bounded chunks; otherwise
+        // commands like /log --t 2h --r 0 --m planes --owner X can show false empty pages.
         int desired = size + 1;
-        int fetchLimit = desired;
-        if (q.owner != null && !q.owner.isBlank()) {
-            fetchLimit = Math.min(2000, desired * 20);
-        }
+        boolean hasPostFilters = hasPostFilters(q);
+        int fetchLimit = hasPostFilters ? Math.min(5000, Math.max(desired * 25, 500)) : desired;
         q.limit = fetchLimit;
 
-        List<LogEntry> raw = LoggerRuntime.storage(level).queryReverse(q);
-        if (raw == null) raw = List.of();
-
-        // Post-filter (planes owner filter): keep stable ordering.
         List<LogEntry> filtered;
-        if (q.owner != null && !q.owner.isBlank()) {
-            filtered = new ArrayList<>(Math.min(desired, raw.size()));
-            for (LogEntry e : raw) {
-                if (PlaneLogFilters.matchesOwner(e, q.owner)) {
-                    filtered.add(e);
-                    if (filtered.size() >= desired) break;
+        boolean exhausted = false;
+        boolean brokeEarly = false;
+        boolean timedOut = false;
+        long budgetMs = q.softBudgetMs > 0 ? Math.max(1500L, q.softBudgetMs) : 6000L;
+        if (hasPostFilters) {
+            filtered = new ArrayList<>(desired);
+            long scanBeforeId = q.beforeId;
+            int passes = 0;
+            long deadlineNs = System.nanoTime() + budgetMs * 1_000_000L;
+            while (passes < 10 && filtered.size() < desired) {
+                if (System.nanoTime() >= deadlineNs) {
+                    timedOut = true;
+                    brokeEarly = true;
+                    break;
+                }
+                LogQuery pageQ = q.copy();
+                pageQ.beforeId = scanBeforeId;
+                long queryStartedNs = System.nanoTime();
+                List<LogEntry> raw = LoggerRuntime.storage(level).queryReverse(pageQ);
+                long queryElapsedMs = (System.nanoTime() - queryStartedNs) / 1_000_000L;
+                if (queryElapsedMs >= budgetMs) {
+                    timedOut = true;
+                    brokeEarly = true;
+                }
+                if (raw == null || raw.isEmpty()) {
+                    exhausted = !timedOut;
+                    break;
+                }
+                for (LogEntry e : raw) {
+                    if (matchesPostFilters(e, q)) {
+                        filtered.add(e);
+                        if (filtered.size() >= desired) break;
+                    }
+                }
+                scanBeforeId = raw.get(raw.size() - 1).id;
+                passes++;
+                if (raw.size() < pageQ.limit) {
+                    exhausted = true;
+                    break;
                 }
             }
         } else {
-            filtered = raw;
+            long queryStartedNs = System.nanoTime();
+            filtered = LoggerRuntime.storage(level).queryReverse(q);
+            long queryElapsedMs = (System.nanoTime() - queryStartedNs) / 1_000_000L;
+            if (queryElapsedMs >= budgetMs) {
+                timedOut = true;
+                brokeEarly = true;
+            }
+            if (filtered == null) filtered = List.of();
+            exhausted = timedOut ? false : filtered.size() < fetchLimit;
         }
 
-        boolean hasNext = filtered.size() > size;
+        boolean hasNext = filtered.size() > size || (hasPostFilters && !exhausted) || brokeEarly;
         List<LogEntry> page = filtered;
-        if (hasNext) page = new ArrayList<>(filtered.subList(0, size));
+        if (filtered.size() > size) page = new ArrayList<>(filtered.subList(0, size));
 
         long nextCursorCandidate = 0L;
         if (!page.isEmpty()) {
@@ -79,9 +115,17 @@ public final class ChatLogPager {
         player.sendSystemMessage(header);
 
         if (page.isEmpty()) {
-            player.sendSystemMessage(Component.literal("Нет записей.").withStyle(ChatFormatting.GRAY));
+            if (timedOut) {
+                player.sendSystemMessage(Component.literal("Не удалось получить информацию: запрос обрабатывался слишком долго и не вернул данные. Сузь время, радиус, тип, игрока или повтори запрос.").withStyle(ChatFormatting.YELLOW));
+            } else {
+                player.sendSystemMessage(Component.literal("Нет записей.").withStyle(ChatFormatting.GRAY));
+            }
             renderNav(player, state);
             return;
+        }
+
+        if (timedOut) {
+            player.sendSystemMessage(Component.literal("Часть информации могла не загрузиться: запрос обрабатывался слишком долго. Сузь фильтры для полного результата.").withStyle(ChatFormatting.YELLOW));
         }
 
         for (LogEntry e : page) {
@@ -89,6 +133,39 @@ public final class ChatLogPager {
         }
 
         renderNav(player, state);
+    }
+
+    private static boolean hasPostFilters(LogQuery q) {
+        if (q == null) return false;
+        return (q.owner != null && !q.owner.isBlank())
+                || (q.blockIdFilter != null && !q.blockIdFilter.isBlank())
+                || (q.planeNameFilter != null && !q.planeNameFilter.isBlank())
+                || (q.extraTextFilter != null && !q.extraTextFilter.isBlank());
+    }
+
+    private static boolean matchesPostFilters(LogEntry e, LogQuery q) {
+        if (e == null || q == null) return false;
+        if (q.owner != null && !q.owner.isBlank() && !PlaneLogFilters.matchesOwner(e, q.owner)) return false;
+        String block = normalizeNeedle(q.blockIdFilter);
+        if (!block.isBlank() && !containsAny(e, block, e.blockBefore, e.blockAfter, e.source, e.extra)) return false;
+        String plane = normalizeNeedle(q.planeNameFilter);
+        if (!plane.isBlank() && !containsAny(e, plane, e.entityType, e.entityNbt, e.source, e.extra)) return false;
+        String text = normalizeNeedle(q.extraTextFilter);
+        if (!text.isBlank() && !containsAny(e, text, e.source, e.extra, e.entityType, e.itemStackNbt)) return false;
+        return true;
+    }
+
+    private static boolean containsAny(LogEntry e, String needle, String... values) {
+        if (needle == null || needle.isBlank()) return true;
+        if (values == null) return false;
+        for (String value : values) {
+            if (value != null && value.toLowerCase(java.util.Locale.ROOT).contains(needle)) return true;
+        }
+        return false;
+    }
+
+    private static String normalizeNeedle(String s) {
+        return s == null ? "" : s.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     private static void renderNav(ServerPlayer player, LastQueryManager.State state) {

@@ -73,6 +73,16 @@ public final class LoggerConfig {
         public final ModConfigSpec.BooleanValue logContainers;
         public final ModConfigSpec.BooleanValue logItemCraftSmelt;
         public final ModConfigSpec.BooleanValue logChat;
+        public final ModConfigSpec.BooleanValue logPlayerLifecycle;
+        public final ModConfigSpec.BooleanValue logItemUse;
+        public final ModConfigSpec.BooleanValue logItemConsume;
+        public final ModConfigSpec.BooleanValue logItemUsePhases;
+        public final ModConfigSpec.BooleanValue logProjectileShots;
+        public final ModConfigSpec.BooleanValue logProjectileHits;
+        public final ModConfigSpec.BooleanValue logGuiOpen;
+        public final ModConfigSpec.BooleanValue logEntityAttacks;
+        public final ModConfigSpec.BooleanValue logGenericBlockUse;
+        public final ModConfigSpec.IntValue genericActionCooldownMs;
         public final ModConfigSpec.IntValue interactionScanTicks;
         public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInDeltaLogs;
         public final ModConfigSpec.BooleanValue storeVerboseBeSnapshotsInInteractLogs;
@@ -189,6 +199,26 @@ public final class LoggerConfig {
             logItemCraftSmelt = b.define("logItemCraftSmelt", true);
             logChat = b.comment("Log chat messages (vanilla server chat packets).")
                     .define("logChat", true);
+            logPlayerLifecycle = b.comment("Log low-noise player lifecycle events: dimension change and respawn.")
+                    .define("logPlayerLifecycle", true);
+            logItemUse = b.comment("Log right-click item use. Protected by genericActionCooldownMs to prevent spam.")
+                    .define("logItemUse", true);
+            logItemConsume = b.comment("Log finished item usage such as eating/drinking/consuming.")
+                    .define("logItemConsume", true);
+            logItemUsePhases = b.comment("Log long item use phases: bow/crossbow charge/release, drinking potions, shields and similar hold-use actions.")
+                    .define("logItemUsePhases", true);
+            logProjectileShots = b.comment("Log player projectile launches: arrows, crossbow shots, thrown potions, tridents, snowballs and similar projectiles.")
+                    .define("logProjectileShots", true);
+            logProjectileHits = b.comment("Log projectile impacts/hits when NeoForge exposes ProjectileImpactEvent or damage source data.")
+                    .define("logProjectileHits", true);
+            logGuiOpen = b.comment("Log non-container GUI/menu opens such as crafting table, anvil, villager trading and modded menus. Container opens stay under CONTAINER_OPEN.")
+                    .define("logGuiOpen", true);
+            logEntityAttacks = b.comment("Log player attacks on entities. Protected by genericActionCooldownMs to prevent combat spam.")
+                    .define("logEntityAttacks", true);
+            logGenericBlockUse = b.comment("Log right-click block use even when the block state does not change. Useful for audits, but noisy; protected by genericActionCooldownMs.")
+                    .define("logGenericBlockUse", true);
+            genericActionCooldownMs = b.comment("Per-player cooldown for generic ITEM_USE/BLOCK_USE/ENTITY_ATTACK logs. Keeps expanded logging from flooding ClickHouse.")
+                    .defineInRange("genericActionCooldownMs", 500, 0, 10000);
             interactionScanTicks = b.comment("How many delayed ticks to watch after block interaction for state/NBT changes. Lower = less TPS impact.")
                     .defineInRange("interactionScanTicks", 1, 1, 10);
             storeVerboseBeSnapshotsInDeltaLogs = b.comment("Store full before/after block-entity NBT inside each CONTAINER_PUT/CONTAINER_TAKE delta log. Disabling removes large duplicate payloads.")
