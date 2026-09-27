@@ -24,6 +24,10 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew build
 
+      - name: Smoke test dedicated server with AE2
+        timeout-minutes: 10
+        run: ./gradlew runGameTestServer
+
       - name: Upload AvilixLogger JAR
         uses: actions/upload-artifact@v4
         with:

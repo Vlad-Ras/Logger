@@ -32,11 +32,20 @@ public abstract class SetStockAmountMenuMixin {
     private void avilixlogger$after(int amount, CallbackInfo ci) {
         ItemStack before = avilixlogger$previous;
         avilixlogger$previous = null;
-        if (before != null) Ae2Audit.stockAmount((AEBaseMenu) (Object) this, slot, before, snapshot());
+        if (before != null) {
+            try {
+                Ae2Audit.stockAmount((AEBaseMenu) (Object) this, slot, before, snapshot());
+            } catch (Throwable ignored) {
+                // Stock amount still changes even if the audit backend is unavailable.
+            }
     }
 
     private ItemStack snapshot() {
-        GenericStack current = host.getInterfaceLogic().getConfig().getStack(slot);
-        return current == null ? ItemStack.EMPTY : GenericStack.wrapInItemStack(current);
+        try {
+            GenericStack current = host.getInterfaceLogic().getConfig().getStack(slot);
+            return current == null ? ItemStack.EMPTY : GenericStack.wrapInItemStack(current);
+        } catch (Throwable ignored) {
+            return ItemStack.EMPTY;
+        }
     }
 }

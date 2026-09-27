@@ -24,7 +24,11 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
     @Override
     public void avilixlogger$beforeAction() {
         if (avilixlogger$depth++ == 0) {
-            avilixlogger$before = Ae2Audit.capture((AEBaseMenu) (Object) this);
+            try {
+                avilixlogger$before = Ae2Audit.capture((AEBaseMenu) (Object) this);
+            } catch (Throwable ignored) {
+                avilixlogger$before = null;
+            }
         }
     }
 
@@ -34,7 +38,11 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
         if (--avilixlogger$depth == 0) {
             Ae2Audit.Snapshot snapshot = avilixlogger$before;
             avilixlogger$before = null;
-            Ae2Audit.compare((AEBaseMenu) (Object) this, snapshot);
+            try {
+                Ae2Audit.compare((AEBaseMenu) (Object) this, snapshot);
+            } catch (Throwable ignored) {
+                // A logger failure must not reject the original AE2 inventory packet.
+            }
         }
     }
 

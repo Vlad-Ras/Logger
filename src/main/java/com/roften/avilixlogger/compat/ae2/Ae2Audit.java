@@ -6,6 +6,7 @@ import java.util.Map;
 import appeng.api.config.Actionable;
 import appeng.api.networking.security.IActionHost;
 import appeng.api.networking.security.IActionSource;
+import appeng.api.networking.IGridNode;
 import appeng.api.stacks.AEItemKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.GenericStack;
@@ -47,7 +48,11 @@ public final class Ae2Audit {
     }
 
     public static boolean enabled() {
-        return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logAe2.get();
+        try {
+            return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logAe2.get();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     /** The returned amount, never the simulated/requested amount, is what entered the ME network. */
@@ -64,7 +69,7 @@ public final class Ae2Audit {
                     ? sl : player != null && player.level() instanceof ServerLevel sl ? sl : null;
             if (level == null) return;
             BlockPos pos = machineBlock != null ? machineBlock.getBlockPos() : targetPos(player);
-            String origin = machine != null ? machine.getClass().getSimpleName() : "terminal";
+            String origin = machine != null ? machineName(machine) : "terminal";
             LogEntry e = entry(level, pos, player, insert ? ActionType.ME_PUT : ActionType.ME_TAKE,
                     "ae2:" + origin);
             if (key instanceof AEItemKey item) {
@@ -75,7 +80,7 @@ public final class Ae2Audit {
                 e.extra = key.getDisplayName().getString() + " [" + key.getId() + "] " + amount + " mB";
             }
             LoggerRuntime.storage(level).append(e);
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
             // Audit must not prevent an AE2 transfer if a third-party key refuses to serialize.
         }
     }
@@ -83,7 +88,23 @@ public final class Ae2Audit {
     private static BlockEntity blockEntity(IActionHost machine) {
         if (machine instanceof BlockEntity be) return be;
         if (machine instanceof AEBasePart part) return part.getBlockEntity();
+        // InterfaceLogic uses a lambda IActionHost backed by a grid node. The node owner
+        // identifies the actual interface or bus; otherwise its automated transfers vanish.
+        try {
+            IGridNode node = machine == null ? null : machine.getActionableNode();
+            Object owner = node == null ? null : node.getOwner();
+            if (owner instanceof BlockEntity be) return be;
+            if (owner instanceof AEBasePart part) return part.getBlockEntity();
+        } catch (Throwable ignored) {}
         return null;
+    }
+
+    private static String machineName(IActionHost machine) {
+        try {
+            IGridNode node = machine.getActionableNode();
+            if (node != null && node.getOwner() != null) return node.getOwner().getClass().getSimpleName();
+        } catch (Throwable ignored) {}
+        return machine.getClass().getSimpleName();
     }
 
     private static BlockPos targetPos(ServerPlayer player) {
@@ -137,7 +158,7 @@ public final class Ae2Audit {
             Map<String, String> settings = menu.getTarget() instanceof IConfigurableObject configurable
                     ? new HashMap<>(configurable.getConfigManager().exportSettings()) : Map.of();
             return new Snapshot(slots, settings);
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
             return null;
         }
     }
