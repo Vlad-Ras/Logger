@@ -38,6 +38,7 @@ public abstract class SetStockAmountMenuMixin {
             } catch (Throwable ignored) {
                 // Stock amount still changes even if the audit backend is unavailable.
             }
+        }
     }
 
     private ItemStack snapshot() {
