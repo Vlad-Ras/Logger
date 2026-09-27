@@ -74,5 +74,13 @@ public enum ActionType {
     ITEM_USE_STOP,
     PROJECTILE_SHOOT,
     PROJECTILE_HIT,
-    GUI_OPEN
+    GUI_OPEN,
+
+    // Append-only: Applied Energistics 2 audits (not automatically reversible).
+    ME_PUT,
+    ME_TAKE,
+    ME_UPGRADE_CHANGE,
+    ME_FILTER_CHANGE,
+    ME_SETTING_CHANGE,
+    ME_CELL_CHANGE
 }

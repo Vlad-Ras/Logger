@@ -61,6 +61,7 @@ public final class LoggerConfig {
         public final ModConfigSpec.BooleanValue logBlocks;
         public final ModConfigSpec.BooleanValue logEntities;
         public final ModConfigSpec.BooleanValue logContainers;
+        public final ModConfigSpec.BooleanValue logAe2;
         public final ModConfigSpec.BooleanValue logItemCraftSmelt;
         public final ModConfigSpec.BooleanValue logChat;
         public final ModConfigSpec.BooleanValue logPlayerLifecycle;
@@ -172,6 +173,8 @@ public final class LoggerConfig {
             logBlocks = b.define("logBlocks", true);
             logEntities = b.define("logEntities", true);
             logContainers = b.define("logContainers", true);
+            logAe2 = b.comment("Log AE2 network transfers, device inventories, upgrades, filters and settings. Requires AE2.")
+                    .define("logAe2", true);
             logItemCraftSmelt = b.define("logItemCraftSmelt", true);
             logChat = b.comment("Log chat messages (vanilla server chat packets).")
                     .define("logChat", true);

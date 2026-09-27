@@ -759,6 +759,12 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ENTITY_CONTAINER_OPEN,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_PUT,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_TAKE,
+                    com.roften.avilixlogger.core.ActionType.ME_PUT,
+                    com.roften.avilixlogger.core.ActionType.ME_TAKE,
+                    com.roften.avilixlogger.core.ActionType.ME_UPGRADE_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.ME_FILTER_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.ME_SETTING_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.ME_CELL_CHANGE,
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.GUI_OPEN
             );

@@ -125,6 +125,8 @@ configurations {
 }
 
 dependencies {
+    // Optional integration: never ship AE2 classes inside the logger JAR.
+    compileOnly 'org.appliedenergistics:appliedenergistics2:19.2.12'
     // --- ClickHouse backend ---
     // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.
 

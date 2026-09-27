@@ -738,7 +738,7 @@ public final class LoggerEventHandlers {
         // 3) Generic GUI/menu open fallback: crafting table/anvil/villager trade/modded menus.
         // Containers already logged above as CONTAINER_OPEN/ENTITY_CONTAINER_OPEN, so do not duplicate them.
         if (!trackedMenu) {
-            if (wantContainers) {
+            if (wantContainers && !isAe2Menu(event.getContainer())) {
                 try {
                     var menu = event.getContainer();
                     String before = GenericMenuSnapshot.write(menu, level.registryAccess());
@@ -909,6 +909,10 @@ public final class LoggerEventHandlers {
         } catch (Throwable ignored) {}
 
         ContainerCtx ctx = OPEN_CONTAINER.remove(sp.getUUID());
+        // AE2 changes are audited at the successful transfer/menu-action boundary. A BE
+        // snapshot on close would double-count cell/upgrade changes and falsely attribute
+        // changes caused by an import/export bus while someone merely had its GUI open.
+        if (isAe2Menu(event.getContainer())) return;
         if (ctx == null) return;
         if (!ctx.dim.equals(level.dimension().location().toString())) return;
 
@@ -951,6 +955,13 @@ public final class LoggerEventHandlers {
         }
         e.extra = "container change " + BuiltInRegistries.BLOCK.getKey(level.getBlockState(ctx.pos).getBlock());
         LoggerRuntime.storage(level).append(e);
+    }
+
+    private static boolean isAe2Menu(Object menu) {
+        for (Class<?> type = menu == null ? null : menu.getClass(); type != null; type = type.getSuperclass()) {
+            if (type.getName().equals("appeng.menu.AEBaseMenu")) return true;
+        }
+        return false;
     }
 
     /**

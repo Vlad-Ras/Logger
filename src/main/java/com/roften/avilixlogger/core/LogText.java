@@ -173,7 +173,9 @@ public final class LogText {
                 || t == ActionType.ITEM_USE
                 || t == ActionType.ITEM_USE_START
                 || t == ActionType.ITEM_USE_STOP
-                || t == ActionType.ITEM_CONSUME;
+                || t == ActionType.ITEM_CONSUME
+                || t == ActionType.ME_PUT
+                || t == ActionType.ME_TAKE;
     }
 
     private static ChatFormatting actionColor(ActionType t) {
@@ -186,6 +188,9 @@ public final class LogText {
 
             case CONTAINER_PUT, ITEM_PICKUP, ITEM_CRAFT, ITEM_SMELT, ITEM_CONSUME, ITEM_USE_START, PROJECTILE_SHOOT -> ChatFormatting.GREEN;
             case CONTAINER_TAKE, ITEM_DROP, ITEM_USE_STOP -> ChatFormatting.RED;
+            case ME_PUT -> ChatFormatting.GREEN;
+            case ME_TAKE -> ChatFormatting.RED;
+            case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE -> ChatFormatting.YELLOW;
 
             case PLAYER_JOIN, PLAYER_RESPAWN, PLAYER_DIMENSION_CHANGE, GUI_OPEN -> ChatFormatting.GREEN;
             case PLAYER_LEAVE -> ChatFormatting.RED;
@@ -227,6 +232,12 @@ public final class LogText {
 
             case CONTAINER_PUT -> "положил";
             case CONTAINER_TAKE -> "достал";
+            case ME_PUT -> "положил в МЭ";
+            case ME_TAKE -> "забрал из МЭ";
+            case ME_UPGRADE_CHANGE -> "изменил улучшение МЭ";
+            case ME_FILTER_CHANGE -> "изменил фильтр МЭ";
+            case ME_SETTING_CHANGE -> "изменил настройку МЭ";
+            case ME_CELL_CHANGE -> "изменил ячейку МЭ";
 
             case ITEM_PICKUP -> "подобрал";
             case ITEM_DROP -> "выбросил";
@@ -285,6 +296,12 @@ public final class LogText {
             // container/item diffs
             case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
                     itemNameComponent(level, e.itemStackNbt);
+            case ME_PUT, ME_TAKE -> {
+                MutableComponent item = itemNameComponent(level, e.itemStackNbt);
+                yield item != null ? item : Component.literal(e.extra != null ? e.extra : "ресурс МЭ");
+            }
+            case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE ->
+                    Component.literal(e.extra != null ? e.extra : "устройство МЭ");
 
             // schedule: и забрал, и поставил показываем предметом
             case TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT ->

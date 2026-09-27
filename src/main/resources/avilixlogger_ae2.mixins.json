@@ -1,0 +1,15 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.ae2.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "NetworkStorageMixin",
+    "StorageHelperMixin",
+    "AEBaseMenuMixin",
+    "ConfigButtonPacketMixin",
+    "SetStockAmountMenuMixin"
+  ],
+  "client": [],
+  "injectors": { "defaultRequire": 0 }
+}
