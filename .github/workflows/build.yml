@@ -26,7 +26,22 @@ jobs:
 
       - name: Smoke test dedicated server with AE2
         timeout-minutes: 10
-        run: ./gradlew runGameTestServer
+        run: |
+          mkdir -p run
+          printf 'eula=true\n' > run/eula.txt
+          # runServer is intentionally long-lived. A GameTestServer without registered
+          # tests exits before reaching server startup while Gradle still reports success.
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
+          tail -n 100 ae2-smoke.log
+          if ! grep -qE 'Done \([0-9]+([.][0-9]+)?s\)!' ae2-smoke.log; then
+            echo 'Dedicated server did not finish loading with AE2.' >&2
+            exit 1
+          fi
+          if grep -qE '(Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then
+            echo 'Dedicated server reported a fatal loading error.' >&2
+            exit 1
+          fi
+          echo 'Dedicated server started with AE2 and AvilixLogger.'
 
       - name: Upload AvilixLogger JAR
         uses: actions/upload-artifact@v4

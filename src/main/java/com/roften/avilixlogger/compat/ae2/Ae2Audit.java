@@ -29,22 +29,46 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 /** Optional AE2 integration. All entry points run on the server thread, after a real mutation. */
 public final class Ae2Audit {
-    private static final ThreadLocal<Integer> POWERED_DEPTH = ThreadLocal.withInitial(() -> 0);
+    // A third-party storage can throw from a powered transfer before its RETURN hook runs.
+    // Expiring such an orphaned scope avoids suppressing all later network audit entries
+    // for the life of the server thread.
+    private static final long POWERED_SCOPE_TIMEOUT_NANOS = 30_000_000_000L;
+    private static final ThreadLocal<PoweredScope> POWERED_SCOPE = new ThreadLocal<>();
+
+    private static final class PoweredScope {
+        int depth;
+        long lastTouched;
+    }
 
     private Ae2Audit() {}
 
     public static void enterPowered() {
-        POWERED_DEPTH.set(POWERED_DEPTH.get() + 1);
+        PoweredScope scope = activeScope();
+        if (scope == null) {
+            scope = new PoweredScope();
+            POWERED_SCOPE.set(scope);
+        }
+        scope.depth++;
+        scope.lastTouched = System.nanoTime();
     }
 
     public static void leavePowered() {
-        int next = POWERED_DEPTH.get() - 1;
-        if (next <= 0) POWERED_DEPTH.remove();
-        else POWERED_DEPTH.set(next);
+        PoweredScope scope = activeScope();
+        if (scope == null || --scope.depth <= 0) POWERED_SCOPE.remove();
+        else scope.lastTouched = System.nanoTime();
     }
 
     public static boolean insidePowered() {
-        return POWERED_DEPTH.get() > 0;
+        return activeScope() != null;
+    }
+
+    private static PoweredScope activeScope() {
+        PoweredScope scope = POWERED_SCOPE.get();
+        if (scope != null && System.nanoTime() - scope.lastTouched > POWERED_SCOPE_TIMEOUT_NANOS) {
+            POWERED_SCOPE.remove();
+            return null;
+        }
+        return scope;
     }
 
     public static boolean enabled() {
