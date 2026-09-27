@@ -21,6 +21,7 @@ import com.roften.avilixlogger.core.NbtSerde;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -121,9 +122,9 @@ public final class Ae2Audit {
         try {
             for (int i = 0; i < menu.slots.size(); i++) {
                 Slot slot = menu.slots.get(i);
-                if (slot == null || menu.isPlayerSideSlot(slot)) continue;
+                if (slot == null || slot.container instanceof Inventory) continue;
                 SlotSemantic semantic = menu.getSlotSemantic(slot);
-                if (semantic == null) continue;
+                if (semantic == null || semantic.playerSide()) continue;
                 String id = semantic.id();
                 // Output/crafting slots can change while the menu is open without a player action.
                 if (!id.equals("UPGRADE") && !id.equals("CONFIG") && !id.equals("VIEW_CELL")
