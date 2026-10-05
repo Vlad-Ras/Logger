@@ -7,7 +7,11 @@
     "ServerLevelSetBlockMixin",
     "ServerChatListenerMixin",
     "ServerCommandListenerMixin",
-    "ServerPlayerGameModeCauseMixin"
+    "ServerPlayerGameModeCauseMixin",
+    "BlockEntityTickSourceMixin",
+    "EntityTickSourceMixin",
+    "SimulationSourceMixin",
+    "ChunkGenerationSourceMixin"
   ],
   "injectors": {
     "defaultRequire": 0

@@ -16,6 +16,10 @@ public final class EntityContainerSerde {
     private EntityContainerSerde() {}
 
     public static String write(Container c, HolderLookup.Provider provider) {
+        return NbtSerde.toSnbt(snapshot(c, provider));
+    }
+
+    public static CompoundTag snapshot(Container c, HolderLookup.Provider provider) {
         if (c == null) return null;
         try {
             CompoundTag root = new CompoundTag();
@@ -35,7 +39,7 @@ public final class EntityContainerSerde {
             }
             root.put("Items", items);
             root.putInt("Size", c.getContainerSize());
-            return NbtSerde.toSnbt(root);
+            return root.copy();
         } catch (Throwable t) {
             return null;
         }

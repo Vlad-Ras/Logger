@@ -76,18 +76,23 @@ public final class NbtSerde {
 
     /** Snapshot a block entity including its full metadata. */
     public static String writeBlockEntity(ServerLevel level, BlockEntity be) {
+        return toSnbt(snapshotBlockEntity(level, be));
+    }
+
+    /** Captures detached NBT on the world thread; SNBT encoding can run on a worker. */
+    public static CompoundTag snapshotBlockEntity(ServerLevel level, BlockEntity be) {
         if (be == null) return null;
 
         // Hot path for MC 1.21.x: avoid the reflection-heavy invokeBlockEntitySave chain.
         // Reflection fallback stays below for compatibility with mapping/API edge cases.
         try {
             CompoundTag tag = be.saveWithFullMetadata(level.registryAccess());
-            if (tag != null) return toSnbt(tag);
+            if (tag != null) return tag.copy();
         } catch (Throwable ignored) {
         }
 
         CompoundTag tag = invokeBlockEntitySave(level, be);
-        return toSnbt(tag);
+        return tag == null ? null : tag.copy();
     }
 
     /** Restore a block entity snapshot (must already exist at pos after state set). */
@@ -112,6 +117,10 @@ public final class NbtSerde {
 
     /** Entity snapshot without hard dependency on exact save signature. */
     public static String writeEntity(ServerLevel level, Entity ent) {
+        return toSnbt(snapshotEntity(level, ent));
+    }
+
+    public static CompoundTag snapshotEntity(ServerLevel level, Entity ent) {
         if (ent == null) return null;
         CompoundTag tag = new CompoundTag();
         try {
@@ -138,7 +147,7 @@ public final class NbtSerde {
             }
         } catch (Throwable ignored) {}
 
-        return toSnbt(tag);
+        return tag.copy();
     }
 
     public record EntityRestoreResult(boolean success, String reason, Entity entity, int affected) {
@@ -284,9 +293,19 @@ public final class NbtSerde {
     }
 
     public static String writeItemStack(ItemStack stack, HolderLookup.Provider provider) {
+        return toSnbt(snapshotItemStack(stack, provider));
+    }
+
+    public static CompoundTag snapshotItemStack(ItemStack stack, HolderLookup.Provider provider) {
         if (stack == null || stack.isEmpty()) return null;
+        if (canUseSimpleItemStackSnbt(stack)) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("id", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+            tag.putInt("count", stack.getCount());
+            return tag;
+        }
         CompoundTag tag = invokeItemStackSave(stack, provider);
-        return toSnbt(tag);
+        return tag == null ? null : tag.copy();
     }
 
     /**

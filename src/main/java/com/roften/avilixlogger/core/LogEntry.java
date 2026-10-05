@@ -58,4 +58,67 @@ public final class LogEntry {
 
     /** Free-form extra context (JSON string). */
     public String extra;
+
+    public enum SnapshotField { BE_BEFORE, BE_AFTER, ITEM, ENTITY, SLOTS_BEFORE, SLOTS_AFTER }
+    private transient java.util.EnumMap<SnapshotField, net.minecraft.nbt.Tag> snapshots;
+    private transient long snapshotBytes;
+
+    /** The supplied detached tag transfers ownership to this row; never pass live mod NBT. */
+    public void deferSnapshot(SnapshotField field, net.minecraft.nbt.Tag tag) {
+        if (tag == null) return;
+        if (snapshots == null) snapshots = new java.util.EnumMap<>(SnapshotField.class);
+        net.minecraft.nbt.Tag previous = snapshots.put(field, tag);
+        if (previous != null) snapshotBytes -= previous.sizeInBytes();
+        snapshotBytes += tag.sizeInBytes();
+    }
+
+    long snapshotBytes() { return snapshotBytes; }
+
+    public void materializeSnapshots() {
+        if (snapshots == null) return;
+        snapshots.forEach((field, tag) -> {
+            String snbt = tag.toString();
+            switch (field) {
+                case BE_BEFORE -> beBefore = snbt;
+                case BE_AFTER -> beAfter = snbt;
+                case ITEM -> itemStackNbt = snbt;
+                case ENTITY -> entityNbt = snbt;
+                case SLOTS_BEFORE -> containerSlotsBefore = snbt;
+                case SLOTS_AFTER -> containerSlotsAfter = snbt;
+            }
+        });
+        snapshots = null;
+        snapshotBytes = 0;
+    }
+
+    public LogEntry copyForQueue() {
+        LogEntry copy = new LogEntry();
+        copy.id = id;
+        copy.ts = ts;
+        copy.dim = dim;
+        copy.type = type;
+        copy.actorUuid = actorUuid;
+        copy.actorName = actorName;
+        copy.source = source;
+        copy.x = x;
+        copy.y = y;
+        copy.z = z;
+        copy.blockBefore = blockBefore;
+        copy.beBefore = beBefore;
+        copy.blockAfter = blockAfter;
+        copy.beAfter = beAfter;
+        copy.entityType = entityType;
+        copy.entityUuid = entityUuid;
+        copy.entityNbt = entityNbt;
+        copy.itemStackNbt = itemStackNbt;
+        copy.count = count;
+        copy.playerInvBefore = playerInvBefore;
+        copy.playerInvAfter = playerInvAfter;
+        copy.containerSlotsBefore = containerSlotsBefore;
+        copy.containerSlotsAfter = containerSlotsAfter;
+        copy.extra = extra;
+        if (snapshots != null) copy.snapshots = new java.util.EnumMap<>(snapshots);
+        copy.snapshotBytes = snapshotBytes;
+        return copy;
+    }
 }

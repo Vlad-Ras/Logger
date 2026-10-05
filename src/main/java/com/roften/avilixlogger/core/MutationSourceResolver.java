@@ -3,23 +3,37 @@ package com.roften.avilixlogger.core;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Resolves an arbitrary mod call-site without maintaining a hard-coded compatibility list. */
+/** Resolves explicit tick context and object classes without walking the server stack. */
 public final class MutationSourceResolver {
-    private static final StackWalker WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+    public static final String VANILLA_SIMULATION = "minecraft:simulation";
+    private static final ThreadLocal<String> CONTEXT = new ThreadLocal<>();
     private static final ConcurrentHashMap<String, String> CLASS_SOURCES = new ConcurrentHashMap<>();
     private static final String NONE = "";
 
     private MutationSourceResolver() {}
 
     public static String resolveExternalSource() {
-        try {
-            return WALKER.walk(frames -> frames.limit(64)
-                    .map(StackWalker.StackFrame::getClassName)
-                    .map(MutationSourceResolver::sourceForClass)
-                    .filter(source -> source != null && !source.isBlank())
-                    .findFirst().orElse(null));
-        } catch (Throwable ignored) {
-            return null;
+        return CONTEXT.get();
+    }
+
+    public static String sourceFor(Object object) {
+        return object == null ? null : sourceForClass(object.getClass().getName());
+    }
+
+    public static Scope push(String source) {
+        String previous = CONTEXT.get();
+        if (source == null) CONTEXT.remove(); else CONTEXT.set(source);
+        return new Scope(previous);
+    }
+
+    public static final class Scope implements AutoCloseable {
+        private final String previous;
+        private boolean closed;
+        private Scope(String previous) { this.previous = previous; }
+        public void close() {
+            if (closed) return;
+            closed = true;
+            if (previous == null) CONTEXT.remove(); else CONTEXT.set(previous);
         }
     }
 

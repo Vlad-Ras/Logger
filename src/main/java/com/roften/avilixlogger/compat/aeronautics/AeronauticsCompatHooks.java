@@ -42,7 +42,7 @@ public final class AeronauticsCompatHooks {
             String dim,
             BlockPos pos,
             String blockBefore,
-            String beBefore,
+            net.minecraft.nbt.CompoundTag beBefore,
             UUID actorUuid,
             String actorName,
             String source,
@@ -150,7 +150,7 @@ public final class AeronauticsCompatHooks {
                     level.dimension().location().toString(),
                     pos.immutable(),
                     NbtSerde.writeBlockState(state),
-                    be != null ? NbtSerde.writeBlockEntity(level, be) : null,
+                    be != null ? NbtSerde.snapshotBlockEntity(level, be) : null,
                     ar != null ? ar.actorUuid() : null,
                     ar != null ? ar.actorName() : null,
                     source,
@@ -168,66 +168,71 @@ public final class AeronauticsCompatHooks {
             BlockState afterState0 = level.getBlockState(before.pos);
             BlockEntity beAfter0 = level.getBlockEntity(before.pos);
             String afterState = NbtSerde.writeBlockState(afterState0);
-            String afterBe = beAfter0 != null ? NbtSerde.writeBlockEntity(level, beAfter0) : null;
+            var afterTag = beAfter0 != null ? NbtSerde.snapshotBlockEntity(level, beAfter0) : null;
+            final String afterBlockId = blockId(afterState0);
+            final var registryAccess = level.registryAccess();
+            final LogStorage storage = LoggerRuntime.storage(level);
+            final long timestamp = System.currentTimeMillis();
+            AsyncLogProcessor.submit(com.roften.avilixlogger.core.PayloadSizeEstimator.estimateTags(before.beBefore, afterTag), () -> {
+                String beforeBe = NbtSerde.toSnbt(before.beBefore);
+                String afterBe = NbtSerde.toSnbt(afterTag);
 
-            boolean stateChanged = before.blockBefore != null && afterState != null && !before.blockBefore.equals(afterState);
-            boolean beChanged = before.beBefore != null && afterBe != null && !before.beBefore.equals(afterBe);
-            if (!stateChanged && !beChanged) return;
+                boolean stateChanged = before.blockBefore != null && afterState != null && !before.blockBefore.equals(afterState);
+                boolean beChanged = beforeBe != null && afterBe != null && !beforeBe.equals(afterBe);
+                if (!stateChanged && !beChanged) return;
 
-            LogEntry e = new LogEntry();
-            e.ts = System.currentTimeMillis();
-            e.dim = before.dim;
-            e.type = stateChanged ? ActionType.BLOCK_INTERACT : ActionType.BLOCK_ENTITY_NBT_CHANGE;
-            e.actorUuid = before.actorUuid;
-            e.actorName = before.actorName != null && !before.actorName.isBlank() ? before.actorName : "Aeronautics";
-            e.x = before.pos.getX();
-            e.y = before.pos.getY();
-            e.z = before.pos.getZ();
-            e.blockBefore = before.blockBefore;
-            e.beBefore = before.beBefore;
-            e.blockAfter = afterState;
-            e.beAfter = afterBe;
-            e.source = source != null ? source : before.source;
-            e.extra = json("aeronautics_block_change", reason, blockId(afterState0), null, null, null);
-            LoggerRuntime.storage(level).append(e);
+                LogEntry e = new LogEntry();
+                e.ts = timestamp;
+                e.dim = before.dim;
+                e.type = stateChanged ? ActionType.BLOCK_INTERACT : ActionType.BLOCK_ENTITY_NBT_CHANGE;
+                e.actorUuid = before.actorUuid;
+                e.actorName = before.actorName != null && !before.actorName.isBlank() ? before.actorName : "Aeronautics";
+                e.x = before.pos.getX();
+                e.y = before.pos.getY();
+                e.z = before.pos.getZ();
+                e.blockBefore = before.blockBefore;
+                e.beBefore = beforeBe;
+                e.blockAfter = afterState;
+                e.beAfter = afterBe;
+                e.source = source != null ? source : before.source;
+                e.extra = json("aeronautics_block_change", reason, afterBlockId, null, null, null);
+                storage.append(e);
 
-            if (beChanged && LoggerConfig.VALUES.logContainers.get()) {
-                final String dim = before.dim;
-                final BlockPos pos = before.pos.immutable();
-                final String beforeBe = before.beBefore;
-                final String capturedAfterBe = afterBe;
-                final String capturedBlockAfter = afterState;
-                final UUID actorUuid = before.actorUuid;
-                final String actorName = before.actorName != null && !before.actorName.isBlank() ? before.actorName : "Aeronautics";
-                final var registryAccess = level.registryAccess();
-                final LogStorage storage = LoggerRuntime.storage(level);
-                AsyncLogProcessor.submit(com.roften.avilixlogger.core.PayloadSizeEstimator.estimateStrings(beforeBe, capturedAfterBe), () -> {
-                    var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
-                    if (diffs == null || diffs.isEmpty()) return;
-                    long ts = System.currentTimeMillis();
-                    for (var d : diffs) {
-                        LogEntry de = new LogEntry();
-                        de.ts = ts;
-                        de.dim = dim;
-                        de.type = (d.deltaCount() > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
-                        de.actorUuid = actorUuid;
-                        de.actorName = actorName;
-                        de.x = pos.getX();
-                        de.y = pos.getY();
-                        de.z = pos.getZ();
-                        de.blockAfter = capturedBlockAfter;
-                        de.count = Math.abs(d.deltaCount());
-                        try {
-                            ItemStack st = d.representative().copy();
-                            st.setCount(Math.max(1, Math.abs(d.deltaCount())));
-                            de.itemStackNbt = NbtSerde.writeItemStack(st, registryAccess);
-                        } catch (Throwable ignored) {}
-                        de.source = source;
-                        de.extra = json("aeronautics_inventory_delta", reason, null, null, null, null);
-                        storage.append(de);
+                if (beChanged && LoggerConfig.VALUES.logContainers.get()) {
+                    final String dim = before.dim;
+                    final BlockPos pos = before.pos.immutable();
+                    final String capturedAfterBe = afterBe;
+                    final String capturedBlockAfter = afterState;
+                    final UUID actorUuid = before.actorUuid;
+                    final String actorName = before.actorName != null && !before.actorName.isBlank() ? before.actorName : "Aeronautics";
+                    {
+                        var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
+                        if (diffs == null || diffs.isEmpty()) return;
+                        long ts = timestamp;
+                        for (var d : diffs) {
+                            LogEntry de = new LogEntry();
+                            de.ts = ts;
+                            de.dim = dim;
+                            de.type = (d.deltaCount() > 0) ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE;
+                            de.actorUuid = actorUuid;
+                            de.actorName = actorName;
+                            de.x = pos.getX();
+                            de.y = pos.getY();
+                            de.z = pos.getZ();
+                            de.blockAfter = capturedBlockAfter;
+                            de.count = Math.abs(d.deltaCount());
+                            try {
+                                ItemStack st = d.representative().copy();
+                                st.setCount(Math.max(1, Math.abs(d.deltaCount())));
+                                de.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(st, registryAccess));
+                            } catch (Throwable ignored) {}
+                            de.source = source;
+                            de.extra = json("aeronautics_inventory_delta", reason, null, null, null, null);
+                            storage.append(de);
+                        }
                     }
-                });
-            }
+                }
+            });
         } catch (Throwable ignored) {}
     }
 
@@ -280,11 +285,11 @@ public final class AeronauticsCompatHooks {
             e.y = pos.getY();
             e.z = pos.getZ();
             e.blockAfter = NbtSerde.writeBlockState(be.getBlockState());
-            e.beAfter = NbtSerde.writeBlockEntity(level, be);
+            e.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, NbtSerde.snapshotBlockEntity(level, be));
             try {
                 e.entityType = EntityType.getKey(projectile.getType()).toString();
                 e.entityUuid = projectile.getUUID();
-                e.entityNbt = NbtSerde.writeEntity(level, projectile);
+                e.deferSnapshot(LogEntry.SnapshotField.ENTITY, NbtSerde.snapshotEntity(level, projectile));
             } catch (Throwable ignored) {}
             e.source = "aeronautics:mounted_potato_cannon";
             e.extra = json("mounted_potato_cannon_fire", "redstone_fire", blockId(be.getBlockState()), e.entityType, null, null);

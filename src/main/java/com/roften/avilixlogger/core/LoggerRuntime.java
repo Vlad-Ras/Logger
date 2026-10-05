@@ -14,6 +14,7 @@ public final class LoggerRuntime {
     private static final PendingLogStorage PENDING = new PendingLogStorage();
     private static final DeduplicatingLogStorage FRONT = new DeduplicatingLogStorage(PENDING);
 
+    private static volatile AsyncLogStorage ASYNC;
     private static volatile LogStorage STORAGE;
     private static volatile boolean INIT_STARTED;
     private static volatile long INIT_GENERATION;
@@ -24,12 +25,25 @@ public final class LoggerRuntime {
     public static LogStorage storage(Level level) {
         if (!LoggerConfig.isEnabled()) return UNAUTHORIZED;
         if (STORAGE == null) startAsyncInit();
-        return FRONT;
+        return eventStorage();
     }
 
     public static void warmupAsync() {
         if (!LoggerConfig.isEnabled()) return;
+        eventStorage();
+        AsyncLogProcessor.warmup();
         startAsyncInit();
+    }
+
+    private static AsyncLogStorage eventStorage() {
+        AsyncLogStorage current = ASYNC;
+        if (current != null) return current;
+        synchronized (LoggerRuntime.class) {
+            if (ASYNC == null) ASYNC = new AsyncLogStorage(FRONT,
+                    LoggerConfig.VALUES.asyncQueueCapacity.get(),
+                    (long) LoggerConfig.VALUES.asyncMaxQueuedPayloadMiB.get() * 1024L * 1024L);
+            return ASYNC;
+        }
     }
 
     private static void startAsyncInit() {
@@ -138,6 +152,9 @@ public final class LoggerRuntime {
         Thread initThread = INIT_THREAD;
         if (initThread != null) initThread.interrupt();
         AsyncLogProcessor.shutdown();
+        AsyncLogStorage events = ASYNC;
+        if (events != null) events.shutdown();
+        ASYNC = null;
         ChatAuditLogger.clearPending();
         AdaptiveLogDiagnostics.logSummary();
         LogStorage s = STORAGE;

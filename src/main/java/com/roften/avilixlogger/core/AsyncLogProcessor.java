@@ -20,8 +20,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class AsyncLogProcessor {
     private static final AtomicInteger THREAD_ID = new AtomicInteger(1);
     private static final AtomicLong REJECTED = new AtomicLong();
+    private static final AtomicLong REPORTED = new AtomicLong();
     private static final AtomicLong QUEUED_PAYLOAD_BYTES = new AtomicLong();
     private static volatile ThreadPoolExecutor executor;
+    private static volatile boolean stopping;
 
     private AsyncLogProcessor() {}
 
@@ -69,7 +71,7 @@ public final class AsyncLogProcessor {
     }
 
     public static void submit(long estimatedPayloadBytes, Runnable task) {
-        if (task == null || !LoggerConfig.isEnabled()) return;
+        if (task == null || stopping || !LoggerConfig.isEnabled()) return;
         long weight = Math.max(128L, estimatedPayloadBytes);
         if (!reservePayload(weight)) {
             onRejected("payload budget");
@@ -84,6 +86,7 @@ public final class AsyncLogProcessor {
                     AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Async log post-processing failed", t);
                 } finally {
                     QUEUED_PAYLOAD_BYTES.addAndGet(-weight);
+                    reportRejected();
                 }
             });
         } catch (java.util.concurrent.RejectedExecutionException rejected) {
@@ -110,17 +113,24 @@ public final class AsyncLogProcessor {
     }
 
     private static void onRejected(String reason) {
-        long n = REJECTED.incrementAndGet();
-        if (n == 1 || n % 1_000 == 0) {
-            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Async CPU queue rejected {} expensive tasks ({}). queuedTasks={}, estimatedPayloadMiB={}",
-                    n, reason, executor == null ? 0 : executor.getQueue().size(),
+        REJECTED.incrementAndGet();
+    }
+
+    private static void reportRejected() {
+        long count = REJECTED.get();
+        long reported = REPORTED.get();
+        if (count > reported && (reported == 0 || count - reported >= 1000)
+                && REPORTED.compareAndSet(reported, count)) {
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Async CPU queue rejected {} tasks; queuedTasks={}, estimatedPayloadMiB={}",
+                    count, executor == null ? 0 : executor.getQueue().size(),
                     QUEUED_PAYLOAD_BYTES.get() / (1024L * 1024L));
         }
     }
 
     public static void shutdown() {
+        stopping = true;
+        reportRejected();
         ThreadPoolExecutor ex = executor;
-        executor = null;
         if (ex == null) return;
         ex.shutdown();
         try {
@@ -131,6 +141,17 @@ public final class AsyncLogProcessor {
             Thread.currentThread().interrupt();
             ex.shutdownNow();
         }
-        QUEUED_PAYLOAD_BYTES.set(0L);
+        if (ex.isTerminated()) {
+            executor = null;
+            QUEUED_PAYLOAD_BYTES.set(0L);
+        }
+    }
+
+    public static synchronized void warmup() {
+        if (executor != null && executor.isShutdown() && !executor.isTerminated())
+            throw new IllegalStateException("Previous CPU workers have not stopped");
+        if (executor != null && executor.isTerminated()) executor = null;
+        stopping = false;
+        executor();
     }
 }

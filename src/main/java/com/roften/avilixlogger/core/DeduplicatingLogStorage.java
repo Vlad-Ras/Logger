@@ -37,7 +37,7 @@ public final class DeduplicatingLogStorage implements LogStorage {
         long now = entry.ts > 0L ? entry.ts : System.currentTimeMillis();
         Fingerprint key = Fingerprint.of(entry);
         Long previous = recent.put(key, now);
-        if (previous != null && now >= previous && (now - previous) <= window) {
+        if (previous != null && Math.abs(now - previous) <= window) {
             AdaptiveLogDiagnostics.suppressedDuplicate();
             return;
         }

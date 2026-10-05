@@ -31,19 +31,23 @@ public final class ContainerSlotSnapshot {
 
     /** Snapshot for a block storage at pos. Returns SNBT string or null if nothing could be snapshotted. */
     public static String snapshot(ServerLevel level, BlockPos pos) {
+        return NbtSerde.toSnbt(snapshotTag(level, pos));
+    }
+
+    public static CompoundTag snapshotTag(ServerLevel level, BlockPos pos) {
         if (level == null || pos == null) return null;
 
         // 1) Prefer capability (modded storages)
         BlockEntity be = level.getBlockEntity(pos);
         if (be != null) {
-            String cap = snapshotFromCapability(level, pos, be);
+            CompoundTag cap = snapshotFromCapability(level, pos, be);
             if (cap != null) return cap;
         }
 
         // 2) Vanilla/container fallback (supports chest, barrel, shulker, etc.)
         Container cont = containerForPos(level, pos);
         if (cont != null) {
-            return NbtSerde.toSnbt(writeContainer(cont, level.registryAccess()));
+            return writeContainer(cont, level.registryAccess()).copy();
         }
 
         return null;
@@ -146,7 +150,7 @@ public final class ContainerSlotSnapshot {
 
     // ---------------- internals ----------------
 
-    private static String snapshotFromCapability(ServerLevel level, BlockPos pos, BlockEntity be) {
+    private static CompoundTag snapshotFromCapability(ServerLevel level, BlockPos pos, BlockEntity be) {
         try {
             // NeoForge 21.1+: BlockEntity no longer exposes getCapability().
             // Query it through the level using reflection so we stay compatible across minor versions.
@@ -171,7 +175,7 @@ public final class ContainerSlotSnapshot {
                 items.add(it);
             }
             out.put("Items", items);
-            return NbtSerde.toSnbt(out);
+            return out.copy();
         } catch (Throwable ignored) {
             return null;
         }
@@ -207,36 +211,8 @@ public final class ContainerSlotSnapshot {
         }
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static IItemHandler getItemHandlerCompat(ServerLevel level, BlockPos pos, BlockEntity be, Direction side) {
-        try {
-            Object cap = Capabilities.ItemHandler.BLOCK;
-            BlockState state = level.getBlockState(pos);
-
-            // Try the most common signatures first.
-            for (java.lang.reflect.Method m : level.getClass().getMethods()) {
-                if (!m.getName().equals("getCapability")) continue;
-                Class<?>[] p = m.getParameterTypes();
-                try {
-                    Object out = null;
-                    if (p.length == 5) {
-                        // (cap, pos, state, be, context)
-                        out = m.invoke(level, cap, pos, state, be, side);
-                    } else if (p.length == 4) {
-                        // (cap, pos, state, context) OR (cap, pos, be, context)
-                        if (p[2].isAssignableFrom(BlockState.class)) out = m.invoke(level, cap, pos, state, side);
-                        else out = m.invoke(level, cap, pos, be, side);
-                    } else if (p.length == 3) {
-                        // (cap, pos, context)
-                        out = m.invoke(level, cap, pos, side);
-                    }
-                    if (out instanceof IItemHandler ih) return ih;
-                } catch (Throwable ignored) {
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
+        return level.getCapability(Capabilities.ItemHandler.BLOCK, pos, level.getBlockState(pos), be, side);
     }
 
     private static Container containerForPos(ServerLevel level, BlockPos pos) {

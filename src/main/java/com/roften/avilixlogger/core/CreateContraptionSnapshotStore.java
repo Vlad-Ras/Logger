@@ -1,6 +1,7 @@
 package com.roften.avilixlogger.core;
 
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 
@@ -24,7 +25,7 @@ public final class CreateContraptionSnapshotStore {
     public static void remember(ServerLevel level, Entity entity, String reason) {
         if (level == null || entity == null || !isCreateContraptionEntity(entity)) return;
         try {
-            String entityNbt = NbtSerde.writeEntity(level, entity);
+            CompoundTag entityNbt = NbtSerde.snapshotEntity(level, entity);
             if (!hasCompleteContraptionSnapshot(entityNbt)) return;
 
             ResourceLocation key = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
@@ -40,6 +41,10 @@ public final class CreateContraptionSnapshotStore {
     }
 
     public static String takeFresh(UUID entityUuid, String dim, long maxAgeMs) {
+        return NbtSerde.toSnbt(takeFreshTag(entityUuid, dim, maxAgeMs));
+    }
+
+    public static CompoundTag takeFreshTag(UUID entityUuid, String dim, long maxAgeMs) {
         if (entityUuid == null) return null;
         Entry entry = SNAPSHOTS.remove(entityUuid);
         if (entry == null) return null;
@@ -51,15 +56,12 @@ public final class CreateContraptionSnapshotStore {
     }
 
     public static boolean hasCompleteContraptionSnapshot(String entSnbt) {
-        try {
-            var tag = NbtSerde.fromSnbt(entSnbt);
-            if (tag == null || !tag.contains("Contraption")) return false;
-            var contraption = tag.getCompound("Contraption");
-            String type = contraption.getString("Type");
-            return type != null && !type.isBlank();
-        } catch (Throwable ignored) {
-            return false;
-        }
+        return hasCompleteContraptionSnapshot(NbtSerde.fromSnbt(entSnbt));
+    }
+
+    public static boolean hasCompleteContraptionSnapshot(CompoundTag tag) {
+        if (tag == null || !tag.contains("Contraption")) return false;
+        return !tag.getCompound("Contraption").getString("Type").isBlank();
     }
 
     public static boolean isCreateContraptionEntity(Entity entity) {
@@ -97,5 +99,5 @@ public final class CreateContraptionSnapshotStore {
         }
     }
 
-    private record Entry(long ts, String dim, String entityType, String entityNbt, String reason) {}
+    private record Entry(long ts, String dim, String entityType, CompoundTag entityNbt, String reason) {}
 }
