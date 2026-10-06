@@ -52,8 +52,8 @@ public final class LoggerRuntime {
     }
 
     private static void startAsyncInit() {
-        if (!LoggerConfig.isEnabled()) return;
         if (INIT_STARTED) return;
+        if (!LoggerConfig.isEnabled()) return;
         synchronized (LoggerRuntime.class) {
             if (INIT_STARTED) return;
             INIT_STARTED = true;

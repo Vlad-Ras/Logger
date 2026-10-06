@@ -8,10 +8,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -50,7 +46,7 @@ public final class RecentPlayerActionTracker {
     public record ActionRef(long tsMs, UUID actorUuid, String actorName, double confidence, String source) {}
 
     private static final int MAX_PER_PLAYER = 64;
-    private static final ConcurrentHashMap<UUID, Deque<Action>> RECENT = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, SpatialActionWindow<Action>> RECENT = new ConcurrentHashMap<>();
 
     private RecentPlayerActionTracker() {}
     public static void discard(UUID player) { RECENT.remove(player); }
@@ -73,10 +69,10 @@ public final class RecentPlayerActionTracker {
         } catch (Throwable ignored) {}
 
         Action a = new Action(System.currentTimeMillis(), level.getGameTime(), dim, player.getUUID(), player.getName().getString(), pos.immutable(), kind, itemKey);
-        Deque<Action> q = RECENT.computeIfAbsent(player.getUUID(), k -> new ArrayDeque<>());
+        SpatialActionWindow<Action> q = RECENT.computeIfAbsent(player.getUUID(),
+                k -> new SpatialActionWindow<>(MAX_PER_PLAYER, Action::pos));
         synchronized (q) {
-            q.addFirst(a);
-            while (q.size() > MAX_PER_PLAYER) q.removeLast();
+            q.add(a);
         }
     }
 
@@ -104,12 +100,13 @@ public final class RecentPlayerActionTracker {
         Candidate second = null;
 
         for (ServerPlayer sp : players) {
-            Deque<Action> q = RECENT.get(sp.getUUID());
+            SpatialActionWindow<Action> q = RECENT.get(sp.getUUID());
             if (q == null) continue;
             Action bestForPlayer = null;
             double bestScoreForPlayer = 0.0;
 
             synchronized (q) {
+                if (!q.mayContain(target, radiusSquared)) continue;
                 for (Action a : q) {
                     if (!dim.equals(a.dim)) continue;
                     long dt = now - a.tsMs;

@@ -51,7 +51,7 @@ public final class ContainerSlotSnapshot {
         }
 
         // 2) Vanilla/container fallback (supports chest, barrel, shulker, etc.)
-        Container cont = containerForPos(level, pos);
+        Container cont = containerForPos(level, pos, state, be);
         if (cont != null) {
             return writeContainer(cont, level.registryAccess());
         }
@@ -226,11 +226,15 @@ public final class ContainerSlotSnapshot {
     private static Container containerForPos(ServerLevel level, BlockPos pos) {
         try {
             BlockState state = level.getBlockState(pos);
+            return containerForPos(level, pos, state, state.hasBlockEntity() ? level.getBlockEntity(pos) : null);
+        } catch (Throwable ignored) { return null; }
+    }
 
+    private static Container containerForPos(ServerLevel level, BlockPos pos, BlockState state, BlockEntity be) {
+        try {
             // Double chest: combine both halves into one deterministic container (pos first, then other).
             if (state.getBlock() instanceof ChestBlock) {
-                BlockEntity be0 = level.getBlockEntity(pos);
-                if (!(be0 instanceof Container c0)) return null;
+                if (!(be instanceof Container c0)) return null;
                 BlockPos other = otherHalfChestPos(level, pos, state);
                 if (other != null) {
                     BlockEntity be1 = level.getBlockEntity(other);
@@ -241,7 +245,6 @@ public final class ContainerSlotSnapshot {
                 return c0;
             }
 
-            BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof Container c) return c;
         } catch (Throwable ignored) {
         }

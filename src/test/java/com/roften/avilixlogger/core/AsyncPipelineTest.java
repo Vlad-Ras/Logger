@@ -13,6 +13,7 @@ public final class AsyncPipelineTest {
         dropAggregation();
         sourceScopeRestoration();
         tickDeadlines();
+        TickHotPathTest.run();
         JournalPipelineTest.run();
         preparedSnapshots();
         ClickHouseDeliveryTest.run();

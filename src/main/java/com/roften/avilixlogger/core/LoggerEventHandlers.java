@@ -354,6 +354,8 @@ public final class LoggerEventHandlers {
 
         logBlockUseIfNeeded(level, p, pos, state, used0, event.getFace());
 
+        BlockEntity interactionBe = null;
+        try { if (state.hasBlockEntity()) interactionBe = level.getBlockEntity(pos); } catch (Throwable ignored) {}
         String stagedDim = null;
         BlockState stagedBlockState = null;
         CompoundTag stagedBeforeBe = null;
@@ -365,10 +367,10 @@ public final class LoggerEventHandlers {
         if (LoggerConfig.VALUES.logContainers.get()) {
             String dim = level.dimension().location().toString();
             boolean inventoryLike = false;
-            try { inventoryLike = isInventoryLike(level, pos, state); } catch (Throwable ignored) {}
+            try { inventoryLike = isInventoryLike(level, pos, state, interactionBe); } catch (Throwable ignored) {}
             BlockState blockAfter = state;
             CompoundTag beforeBe = null;
-            try { beforeBe = NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(pos)); } catch (Throwable ignored) {}
+            try { beforeBe = NbtSerde.snapshotBlockEntity(level, interactionBe); } catch (Throwable ignored) {}
             stagedDim = dim;
             stagedBlockState = blockAfter;
             stagedBeforeBe = beforeBe;
@@ -401,13 +403,14 @@ public final class LoggerEventHandlers {
         // 2) Generic interaction logging (fillable blocks, depot-like blocks, modded mechanics).
         //    We snapshot the blockstate and, if present, block-entity NBT BEFORE interaction and compare next tick.
         if (!LoggerConfig.VALUES.logBlocks.get()) return;
-        if (!shouldTrackDelayedInteraction(level, pos, state)) return;
+        if (!shouldTrackDelayedInteraction(state, interactionBe)) return;
         final String dim = stagedDim != null ? stagedDim : level.dimension().location().toString();
         final BlockState beforeState = stagedSnapshot ? stagedBlockState : state;
-        final BlockEntity be0 = stagedSnapshot ? null : level.getBlockEntity(pos);
+        final BlockEntity be0 = stagedSnapshot ? null : interactionBe;
         final CompoundTag beforeTag = stagedSnapshot ? stagedBeforeBe : (be0 != null ? NbtSerde.snapshotBlockEntity(level, be0) : null);
-        final ItemStack used = event.getItemStack() != null ? event.getItemStack().copy() : ItemStack.EMPTY;
-        final CompoundTag usedTag = NbtSerde.snapshotItemStack(used, level.registryAccess());
+        final CompoundTag usedTag = NbtSerde.snapshotItemStack(used0, level.registryAccess());
+        // The before/used snapshots are shared by every delayed check and never mutate.
+        final long sharedPayloadBytes = PayloadSizeEstimator.estimateTags(beforeTag, usedTag);
         final UUID actorUuid = p.getUUID();
         final String actorName = p.getName().getString();
 
@@ -420,13 +423,14 @@ public final class LoggerEventHandlers {
                 if (logged.get()) return;
                 try {
                 BlockState afterState0 = level.getBlockState(pos);
-                BlockEntity be1 = level.getBlockEntity(pos);
+                BlockEntity be1 = afterState0.hasBlockEntity() ? level.getBlockEntity(pos) : null;
                 CompoundTag afterTag = be1 != null ? NbtSerde.snapshotBlockEntity(level, be1) : null;
+                if (beforeState == afterState0 && beforeTag == null && afterTag == null) return;
                 final String afterBlockId = BuiltInRegistries.BLOCK.getKey(afterState0.getBlock()).toString();
                 final var registryAccess = level.registryAccess();
                 final LogStorage storage = LoggerRuntime.storage(level);
                 final long eventTs = System.currentTimeMillis();
-                AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(beforeTag, afterTag, usedTag), () -> {
+                AsyncLogProcessor.submit(sharedPayloadBytes + (afterTag == null ? 0L : 2L * afterTag.sizeInBytes()), () -> {
                     if (logged.get()) return;
                     boolean stateChanged = beforeState != afterState0;
                     boolean beChanged = !java.util.Objects.equals(beforeTag, afterTag);
@@ -1957,17 +1961,14 @@ public final class LoggerEventHandlers {
         try { return String.valueOf(value); } catch (Throwable ignored) { return "?"; }
     }
 
-    private static boolean isInventoryLike(ServerLevel level, BlockPos pos, BlockState state) {
-        BlockEntity be = level.getBlockEntity(pos);
+    private static boolean isInventoryLike(ServerLevel level, BlockPos pos, BlockState state, BlockEntity be) {
         if (be instanceof Container) return true;
         return state.getMenuProvider(level, pos) != null;
     }
 
-    private static boolean shouldTrackDelayedInteraction(ServerLevel level, BlockPos pos, BlockState state) {
+    private static boolean shouldTrackDelayedInteraction(BlockState state, BlockEntity be) {
         if (state == null) return false;
-        try {
-            if (level.getBlockEntity(pos) != null) return true;
-        } catch (Throwable ignored) {}
+        if (be != null) return true;
         try {
             return state.hasAnalogOutputSignal()
                     || state.hasBlockEntity()

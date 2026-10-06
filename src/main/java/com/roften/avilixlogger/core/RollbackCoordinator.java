@@ -144,11 +144,12 @@ public final class RollbackCoordinator {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
+        ActiveJob job = active;
+        if (job == null && PREPARATIONS.isEmpty()) return;
         if (!LoggerConfig.isEnabled()) {
             if (active != null || !PREPARATIONS.isEmpty()) shutdown();
             return;
         }
-        ActiveJob job = active;
         if (job == null) return;
         // NeoForge's own tick budget is the first guard: under load the rollback simply waits.
         if (!event.hasTime()) return;

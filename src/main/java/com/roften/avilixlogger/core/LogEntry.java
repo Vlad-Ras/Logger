@@ -74,7 +74,8 @@ public final class LogEntry {
     net.minecraft.nbt.CompoundTag rollbackItem() { prepareForRollback(); return rollbackItem; }
 
     public enum SnapshotField { BE_BEFORE, BE_AFTER, ITEM, ENTITY, SLOTS_BEFORE, SLOTS_AFTER }
-    private transient java.util.EnumMap<SnapshotField, net.minecraft.nbt.Tag> snapshots;
+    private static final SnapshotField[] SNAPSHOT_FIELDS = SnapshotField.values();
+    private transient net.minecraft.nbt.Tag[] snapshots;
     private transient long snapshotBytes;
     transient boolean aggregateDrop;
     private transient net.minecraft.world.level.block.state.BlockState deferredBlockBefore;
@@ -86,8 +87,11 @@ public final class LogEntry {
     /** The supplied detached tag transfers ownership to this row; never pass live mod NBT. */
     public void deferSnapshot(SnapshotField field, net.minecraft.nbt.Tag tag) {
         if (tag == null) return;
-        if (snapshots == null) snapshots = new java.util.EnumMap<>(SnapshotField.class);
-        net.minecraft.nbt.Tag previous = snapshots.put(field, tag);
+        if (snapshots == null) snapshots = new net.minecraft.nbt.Tag[SNAPSHOT_FIELDS.length];
+        int index = field.ordinal();
+        net.minecraft.nbt.Tag previous = snapshots[index];
+        if (previous == tag) return;
+        snapshots[index] = tag;
         if (previous != null) snapshotBytes -= previous.sizeInBytes();
         snapshotBytes += tag.sizeInBytes();
     }
@@ -100,9 +104,11 @@ public final class LogEntry {
         deferredBlockBefore = null;
         deferredBlockAfter = null;
         if (snapshots == null) return;
-        snapshots.forEach((field, tag) -> {
+        for (int i = 0; i < snapshots.length; i++) {
+            net.minecraft.nbt.Tag tag = snapshots[i];
+            if (tag == null) continue;
             String snbt = tag.toString();
-            switch (field) {
+            switch (SNAPSHOT_FIELDS[i]) {
                 case BE_BEFORE -> beBefore = snbt;
                 case BE_AFTER -> beAfter = snbt;
                 case ITEM -> itemStackNbt = snbt;
@@ -110,7 +116,7 @@ public final class LogEntry {
                 case SLOTS_BEFORE -> containerSlotsBefore = snbt;
                 case SLOTS_AFTER -> containerSlotsAfter = snbt;
             }
-        });
+        }
         snapshots = null;
         snapshotBytes = 0;
     }
@@ -142,7 +148,7 @@ public final class LogEntry {
         copy.containerSlotsBefore = containerSlotsBefore;
         copy.containerSlotsAfter = containerSlotsAfter;
         copy.extra = extra;
-        if (snapshots != null) copy.snapshots = new java.util.EnumMap<>(snapshots);
+        if (snapshots != null) copy.snapshots = snapshots.clone();
         copy.snapshotBytes = snapshotBytes;
         copy.deferredBlockBefore = deferredBlockBefore;
         copy.deferredBlockAfter = deferredBlockAfter;

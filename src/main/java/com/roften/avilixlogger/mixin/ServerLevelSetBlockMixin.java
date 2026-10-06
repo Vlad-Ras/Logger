@@ -47,8 +47,6 @@ public abstract class ServerLevelSetBlockMixin {
     private SetBlockCapture capture(BlockPos pos, BlockState newState) {
         boolean ownsGuard = false;
         try {
-            // Config lives in root package (not in core).
-            if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return null;
             if (pos == null || newState == null) return null;
             if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return null;
 
@@ -57,6 +55,9 @@ public abstract class ServerLevelSetBlockMixin {
             CauseContext.Cause cause = CauseContext.peek();
             String source = cause == null ? MutationSourceResolver.resolveExternalSource() : null;
             if (cause == null && MutationSourceResolver.VANILLA_SIMULATION.equals(source)) return null;
+            // Ignored simulation/client calls need no authorization lookup. Every captured
+            // mutation still checks the current authorization before reading world snapshots.
+            if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return null;
             BlockState before = level.getBlockState(pos);
             if (before == null || before == newState) return null;
             if (source == null && cause == null) source = MutationSourceResolver.sourceFor(before.getBlock());
@@ -109,7 +110,7 @@ public abstract class ServerLevelSetBlockMixin {
             if (actorName == null) {
                 actorName = "SYSTEM[" + source + "]";
             }
-            return new SetBlockCapture(new BlockPos(pos.getX(), pos.getY(), pos.getZ()),
+            return new SetBlockCapture(pos.immutable(),
                     level.dimension().location().toString(), beforeState, beforeBe, beforeSlots,
                     source, cause == null ? null : cause.kind(), actorUuid, actorName);
         } catch (Throwable ignored) {
@@ -141,6 +142,11 @@ public abstract class ServerLevelSetBlockMixin {
             final long timestamp = System.currentTimeMillis();
             final String afterId = BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString();
             final LogStorage storage = LoggerRuntime.storage(level);
+            if (cap.beforeBe() == null && afterBe == null && cap.beforeSlots() == null && afterSlots == null) {
+                // No mutable NBT to compare: avoid a CPU task, its queue lock and a second handoff.
+                if (cap.beforeState() != afterState) storage.append(cap.entry(afterState, afterId, timestamp));
+                return;
+            }
             long bytes = 512L + (cap.beforeBe() == null ? 0 : cap.beforeBe().sizeInBytes())
                     + (afterBe == null ? 0 : afterBe.sizeInBytes())
                     + (cap.beforeSlots() == null ? 0 : cap.beforeSlots().sizeInBytes())
@@ -150,37 +156,11 @@ public abstract class ServerLevelSetBlockMixin {
                         && Objects.equals(cap.beforeBe(), afterBe)
                         && Objects.equals(cap.beforeSlots(), afterSlots)) return;
 
-                ActionType type;
-                boolean beforeAir = cap.beforeState().isAir();
-                boolean afterAir = after == null || after.isAir();
-                if (beforeAir && !afterAir) type = ActionType.BLOCK_PLACE;
-                else if (!beforeAir && afterAir) type = ActionType.BLOCK_BREAK;
-                else if (cap.causeKind() == CauseContext.Kind.USE_BLOCK || cap.causeKind() == CauseContext.Kind.USE_ITEM) {
-                    type = ActionType.BLOCK_INTERACT;
-                } else if (!Objects.equals(cap.beforeState(), afterState)) {
-                    type = ActionType.BLOCK_PLACE;
-                } else {
-                    type = ActionType.BLOCK_ENTITY_NBT_CHANGE;
-                }
-
-                LogEntry e = new LogEntry();
-                e.ts = timestamp;
-                e.dim = cap.dim();
-                e.type = type;
-                e.actorUuid = cap.actorUuid();
-                e.actorName = cap.actorName();
-                e.x = cap.pos().getX();
-                e.y = cap.pos().getY();
-                e.z = cap.pos().getZ();
-                e.blockBefore = NbtSerde.writeBlockState(cap.beforeState());
+                LogEntry e = cap.entry(afterState, afterId, timestamp);
                 e.beBefore = NbtSerde.toSnbt(cap.beforeBe());
-                e.blockAfter = NbtSerde.writeBlockState(afterState);
                 e.beAfter = NbtSerde.toSnbt(afterBe);
                 e.containerSlotsBefore = NbtSerde.toSnbt(cap.beforeSlots());
                 e.containerSlotsAfter = NbtSerde.toSnbt(afterSlots);
-                e.source = cap.source();
-
-                e.extra = "setBlock " + afterId;
                 storage.append(e);
             });
         } catch (Throwable ignored) {
