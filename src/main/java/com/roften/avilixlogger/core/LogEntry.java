@@ -99,6 +99,13 @@ public final class LogEntry implements QueuedLogEvent {
 
     long snapshotBytes() { return snapshotBytes; }
 
+    public void attachCartItemIdentity() {
+        if (source != null && source.startsWith("create:cart:")) return;
+        if (snapshots == null || !(snapshots[SnapshotField.ITEM.ordinal()] instanceof net.minecraft.nbt.CompoundTag item)) return;
+        net.minecraft.nbt.CompoundTag audit = item.getCompound("components").getCompound("create:minecart_contraption_data").getCompound("AvilixCartAudit");
+        if (audit.hasUUID("Id")) { source = CartAuditContext.prefix(audit.getUUID("Id")) + "item:0"; LogIdGenerator.ensure(this); }
+    }
+
     public void materializeSnapshots() {
         if (deferredBlockBefore != null) blockBefore = NbtSerde.writeBlockState(deferredBlockBefore);
         if (deferredBlockAfter != null) blockAfter = NbtSerde.writeBlockState(deferredBlockAfter);

@@ -28,7 +28,7 @@ public final class DeduplicatingLogStorage implements LogStorage {
     public void append(LogEntry entry) {
         if (entry == null || !LoggerConfig.isEnabled()) return;
         LogAdapterRegistry.enrich(entry);
-        long window = duplicateWindowMs(entry.type);
+        long window = CartAuditContext.id(entry.source) == null ? duplicateWindowMs(entry.type) : 0L;
         if (window <= 0L) {
             AdaptiveLogDiagnostics.accepted(entry);
             delegate.append(entry);

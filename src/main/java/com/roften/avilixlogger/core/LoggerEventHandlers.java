@@ -273,6 +273,10 @@ public final class LoggerEventHandlers {
         try (var scope = CauseContext.push(p, CauseContext.Kind.PLACE_BLOCK, event.getPos(), used0)) {
 
         BlockPos pos = event.getPos().immutable();
+        if ("create:cart_assembler".equals(String.valueOf(BuiltInRegistries.BLOCK.getKey(event.getPlacedBlock().getBlock()))) && !event.isCanceled()) {
+            var be = level.getBlockEntity(pos);
+            if (be != null) { CompoundTag owner = new CompoundTag(); owner.putUUID("Owner", p.getUUID()); owner.putString("Name", p.getName().getString()); be.getPersistentData().put("AvilixCartPlacer", owner); be.setChanged(); }
+        }
         // The universal setBlock hook owns the successful before/after snapshot.
         try {
             if (p instanceof ServerPlayer sp2) RecentPlayerActionTracker.note(level, sp2, pos, RecentPlayerActionTracker.ActionKind.PLACE_BLOCK, sp2.getMainHandItem());
@@ -1168,6 +1172,9 @@ public final class LoggerEventHandlers {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Entity ent = event.getEntity();
         if (ent instanceof Player) return;
+        if (CartAuditContext.restoring()) return;
+        if (ent instanceof com.roften.avilixlogger.compat.create.CartEntityAccess a && a.avilixlogger$mountedState() != null) return;
+        if (ent instanceof AbstractMinecart && ent.getPersistentData().contains("AvilixCartAudit")) return;
 
         // Tag Create-related minecarts/entities with owner info (best-effort).
         try { CreateOwnershipTracker.onEntityJoin(event); } catch (Throwable ignored) {}
@@ -2209,6 +2216,9 @@ public final class LoggerEventHandlers {
         Entity ent = event.getEntity();
         if (ent == null) return;
         if (ent instanceof Player) return;
+        if (CartAuditContext.restoring()) return;
+        if (ent instanceof com.roften.avilixlogger.compat.create.CartEntityAccess a && a.avilixlogger$mountedState() != null) return;
+        if (ent instanceof AbstractMinecart && ent.getPersistentData().contains("AvilixCartAudit")) return;
 
         if (ent instanceof Projectile || ent instanceof ExperienceOrb || ent instanceof ItemEntity) return;
 

@@ -24,6 +24,7 @@ public final class CreateContraptionSnapshotStore {
 
     public static void remember(ServerLevel level, Entity entity, String reason) {
         if (level == null || entity == null || !isCreateContraptionEntity(entity)) return;
+        if (entity instanceof com.roften.avilixlogger.compat.create.CartEntityAccess a && a.avilixlogger$mountedState() != null) return;
         try {
             CompoundTag entityNbt = NbtSerde.snapshotEntity(level, entity);
             if (!hasCompleteContraptionSnapshot(entityNbt)) return;

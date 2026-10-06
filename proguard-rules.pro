@@ -53,3 +53,7 @@
 -keepclassmembers enum com.roften.avilixlogger.core.ActionType {
     public static <fields>;
 }
+
+# Implementations are woven into external Create classes after obfuscation.
+-keep interface com.roften.avilixlogger.compat.create.CartAuditAccess { *; }
+-keep interface com.roften.avilixlogger.compat.create.CartEntityAccess { *; }

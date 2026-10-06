@@ -47,14 +47,16 @@ public abstract class ServerLevelSetBlockMixin {
     private SetBlockCapture capture(BlockPos pos, BlockState newState) {
         boolean ownsGuard = false;
         try {
-            if (pos == null || newState == null) return null;
+            if (pos == null || newState == null || CartAuditContext.restoring()) return null;
             if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return null;
 
             if (!((Object) this instanceof ServerLevel level)) return null;
 
+            CartAuditContext.Stamp cart = CartAuditContext.current();
             CauseContext.Cause cause = CauseContext.peek();
             String source = cause == null ? MutationSourceResolver.resolveExternalSource() : null;
-            if (cause == null && MutationSourceResolver.VANILLA_SIMULATION.equals(source)) return null;
+            if (cart != null) source = cart.source();
+            if (cart == null && cause == null && MutationSourceResolver.VANILLA_SIMULATION.equals(source)) return null;
             // Ignored simulation/client calls need no authorization lookup. Every captured
             // mutation still checks the current authorization before reading world snapshots.
             if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return null;
@@ -70,11 +72,12 @@ public abstract class ServerLevelSetBlockMixin {
             ownsGuard = true;
             BlockState beforeState = before;
             BlockEntity be = before.hasBlockEntity() ? level.getBlockEntity(pos) : null;
-            var beforeBe = be != null ? NbtSerde.snapshotBlockEntity(level, be) : null;
-            var beforeSlots = be != null ? ContainerSlotSnapshot.snapshotTag(level, pos, before, be) : null;
+            var removed = cart == null ? null : CartAuditContext.takeRemovedBlock(pos);
+            var beforeBe = removed != null ? removed.be() : be != null ? NbtSerde.snapshotBlockEntity(level, be) : null;
+            var beforeSlots = removed != null ? removed.slots() : be != null ? ContainerSlotSnapshot.snapshotTag(level, pos, before, be) : null;
 
-            java.util.UUID actorUuid = null;
-            String actorName = null;
+            java.util.UUID actorUuid = cart == null ? null : cart.owner();
+            String actorName = cart == null ? null : cart.ownerName();
 
             try {
                 if (cause != null && cause.actorUuid() != null) {
@@ -91,7 +94,7 @@ public abstract class ServerLevelSetBlockMixin {
                 }
             }
 
-            if ((actorUuid == null && actorName == null) && source.contains("create")) {
+            if (cart == null && (actorUuid == null && actorName == null) && source.contains("create")) {
                 var ra = CreateOwnershipTracker.resolveForSystemChange(level, pos, null);
                 if (ra != null) {
                     actorUuid = ra.uuid();
@@ -99,7 +102,7 @@ public abstract class ServerLevelSetBlockMixin {
                     source = ra.source();
                 }
             }
-            if (actorUuid == null && actorName == null && !source.equals("system:unattributed")) {
+            if (cart == null && actorUuid == null && actorName == null && !source.equals("system:unattributed")) {
                 var recent = RecentPlayerActionTracker.resolveBest(level, pos, 4, 2_500L, null);
                 if (recent != null && recent.confidence() >= 0.55) {
                     actorUuid = recent.actorUuid();
@@ -112,7 +115,8 @@ public abstract class ServerLevelSetBlockMixin {
             }
             return new SetBlockCapture(pos.immutable(),
                     level.dimension().location().toString(), beforeState, beforeBe, beforeSlots,
-                    source, cause == null ? null : cause.kind(), actorUuid, actorName);
+                    source, cause == null ? null : cause.kind(), actorUuid, actorName,
+                    cart == null ? 0L : LogIdGenerator.next(System.currentTimeMillis()));
         } catch (Throwable ignored) {
             return null;
         } finally {

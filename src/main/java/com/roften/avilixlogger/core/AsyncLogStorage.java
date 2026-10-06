@@ -20,6 +20,9 @@ public final class AsyncLogStorage implements LogStorage {
 
     @Override public void append(LogEntry entry) {
         if (entry == null) return;
+        if (CartAuditContext.restoring()) return;
+        CartAuditContext.enrich(entry);
+        entry.attachCartItemIdentity();
         LogEntry snapshot = entry.copyForQueue();
         queue.put(snapshot, PayloadSizeEstimator.estimate(snapshot));
     }

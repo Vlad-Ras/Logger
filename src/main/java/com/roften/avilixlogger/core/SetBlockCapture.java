@@ -12,10 +12,15 @@ import java.util.UUID;
  * classes from them cannot be referenced by transformed target classes.</p>
  */
 public record SetBlockCapture(BlockPos pos, String dim, net.minecraft.world.level.block.state.BlockState beforeState, net.minecraft.nbt.CompoundTag beforeBe, net.minecraft.nbt.CompoundTag beforeSlots,
-                              String source, CauseContext.Kind causeKind, UUID actorUuid, String actorName) {
+                              String source, CauseContext.Kind causeKind, UUID actorUuid, String actorName, long capturedId) {
+    public SetBlockCapture(BlockPos pos, String dim, BlockState state, net.minecraft.nbt.CompoundTag be, net.minecraft.nbt.CompoundTag slots,
+            String source, CauseContext.Kind kind, UUID actor, String name) {
+        this(pos, dim, state, be, slots, source, kind, actor, name, 0L);
+    }
     /** Plain state changes need only the event queue; block-state encoding stays on its worker. */
     public LogEntry entry(BlockState after, String afterId, long timestamp) {
         LogEntry row = new LogEntry();
+        row.id = capturedId;
         row.ts = timestamp;
         row.dim = dim;
         row.type = classify(beforeState.isAir(), after.isAir(), !java.util.Objects.equals(beforeState, after), causeKind);

@@ -33,6 +33,9 @@ public final class LogQuery {
     /** Optional text marker filter for compat logs such as trains/cannons. */
     public String extraTextFilter;
 
+    /** Exact logical Create cart; required filter, never removed on query fallback. */
+    public java.util.UUID cartId;
+
     /** Optional source label for diagnostics (chat/gui/rollback). */
     public String debugSource;
 

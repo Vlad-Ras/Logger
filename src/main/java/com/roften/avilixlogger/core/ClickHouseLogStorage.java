@@ -1057,6 +1057,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             appendActorWhere(sql, q.actorName);
         }
 
+        if (q.cartId != null) sql.append(" AND startsWith(source, ").append(sqlString(CartAuditContext.prefix(q.cartId))).append(')');
         appendPositionWhere(sql, q);
         if (includeOptionalFilters) appendFeedOptionalFilters(sql, q);
 
@@ -1094,6 +1095,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             appendActorWhere(sql, q.actorName);
         }
 
+        if (q.cartId != null) sql.append(" AND startsWith(source, ").append(sqlString(CartAuditContext.prefix(q.cartId))).append(')');
         appendPositionWhere(sql, q);
         if (includeOptionalFilters) appendSplitOptionalFilters(sql, q, kind);
 
@@ -1245,6 +1247,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (q.actorName != null && !q.actorName.isBlank()) {
             sql.append(" AND lowerUTF8(actor_name) = ").append(sqlString(q.actorName.toLowerCase(Locale.ROOT)));
         }
+
+        if (q.cartId != null) sql.append(" AND startsWith(JSONExtractString(data, 'source'), ").append(sqlString(CartAuditContext.prefix(q.cartId))).append(')');
 
         if (q.exactPos != null) {
             sql.append(" AND x = ").append(q.exactPos.getX())

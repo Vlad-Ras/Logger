@@ -32,6 +32,9 @@ repositories {
 
     // Modrinth Maven (LDLib2, etc.)
     maven { url = uri("https://api.modrinth.com/maven") }
+    maven { url = uri("https://maven.createmod.net") }
+    maven { url = uri("https://maven.tterrag.com") }
+    maven { url = uri("https://maven.engine-room.dev/releases") }
 }
 
 base {
@@ -130,6 +133,9 @@ dependencies {
     // Optional integration: never ship AE2 classes inside the logger JAR.
     compileOnly 'org.appliedenergistics:appliedenergistics2:19.2.12'
     localRuntime 'org.appliedenergistics:appliedenergistics2:19.2.12'
+    // Optional Create integration. Never embed Create or its libraries in the logger.
+    compileOnly 'com.simibubi.create:create-1.21.1:6.0.11-313'
+    localRuntime 'com.simibubi.create:create-1.21.1:6.0.11-313'
     // --- ClickHouse backend ---
     // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.
 
