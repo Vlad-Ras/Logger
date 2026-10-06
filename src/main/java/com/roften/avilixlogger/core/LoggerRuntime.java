@@ -11,8 +11,8 @@ import com.roften.avilixlogger.api.LogAdapterRegistry;
  */
 public final class LoggerRuntime {
     private static final NoopLogStorage UNAUTHORIZED = new NoopLogStorage();
-    private static final PendingLogStorage PENDING = new PendingLogStorage();
-    private static final DeduplicatingLogStorage FRONT = new DeduplicatingLogStorage(PENDING);
+    private static volatile PendingLogStorage PENDING;
+    private static volatile DeduplicatingLogStorage FRONT;
 
     private static volatile AsyncLogStorage ASYNC;
     private static volatile LogStorage STORAGE;
@@ -24,8 +24,9 @@ public final class LoggerRuntime {
 
     public static LogStorage storage(Level level) {
         if (!LoggerConfig.isEnabled()) return UNAUTHORIZED;
+        LogStorage events = eventStorage();
         if (STORAGE == null) startAsyncInit();
-        return eventStorage();
+        return events;
     }
 
     public static void warmupAsync() {
@@ -39,9 +40,13 @@ public final class LoggerRuntime {
         AsyncLogStorage current = ASYNC;
         if (current != null) return current;
         synchronized (LoggerRuntime.class) {
-            if (ASYNC == null) ASYNC = new AsyncLogStorage(FRONT,
+            if (ASYNC == null) {
+                PENDING = new PendingLogStorage();
+                FRONT = new DeduplicatingLogStorage(PENDING);
+                ASYNC = new AsyncLogStorage(FRONT,
                     LoggerConfig.VALUES.asyncQueueCapacity.get(),
                     (long) LoggerConfig.VALUES.asyncMaxQueuedPayloadMiB.get() * 1024L * 1024L);
+            }
             return ASYNC;
         }
     }
@@ -60,7 +65,7 @@ public final class LoggerRuntime {
                     LogAdapterRegistry.discover();
                     while (INIT_STARTED && INIT_GENERATION == generation && LoggerConfig.isEnabled()) {
                         attempt++;
-                        LogStorage real;
+                        BatchLogStorage real;
                         try {
                             real = createConfiguredStorage();
                         } catch (Throwable failure) {
@@ -82,12 +87,14 @@ public final class LoggerRuntime {
                             continue;
                         }
 
-                        if (!INIT_STARTED || INIT_GENERATION != generation || !LoggerConfig.isEnabled()) {
-                            real.shutdown();
-                            return;
+                        synchronized (LoggerRuntime.class) {
+                            if (!INIT_STARTED || INIT_GENERATION != generation || !LoggerConfig.isEnabled()) {
+                                real.shutdown();
+                                return;
+                            }
+                            PENDING.setDelegate(real);
+                            STORAGE = real;
                         }
-                        PENDING.setDelegate(real);
-                        STORAGE = real;
                         if (attempt > 1) {
                             AvilixLoggerMod.LOGGER.info(
                                     "[AvilixLogger] ClickHouse connection recovered after {} attempts; queued logs are being flushed.",
@@ -141,31 +148,36 @@ public final class LoggerRuntime {
         return LoggerConfig.isEnabled() && INIT_STARTED && STORAGE == null;
     }
 
-    private static LogStorage createConfiguredStorage() {
+    private static BatchLogStorage createConfiguredStorage() {
         AvilixLoggerMod.LOGGER.info("[AvilixLogger] Starting ClickHouse storage (MySQL is not read or migrated)");
         return new ClickHouseLogStorage();
     }
 
     public static void shutdown() {
-        INIT_STARTED = false;
-        INIT_GENERATION++;
-        Thread initThread = INIT_THREAD;
+        Thread initThread;
+        synchronized (LoggerRuntime.class) {
+            INIT_STARTED = false;
+            INIT_GENERATION++;
+            initThread = INIT_THREAD;
+        }
         if (initThread != null) initThread.interrupt();
         AsyncLogProcessor.shutdown();
         AsyncLogStorage events = ASYNC;
         if (events != null) events.shutdown();
-        ASYNC = null;
+        PendingLogStorage pending = PENDING;
+        if (pending != null) pending.shutdown();
         ChatAuditLogger.clearPending();
         AdaptiveLogDiagnostics.logSummary();
-        LogStorage s = STORAGE;
-        if (s != null) {
-            s.shutdown();
-        } else {
-            PENDING.shutdown();
+        LogStorage storage = STORAGE;
+        if (storage != null) storage.shutdown();
+        if (initThread != null) WeightedQueue.join(initThread);
+        synchronized (LoggerRuntime.class) {
+            ASYNC = null;
+            STORAGE = null;
+            PENDING = null;
+            if (FRONT != null) FRONT.clear();
+            FRONT = null;
+            INIT_THREAD = null;
         }
-        STORAGE = null;
-        INIT_THREAD = null;
-        PENDING.reset();
-        FRONT.clear();
     }
 }

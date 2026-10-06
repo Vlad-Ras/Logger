@@ -37,11 +37,11 @@ public final class CreateOwnershipTracker {
     private static final long INTERACT_TTL_MS = 2 * 60_000L; // 2 minutes
     private static final int INTERACT_RADIUS = 24;
 
-    private record PosKey(String dim, long posLong) {}
+    private record ChunkKey(String dim, int x, int z) {}
 
     public record ResolvedActor(UUID uuid, String name, String source) {}
 
-    private static final ConcurrentMap<PosKey, ActorTracker.ActorRef> LAST_INTERACT = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<ChunkKey, ConcurrentHashMap<Long, ActorTracker.ActorRef>> LAST_INTERACT = new ConcurrentHashMap<>();
 
     private static final ConcurrentMap<UUID, PendingMinecart> PENDING_MINECART = new ConcurrentHashMap<>();
     private record PendingMinecart(String dim, BlockPos pos, long gameTime, String playerName) {}
@@ -66,8 +66,13 @@ public final class CreateOwnershipTracker {
 
         // Track interactions with Create devices.
         if (isCreateBlock(level, pos) || (level.getBlockEntity(pos) != null && level.getBlockEntity(pos).getClass().getName().toLowerCase().contains("create"))) {
-            LAST_INTERACT.put(new PosKey(level.dimension().location().toString(), pos.asLong()),
-                    new ActorTracker.ActorRef(System.currentTimeMillis(), p.getUUID(), p.getName().getString()));
+            ChunkKey key = new ChunkKey(level.dimension().location().toString(), pos.getX() >> 4, pos.getZ() >> 4);
+            ActorTracker.ActorRef actor = new ActorTracker.ActorRef(System.currentTimeMillis(), p.getUUID(), p.getName().getString());
+            LAST_INTERACT.compute(key, (ignored, entries) -> {
+                if (entries == null) entries = new ConcurrentHashMap<>();
+                entries.put(pos.asLong(), actor);
+                return entries;
+            });
         }
 
         // Track minecart placement intent (minecart drill uses minecart base).
@@ -135,7 +140,8 @@ public final class CreateOwnershipTracker {
                 changedPos.getX() - 16, changedPos.getY() - 16, changedPos.getZ() - 16,
                 changedPos.getX() + 16, changedPos.getY() + 16, changedPos.getZ() + 16
         );
-        for (Entity e : level.getEntities(null, aabb)) {
+        var nearby = level.getEntities(null, aabb);
+        for (Entity e : nearby) {
             if (!isCreateEntity(e)) continue;
             UUID u = readOwnerUuid(e);
             if (u == null) continue;
@@ -144,7 +150,7 @@ public final class CreateOwnershipTracker {
         }
 
         // 3) Check for tagged minecarts (covers minecart drill).
-        for (Entity e : level.getEntities(null, aabb)) {
+        for (Entity e : nearby) {
             if (!(e instanceof AbstractMinecart)) continue;
             UUID u = readOwnerUuid(e);
             if (u == null) continue;
@@ -155,27 +161,29 @@ public final class CreateOwnershipTracker {
         // 4) Search around for a recent Create block interaction.
         long now = System.currentTimeMillis();
         String dim = level.dimension().location().toString();
-        BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
 
         int bestD2 = Integer.MAX_VALUE;
         ActorTracker.ActorRef best = null;
         BlockPos bestPos = null;
 
-        for (int dx = -INTERACT_RADIUS; dx <= INTERACT_RADIUS; dx++) {
-            for (int dz = -INTERACT_RADIUS; dz <= INTERACT_RADIUS; dz++) {
-                // keep it cheap: ignore far corners early
-                int d2 = dx*dx + dz*dz;
-                if (d2 > INTERACT_RADIUS*INTERACT_RADIUS) continue;
-                mp.set(changedPos.getX() + dx, changedPos.getY(), changedPos.getZ() + dz);
-
-                ActorTracker.ActorRef ar = LAST_INTERACT.get(new PosKey(dim, mp.asLong()));
-                if (ar == null) continue;
-                if (now - ar.tsMs() > INTERACT_TTL_MS) continue;
-
-                if (d2 < bestD2) {
-                    bestD2 = d2;
-                    best = ar;
-                    bestPos = mp.immutable();
+        // At most 16 chunk buckets instead of ~1,800 empty position lookups per mutation.
+        for (int cx = (changedPos.getX() - INTERACT_RADIUS) >> 4; cx <= (changedPos.getX() + INTERACT_RADIUS) >> 4; cx++) {
+            for (int cz = (changedPos.getZ() - INTERACT_RADIUS) >> 4; cz <= (changedPos.getZ() + INTERACT_RADIUS) >> 4; cz++) {
+                var entries = LAST_INTERACT.get(new ChunkKey(dim, cx, cz));
+                if (entries == null) continue;
+                for (var entry : entries.entrySet()) {
+                    long packed = entry.getKey();
+                    if (BlockPos.getY(packed) != changedPos.getY()) continue;
+                    int x = BlockPos.getX(packed), z = BlockPos.getZ(packed);
+                    int dx = x - changedPos.getX(), dz = z - changedPos.getZ();
+                    int d2 = dx * dx + dz * dz;
+                    if (d2 > INTERACT_RADIUS * INTERACT_RADIUS) continue;
+                    ActorTracker.ActorRef actor = entry.getValue();
+                    if (now - actor.tsMs() > INTERACT_TTL_MS) continue;
+                    if (d2 < bestD2 || (d2 == bestD2 && bestPos != null
+                            && (x < bestPos.getX() || (x == bestPos.getX() && z < bestPos.getZ())))) {
+                        bestD2 = d2; best = actor; bestPos = new BlockPos(x, changedPos.getY(), z);
+                    }
                 }
             }
         }
@@ -187,6 +195,15 @@ public final class CreateOwnershipTracker {
         }
 
         return null;
+    }
+
+    public static void cleanupBackground(long now) {
+        for (ChunkKey key : LAST_INTERACT.keySet()) {
+            LAST_INTERACT.computeIfPresent(key, (ignored, entries) -> {
+                entries.entrySet().removeIf(entry -> now - entry.getValue().tsMs() > INTERACT_TTL_MS);
+                return entries.isEmpty() ? null : entries;
+            });
+        }
     }
 
     @Nullable

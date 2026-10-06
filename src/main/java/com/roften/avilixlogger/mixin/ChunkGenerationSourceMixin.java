@@ -12,8 +12,7 @@ public abstract class ChunkGenerationSourceMixin {
     @WrapMethod(method = "postProcessGeneration")
     private void avilixlogger$generation(Operation<Void> original) {
         if (!LoggerConfig.isEnabled()) { original.call(); return; }
-        try (var scope = MutationSourceResolver.push(MutationSourceResolver.VANILLA_SIMULATION)) {
-            original.call();
-        }
+        String previous = MutationSourceResolver.enter(MutationSourceResolver.VANILLA_SIMULATION);
+        try { original.call(); } finally { MutationSourceResolver.restore(previous); }
     }
 }

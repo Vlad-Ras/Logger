@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class DeduplicatingLogStorage implements LogStorage {
     private static final int CLEANUP_AT = 200_000;
 
+    private long lastCleanup;
     private final LogStorage delegate;
     private final ConcurrentHashMap<Fingerprint, Long> recent = new ConcurrentHashMap<>();
 
@@ -44,7 +45,11 @@ public final class DeduplicatingLogStorage implements LogStorage {
         AdaptiveLogDiagnostics.accepted(entry);
         delegate.append(entry);
 
-        if (recent.size() >= CLEANUP_AT) cleanup(now - 5_000L);
+        long wallTime = System.currentTimeMillis();
+        if (recent.size() >= CLEANUP_AT && wallTime - lastCleanup >= 1_000) {
+            cleanup(now - 5_000L);
+            lastCleanup = wallTime;
+        }
     }
 
     @Override

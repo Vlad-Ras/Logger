@@ -26,3 +26,5 @@ run-data
 repo
 # Local logging from concurrency checks
 logs/
+
+avilixlogger-spool/

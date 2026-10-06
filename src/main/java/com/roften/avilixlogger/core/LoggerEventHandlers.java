@@ -4,7 +4,6 @@ import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks;
 import com.roften.avilixlogger.compat.aeronautics.AeronauticsCompatHooks;
 
-import net.minecraft.server.TickTask;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.core.Direction;
@@ -48,10 +47,6 @@ import net.neoforged.neoforge.event.level.BlockEvent;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.lang.reflect.Method;
 
 /**
@@ -86,59 +81,32 @@ public final class LoggerEventHandlers {
         }
         map.put(key, nowMs);
 
-        // Best-effort cleanup to prevent unbounded growth.
-        if (map.size() > 5000) {
-            long cutoff = nowMs - 10_000L;
-            for (var it = map.entrySet().iterator(); it.hasNext(); ) {
-                var e = it.next();
-                if (e.getValue() == null || e.getValue() < cutoff) it.remove();
-            }
-        }
         return true;
     }
 
-    private static final ScheduledExecutorService DROP_FLUSH_EXECUTOR = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
-        @Override
-        public Thread newThread(Runnable r) {
-            Thread t = new Thread(r, "AvilixLogger-DropFlush");
-            t.setDaemon(true);
-            return t;
-        }
-    });
+    public static void cleanupBackground(long now) {
+        long cutoff = now - 10_000;
+        for (var map : java.util.List.of(RECENT_PICKUPS, RECENT_DROPS, RECENT_GENERIC_ACTIONS))
+            map.entrySet().removeIf(entry -> entry.getValue() < cutoff);
+        PRE_DEATH.entrySet().removeIf(entry -> now - entry.getValue().ts > 30_000);
+        PENDING_BLOCK_CONTAINER_OPEN.entrySet().removeIf(entry -> now - entry.getValue().ts > 10_000);
+        PENDING_ENTITY_CONTAINER_OPEN.entrySet().removeIf(entry -> now - entry.getValue().ts > 10_000);
+        ActorTracker.cleanup(60_000);
+        CreateContraptionSnapshotStore.cleanup();
+        CreateOwnershipTracker.cleanupBackground(now);
+        AeronauticsCompatHooks.cleanupBackground(now);
+    }
 
     public static void shutdownBackground() {
-        try {
-            DROP_FLUSH_EXECUTOR.shutdown();
-            DROP_FLUSH_EXECUTOR.awaitTermination(3, TimeUnit.SECONDS);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        } catch (Throwable ignored) {
-        } finally {
-            try {
-                DROP_FLUSH_EXECUTOR.shutdownNow();
-            } catch (Throwable ignored) {
-            }
-        }
+        OPEN_CONTAINER.clear(); OPEN_ENTITY_CONTAINER.clear(); OPEN_GENERIC_MENU.clear();
+        PENDING_BLOCK_CONTAINER_OPEN.clear(); PENDING_ENTITY_CONTAINER_OPEN.clear();
+        PRE_DEATH.clear();
+        RECENT_PICKUPS.clear(); RECENT_DROPS.clear(); RECENT_GENERIC_ACTIONS.clear();
+        RecentPlayerActionTracker.clear();
     }
 
-    private static void scheduleDropFlush(ServerLevel level, int delayTicks, String key, long idleMs) {
-        if (level == null || key == null) return;
-        long delayMs = Math.max(1L, delayTicks) * 50L;
-        try {
-            DROP_FLUSH_EXECUTOR.schedule(() -> flushDropIfIdle(level, key, idleMs), delayMs, TimeUnit.MILLISECONDS);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void runAfterTicks(ServerLevel level, int delayTicks, Runnable r) {
-        try {
-            if (level == null || r == null) return;
-            var srv = level.getServer();
-            if (srv == null) return;
-            int d = Math.max(1, delayTicks);
-            srv.tell(new TickTask(srv.getTickCount() + d, r));
-        } catch (Throwable ignored) {
-        }
+    private static void runAfterTicks(ServerLevel level, int delayTicks, Runnable task) {
+        if (level != null && task != null) ServerTickScheduler.schedule(level.getServer(), delayTicks, task);
     }
 
     private static final class ContainerCtx {
@@ -162,11 +130,11 @@ public final class LoggerEventHandlers {
         final long ts;
         final String dim;
         final BlockPos pos;
-        final String blockAfter;
+        final BlockState blockAfter;
         final CompoundTag beforeBe;
         final boolean openLogged;
 
-        PendingBlockContainerOpen(long ts, String dim, BlockPos pos, String blockAfter, CompoundTag beforeBe, boolean openLogged) {
+        PendingBlockContainerOpen(long ts, String dim, BlockPos pos, BlockState blockAfter, CompoundTag beforeBe, boolean openLogged) {
             this.ts = ts;
             this.dim = dim;
             this.pos = pos;
@@ -232,32 +200,6 @@ public final class LoggerEventHandlers {
 
     // player uuid -> staged entity container open (confirmed later by PlayerContainerEvent.Open)
     private static final Map<UUID, PendingEntityContainerOpen> PENDING_ENTITY_CONTAINER_OPEN = new ConcurrentHashMap<>();
-
-    private static final class DropAgg {
-        final UUID actorUuid;
-        final String actorName;
-        final String dim;
-        final String itemKeySnbt; // normalized stack (count=1)
-        int count;
-        int x, y, z;
-        long lastTs;
-
-        DropAgg(UUID actorUuid, String actorName, String dim, String itemKeySnbt, int count, int x, int y, int z, long lastTs) {
-            this.actorUuid = actorUuid;
-            this.actorName = actorName;
-            this.dim = dim;
-            this.itemKeySnbt = itemKeySnbt;
-            this.count = count;
-            this.x = x;
-            this.y = y;
-            this.z = z;
-            this.lastTs = lastTs;
-        }
-    }
-
-    // key: playerUuid + ":" + normalizedStackSnbt
-    private static final Map<String, DropAgg> DROP_AGG = new ConcurrentHashMap<>();
-
 
     private static final class PreDeathSnapshot {
         final long ts;
@@ -413,7 +355,7 @@ public final class LoggerEventHandlers {
         logBlockUseIfNeeded(level, p, pos, state, used0, event.getFace());
 
         String stagedDim = null;
-        String stagedBlockState = null;
+        BlockState stagedBlockState = null;
         CompoundTag stagedBeforeBe = null;
         boolean stagedSnapshot = false;
 
@@ -424,8 +366,7 @@ public final class LoggerEventHandlers {
             String dim = level.dimension().location().toString();
             boolean inventoryLike = false;
             try { inventoryLike = isInventoryLike(level, pos, state); } catch (Throwable ignored) {}
-            String blockAfter = null;
-            try { blockAfter = NbtSerde.writeBlockState(state); } catch (Throwable ignored) {}
+            BlockState blockAfter = state;
             CompoundTag beforeBe = null;
             try { beforeBe = NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(pos)); } catch (Throwable ignored) {}
             stagedDim = dim;
@@ -451,7 +392,7 @@ public final class LoggerEventHandlers {
                 e.x = pos.getX();
                 e.y = pos.getY();
                 e.z = pos.getZ();
-                e.blockAfter = blockAfter;
+                e.deferBlockAfter(blockAfter);
                 e.extra = "open " + BuiltInRegistries.BLOCK.getKey(state.getBlock());
                 LoggerRuntime.storage(level).append(e);
             }
@@ -462,7 +403,7 @@ public final class LoggerEventHandlers {
         if (!LoggerConfig.VALUES.logBlocks.get()) return;
         if (!shouldTrackDelayedInteraction(level, pos, state)) return;
         final String dim = stagedDim != null ? stagedDim : level.dimension().location().toString();
-        final String beforeState = stagedSnapshot ? stagedBlockState : NbtSerde.writeBlockState(state);
+        final BlockState beforeState = stagedSnapshot ? stagedBlockState : state;
         final BlockEntity be0 = stagedSnapshot ? null : level.getBlockEntity(pos);
         final CompoundTag beforeTag = stagedSnapshot ? stagedBeforeBe : (be0 != null ? NbtSerde.snapshotBlockEntity(level, be0) : null);
         final ItemStack used = event.getItemStack() != null ? event.getItemStack().copy() : ItemStack.EMPTY;
@@ -479,7 +420,6 @@ public final class LoggerEventHandlers {
                 if (logged.get()) return;
                 try {
                 BlockState afterState0 = level.getBlockState(pos);
-                String afterState = NbtSerde.writeBlockState(afterState0);
                 BlockEntity be1 = level.getBlockEntity(pos);
                 CompoundTag afterTag = be1 != null ? NbtSerde.snapshotBlockEntity(level, be1) : null;
                 final String afterBlockId = BuiltInRegistries.BLOCK.getKey(afterState0.getBlock()).toString();
@@ -488,15 +428,14 @@ public final class LoggerEventHandlers {
                 final long eventTs = System.currentTimeMillis();
                 AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(beforeTag, afterTag, usedTag), () -> {
                     if (logged.get()) return;
-                    String beforeBe = NbtSerde.toSnbt(beforeTag);
-                    String afterBe = NbtSerde.toSnbt(afterTag);
-                    String usedItemSnbt = NbtSerde.toSnbt(usedTag);
-
-                    boolean stateChanged = beforeState != null && afterState != null && !afterState.equals(beforeState);
-                    boolean beChanged = beforeBe != null && afterBe != null && !afterBe.equals(beforeBe);
-
+                    boolean stateChanged = beforeState != afterState0;
+                    boolean beChanged = !java.util.Objects.equals(beforeTag, afterTag);
                     if (!stateChanged && !beChanged) return;
                     if (!logged.compareAndSet(false, true)) return;
+                    String beforeBe = beChanged ? NbtSerde.toSnbt(beforeTag) : null;
+                    String afterBe = beChanged ? NbtSerde.toSnbt(afterTag) : null;
+                    String usedItemSnbt = NbtSerde.toSnbt(usedTag);
+                    String afterState = NbtSerde.writeBlockState(afterState0);
 
                     // Human-friendly block interaction entry (covers cauldrons/composters/etc.)
                     if (stateChanged) {
@@ -509,7 +448,7 @@ public final class LoggerEventHandlers {
                         ie.x = pos.getX();
                         ie.y = pos.getY();
                         ie.z = pos.getZ();
-                        ie.blockBefore = beforeState;
+                        ie.deferBlockBefore(beforeState);
                         ie.blockAfter = afterState;
                         if (beChanged && LoggerConfig.VALUES.storeVerboseBeSnapshotsInInteractLogs.get()) {
                             ie.beBefore = beforeBe;
@@ -544,7 +483,7 @@ public final class LoggerEventHandlers {
                         storage.append(se);
 
                         if (LoggerConfig.VALUES.logContainers.get()) {
-                            var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
+                            var diffs = InventoryDiffUtil.diff(beforeTag, afterTag, registryAccess);
                             if (diffs == null || diffs.isEmpty()) return;
                             long ts = eventTs;
                             for (var d : diffs) {
@@ -697,7 +636,7 @@ public final class LoggerEventHandlers {
                     e.x = pending.pos.getX();
                     e.y = pending.pos.getY();
                     e.z = pending.pos.getZ();
-                    e.blockAfter = pending.blockAfter;
+                    e.deferBlockAfter(pending.blockAfter);
                     e.extra = "open menu " + BuiltInRegistries.BLOCK.getKey(level.getBlockState(pending.pos).getBlock());
                     LoggerRuntime.storage(level).append(e);
                 }
@@ -867,7 +806,7 @@ public final class LoggerEventHandlers {
                         final BlockPos entityPos = ent.blockPosition().immutable();
                         final long timestamp = System.currentTimeMillis();
                         AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(ectx.beforeInv, capturedAfterInv), () -> {
-                            var diffs = InventoryDiffUtil.diff(NbtSerde.toSnbt(ectx.beforeInv), NbtSerde.toSnbt(capturedAfterInv), registryAccess);
+                            var diffs = InventoryDiffUtil.diff(ectx.beforeInv, capturedAfterInv, registryAccess);
                             if (diffs == null || diffs.isEmpty()) return;
                             long ts = timestamp;
                             for (var d : diffs) {
@@ -911,7 +850,7 @@ public final class LoggerEventHandlers {
                     final String actorName = sp.getName().getString();
                     final long timestamp = System.currentTimeMillis();
                     AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(generic.beforeSlots, after), () -> emitContainerChanges(
-                            NbtSerde.toSnbt(generic.beforeSlots), NbtSerde.toSnbt(after), registryAccess, storage,
+                            generic.beforeSlots, after, registryAccess, storage,
                             generic.dim, generic.playerPos, actorUuid, actorName,
                             "menu:" + generic.menuClass, null, timestamp));
                 }
@@ -928,8 +867,8 @@ public final class LoggerEventHandlers {
 
         CompoundTag afterSlotsTag = ContainerSlotSnapshot.snapshotTag(level, ctx.pos);
         CompoundTag afterBeTag = NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(ctx.pos));
-        final String blockAfter = NbtSerde.writeBlockState(level.getBlockState(ctx.pos));
-        final String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(ctx.pos).getBlock()).toString();
+        final BlockState capturedState = level.getBlockState(ctx.pos);
+        final String blockId = BuiltInRegistries.BLOCK.getKey(capturedState.getBlock()).toString();
         final var registryAccess = level.registryAccess();
         final LogStorage storage = LoggerRuntime.storage(level);
         final UUID actorUuid = sp.getUUID();
@@ -939,9 +878,10 @@ public final class LoggerEventHandlers {
             boolean slotsChanged = !java.util.Objects.equals(ctx.beforeSlots, afterSlotsTag);
             boolean beChanged = !java.util.Objects.equals(ctx.beforeBe, afterBeTag);
             if (!slotsChanged && !beChanged) return;
-            String beforeSlots = NbtSerde.toSnbt(ctx.beforeSlots);
-            String afterSlots = NbtSerde.toSnbt(afterSlotsTag);
-            if (slotsChanged) emitContainerChanges(beforeSlots, afterSlots, registryAccess, storage,
+            String blockAfter = NbtSerde.writeBlockState(capturedState);
+            String beforeSlots = slotsChanged ? NbtSerde.toSnbt(ctx.beforeSlots) : null;
+            String afterSlots = slotsChanged ? NbtSerde.toSnbt(afterSlotsTag) : null;
+            if (slotsChanged) emitContainerChanges(ctx.beforeSlots, afterSlotsTag, registryAccess, storage,
                     ctx.dim, ctx.pos, actorUuid, actorName, null, blockAfter, timestamp);
             LogEntry e = new LogEntry();
             e.ts = timestamp; e.dim = ctx.dim; e.type = ActionType.BLOCK_ENTITY_NBT_CHANGE;
@@ -970,8 +910,8 @@ public final class LoggerEventHandlers {
      * are unchanged. The fallback is what makes pure rearrangements in arbitrary mod menus visible.
      */
     private static void emitContainerChanges(
-            String beforeSlots,
-            String afterSlots,
+            CompoundTag beforeSlots,
+            CompoundTag afterSlots,
             net.minecraft.core.HolderLookup.Provider registryAccess,
             LogStorage storage,
             String dim,
@@ -1178,64 +1118,22 @@ public final class LoggerEventHandlers {
 
     
     
-    private static void recordPlayerDrop(ServerLevel level, ServerPlayer sp, int x, int y, int z, ItemStack st, long now) {
-        if (level == null || sp == null || st == null || st.isEmpty()) return;
-        try {
-            ItemStack norm = st.copy();
-            norm.setCount(1);
-            String itemKey = NbtSerde.writeItemStackHotPath(norm, level.registryAccess());
-            if (itemKey == null) return;
-
-            String key = sp.getUUID() + ":" + itemKey;
-            DropAgg agg = DROP_AGG.get(key);
-            if (agg == null) {
-                agg = new DropAgg(sp.getUUID(), sp.getName().getString(), level.dimension().location().toString(), itemKey, st.getCount(), x, y, z, now);
-                DROP_AGG.put(key, agg);
-            } else {
-                agg.count += st.getCount();
-                agg.x = x;
-                agg.y = y;
-                agg.z = z;
-                agg.lastTs = now;
-            }
-
-            // Flush once the player stops spamming Q for a short time, fully off the main thread.
-            scheduleDropFlush(level, 5, key, 250L);
-        } catch (Throwable ignored) {}
-    }
-
-    private static void flushDropIfIdle(ServerLevel level, String key, long idleMs) {
-        if (level == null || key == null) return;
-        try {
-            DropAgg agg = DROP_AGG.get(key);
-            if (agg == null) return;
-            long now = System.currentTimeMillis();
-            long dt = (now - agg.lastTs);
-            if (dt < idleMs) {
-                // still active; reschedule until the player stops dropping for idleMs
-                int more = (int) Math.ceil((idleMs - dt) / 50.0D);
-                scheduleDropFlush(level, Math.max(1, more), key, idleMs);
-                return;
-            }
-
-            DROP_AGG.remove(key);
-
-            LogEntry e = new LogEntry();
-            e.ts = now;
-            e.dim = agg.dim;
-            e.type = ActionType.ITEM_DROP;
-            e.actorUuid = agg.actorUuid;
-            e.actorName = agg.actorName;
-            e.x = agg.x;
-            e.y = agg.y;
-            e.z = agg.z;
-            // Keep the normalized stack SNBT captured on toss and just store the aggregated count.
-            // Avoid rebuilding ItemStack here to keep idle-flush cheap and fully off-thread.
-            e.itemStackNbt = agg.itemKeySnbt;
-            e.count = Math.max(1, agg.count);
-            e.extra = "drop";
-            LoggerRuntime.storage(level).append(e);
-        } catch (Throwable ignored) {}
+    private static void recordPlayerDrop(ServerLevel level, ServerPlayer player, int x, int y, int z, ItemStack stack, long now) {
+        if (level == null || player == null || stack == null || stack.isEmpty()) return;
+        CompoundTag tag = NbtSerde.snapshotItemStack(stack, level.registryAccess());
+        if (tag == null) return;
+        tag.putInt("count", 1);
+        tag.remove("Count");
+        LogEntry entry = new LogEntry();
+        entry.ts = now;
+        entry.type = ActionType.ITEM_DROP;
+        entry.actorUuid = player.getUUID(); entry.actorName = player.getName().getString();
+        entry.dim = level.dimension().location().toString();
+        entry.x = x; entry.y = y; entry.z = z;
+        entry.count = stack.getCount(); entry.extra = "drop";
+        entry.aggregateDrop = true;
+        entry.deferSnapshot(LogEntry.SnapshotField.ITEM, tag);
+        LoggerRuntime.storage(level).append(entry);
     }
 
 @SubscribeEvent
@@ -1630,6 +1528,7 @@ public final class LoggerEventHandlers {
         PENDING_ENTITY_CONTAINER_OPEN.remove(playerId);
         OPEN_GENERIC_MENU.remove(playerId);
         ChatAuditLogger.discardPlayer(playerId);
+        RecentPlayerActionTracker.discard(playerId);
 
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
@@ -2030,7 +1929,7 @@ public final class LoggerEventHandlers {
         e.x = pos.getX();
         e.y = pos.getY();
         e.z = pos.getZ();
-        try { e.blockAfter = NbtSerde.writeBlockState(state); } catch (Throwable ignored) {}
+        try { e.deferBlockAfter(state); } catch (Throwable ignored) {}
         if (used != null && !used.isEmpty()) {
             try { e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(used.copy(), level.registryAccess())); } catch (Throwable ignored) {}
         }

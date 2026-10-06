@@ -36,7 +36,6 @@ public final class CreateContraptionSnapshotStore {
                     entityNbt,
                     reason == null ? "" : reason
             ));
-            cleanup();
         } catch (Throwable ignored) {}
     }
 
@@ -81,14 +80,13 @@ public final class CreateContraptionSnapshotStore {
         return path != null && (path.contains("contraption") || path.contains("carriage"));
     }
 
-    private static void cleanup() {
-        if (SNAPSHOTS.size() <= MAX_ENTRIES) return;
+    static void cleanup() {
         long now = System.currentTimeMillis();
         Iterator<Map.Entry<UUID, Entry>> it = SNAPSHOTS.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<UUID, Entry> e = it.next();
             if ((now - e.getValue().ts) > MAX_AGE_MS) {
-                it.remove();
+                SNAPSHOTS.remove(e.getKey(), e.getValue());
             }
         }
         if (SNAPSHOTS.size() <= MAX_ENTRIES) return;

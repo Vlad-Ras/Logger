@@ -23,6 +23,7 @@ public abstract class BlockEntityTickSourceMixin {
         }
         String source = MutationSourceResolver.sourceFor(blockEntity);
         if (source == null) source = MutationSourceResolver.VANILLA_SIMULATION;
-        try (var scope = MutationSourceResolver.push(source)) { original.call(); }
+        String previous = MutationSourceResolver.enter(source);
+        try { original.call(); } finally { MutationSourceResolver.restore(previous); }
     }
 }

@@ -10,7 +10,7 @@ import java.util.List;
  */
 public interface LogStorage {
 
-    /** Enqueue a log entry for persistence (non-blocking). */
+    /** Hand off a log entry; the runtime queues it in memory, applying backpressure only on saturation. */
     void append(LogEntry entry);
 
     /**

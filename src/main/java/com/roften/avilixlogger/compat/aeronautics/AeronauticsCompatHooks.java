@@ -41,7 +41,7 @@ public final class AeronauticsCompatHooks {
     public record Snapshot(
             String dim,
             BlockPos pos,
-            String blockBefore,
+            BlockState blockBefore,
             net.minecraft.nbt.CompoundTag beBefore,
             UUID actorUuid,
             String actorName,
@@ -85,7 +85,6 @@ public final class AeronauticsCompatHooks {
         try {
             ActorTracker.ActorRef ref = new ActorTracker.ActorRef(System.currentTimeMillis(), player.getUUID(), player.getName().getString());
             LAST_BLOCK_ACTOR.put(key(level, pos), ref);
-            cleanupActors(System.currentTimeMillis());
         } catch (Throwable ignored) {}
     }
 
@@ -149,7 +148,7 @@ public final class AeronauticsCompatHooks {
             return new Snapshot(
                     level.dimension().location().toString(),
                     pos.immutable(),
-                    NbtSerde.writeBlockState(state),
+                    state,
                     be != null ? NbtSerde.snapshotBlockEntity(level, be) : null,
                     ar != null ? ar.actorUuid() : null,
                     ar != null ? ar.actorName() : null,
@@ -167,19 +166,18 @@ public final class AeronauticsCompatHooks {
         try {
             BlockState afterState0 = level.getBlockState(before.pos);
             BlockEntity beAfter0 = level.getBlockEntity(before.pos);
-            String afterState = NbtSerde.writeBlockState(afterState0);
             var afterTag = beAfter0 != null ? NbtSerde.snapshotBlockEntity(level, beAfter0) : null;
             final String afterBlockId = blockId(afterState0);
             final var registryAccess = level.registryAccess();
             final LogStorage storage = LoggerRuntime.storage(level);
             final long timestamp = System.currentTimeMillis();
             AsyncLogProcessor.submit(com.roften.avilixlogger.core.PayloadSizeEstimator.estimateTags(before.beBefore, afterTag), () -> {
+                boolean stateChanged = before.blockBefore != afterState0;
+                boolean beChanged = !java.util.Objects.equals(before.beBefore, afterTag);
+                if (!stateChanged && !beChanged) return;
                 String beforeBe = NbtSerde.toSnbt(before.beBefore);
                 String afterBe = NbtSerde.toSnbt(afterTag);
-
-                boolean stateChanged = before.blockBefore != null && afterState != null && !before.blockBefore.equals(afterState);
-                boolean beChanged = beforeBe != null && afterBe != null && !beforeBe.equals(afterBe);
-                if (!stateChanged && !beChanged) return;
+                String afterState = NbtSerde.writeBlockState(afterState0);
 
                 LogEntry e = new LogEntry();
                 e.ts = timestamp;
@@ -190,7 +188,7 @@ public final class AeronauticsCompatHooks {
                 e.x = before.pos.getX();
                 e.y = before.pos.getY();
                 e.z = before.pos.getZ();
-                e.blockBefore = before.blockBefore;
+                e.deferBlockBefore(before.blockBefore);
                 e.beBefore = beforeBe;
                 e.blockAfter = afterState;
                 e.beAfter = afterBe;
@@ -206,7 +204,7 @@ public final class AeronauticsCompatHooks {
                     final UUID actorUuid = before.actorUuid;
                     final String actorName = before.actorName != null && !before.actorName.isBlank() ? before.actorName : "Aeronautics";
                     {
-                        var diffs = InventoryDiffUtil.diff(beforeBe, capturedAfterBe, registryAccess);
+                        var diffs = InventoryDiffUtil.diff(before.beBefore, afterTag, registryAccess);
                         if (diffs == null || diffs.isEmpty()) return;
                         long ts = timestamp;
                         for (var d : diffs) {
@@ -261,10 +259,7 @@ public final class AeronauticsCompatHooks {
             Long prev = RECENT_CANNON_FIRE_LOGS.get(dedupKey);
             if (prev != null && now - prev >= 0 && now - prev < CANNON_FIRE_DEDUP_MS) return;
             RECENT_CANNON_FIRE_LOGS.put(dedupKey, now);
-            if (RECENT_CANNON_FIRE_LOGS.size() > 4096) {
-                long cutoff = now - 30_000L;
-                RECENT_CANNON_FIRE_LOGS.entrySet().removeIf(e -> e.getValue() == null || e.getValue() < cutoff);
-            }
+
 
             ActorTracker.ActorRef ar = resolveActorForBlock(level, pos);
             if (ar != null && ar.actorUuid() != null) {
@@ -284,7 +279,7 @@ public final class AeronauticsCompatHooks {
             e.x = pos.getX();
             e.y = pos.getY();
             e.z = pos.getZ();
-            e.blockAfter = NbtSerde.writeBlockState(be.getBlockState());
+            e.deferBlockAfter(be.getBlockState());
             e.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, NbtSerde.snapshotBlockEntity(level, be));
             try {
                 e.entityType = EntityType.getKey(projectile.getType()).toString();
@@ -301,6 +296,11 @@ public final class AeronauticsCompatHooks {
         String dim = "?";
         try { dim = level.dimension().location().toString(); } catch (Throwable ignored) {}
         return dim + "@" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
+    public static void cleanupBackground(long now) {
+        RECENT_CANNON_FIRE_LOGS.entrySet().removeIf(entry -> now - entry.getValue() > 10_000);
+        cleanupActors(now);
     }
 
     private static void cleanupActors(long now) {

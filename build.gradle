@@ -256,13 +256,20 @@ tasks.register('verifyObfuscatedJar') {
 
         def actionTypeName = actionTypeMapping.group(1)
         def jarUrl = releaseJar.get().asFile.toURI().toURL()
-        def loader = new URLClassLoader([jarUrl] as URL[], ClassLoader.getPlatformClassLoader())
+        def loader = new URLClassLoader(([jarUrl] + sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() }) as URL[], ClassLoader.getPlatformClassLoader())
         try {
             def actionType = Class.forName(actionTypeName, true, loader)
             def constants = actionType.getEnumConstants()
             if (!actionType.isEnum() || constants == null || constants.length == 0) {
                 throw new GradleException('ProGuard broke ActionType enum reflection required by EnumMap/EnumSet')
             }
+            def rowMapping = mappingText =~ /(?m)^com\.roften\.avilixlogger\.core\.LogEntry -> ([\w.$]+):$/
+            if (!rowMapping.find()) throw new GradleException('LogEntry missing from ProGuard mapping')
+            def rowType = Class.forName(rowMapping.group(1), false, loader)
+            ['id', 'ts', 'dim', 'type', 'actorUuid', 'actorName', 'source', 'x', 'y', 'z',
+             'blockBefore', 'beBefore', 'blockAfter', 'beAfter', 'entityType', 'entityUuid', 'entityNbt',
+             'itemStackNbt', 'count', 'playerInvBefore', 'playerInvAfter', 'containerSlotsBefore',
+             'containerSlotsAfter', 'extra'].each { rowType.getField(it) }
         } finally {
             loader.close()
         }

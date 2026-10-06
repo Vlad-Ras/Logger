@@ -12,17 +12,19 @@ import org.spongepowered.asm.mixin.Mixin;
 public abstract class EntityTickSourceMixin {
     @WrapMethod(method = "tickNonPassenger")
     private void avilixlogger$withSource(Entity entity, Operation<Void> original) {
-        String source = LoggerConfig.isEnabled() ? MutationSourceResolver.sourceFor(entity) : null;
         if (!LoggerConfig.isEnabled()) { original.call(entity); return; }
+        String source = MutationSourceResolver.sourceFor(entity);
         if (source == null) source = MutationSourceResolver.VANILLA_SIMULATION;
-        try (var scope = MutationSourceResolver.push(source)) { original.call(entity); }
+        String previous = MutationSourceResolver.enter(source);
+        try { original.call(entity); } finally { MutationSourceResolver.restore(previous); }
     }
 
     @WrapMethod(method = "tickPassenger")
     private void avilixlogger$withPassengerSource(Entity vehicle, Entity passenger, Operation<Void> original) {
-        String source = LoggerConfig.isEnabled() ? MutationSourceResolver.sourceFor(passenger) : null;
         if (!LoggerConfig.isEnabled()) { original.call(vehicle, passenger); return; }
+        String source = MutationSourceResolver.sourceFor(passenger);
         if (source == null) source = MutationSourceResolver.VANILLA_SIMULATION;
-        try (var scope = MutationSourceResolver.push(source)) { original.call(vehicle, passenger); }
+        String previous = MutationSourceResolver.enter(source);
+        try { original.call(vehicle, passenger); } finally { MutationSourceResolver.restore(previous); }
     }
 }

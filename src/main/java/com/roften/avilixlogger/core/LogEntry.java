@@ -59,9 +59,29 @@ public final class LogEntry {
     /** Free-form extra context (JSON string). */
     public String extra;
 
+    private transient boolean rollbackParsed;
+    private transient net.minecraft.nbt.CompoundTag rollbackEntity, rollbackItem;
+
+    long prepareForRollback() {
+        if (rollbackParsed) return 0;
+        rollbackParsed = true;
+        if (type == ActionType.ENTITY_DEATH || type == ActionType.PLANE_REMOVE) rollbackEntity = NbtSerde.fromSnbt(entityNbt);
+        if (type == ActionType.ITEM_DROP || type == ActionType.ITEM_PICKUP || type == ActionType.PLANE_PICKUP
+                || type == ActionType.ITEM_CRAFT || type == ActionType.ITEM_SMELT) rollbackItem = NbtSerde.fromSnbt(itemStackNbt);
+        return PayloadSizeEstimator.estimateTags(rollbackEntity, rollbackItem);
+    }
+    net.minecraft.nbt.CompoundTag rollbackEntity() { prepareForRollback(); return rollbackEntity; }
+    net.minecraft.nbt.CompoundTag rollbackItem() { prepareForRollback(); return rollbackItem; }
+
     public enum SnapshotField { BE_BEFORE, BE_AFTER, ITEM, ENTITY, SLOTS_BEFORE, SLOTS_AFTER }
     private transient java.util.EnumMap<SnapshotField, net.minecraft.nbt.Tag> snapshots;
     private transient long snapshotBytes;
+    transient boolean aggregateDrop;
+    private transient net.minecraft.world.level.block.state.BlockState deferredBlockBefore;
+    private transient net.minecraft.world.level.block.state.BlockState deferredBlockAfter;
+
+    public void deferBlockBefore(net.minecraft.world.level.block.state.BlockState state) { deferredBlockBefore = state; }
+    public void deferBlockAfter(net.minecraft.world.level.block.state.BlockState state) { deferredBlockAfter = state; }
 
     /** The supplied detached tag transfers ownership to this row; never pass live mod NBT. */
     public void deferSnapshot(SnapshotField field, net.minecraft.nbt.Tag tag) {
@@ -75,6 +95,10 @@ public final class LogEntry {
     long snapshotBytes() { return snapshotBytes; }
 
     public void materializeSnapshots() {
+        if (deferredBlockBefore != null) blockBefore = NbtSerde.writeBlockState(deferredBlockBefore);
+        if (deferredBlockAfter != null) blockAfter = NbtSerde.writeBlockState(deferredBlockAfter);
+        deferredBlockBefore = null;
+        deferredBlockAfter = null;
         if (snapshots == null) return;
         snapshots.forEach((field, tag) -> {
             String snbt = tag.toString();
@@ -93,6 +117,7 @@ public final class LogEntry {
 
     public LogEntry copyForQueue() {
         LogEntry copy = new LogEntry();
+        copy.aggregateDrop = aggregateDrop;
         copy.id = id;
         copy.ts = ts;
         copy.dim = dim;
@@ -119,6 +144,8 @@ public final class LogEntry {
         copy.extra = extra;
         if (snapshots != null) copy.snapshots = new java.util.EnumMap<>(snapshots);
         copy.snapshotBytes = snapshotBytes;
+        copy.deferredBlockBefore = deferredBlockBefore;
+        copy.deferredBlockAfter = deferredBlockAfter;
         return copy;
     }
 }

@@ -1,13 +1,14 @@
 package com.roften.avilixlogger.core;
 
 import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
 
 /** Resolves explicit tick context and object classes without walking the server stack. */
 public final class MutationSourceResolver {
     public static final String VANILLA_SIMULATION = "minecraft:simulation";
     private static final ThreadLocal<String> CONTEXT = new ThreadLocal<>();
-    private static final ConcurrentHashMap<String, String> CLASS_SOURCES = new ConcurrentHashMap<>();
+    private static final ClassValue<String> CLASS_SOURCES = new ClassValue<>() {
+        @Override protected String computeValue(Class<?> type) { return classify(type.getName()); }
+    };
     private static final String NONE = "";
 
     private MutationSourceResolver() {}
@@ -17,14 +18,21 @@ public final class MutationSourceResolver {
     }
 
     public static String sourceFor(Object object) {
-        return object == null ? null : sourceForClass(object.getClass().getName());
+        if (object == null) return null;
+        String source = CLASS_SOURCES.get(object.getClass());
+        return source.isEmpty() ? null : source;
     }
 
-    public static Scope push(String source) {
+    /** Allocation-free enter/restore for callbacks executed on every tick. */
+    public static String enter(String source) {
         String previous = CONTEXT.get();
-        if (source == null) CONTEXT.remove(); else CONTEXT.set(source);
-        return new Scope(previous);
+        CONTEXT.set(source);
+        return previous;
     }
+
+    public static void restore(String previous) { CONTEXT.set(previous); }
+
+    public static Scope push(String source) { return new Scope(enter(source)); }
 
     public static final class Scope implements AutoCloseable {
         private final String previous;
@@ -33,14 +41,8 @@ public final class MutationSourceResolver {
         public void close() {
             if (closed) return;
             closed = true;
-            if (previous == null) CONTEXT.remove(); else CONTEXT.set(previous);
+            restore(previous);
         }
-    }
-
-    private static String sourceForClass(String className) {
-        if (className == null || className.isBlank()) return null;
-        String cached = CLASS_SOURCES.computeIfAbsent(className, MutationSourceResolver::classify);
-        return cached.isEmpty() ? null : cached;
     }
 
     private static String classify(String className) {

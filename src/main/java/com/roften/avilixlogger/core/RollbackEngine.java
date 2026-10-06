@@ -2,6 +2,7 @@ package com.roften.avilixlogger.core;
 
 import com.roften.avilixlogger.LoggerConfig;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -124,7 +125,11 @@ public final class RollbackEngine {
      * contains no live world objects, so ClickHouse paging can safely happen on a worker thread.
      */
     public record PreparedBlockSnapshot(BlockPos pos, String blockBeforeSnbt, String beBeforeSnbt,
-                                        String containerSlotsBeforeSnbt, ActionType type) {
+                                        String containerSlotsBeforeSnbt, ActionType type,
+                                        CompoundTag stateTag, CompoundTag beTag, CompoundTag slotsTag) {
+        public PreparedBlockSnapshot(BlockPos pos, String state, String be, String slots, ActionType type) {
+            this(pos, state, be, slots, type, NbtSerde.fromSnbt(state), NbtSerde.fromSnbt(be), NbtSerde.fromSnbt(slots));
+        }
         public PreparedBlockSnapshot {
             pos = pos == null ? BlockPos.ZERO : pos.immutable();
         }
@@ -191,8 +196,7 @@ public final class RollbackEngine {
         java.util.LinkedHashMap<BlockPos, BlockSnapshot> snapshots = new java.util.LinkedHashMap<>();
         for (PreparedBlockSnapshot block : blocks) {
             if (block == null) continue;
-            snapshots.put(block.pos(), new BlockSnapshot(block.blockBeforeSnbt(), block.beBeforeSnbt(),
-                    block.containerSlotsBeforeSnbt(), block.type()));
+            snapshots.put(block.pos(), new BlockSnapshot(block));
         }
         applyConsolidatedBlocks(level, snapshots, report, true);
         return report;
@@ -291,10 +295,10 @@ public final class RollbackEngine {
                 } else if (isEntityRemovalType(e.type)) {
                     // Undo spawned moving entities before stationary blocks are put back.
                     entityRemovals.add(e);
-                    retainedBytes += PayloadSizeEstimator.estimate(e);
+                    retainedBytes += PayloadSizeEstimator.estimate(e) + e.prepareForRollback();
                 } else {
                     deferred.add(e);
-                    retainedBytes += PayloadSizeEstimator.estimate(e);
+                    retainedBytes += PayloadSizeEstimator.estimate(e) + e.prepareForRollback();
                 }
                 if (retainedBytes > maxPreparedBytes) {
                     throw new IllegalStateException("план превышает "
@@ -311,8 +315,11 @@ public final class RollbackEngine {
         java.util.ArrayList<PreparedBlockSnapshot> blocks = new java.util.ArrayList<>(blockSnapshots.size());
         for (var entry : blockSnapshots.entrySet()) {
             BlockSnapshot snap = entry.getValue();
-            blocks.add(new PreparedBlockSnapshot(entry.getKey(), snap.blockBeforeSnbt, snap.beBeforeSnbt,
-                    snap.containerSlotsBeforeSnbt, snap.type));
+            PreparedBlockSnapshot parsed = new PreparedBlockSnapshot(entry.getKey(), snap.blockBeforeSnbt, snap.beBeforeSnbt,
+                    snap.containerSlotsBeforeSnbt, snap.type);
+            retainedBytes += PayloadSizeEstimator.estimateTags(parsed.stateTag, parsed.beTag, parsed.slotsTag);
+            if (retainedBytes > maxPreparedBytes) throw new IllegalStateException("разобранный план превышает лимит памяти; сузьте область или период");
+            blocks.add(parsed);
         }
         // Keep block batches chunk-local where possible. This reduces synchronous chunk loads and
         // preserves the existing per-batch transaction/verification semantics.
@@ -353,14 +360,14 @@ public final class RollbackEngine {
 
             BlockState state = null;
             if (snap.blockBeforeSnbt != null) {
-                state = NbtSerde.readBlockState(level, snap.blockBeforeSnbt);
+                state = NbtSerde.readBlockState(level, snap.stateTag);
                 if (state == null) { report.onSkipped("invalid_block_snapshot"); continue; }
             }
-            if (snap.beBeforeSnbt != null && NbtSerde.fromSnbt(snap.beBeforeSnbt) == null) {
+            if (snap.beBeforeSnbt != null && snap.beTag == null) {
                 report.onSkipped("invalid_block_entity_nbt");
                 continue;
             }
-            if (snap.containerSlotsBeforeSnbt != null && !ContainerSlotSnapshot.isValid(snap.containerSlotsBeforeSnbt)) {
+            if (snap.containerSlotsBeforeSnbt != null && !ContainerSlotSnapshot.isValid(snap.slotsTag)) {
                 report.onSkipped("invalid_container_snapshot");
                 continue;
             }
@@ -379,8 +386,8 @@ public final class RollbackEngine {
         java.util.ArrayList<BlockBackup> backups = new java.util.ArrayList<>(prepared.size());
         for (PreparedBlock block : prepared) {
             backups.add(new BlockBackup(block.pos, level.getBlockState(block.pos),
-                    NbtSerde.writeBlockEntity(level, level.getBlockEntity(block.pos)),
-                    ContainerSlotSnapshot.snapshot(level, block.pos)));
+                    NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(block.pos)),
+                    ContainerSlotSnapshot.snapshotTag(level, block.pos)));
         }
 
         String failure = null;
@@ -400,14 +407,14 @@ public final class RollbackEngine {
         if (failure == null) {
             for (PreparedBlock block : prepared) {
                 if (block.snapshot.beBeforeSnbt != null) {
-                    if (!NbtSerde.readBlockEntity(level, block.pos, block.snapshot.beBeforeSnbt)) {
+                    if (!NbtSerde.readBlockEntity(level, block.pos, block.snapshot.beTag)) {
                         failure = "block_entity_restore_failed";
                         break;
                     }
                     if (looksLikeCreatePayload(block.snapshot.beBeforeSnbt)) createTouched.add(block.pos);
                 }
                 if (block.snapshot.containerSlotsBeforeSnbt != null) {
-                    if (!ContainerSlotSnapshot.apply(level, block.pos, block.snapshot.containerSlotsBeforeSnbt)) {
+                    if (!ContainerSlotSnapshot.apply(level, block.pos, block.snapshot.slotsTag)) {
                         failure = "container_restore_failed";
                         break;
                     }
@@ -495,16 +502,25 @@ public final class RollbackEngine {
         final String beBeforeSnbt;
         final String containerSlotsBeforeSnbt;
         final ActionType type;
+        final CompoundTag stateTag, beTag, slotsTag;
         BlockSnapshot(String blockBeforeSnbt, String beBeforeSnbt, String containerSlotsBeforeSnbt, ActionType type) {
             this.blockBeforeSnbt = blockBeforeSnbt;
             this.beBeforeSnbt = beBeforeSnbt;
             this.containerSlotsBeforeSnbt = containerSlotsBeforeSnbt;
             this.type = type;
+            this.stateTag = null; this.beTag = null; this.slotsTag = null;
+        }
+        BlockSnapshot(PreparedBlockSnapshot parsed) {
+            this.blockBeforeSnbt = parsed.blockBeforeSnbt;
+            this.beBeforeSnbt = parsed.beBeforeSnbt;
+            this.containerSlotsBeforeSnbt = parsed.containerSlotsBeforeSnbt;
+            this.type = parsed.type;
+            this.stateTag = parsed.stateTag; this.beTag = parsed.beTag; this.slotsTag = parsed.slotsTag;
         }
     }
 
     private record PreparedBlock(BlockPos pos, BlockSnapshot snapshot, BlockState state) {}
-    private record BlockBackup(BlockPos pos, BlockState state, String beSnbt, String containerSnbt) {}
+    private record BlockBackup(BlockPos pos, BlockState state, CompoundTag beSnbt, CompoundTag containerSnbt) {}
 
     private static void applyRollback(ServerLevel level, LogEntry e, RollbackReport report, boolean apply) {
         try {
@@ -546,19 +562,19 @@ public final class RollbackEngine {
                 }
                 case ENTITY_DEATH, PLANE_REMOVE -> {
                     if (e.entityType != null && e.entityNbt != null) {
-                        String invalid = NbtSerde.validateEntitySnapshot(e.entityType, e.entityUuid, e.entityNbt);
+                        String invalid = NbtSerde.validateEntitySnapshot(e.entityType, e.entityUuid, e.rollbackEntity());
                         if (invalid != null) { report.onSkipped(invalid); return; }
                         if (!apply) {
-                            if (NbtSerde.isCreateContraptionSnapshot(e.entityType, e.entityNbt)) report.createStructuresRestored++;
+                            if (NbtSerde.isCreateContraptionSnapshot(e.entityType, e.rollbackEntity())) report.createStructuresRestored++;
                             else report.entitiesRespawned++;
                             report.onApplied(e.type);
                             return;
                         }
 
-                        boolean createSnapshot = NbtSerde.isCreateContraptionSnapshot(e.entityType, e.entityNbt);
+                        boolean createSnapshot = NbtSerde.isCreateContraptionSnapshot(e.entityType, e.rollbackEntity());
                         NbtSerde.EntityRestoreResult result = createSnapshot
-                                ? NbtSerde.restoreCreateContraptionAsBlocks(level, e.entityType, e.entityUuid, e.entityNbt)
-                                : NbtSerde.restoreEntityFromSnapshot(level, e.entityType, e.entityUuid, e.entityNbt);
+                                ? NbtSerde.restoreCreateContraptionAsBlocks(level, e.entityType, e.entityUuid, e.rollbackEntity())
+                                : NbtSerde.restoreEntityFromSnapshot(level, e.entityType, e.entityUuid, e.rollbackEntity());
                         if (!result.success()) { report.onSkipped(result.reason()); return; }
                         if (createSnapshot) {
                             report.createStructuresRestored++;
@@ -600,7 +616,7 @@ public final class RollbackEngine {
                     return;
                 }
                 case ITEM_DROP -> {
-                    ItemStack st = NbtSerde.readItemStack(e.itemStackNbt, level.registryAccess());
+                    ItemStack st = NbtSerde.readItemStack(e.rollbackItem(), level.registryAccess());
                     if (st.isEmpty()) { report.onSkipped("invalid_stack"); return; }
                     st.setCount(Math.max(1, e.count));
                     ServerPlayer p = (e.actorUuid != null) ? level.getServer().getPlayerList().getPlayer(e.actorUuid) : null;
@@ -623,7 +639,7 @@ public final class RollbackEngine {
                 }
                 case ITEM_PICKUP, PLANE_PICKUP -> {
                     // Remove picked item from inventory (best-effort).
-                    ItemStack target = NbtSerde.readItemStack(e.itemStackNbt, level.registryAccess());
+                    ItemStack target = NbtSerde.readItemStack(e.rollbackItem(), level.registryAccess());
                     if (target.isEmpty()) { report.onSkipped("invalid_stack"); return; }
                     target.setCount(Math.max(1, e.count));
                     ServerPlayer p = (e.actorUuid != null) ? level.getServer().getPlayerList().getPlayer(e.actorUuid) : null;
@@ -651,7 +667,7 @@ public final class RollbackEngine {
                 }
                 case ITEM_CRAFT, ITEM_SMELT -> {
                     // Best-effort: remove crafted output from inventory if player online.
-                    ItemStack out = NbtSerde.readItemStack(e.itemStackNbt, level.registryAccess());
+                    ItemStack out = NbtSerde.readItemStack(e.rollbackItem(), level.registryAccess());
                     if (out.isEmpty()) { report.onSkipped("invalid_stack"); return; }
                     out.setCount(Math.max(1, e.count));
                     ServerPlayer p = (e.actorUuid != null) ? level.getServer().getPlayerList().getPlayer(e.actorUuid) : null;

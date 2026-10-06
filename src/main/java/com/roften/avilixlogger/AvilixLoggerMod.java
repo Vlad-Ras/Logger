@@ -57,6 +57,7 @@ public final class AvilixLoggerMod {
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(RollbackCoordinator::onServerTick);
+        NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.core.ServerTickScheduler::onServerTick);
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
@@ -84,6 +85,7 @@ public final class AvilixLoggerMod {
 
     private void onServerStopping(ServerStoppingEvent event) {
         // Ensure we flush writers and stop GUI/database helper executors.
+        com.roften.avilixlogger.core.ServerTickScheduler.finish(event.getServer());
         LoggerEventHandlers.shutdownBackground();
         ChatLogPager.shutdown();
         LoggerNetwork.shutdown();

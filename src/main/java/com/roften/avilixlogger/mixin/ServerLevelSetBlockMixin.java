@@ -68,9 +68,9 @@ public abstract class ServerLevelSetBlockMixin {
             AVILIXLOGGER$REENTRY_GUARD.set(Boolean.TRUE);
             ownsGuard = true;
             BlockState beforeState = before;
-            BlockEntity be = level.getBlockEntity(pos);
+            BlockEntity be = before.hasBlockEntity() ? level.getBlockEntity(pos) : null;
             var beforeBe = be != null ? NbtSerde.snapshotBlockEntity(level, be) : null;
-            var beforeSlots = be != null ? ContainerSlotSnapshot.snapshotTag(level, pos) : null;
+            var beforeSlots = be != null ? ContainerSlotSnapshot.snapshotTag(level, pos, before, be) : null;
 
             java.util.UUID actorUuid = null;
             String actorName = null;
@@ -133,9 +133,9 @@ public abstract class ServerLevelSetBlockMixin {
 
             BlockState after = level.getBlockState(pos);
             BlockState afterState = after;
-            BlockEntity beAfter = level.getBlockEntity(pos);
+            BlockEntity beAfter = after.hasBlockEntity() ? level.getBlockEntity(pos) : null;
             var afterBe = beAfter != null ? NbtSerde.snapshotBlockEntity(level, beAfter) : null;
-            var afterSlots = beAfter != null ? ContainerSlotSnapshot.snapshotTag(level, pos) : null;
+            var afterSlots = beAfter != null ? ContainerSlotSnapshot.snapshotTag(level, pos, after, beAfter) : null;
 
             // Freeze all world state above. Comparison and SNBT encoding below use only snapshots.
             final long timestamp = System.currentTimeMillis();
