@@ -9,7 +9,8 @@ import java.util.UUID;
  * - forward-compatible: unknown fields should be ignored
  * - rollback-friendly: contains "before" snapshots where possible
  */
-public final class LogEntry {
+public final class LogEntry implements QueuedLogEvent {
+    @Override public LogEntry resolve() { return this; }
     /** SQL row id (filled on reads). */
     public long id;
     public long ts;                // epoch millis

@@ -9,8 +9,35 @@ import static com.roften.avilixlogger.core.AsyncPipelineTest.check;
 final class TickHotPathTest {
     static void run() {
         snapshotHandoff();
+        lazyRowHandoff();
         blockActionKinds();
         spatialWindow();
+    }
+
+    private static void lazyRowHandoff() {
+        List<LogEntry> delivered = new ArrayList<>();
+        Thread producer = Thread.currentThread();
+        LogStorage sink = new LogStorage() {
+            public void append(LogEntry row) { delivered.add(row); }
+            public List<LogEntry> query(LogQuery query) { return List.of(); }
+            public List<LogEntry> queryReverse(LogQuery query) { return List.of(); }
+            public void shutdown() {}
+        };
+        AsyncLogStorage storage = new AsyncLogStorage(sink, 16, 100_000);
+        storage.append(AsyncPipelineTest.row("first"));
+        storage.appendCaptured(() -> {
+            check(Thread.currentThread() != producer, "deferred row was constructed on the server producer");
+            LogEntry row = AsyncPipelineTest.row("lazy");
+            CompoundTag tag = new CompoundTag(); tag.putString("id", "minecraft:stone");
+            row.deferSnapshot(LogEntry.SnapshotField.ITEM, tag);
+            return row;
+        }, 1024);
+        storage.append(AsyncPipelineTest.row("last"));
+        storage.shutdown();
+        check(delivered.stream().map(row -> row.extra).toList().equals(List.of("first", "lazy", "last")),
+                "deferred rows changed delivery order or were not drained on shutdown");
+        check(delivered.get(1).itemStackNbt.contains("minecraft:stone"), "deferred row skipped NBT encoding");
+        check(storage.retainedBytes() == 0, "deferred row reservation leaked");
     }
 
     private static void snapshotHandoff() {

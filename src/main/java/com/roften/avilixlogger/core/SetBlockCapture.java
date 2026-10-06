@@ -18,7 +18,7 @@ public record SetBlockCapture(BlockPos pos, String dim, net.minecraft.world.leve
         LogEntry row = new LogEntry();
         row.ts = timestamp;
         row.dim = dim;
-        row.type = classify(beforeState.isAir(), after.isAir(), beforeState != after, causeKind);
+        row.type = classify(beforeState.isAir(), after.isAir(), !java.util.Objects.equals(beforeState, after), causeKind);
         row.actorUuid = actorUuid;
         row.actorName = actorName;
         row.x = pos.getX(); row.y = pos.getY(); row.z = pos.getZ();

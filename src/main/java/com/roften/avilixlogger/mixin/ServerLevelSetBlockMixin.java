@@ -144,8 +144,11 @@ public abstract class ServerLevelSetBlockMixin {
             final LogStorage storage = LoggerRuntime.storage(level);
             if (cap.beforeBe() == null && afterBe == null && cap.beforeSlots() == null && afterSlots == null) {
                 // No mutable NBT to compare: avoid a CPU task, its queue lock and a second handoff.
-                if (cap.beforeState() != afterState) storage.append(cap.entry(afterState, afterId, timestamp));
-                return;
+                if (Objects.equals(cap.beforeState(), afterState)) return;
+                if (storage instanceof AsyncLogStorage async) {
+                    async.appendBlockChange(cap, afterState, afterId, timestamp);
+                    return;
+                }
             }
             long bytes = 512L + (cap.beforeBe() == null ? 0 : cap.beforeBe().sizeInBytes())
                     + (afterBe == null ? 0 : afterBe.sizeInBytes())

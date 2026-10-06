@@ -6,7 +6,7 @@ import java.util.List;
 /** Ordered background serialization; saturation applies backpressure without dropping rows. */
 public final class AsyncLogStorage implements LogStorage {
     private final LogStorage delegate;
-    private final WeightedQueue<LogEntry> queue;
+    private final WeightedQueue<QueuedLogEvent> queue;
     private final Thread worker;
 
     public AsyncLogStorage(LogStorage delegate, int capacity, long maxBytes) {
@@ -24,6 +24,22 @@ public final class AsyncLogStorage implements LogStorage {
         queue.put(snapshot, PayloadSizeEstimator.estimate(snapshot));
     }
 
+    private record BlockChangeEvent(SetBlockCapture before,
+                                    net.minecraft.world.level.block.state.BlockState after,
+                                    String afterId, long timestamp) implements QueuedLogEvent {
+        @Override public LogEntry resolve() { return before.entry(after, afterId, timestamp); }
+    }
+
+    /** No LogEntry allocation/copy or text encoding on the producer's block-mutation path. */
+    public void appendBlockChange(SetBlockCapture before,
+                                  net.minecraft.world.level.block.state.BlockState after,
+                                  String afterId, long timestamp) {
+        appendCaptured(new BlockChangeEvent(before, after, afterId, timestamp),
+                PayloadSizeEstimator.estimateBlockChange(before, afterId));
+    }
+
+    void appendCaptured(QueuedLogEvent event, long bytes) { queue.put(event, bytes); }
+
     private void process() {
         DropAggregator drops = new DropAggregator(delegate::append);
         long nextMaintenance = 0;
@@ -38,9 +54,10 @@ public final class AsyncLogStorage implements LogStorage {
                 }
                 if (work == null) continue;
                 try {
-                    work.value().materializeSnapshots();
-                    if (work.value().aggregateDrop) drops.add(work.value(), now);
-                    else delegate.append(work.value());
+                    LogEntry row = work.value().resolve();
+                    row.materializeSnapshots();
+                    if (row.aggregateDrop) drops.add(row, now);
+                    else delegate.append(row);
                 } catch (Throwable error) {
                     AvilixLoggerMod.LOGGER.error("[AvilixLogger] Event processing failed", error);
                 } finally { queue.complete(work); }

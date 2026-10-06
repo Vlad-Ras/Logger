@@ -35,6 +35,13 @@ public final class PayloadSizeEstimator {
         return Math.max(128L, bytes);
     }
 
+    public static long estimateBlockChange(SetBlockCapture before, String afterId) {
+        return 512L + stringBytes(before.dim()) + stringBytes(before.actorName())
+                + stringBytes(before.source()) + stringBytes(afterId)
+                + 2L * ((before.beforeBe() == null ? 0L : before.beforeBe().sizeInBytes())
+                        + (before.beforeSlots() == null ? 0L : before.beforeSlots().sizeInBytes()));
+    }
+
     public static long estimateTags(net.minecraft.nbt.Tag... values) {
         long bytes = 128L;
         for (net.minecraft.nbt.Tag value : values) if (value != null) bytes += 2L * value.sizeInBytes();
