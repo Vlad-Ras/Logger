@@ -4,8 +4,10 @@ import com.roften.avilixlogger.LoggerConfig;
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.sun.net.httpserver.HttpServer;
 import net.neoforged.fml.config.IConfigSpec;
+import net.neoforged.fml.config.ModConfig;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import static com.roften.avilixlogger.core.AsyncPipelineTest.*;
@@ -40,10 +42,12 @@ final class ClickHouseDeliveryTest {
             CommentedConfig config = CommentedConfig.inMemory();
             LoggerConfig.SPEC.correct(config);
             config.set(List.of("clickhouse", "url"), "http://127.0.0.1:" + http.getAddress().getPort());
-            LoggerConfig.SPEC.acceptConfig(new IConfigSpec.ILoadedConfig() {
-                public CommentedConfig config() { return config; }
-                public void save() {}
-            });
+            // FML seals ILoadedConfig. Use its real wrapper for this headless test;
+            // no file/container is needed because the already-correct config is never saved.
+            var constructor = Class.forName("net.neoforged.fml.config.LoadedConfig")
+                    .getDeclaredConstructor(CommentedConfig.class, Path.class, ModConfig.class);
+            constructor.setAccessible(true);
+            LoggerConfig.SPEC.acceptConfig((IConfigSpec.ILoadedConfig) constructor.newInstance(config, null, null));
             database = new ClickHouseLogStorage();
             LogEntry first = row("delta"), second = row("delta");
             first.type = second.type = ActionType.CONTAINER_PUT;

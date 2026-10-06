@@ -139,9 +139,9 @@ public final class LoggerConfig {
                     .defineInRange("selectQueryTimeoutSec", 15, 1, 600);
             clickHouseWorldQueryTimeoutSec = b.comment("Timeout for whole-world, all-dimension and 30+ day queries. They run outside the server tick.")
                     .defineInRange("worldQueryTimeoutSec", 600, 5, 3600);
-            clickHouseAsyncInsert = b.comment("Enable ClickHouse server-side async inserts with wait_for_async_insert control.")
+            clickHouseAsyncInsert = b.comment("Legacy option retained for compatibility. The background journal sender uses acknowledged synchronous inserts.")
                     .define("asyncInsert", true);
-            clickHouseWaitForAsyncInsert = b.comment("When asyncInsert is enabled, wait until ClickHouse confirms the buffered insert.")
+            clickHouseWaitForAsyncInsert = b.comment("Legacy option retained for compatibility. Journal batches always wait for ClickHouse acknowledgment.")
                     .define("waitForAsyncInsert", true);
             clickHouseHealthCooldownMs = b.comment("How long ClickHouse remains marked unhealthy after a failed request (ms).")
                     .defineInRange("healthCooldownMs", 10000, 1000, 300000);
