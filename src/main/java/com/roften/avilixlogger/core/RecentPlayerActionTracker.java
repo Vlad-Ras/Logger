@@ -8,10 +8,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
-import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -50,9 +46,11 @@ public final class RecentPlayerActionTracker {
     public record ActionRef(long tsMs, UUID actorUuid, String actorName, double confidence, String source) {}
 
     private static final int MAX_PER_PLAYER = 64;
-    private static final ConcurrentHashMap<UUID, Deque<Action>> RECENT = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<UUID, SpatialActionWindow<Action>> RECENT = new ConcurrentHashMap<>();
 
     private RecentPlayerActionTracker() {}
+    public static void discard(UUID player) { RECENT.remove(player); }
+    public static void clear() { RECENT.clear(); }
 
     public static void note(ServerLevel level, ServerPlayer player, BlockPos pos) {
         note(level, player, pos, ActionKind.OTHER, player.getMainHandItem());
@@ -71,10 +69,10 @@ public final class RecentPlayerActionTracker {
         } catch (Throwable ignored) {}
 
         Action a = new Action(System.currentTimeMillis(), level.getGameTime(), dim, player.getUUID(), player.getName().getString(), pos.immutable(), kind, itemKey);
-        Deque<Action> q = RECENT.computeIfAbsent(player.getUUID(), k -> new ArrayDeque<>());
+        SpatialActionWindow<Action> q = RECENT.computeIfAbsent(player.getUUID(),
+                k -> new SpatialActionWindow<>(MAX_PER_PLAYER, Action::pos));
         synchronized (q) {
-            q.addFirst(a);
-            while (q.size() > MAX_PER_PLAYER) q.removeLast();
+            q.add(a);
         }
     }
 
@@ -94,33 +92,30 @@ public final class RecentPlayerActionTracker {
         long now = System.currentTimeMillis();
         String dim = level.dimension().location().toString();
 
-        // Collect candidates from online players in this level.
-        List<ServerPlayer> players = new ArrayList<>();
-        try {
-            for (Player p : level.players()) {
-                if (p instanceof ServerPlayer sp) players.add(sp);
-            }
-        } catch (Throwable ignored) {}
+        var players = level.players();
         if (players.isEmpty()) return null;
+        double radiusSquared = (double) searchRadiusBlocks * searchRadiusBlocks;
 
         Candidate best = null;
         Candidate second = null;
 
         for (ServerPlayer sp : players) {
-            Deque<Action> q = RECENT.get(sp.getUUID());
+            SpatialActionWindow<Action> q = RECENT.get(sp.getUUID());
             if (q == null) continue;
             Action bestForPlayer = null;
             double bestScoreForPlayer = 0.0;
 
             synchronized (q) {
+                if (!q.mayContain(target, radiusSquared)) continue;
                 for (Action a : q) {
                     if (!dim.equals(a.dim)) continue;
                     long dt = now - a.tsMs;
                     if (dt < 0) dt = 0;
                     if (dt > ttlMs) break; // queue is newest-first
 
-                    double dist = Math.sqrt(a.pos.distSqr(target));
-                    if (dist > searchRadiusBlocks) continue;
+                    double squared = a.pos.distSqr(target);
+                    if (squared > radiusSquared) continue;
+                    double dist = Math.sqrt(squared);
 
                     double timeScore = clamp01(1.0 - (dt / 4000.0)); // 4s window
                     double distScore = clamp01(1.0 - (dist / 6.0));   // 6 block sweet spot
@@ -191,9 +186,9 @@ public final class RecentPlayerActionTracker {
             int within = 0;
             for (Player p : level.players()) {
                 if (!(p instanceof ServerPlayer sp)) continue;
-                double d = Math.sqrt(sp.blockPosition().distSqr(target));
-                if (d <= maxDist) {
-                    within++;
+                double d = sp.blockPosition().distSqr(target);
+                if (d <= maxDist * maxDist) {
+                    if (++within > 1) return null;
                     if (d < best) {
                         best = d;
                         nearest = sp;
@@ -202,7 +197,7 @@ public final class RecentPlayerActionTracker {
             }
             // only if single player nearby to reduce errors
             if (nearest != null && within == 1) {
-                double conf = clamp01(0.55 - (best / (maxDist * 2.0))); // ~0.55..0.30
+                double conf = clamp01(0.55 - (Math.sqrt(best) / (maxDist * 2.0))); // ~0.55..0.30
                 return new ActionRef(System.currentTimeMillis(), nearest.getUUID(), nearest.getName().getString(), conf, "nearest");
             }
         } catch (Throwable ignored) {}

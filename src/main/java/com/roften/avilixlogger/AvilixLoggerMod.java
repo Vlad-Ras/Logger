@@ -57,6 +57,12 @@ public final class AvilixLoggerMod {
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(RollbackCoordinator::onServerTick);
+        if (net.neoforged.fml.ModList.get().isLoaded("create")) {
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartRollbackCoordinator::onTick);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartItemTracker::join);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartItemTracker::leave);
+        }
+        NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.core.ServerTickScheduler::onServerTick);
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
@@ -84,10 +90,12 @@ public final class AvilixLoggerMod {
 
     private void onServerStopping(ServerStoppingEvent event) {
         // Ensure we flush writers and stop GUI/database helper executors.
+        com.roften.avilixlogger.core.ServerTickScheduler.finish(event.getServer());
         LoggerEventHandlers.shutdownBackground();
         ChatLogPager.shutdown();
         LoggerNetwork.shutdown();
         RollbackCoordinator.shutdown();
+        if (net.neoforged.fml.ModList.get().isLoaded("create")) com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();
         LoggerRuntime.shutdown();
         AuthCoreBridge.clear(event.getServer());
     }

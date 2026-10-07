@@ -16,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class DeduplicatingLogStorage implements LogStorage {
     private static final int CLEANUP_AT = 200_000;
 
+    private long lastCleanup;
     private final LogStorage delegate;
     private final ConcurrentHashMap<Fingerprint, Long> recent = new ConcurrentHashMap<>();
 
@@ -27,7 +28,7 @@ public final class DeduplicatingLogStorage implements LogStorage {
     public void append(LogEntry entry) {
         if (entry == null || !LoggerConfig.isEnabled()) return;
         LogAdapterRegistry.enrich(entry);
-        long window = duplicateWindowMs(entry.type);
+        long window = CartAuditContext.id(entry.source) == null ? duplicateWindowMs(entry.type) : 0L;
         if (window <= 0L) {
             AdaptiveLogDiagnostics.accepted(entry);
             delegate.append(entry);
@@ -37,14 +38,18 @@ public final class DeduplicatingLogStorage implements LogStorage {
         long now = entry.ts > 0L ? entry.ts : System.currentTimeMillis();
         Fingerprint key = Fingerprint.of(entry);
         Long previous = recent.put(key, now);
-        if (previous != null && now >= previous && (now - previous) <= window) {
+        if (previous != null && Math.abs(now - previous) <= window) {
             AdaptiveLogDiagnostics.suppressedDuplicate();
             return;
         }
         AdaptiveLogDiagnostics.accepted(entry);
         delegate.append(entry);
 
-        if (recent.size() >= CLEANUP_AT) cleanup(now - 5_000L);
+        long wallTime = System.currentTimeMillis();
+        if (recent.size() >= CLEANUP_AT && wallTime - lastCleanup >= 1_000) {
+            cleanup(now - 5_000L);
+            lastCleanup = wallTime;
+        }
     }
 
     @Override
@@ -58,6 +63,8 @@ public final class DeduplicatingLogStorage implements LogStorage {
         requireEnabled();
         return delegate.queryReverse(query);
     }
+
+    @Override public boolean awaitVisible(long deadline) throws InterruptedException { return delegate.awaitVisible(deadline); }
 
     @Override
     public void shutdown() {

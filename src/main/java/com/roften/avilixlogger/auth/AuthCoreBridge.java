@@ -3,7 +3,9 @@ package com.roften.avilixlogger.auth;
 import com.roften.avilixlogger.AvilixLoggerMod;
 import net.minecraft.server.MinecraftServer;
 
-import java.lang.reflect.Method;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 
 /**
  * Fail-closed bridge to the server-only AvilixAuthCore API.
@@ -18,7 +20,7 @@ public final class AuthCoreBridge {
     private static final String API_METHOD = "isAuthorized";
 
     private static volatile MinecraftServer activeServer;
-    private static volatile Method authorizationMethod;
+    private static volatile MethodHandle authorizationMethod;
     private static volatile boolean methodLookupAttempted;
     private static volatile String failureDescription = "AvilixAuthCore has not been checked";
 
@@ -39,12 +41,11 @@ public final class AuthCoreBridge {
             return false;
         }
 
-        Method method = resolveAuthorizationMethod();
+        MethodHandle method = resolveAuthorizationMethod();
         if (method == null) return false;
 
         try {
-            Object result = method.invoke(null, server, AvilixLoggerMod.MOD_ID);
-            boolean authorized = Boolean.TRUE.equals(result);
+            boolean authorized = (boolean) method.invokeExact(server, AvilixLoggerMod.MOD_ID);
             failureDescription = authorized
                     ? "server authorized by AvilixAuthCore"
                     : "AvilixAuthCore denied this server";
@@ -64,8 +65,8 @@ public final class AuthCoreBridge {
         failureDescription = "AvilixAuthCore has not been checked";
     }
 
-    private static Method resolveAuthorizationMethod() {
-        Method current = authorizationMethod;
+    private static MethodHandle resolveAuthorizationMethod() {
+        MethodHandle current = authorizationMethod;
         if (current != null) return current;
         if (methodLookupAttempted) return null;
 
@@ -76,7 +77,8 @@ public final class AuthCoreBridge {
             methodLookupAttempted = true;
             try {
                 Class<?> api = Class.forName(API_CLASS, true, AuthCoreBridge.class.getClassLoader());
-                current = api.getMethod(API_METHOD, MinecraftServer.class, String.class);
+                current = MethodHandles.publicLookup().unreflect(api.getMethod(API_METHOD, MinecraftServer.class, String.class))
+                        .asType(MethodType.methodType(boolean.class, MinecraftServer.class, String.class));
                 authorizationMethod = current;
                 return current;
             } catch (Throwable failure) {

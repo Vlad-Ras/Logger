@@ -11,27 +11,20 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.Optional;
 import java.util.Objects;
 
 /**
  * Catch block changes that bypass NeoForge events (WorldEdit, Create Schematicannon, creative tools, etc.).
  *
- * External sources are resolved from their call-site dynamically. This makes the hook work for
- * mods that were not known when the logger was built; the central storage gate removes overlap
+ * External sources are passed through explicit action/tick context without stack walking.
+ * The central storage gate removes overlap
  * with normal NeoForge events.
  */
 @Mixin(Level.class)
 public abstract class ServerLevelSetBlockMixin {
-
-    @Unique
-    private static final ThreadLocal<Deque<Optional<SetBlockCapture>>> AVILIXLOGGER$CAPTURE_STACK = ThreadLocal.withInitial(ArrayDeque::new);
 
     @Unique
     private static final ThreadLocal<Boolean> AVILIXLOGGER$REENTRY_GUARD = ThreadLocal.withInitial(() -> Boolean.FALSE);
@@ -39,52 +32,53 @@ public abstract class ServerLevelSetBlockMixin {
     // NOTE: Do NOT declare helper record/class in this mixin package.
     // Mixin packages are restricted and cannot be referenced by transformed target classes.
 
-    // The three-argument Level#setBlock delegates here. Hooking both overloads would serialize
-    // every ordinary block change twice before the central deduplicator can remove the second row.
-    @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
-            at = @At("HEAD"), require = 0)
-    private void avilixlogger$capture4(BlockPos pos, BlockState newState, int flags, int recursionLeft, CallbackInfoReturnable<Boolean> cir) {
-        capture(pos, newState);
-    }
-
-    @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
-            at = @At("RETURN"), require = 0)
-    private void avilixlogger$after4(BlockPos pos, BlockState newState, int flags, int recursionLeft, CallbackInfoReturnable<Boolean> cir) {
-        after(pos, newState, cir.getReturnValueZ());
+    // Only the four-argument overload: the three-argument overload delegates to it.
+    // A local snapshot survives recursion and exceptions without thread-local capture stacks.
+    @WrapMethod(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z")
+    private boolean avilixlogger$setBlock(BlockPos pos, BlockState newState, int flags, int recursionLeft,
+                                         Operation<Boolean> original) {
+        if (CartRestoreLocks.blockLocked((Level)(Object)this,pos)) return false;
+        SetBlockCapture snapshot = capture(pos, newState);
+        boolean changed = original.call(pos, newState, flags, recursionLeft);
+        if (snapshot != null && changed) after(snapshot, pos);
+        return changed;
     }
 
     @Unique
-    private void capture(BlockPos pos, BlockState newState) {
-        Deque<Optional<SetBlockCapture>> stack = AVILIXLOGGER$CAPTURE_STACK.get();
-        stack.addLast(Optional.empty());
+    private SetBlockCapture capture(BlockPos pos, BlockState newState) {
+        boolean ownsGuard = false;
         try {
-            // Config lives in root package (not in core).
-            if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
-            if (pos == null || newState == null) return;
-            if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return;
+            if (pos == null || newState == null || CartAuditContext.restoring()) return null;
+            if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return null;
 
-            if (!((Object) this instanceof ServerLevel level)) return;
+            if (!((Object) this instanceof ServerLevel level)) return null;
 
+            CartAuditContext.Stamp cart = CartAuditContext.current();
             CauseContext.Cause cause = CauseContext.peek();
-            // StackWalker is useful for unknown mod mutations, but wasteful for the overwhelmingly
-            // common player path where the cause context already gives us exact attribution.
             String source = cause == null ? MutationSourceResolver.resolveExternalSource() : null;
-            if (source == null && cause == null) return;
+            if (cart != null) source = cart.source();
+            if (cart == null && cause == null && MutationSourceResolver.VANILLA_SIMULATION.equals(source)) return null;
+            // Ignored simulation/client calls need no authorization lookup. Every captured
+            // mutation still checks the current authorization before reading world snapshots.
+            if (!LoggerConfig.isEnabled() || (cart==null && !LoggerConfig.VALUES.logBlocks.get())) return null;
+            BlockState before = level.getBlockState(pos);
+            if (before == null || before == newState) return null;
+            if (source == null && cause == null) source = MutationSourceResolver.sourceFor(before.getBlock());
+            if (source == null && cause == null) source = MutationSourceResolver.sourceFor(newState.getBlock());
+            // Unknown mod callbacks still get an audit row; never guess a player or walk a stack.
+            if (source == null && cause == null) source = "system:unattributed";
             if (source == null) source = "player:" + cause.kind().name().toLowerCase(java.util.Locale.ROOT);
 
-            BlockState before = level.getBlockState(pos);
-            if (before == null) return;
+            AVILIXLOGGER$REENTRY_GUARD.set(Boolean.TRUE);
+            ownsGuard = true;
+            BlockState beforeState = before;
+            BlockEntity be = before.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+            var removed = cart == null ? null : CartAuditContext.takeRemovedBlock(pos);
+            var beforeBe = removed != null ? removed.be() : be != null ? NbtSerde.snapshotBlockEntity(level, be) : null;
+            var beforeSlots = removed != null ? removed.slots() : be != null ? ContainerSlotSnapshot.snapshotTag(level, pos, before, be) : null;
 
-            // If nothing changes, ignore.
-            if (before == newState) return;
-
-            String beforeState = NbtSerde.writeBlockState(before);
-            BlockEntity be = level.getBlockEntity(pos);
-            String beforeBe = (be != null || newState.hasBlockEntity()) ? NbtSerde.writeBlockEntity(level, be) : null;
-            String beforeSlots = be != null ? ContainerSlotSnapshot.snapshot(level, pos) : null;
-
-            java.util.UUID actorUuid = null;
-            String actorName = null;
+            java.util.UUID actorUuid = cart == null ? null : cart.owner();
+            String actorName = cart == null ? null : cart.ownerName();
 
             try {
                 if (cause != null && cause.actorUuid() != null) {
@@ -101,7 +95,7 @@ public abstract class ServerLevelSetBlockMixin {
                 }
             }
 
-            if ((actorUuid == null && actorName == null) && source.contains("create")) {
+            if (cart == null && (actorUuid == null && actorName == null) && source.contains("create")) {
                 var ra = CreateOwnershipTracker.resolveForSystemChange(level, pos, null);
                 if (ra != null) {
                     actorUuid = ra.uuid();
@@ -109,7 +103,7 @@ public abstract class ServerLevelSetBlockMixin {
                     source = ra.source();
                 }
             }
-            if (actorUuid == null && actorName == null) {
+            if (cart == null && actorUuid == null && actorName == null && !source.equals("system:unattributed")) {
                 var recent = RecentPlayerActionTracker.resolveBest(level, pos, 4, 2_500L, null);
                 if (recent != null && recent.confidence() >= 0.55) {
                     actorUuid = recent.actorUuid();
@@ -120,22 +114,19 @@ public abstract class ServerLevelSetBlockMixin {
             if (actorName == null) {
                 actorName = "SYSTEM[" + source + "]";
             }
-            stack.removeLast();
-            stack.addLast(Optional.of(new SetBlockCapture(new BlockPos(pos.getX(), pos.getY(), pos.getZ()),
+            return new SetBlockCapture(pos.immutable(),
                     level.dimension().location().toString(), beforeState, beforeBe, beforeSlots,
-                    source, cause == null ? null : cause.kind(), actorUuid, actorName)));
+                    source, cause == null ? null : cause.kind(), actorUuid, actorName,
+                    cart == null ? 0L : LogIdGenerator.next(System.currentTimeMillis()));
         } catch (Throwable ignored) {
+            return null;
+        } finally {
+            if (ownsGuard) AVILIXLOGGER$REENTRY_GUARD.set(Boolean.FALSE);
         }
     }
 
     @Unique
-    private void after(BlockPos pos, BlockState newState, boolean ok) {
-        Deque<Optional<SetBlockCapture>> st = AVILIXLOGGER$CAPTURE_STACK.get();
-        if (st.isEmpty()) return;
-        Optional<SetBlockCapture> captured = st.removeLast();
-        if (captured.isEmpty()) return;
-        SetBlockCapture cap = captured.get();
-        if (!ok) return;
+    private void after(SetBlockCapture cap, BlockPos pos) {
         if (pos == null || !pos.equals(cap.pos())) {
             // Should not happen, but keep stack consistent.
             return;
@@ -147,65 +138,45 @@ public abstract class ServerLevelSetBlockMixin {
             AVILIXLOGGER$REENTRY_GUARD.set(Boolean.TRUE);
 
             BlockState after = level.getBlockState(pos);
-            String afterState = NbtSerde.writeBlockState(after);
-            BlockEntity beAfter = level.getBlockEntity(pos);
-            String afterBe = (beAfter != null || cap.beforeBe() != null) ? NbtSerde.writeBlockEntity(level, beAfter) : null;
-            String afterSlots = beAfter != null || cap.beforeSlots() != null ? ContainerSlotSnapshot.snapshot(level, pos) : null;
+            BlockState afterState = after;
+            BlockEntity beAfter = after.hasBlockEntity() ? level.getBlockEntity(pos) : null;
+            var afterBe = beAfter != null ? NbtSerde.snapshotBlockEntity(level, beAfter) : null;
+            var afterSlots = beAfter != null ? ContainerSlotSnapshot.snapshotTag(level, pos, after, beAfter) : null;
 
-            if (Objects.equals(cap.beforeState(), afterState)
-                    && Objects.equals(cap.beforeBe(), afterBe)
-                    && Objects.equals(cap.beforeSlots(), afterSlots)) return;
-
-            ActionType type;
-            boolean beforeAir = beforeIsAir(cap.beforeState());
-            boolean afterAir = after == null || after.isAir();
-            if (beforeAir && !afterAir) type = ActionType.BLOCK_PLACE;
-            else if (!beforeAir && afterAir) type = ActionType.BLOCK_BREAK;
-            else if (cap.causeKind() == CauseContext.Kind.USE_BLOCK || cap.causeKind() == CauseContext.Kind.USE_ITEM) {
-                type = ActionType.BLOCK_INTERACT;
-            } else if (!Objects.equals(cap.beforeState(), afterState)) {
-                type = ActionType.BLOCK_PLACE;
-            } else {
-                type = ActionType.BLOCK_ENTITY_NBT_CHANGE;
-            }
-
-            LogEntry e = new LogEntry();
-            e.ts = System.currentTimeMillis();
-            e.dim = cap.dim();
-            e.type = type;
-            e.actorUuid = cap.actorUuid();
-            e.actorName = cap.actorName();
-            e.x = pos.getX();
-            e.y = pos.getY();
-            e.z = pos.getZ();
-            e.blockBefore = cap.beforeState();
-            e.beBefore = cap.beforeBe();
-            e.blockAfter = afterState;
-            e.beAfter = afterBe;
-            e.containerSlotsBefore = cap.beforeSlots();
-            e.containerSlotsAfter = afterSlots;
-            e.source = cap.source();
-
-            try {
-                if (after != null) {
-                    var id = BuiltInRegistries.BLOCK.getKey(after.getBlock());
-                    if (id != null) e.extra = "setBlock " + id;
+            var cart=CartAuditContext.current();
+            if(cart!=null && cart.phase().equals("disassemble") && afterBe!=null)CartAuditContext.rememberPlacedBlock(pos,afterBe,afterSlots);
+            // Freeze all world state above. Comparison and SNBT encoding below use only snapshots.
+            final long timestamp = System.currentTimeMillis();
+            final String afterId = BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString();
+            final LogStorage storage = LoggerRuntime.storage(level);
+            if (cap.beforeBe() == null && afterBe == null && cap.beforeSlots() == null && afterSlots == null) {
+                // No mutable NBT to compare: avoid a CPU task, its queue lock and a second handoff.
+                if (Objects.equals(cap.beforeState(), afterState)) return;
+                if (storage instanceof AsyncLogStorage async) {
+                    async.appendBlockChange(cap, afterState, afterId, timestamp);
+                    return;
                 }
-            } catch (Throwable ignored) {}
+            }
+            long bytes = 512L + (cap.beforeBe() == null ? 0 : cap.beforeBe().sizeInBytes())
+                    + (afterBe == null ? 0 : afterBe.sizeInBytes())
+                    + (cap.beforeSlots() == null ? 0 : cap.beforeSlots().sizeInBytes())
+                    + (afterSlots == null ? 0 : afterSlots.sizeInBytes());
+            AsyncLogProcessor.submit(bytes * 2L, () -> {
+                if (Objects.equals(cap.beforeState(), afterState)
+                        && Objects.equals(cap.beforeBe(), afterBe)
+                        && Objects.equals(cap.beforeSlots(), afterSlots)) return;
 
-            LoggerRuntime.storage(level).append(e);
+                LogEntry e = cap.entry(afterState, afterId, timestamp);
+                e.beBefore = NbtSerde.toSnbt(cap.beforeBe());
+                e.beAfter = NbtSerde.toSnbt(afterBe);
+                e.containerSlotsBefore = NbtSerde.toSnbt(cap.beforeSlots());
+                e.containerSlotsAfter = NbtSerde.toSnbt(afterSlots);
+                storage.append(e);
+            });
         } catch (Throwable ignored) {
         } finally {
             AVILIXLOGGER$REENTRY_GUARD.set(Boolean.FALSE);
         }
-    }
-
-    @Unique
-    private static boolean beforeIsAir(String beforeStateSnbt) {
-        if (beforeStateSnbt == null) return true;
-        // Cheap heuristic without parsing NBT.
-        // NbtUtils.writeBlockState encodes "Name:"minecraft:air"" for air.
-        return beforeStateSnbt.contains("minecraft:air") || beforeStateSnbt.contains("minecraft:cave_air") || beforeStateSnbt.contains("minecraft:void_air");
     }
 
 }

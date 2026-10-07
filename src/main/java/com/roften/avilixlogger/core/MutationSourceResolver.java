@@ -1,32 +1,48 @@
 package com.roften.avilixlogger.core;
 
 import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
 
-/** Resolves an arbitrary mod call-site without maintaining a hard-coded compatibility list. */
+/** Resolves explicit tick context and object classes without walking the server stack. */
 public final class MutationSourceResolver {
-    private static final StackWalker WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
-    private static final ConcurrentHashMap<String, String> CLASS_SOURCES = new ConcurrentHashMap<>();
+    public static final String VANILLA_SIMULATION = "minecraft:simulation";
+    private static final ThreadLocal<String> CONTEXT = new ThreadLocal<>();
+    private static final ClassValue<String> CLASS_SOURCES = new ClassValue<>() {
+        @Override protected String computeValue(Class<?> type) { return classify(type.getName()); }
+    };
     private static final String NONE = "";
 
     private MutationSourceResolver() {}
 
     public static String resolveExternalSource() {
-        try {
-            return WALKER.walk(frames -> frames.limit(64)
-                    .map(StackWalker.StackFrame::getClassName)
-                    .map(MutationSourceResolver::sourceForClass)
-                    .filter(source -> source != null && !source.isBlank())
-                    .findFirst().orElse(null));
-        } catch (Throwable ignored) {
-            return null;
-        }
+        return CONTEXT.get();
     }
 
-    private static String sourceForClass(String className) {
-        if (className == null || className.isBlank()) return null;
-        String cached = CLASS_SOURCES.computeIfAbsent(className, MutationSourceResolver::classify);
-        return cached.isEmpty() ? null : cached;
+    public static String sourceFor(Object object) {
+        if (object == null) return null;
+        String source = CLASS_SOURCES.get(object.getClass());
+        return source.isEmpty() ? null : source;
+    }
+
+    /** Allocation-free enter/restore for callbacks executed on every tick. */
+    public static String enter(String source) {
+        String previous = CONTEXT.get();
+        CONTEXT.set(source);
+        return previous;
+    }
+
+    public static void restore(String previous) { CONTEXT.set(previous); }
+
+    public static Scope push(String source) { return new Scope(enter(source)); }
+
+    public static final class Scope implements AutoCloseable {
+        private final String previous;
+        private boolean closed;
+        private Scope(String previous) { this.previous = previous; }
+        public void close() {
+            if (closed) return;
+            closed = true;
+            restore(previous);
+        }
     }
 
     private static String classify(String className) {

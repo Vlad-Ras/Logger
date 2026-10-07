@@ -77,6 +77,8 @@ public final class LoggerCommands {
             .requires(LoggerCommands::hasAnyLoggerPermission)
             .executes(LoggerCommands::lookupDefaultRoot)
 
+            .then(CartCommands.node())
+
             // Short help + examples
             .then(literal("help").executes(LoggerCommands::help))
 
@@ -509,7 +511,7 @@ public final class LoggerCommands {
             e.y = pos.getY();
             e.z = pos.getZ();
 
-            e.itemStackNbt = NbtSerde.writeItemStack(plane, level.registryAccess());
+            e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(plane, level.registryAccess()));
             e.count = plane.getCount();
 
             String planeName = null;
@@ -998,6 +1000,22 @@ public final class LoggerCommands {
         return 1;
     }
 
+    private static void queryConsole(CommandSourceStack source, ServerLevel level, LogQuery query, Component title) {
+        ChatLogPager.queryConsole(source, level, query, title);
+    }
+
+    private static int startLegacyRollback(CommandSourceStack source, long from, long until, String actor,
+                                            List<RollbackPlanManager.Scope> scopes) {
+        UUID owner = source.getEntity() instanceof ServerPlayer player ? player.getUUID() : new UUID(0, 0);
+        RollbackPlanManager.Plan plan = RollbackPlanManager.save(owner, from, until, actor, null, scopes);
+        source.sendSystemMessage(Component.literal("[Логгер] Подготовка отката...").withStyle(ChatFormatting.AQUA));
+        RollbackCoordinator.startRollback(source.getServer(), owner, plan,
+                () -> source.sendSystemMessage(Component.literal("[Логгер] Откат выполняется по частям.")),
+                report -> sendRollbackSummary(source, false, report),
+                error -> source.sendFailure(Component.literal(error)));
+        return 1;
+    }
+
     private enum PageNav { NEXT, PREV, FIRST }
 
     private static int inspectBlock(CommandContext<CommandSourceStack> ctx) {
@@ -1045,16 +1063,7 @@ public final class LoggerCommands {
 
         // Console / command blocks: no interactive pagination.
         q.limit = Math.min(50, LoggerConfig.VALUES.lookupDefaultLimit.get() * 2);
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        src.sendSystemMessage(Component.literal("--- Логи для " + q.dim + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ() + " ---"));
-        if (entries.isEmpty()) {
-            src.sendSystemMessage(Component.literal("(нет записей)"));
-            return;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            src.sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(src, level, q, Component.literal("--- Логи для " + q.dim + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ() + " ---"));
     }
 
     private static int lookup(CommandContext<CommandSourceStack> ctx, int seconds, int radius, String actor) {
@@ -1097,16 +1106,7 @@ public final class LoggerCommands {
 
         // Console / command blocks: print without interactive pagination.
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Поиск (" + formatDuration(seconds) + ", r=" + radius + ") ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Поиск (" + formatDuration(seconds) + ", r=" + radius + ") ---"));
         return 1;
     }
 
@@ -1185,9 +1185,8 @@ public final class LoggerCommands {
         BlockPos min = center.offset(-radius, -radius, -radius);
         BlockPos max = center.offset(radius, radius, radius);
 
-        int changed = RollbackEngine.rollbackBox(level, min, max, sinceTs, actor);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback complete. affected=" + changed), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), sinceTs, System.currentTimeMillis(), actor,
+                List.of(new RollbackPlanManager.Scope(level.dimension().location().toString(), min, max)));
     }
 
     private static int rollbackDateRadius(CommandContext<CommandSourceStack> ctx, String date, int radius, String actor) {
@@ -1205,9 +1204,8 @@ public final class LoggerCommands {
         BlockPos min = center.offset(-radius, -radius, -radius);
         BlockPos max = center.offset(radius, radius, radius);
 
-        int changed = RollbackEngine.rollbackBoxRange(level, min, max, range[0], range[1], actor);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback complete. affected=" + changed + " (date=" + date + ")"), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), range[0], range[1], actor,
+                List.of(new RollbackPlanManager.Scope(level.dimension().location().toString(), min, max)));
     }
 
     private static int rollbackDateAll(CommandContext<CommandSourceStack> ctx, String date, String actor) {
@@ -1220,17 +1218,12 @@ public final class LoggerCommands {
             ctx.getSource().sendFailure(Component.literal("Сервер недоступен."));
             return 0;
         }
-        int changed = 0;
+        List<RollbackPlanManager.Scope> scopes = new java.util.ArrayList<>();
         for (ServerLevel lvl : ctx.getSource().getServer().getAllLevels()) {
-            // World border hard limits (safe integers, avoids DB overflow).
-            BlockPos min = new BlockPos(-30_000_000, -2048, -30_000_000);
-            BlockPos max = new BlockPos(30_000_000, 4096, 30_000_000);
-            changed += RollbackEngine.rollbackBoxRange(lvl, min, max, range[0], range[1], actor);
+            scopes.add(new RollbackPlanManager.Scope(lvl.dimension().location().toString(),
+                    new BlockPos(-30_000_000, -2048, -30_000_000), new BlockPos(30_000_000, 4096, 30_000_000)));
         }
-        final int affected = changed;
-        final String dateStr = date;
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback complete. affected=" + affected + " (date=" + dateStr + ", all dims)"), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), range[0], range[1], actor, scopes);
     }
 
     private static int rollbackBlock(CommandContext<CommandSourceStack> ctx, int seconds) {
@@ -1247,19 +1240,14 @@ public final class LoggerCommands {
         BlockPos pos = hit.getBlockPos();
         long sinceTs = System.currentTimeMillis() - (seconds * 1000L);
 
-        // If chest: rollback both halves if double chest.
-        BlockState state = level.getBlockState(pos);
-        if (state.getBlock() instanceof ChestBlock) {
-            BlockPos other = ChestUtil.getConnectedChestPos(level, pos, state);
-            int c1 = RollbackEngine.rollbackExact(level, pos, sinceTs, null);
-            int c2 = other != null && !other.equals(pos) ? RollbackEngine.rollbackExact(level, other, sinceTs, null) : 0;
-            ctx.getSource().sendSuccess(() -> Component.literal("Rollback chest complete. affected=" + (c1 + c2)), true);
-            return 1;
+        List<RollbackPlanManager.Scope> scopes = new java.util.ArrayList<>();
+        scopes.add(new RollbackPlanManager.Scope(level.dimension().location().toString(), pos, pos));
+        if (level.getBlockState(pos).getBlock() instanceof ChestBlock) {
+            BlockPos other = ChestUtil.getConnectedChestPos(level, pos, level.getBlockState(pos));
+            if (other != null && !other.equals(pos))
+                scopes.add(new RollbackPlanManager.Scope(level.dimension().location().toString(), other, other));
         }
-
-        int changed = RollbackEngine.rollbackExact(level, pos, sinceTs, null);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback block complete. affected=" + changed), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), sinceTs, System.currentTimeMillis(), null, scopes);
     }
 
     private static int rollbackWorldEditSelection(CommandContext<CommandSourceStack> ctx, int seconds) {
@@ -1274,9 +1262,8 @@ public final class LoggerCommands {
             return 0;
         }
         long sinceTs = System.currentTimeMillis() - (seconds * 1000L);
-        int changed = RollbackEngine.rollbackBox(level, sel[0], sel[1], sinceTs, null);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback WorldEdit selection complete. affected=" + changed), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), sinceTs, System.currentTimeMillis(), null,
+                List.of(new RollbackPlanManager.Scope(level.dimension().location().toString(), sel[0], sel[1])));
     }
 
     private static int setInspectTool(CommandContext<CommandSourceStack> ctx, String itemId) {
@@ -1335,16 +1322,7 @@ public final class LoggerCommands {
         }
 
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Игрок: " + (actor == null ? "все" : actor) + " (" + formatDuration(seconds) + ") ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Игрок: " + (actor == null ? "все" : actor) + " (" + formatDuration(seconds) + ") ---"));
         return 1;
     }
 
@@ -1388,16 +1366,7 @@ public final class LoggerCommands {
         }
 
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Поиск (дата=" + date + ", r=" + radius + ") ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Поиск (дата=" + date + ", r=" + radius + ") ---"));
         return 1;
     }
 
@@ -1427,16 +1396,7 @@ public final class LoggerCommands {
         }
 
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Поиск (дата=" + date + ", все миры) ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Поиск (дата=" + date + ", все миры) ---"));
         return 1;
     }
 

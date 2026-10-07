@@ -45,3 +45,15 @@
 }
 
 -repackageclasses 'com.roften.avilixlogger.o'
+
+# Stable on-disk journal and legacy JSON field names across obfuscated releases.
+-keepclassmembers class com.roften.avilixlogger.core.LogEntry {
+    public <fields>;
+}
+-keepclassmembers enum com.roften.avilixlogger.core.ActionType {
+    public static <fields>;
+}
+
+# Implementations are woven into external Create classes after obfuscation.
+-keep interface com.roften.avilixlogger.compat.create.CartAuditAccess { *; }
+-keep interface com.roften.avilixlogger.compat.create.CartEntityAccess { *; }

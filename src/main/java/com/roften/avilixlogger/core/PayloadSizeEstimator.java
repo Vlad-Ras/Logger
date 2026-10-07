@@ -8,7 +8,7 @@ public final class PayloadSizeEstimator {
 
     public static long estimate(LogEntry entry) {
         if (entry == null) return 0L;
-        long bytes = ENTRY_OVERHEAD;
+        long bytes = ENTRY_OVERHEAD + entry.snapshotBytes() * 2L;
         bytes += stringBytes(entry.dim);
         bytes += stringBytes(entry.actorName);
         bytes += stringBytes(entry.source);
@@ -33,6 +33,19 @@ public final class PayloadSizeEstimator {
             for (String value : values) bytes += stringBytes(value);
         }
         return Math.max(128L, bytes);
+    }
+
+    public static long estimateBlockChange(SetBlockCapture before, String afterId) {
+        return 512L + stringBytes(before.dim()) + stringBytes(before.actorName())
+                + stringBytes(before.source()) + stringBytes(afterId)
+                + 2L * ((before.beforeBe() == null ? 0L : before.beforeBe().sizeInBytes())
+                        + (before.beforeSlots() == null ? 0L : before.beforeSlots().sizeInBytes()));
+    }
+
+    public static long estimateTags(net.minecraft.nbt.Tag... values) {
+        long bytes = 128L;
+        for (net.minecraft.nbt.Tag value : values) if (value != null) bytes += 2L * value.sizeInBytes();
+        return bytes;
     }
 
     private static long stringBytes(String value) {

@@ -14,6 +14,10 @@ public final class GenericMenuSnapshot {
     private GenericMenuSnapshot() {}
 
     public static String write(AbstractContainerMenu menu, HolderLookup.Provider provider) {
+        return NbtSerde.toSnbt(snapshot(menu, provider));
+    }
+
+    public static CompoundTag snapshot(AbstractContainerMenu menu, HolderLookup.Provider provider) {
         if (menu == null || provider == null || menu.slots == null || menu.slots.isEmpty()) return null;
         try {
             CompoundTag root = new CompoundTag();
@@ -26,16 +30,15 @@ public final class GenericMenuSnapshot {
                 externalSlots++;
                 ItemStack stack = slot.getItem();
                 if (stack == null || stack.isEmpty()) continue;
-                CompoundTag item = new CompoundTag();
+                CompoundTag item = NbtSerde.snapshotItemStack(stack, provider);
+                if (item == null) return null;
                 item.putInt("Slot", i);
-                Tag saved = stack.save(provider);
-                if (saved instanceof CompoundTag compound) item.merge(compound);
                 items.add(item);
             }
             if (externalSlots == 0) return null;
             root.putInt("ExternalSlots", externalSlots);
             root.put("Items", items);
-            return NbtSerde.toSnbt(root);
+            return root;
         } catch (Throwable ignored) {
             return null;
         }

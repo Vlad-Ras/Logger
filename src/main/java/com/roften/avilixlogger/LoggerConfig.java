@@ -131,7 +131,7 @@ public final class LoggerConfig {
                     .defineInRange("batchSize", 5000, 100, 100000);
             clickHouseFlushIntervalMs = b.comment("Force flush interval for ClickHouse writer thread (ms).")
                     .defineInRange("flushIntervalMs", 1000, 100, 10000);
-            clickHouseQueueCapacity = b.comment("In-memory ClickHouse queue capacity. If full, new logs are dropped to protect TPS.")
+            clickHouseQueueCapacity = b.comment("In-memory journal queue capacity. Overflow waits for the background disk writer; rows are never dropped.")
                     .defineInRange("queueCapacity", 500000, 10000, 2000000);
             clickHouseMaxQueuedPayloadMiB = b.comment("Maximum estimated SNBT/text payload retained by the ClickHouse queue. Protects the JVM from large modded NBT bursts even when row capacity is not reached.")
                     .defineInRange("maxQueuedPayloadMiB", 256, 16, 8192);
@@ -139,9 +139,9 @@ public final class LoggerConfig {
                     .defineInRange("selectQueryTimeoutSec", 15, 1, 600);
             clickHouseWorldQueryTimeoutSec = b.comment("Timeout for whole-world, all-dimension and 30+ day queries. They run outside the server tick.")
                     .defineInRange("worldQueryTimeoutSec", 600, 5, 3600);
-            clickHouseAsyncInsert = b.comment("Enable ClickHouse server-side async inserts with wait_for_async_insert control.")
+            clickHouseAsyncInsert = b.comment("Legacy option retained for compatibility. The background journal sender uses acknowledged synchronous inserts.")
                     .define("asyncInsert", true);
-            clickHouseWaitForAsyncInsert = b.comment("When asyncInsert is enabled, wait until ClickHouse confirms the buffered insert.")
+            clickHouseWaitForAsyncInsert = b.comment("Legacy option retained for compatibility. Journal batches always wait for ClickHouse acknowledgment.")
                     .define("waitForAsyncInsert", true);
             clickHouseHealthCooldownMs = b.comment("How long ClickHouse remains marked unhealthy after a failed request (ms).")
                     .defineInRange("healthCooldownMs", 10000, 1000, 300000);
@@ -152,7 +152,7 @@ public final class LoggerConfig {
                     .defineInRange("workerThreads", 2, 1, 16);
             asyncQueueCapacity = b.comment("Queue capacity for expensive CPU post-processing tasks. If this is full, increase workerThreads or investigate spammy mods.")
                     .defineInRange("queueCapacity", 100000, 10000, 1000000);
-            asyncMaxQueuedPayloadMiB = b.comment("Maximum estimated snapshot payload retained by queued CPU tasks. New expensive tasks are rejected before they can exhaust heap.")
+            asyncMaxQueuedPayloadMiB = b.comment("Maximum estimated snapshot payload retained by CPU tasks. Saturation applies backpressure. One oversized snapshot is processed alone.")
                     .defineInRange("maxQueuedPayloadMiB", 128, 16, 4096);
             b.pop();
 

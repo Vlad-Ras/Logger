@@ -3,7 +3,6 @@ package com.roften.avilixlogger.core;
 import com.roften.avilixlogger.LoggerConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.TickTask;
 
 import java.lang.reflect.Method;
 import java.util.Locale;
@@ -54,9 +53,9 @@ public final class ChatAuditLogger {
             long token = PACKET_SEQUENCE.incrementAndGet();
             PENDING_PUBLIC.put(key, token);
             var server = level.getServer();
-            server.tell(new TickTask(server.getTickCount() + 20, () -> {
+            ServerTickScheduler.schedule(server, 20, () -> {
                 if (PENDING_PUBLIC.remove(key, token)) appendOnServer(player, normalizePublic(message));
-            }));
+            });
         });
     }
 

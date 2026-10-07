@@ -47,6 +47,9 @@ public final class NbtSerde {
      */
     private static final ConcurrentHashMap<MethodKey, Optional<Method>> METHOD_CACHE = new ConcurrentHashMap<>();
 
+    private static final com.google.common.cache.Cache<BlockState, String> BLOCK_STATES =
+            com.google.common.cache.CacheBuilder.newBuilder().maximumSize(8192).build();
+
     private NbtSerde() {}
 
     public static CompoundTag fromSnbt(String snbt) {
@@ -63,11 +66,19 @@ public final class NbtSerde {
     }
 
     public static String writeBlockState(BlockState state) {
-        return toSnbt(NbtUtils.writeBlockState(state));
+        if (state == null) return null;
+        String cached = BLOCK_STATES.getIfPresent(state);
+        if (cached != null) return cached;
+        String encoded = toSnbt(NbtUtils.writeBlockState(state));
+        BLOCK_STATES.put(state, encoded);
+        return encoded;
     }
 
     public static BlockState readBlockState(ServerLevel level, String snbt) {
-        CompoundTag tag = fromSnbt(snbt);
+        return readBlockState(level, fromSnbt(snbt));
+    }
+
+    public static BlockState readBlockState(ServerLevel level, CompoundTag tag) {
         if (tag == null) return null;
         // In 1.21+, readBlockState takes HolderGetter<Block> which RegistryLookup implements.
         var getter = level.registryAccess().lookupOrThrow(Registries.BLOCK);
@@ -76,28 +87,35 @@ public final class NbtSerde {
 
     /** Snapshot a block entity including its full metadata. */
     public static String writeBlockEntity(ServerLevel level, BlockEntity be) {
+        return toSnbt(snapshotBlockEntity(level, be));
+    }
+
+    /** Captures detached NBT on the world thread; SNBT encoding can run on a worker. */
+    public static CompoundTag snapshotBlockEntity(ServerLevel level, BlockEntity be) {
         if (be == null) return null;
 
         // Hot path for MC 1.21.x: avoid the reflection-heavy invokeBlockEntitySave chain.
         // Reflection fallback stays below for compatibility with mapping/API edge cases.
         try {
             CompoundTag tag = be.saveWithFullMetadata(level.registryAccess());
-            if (tag != null) return toSnbt(tag);
+            if (tag != null) return tag.copy();
         } catch (Throwable ignored) {
         }
 
         CompoundTag tag = invokeBlockEntitySave(level, be);
-        return toSnbt(tag);
+        return tag == null ? null : tag.copy();
     }
 
     /** Restore a block entity snapshot (must already exist at pos after state set). */
     public static boolean readBlockEntity(ServerLevel level, BlockPos pos, String beSnbt) {
-        if (beSnbt == null || beSnbt.isEmpty()) return false;
+        return readBlockEntity(level, pos, fromSnbt(beSnbt));
+    }
+
+    public static boolean readBlockEntity(ServerLevel level, BlockPos pos, CompoundTag snapshot) {
+        if (snapshot == null) return false;
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) return false;
-
-        CompoundTag tag = fromSnbt(beSnbt);
-        if (tag == null) return false;
+        CompoundTag tag = snapshot.copy();
         // Ensure coords (some serializers rely on them)
         tag.putInt("x", pos.getX());
         tag.putInt("y", pos.getY());
@@ -112,6 +130,10 @@ public final class NbtSerde {
 
     /** Entity snapshot without hard dependency on exact save signature. */
     public static String writeEntity(ServerLevel level, Entity ent) {
+        return toSnbt(snapshotEntity(level, ent));
+    }
+
+    public static CompoundTag snapshotEntity(ServerLevel level, Entity ent) {
         if (ent == null) return null;
         CompoundTag tag = new CompoundTag();
         try {
@@ -138,7 +160,7 @@ public final class NbtSerde {
             }
         } catch (Throwable ignored) {}
 
-        return toSnbt(tag);
+        return tag.copy();
     }
 
     public record EntityRestoreResult(boolean success, String reason, Entity entity, int affected) {
@@ -153,12 +175,15 @@ public final class NbtSerde {
 
     /** Validate an entity snapshot without constructing or adding anything to the world. */
     public static String validateEntitySnapshot(String entityTypeId, UUID expectedUuid, String entSnbt) {
+        return validateEntitySnapshot(entityTypeId, expectedUuid, fromSnbt(entSnbt));
+    }
+
+    public static String validateEntitySnapshot(String entityTypeId, UUID expectedUuid, CompoundTag tag) {
         ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
         if (key == null || BuiltInRegistries.ENTITY_TYPE.getOptional(key).isEmpty()) return "unknown_entity_type";
-        CompoundTag tag = fromSnbt(entSnbt);
         if (tag == null || tag.isEmpty()) return "invalid_entity_nbt";
         if (isUnsafeEntityRollback(key, tag)) {
-            if (!CreateContraptionSnapshotStore.hasCompleteContraptionSnapshot(entSnbt)) return "incomplete_create_snapshot";
+            if (!CreateContraptionSnapshotStore.hasCompleteContraptionSnapshot(tag)) return "incomplete_create_snapshot";
         }
         return validateEntityTree(tag, key, expectedUuid, true);
     }
@@ -169,11 +194,14 @@ public final class NbtSerde {
      */
     public static EntityRestoreResult restoreEntityFromSnapshot(ServerLevel level, String entityTypeId,
                                                                   UUID expectedUuid, String entSnbt) {
-        String invalid = validateEntitySnapshot(entityTypeId, expectedUuid, entSnbt);
-        if (invalid != null) return EntityRestoreResult.fail(invalid);
+        return restoreEntityFromSnapshot(level, entityTypeId, expectedUuid, fromSnbt(entSnbt));
+    }
 
+    public static EntityRestoreResult restoreEntityFromSnapshot(ServerLevel level, String entityTypeId,
+                                                                 UUID expectedUuid, CompoundTag tag) {
+        String invalid = validateEntitySnapshot(entityTypeId, expectedUuid, tag);
+        if (invalid != null) return EntityRestoreResult.fail(invalid);
         ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
-        CompoundTag tag = fromSnbt(entSnbt);
         if (key == null || tag == null || isUnsafeEntityRollback(key, tag)) {
             return EntityRestoreResult.fail("unsafe_entity_snapshot");
         }
@@ -222,10 +250,15 @@ public final class NbtSerde {
      */
     public static EntityRestoreResult restoreCreateContraptionAsBlocks(ServerLevel level, String entityTypeId,
                                                                         UUID expectedUuid, String entSnbt) {
+        return restoreCreateContraptionAsBlocks(level, entityTypeId, expectedUuid, fromSnbt(entSnbt));
+    }
+
+    public static EntityRestoreResult restoreCreateContraptionAsBlocks(ServerLevel level, String entityTypeId,
+                                                                       UUID expectedUuid, CompoundTag snapshot) {
         List<WorldBlockBackup> backups = List.of();
         try {
             ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
-            CompoundTag entityTag = fromSnbt(entSnbt);
+            CompoundTag entityTag = snapshot == null ? null : snapshot.copy();
             if (key == null || entityTag == null || !isUnsafeEntityRollback(key, entityTag)) return EntityRestoreResult.fail("not_create_snapshot");
             Optional<EntityType<?>> typeOpt = BuiltInRegistries.ENTITY_TYPE.getOptional(key);
             if (typeOpt.isEmpty()) return EntityRestoreResult.fail("unknown_entity_type");
@@ -258,7 +291,7 @@ public final class NbtSerde {
             for (CreateTarget target : targets) {
                 BlockPos pos = target.pos;
                 backups.add(new WorldBlockBackup(pos, level.getBlockState(pos),
-                        writeBlockEntity(level, level.getBlockEntity(pos)), ContainerSlotSnapshot.snapshot(level, pos)));
+                        snapshotBlockEntity(level, level.getBlockEntity(pos)), ContainerSlotSnapshot.snapshotTag(level, pos)));
             }
 
             try {
@@ -284,9 +317,19 @@ public final class NbtSerde {
     }
 
     public static String writeItemStack(ItemStack stack, HolderLookup.Provider provider) {
+        return toSnbt(snapshotItemStack(stack, provider));
+    }
+
+    public static CompoundTag snapshotItemStack(ItemStack stack, HolderLookup.Provider provider) {
         if (stack == null || stack.isEmpty()) return null;
+        if (canUseSimpleItemStackSnbt(stack)) {
+            CompoundTag tag = new CompoundTag();
+            tag.putString("id", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+            tag.putInt("count", stack.getCount());
+            return tag;
+        }
         CompoundTag tag = invokeItemStackSave(stack, provider);
-        return toSnbt(tag);
+        return tag == null ? null : tag.copy();
     }
 
     /**
@@ -305,24 +348,10 @@ public final class NbtSerde {
     }
 
     private static boolean canUseSimpleItemStackSnbt(ItemStack stack) {
-        try {
-            ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
-            if (id == null || !"minecraft".equals(id.getNamespace())) return false;
-            try { if (stack.isDamaged()) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.CUSTOM_DATA)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.CUSTOM_NAME)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.ITEM_NAME)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.ENCHANTMENTS)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.STORED_ENCHANTMENTS)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.CONTAINER)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.CONTAINER_LOOT)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.BLOCK_ENTITY_DATA)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.ENTITY_DATA)) return false; } catch (Throwable ignored) {}
-            try { if (stack.has(DataComponents.BLOCK_STATE)) return false; } catch (Throwable ignored) {}
-            return true;
-        } catch (Throwable ignored) {
-            return false;
-        }
+        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        // Inspect the entire patch: a whitelist used to miss potion, book, map and mod-added
+        // components on vanilla items. Default components are reconstructed from the item id.
+        return id != null && "minecraft".equals(id.getNamespace()) && stack.getComponentsPatch().isEmpty();
     }
 
     private static boolean isUnsafeEntityRollback(ResourceLocation key, CompoundTag tag) {
@@ -344,8 +373,11 @@ public final class NbtSerde {
     }
 
     public static boolean isCreateContraptionSnapshot(String entityTypeId, String entSnbt) {
+        return isCreateContraptionSnapshot(entityTypeId, fromSnbt(entSnbt));
+    }
+
+    public static boolean isCreateContraptionSnapshot(String entityTypeId, CompoundTag tag) {
         ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
-        CompoundTag tag = fromSnbt(entSnbt);
         return key != null && tag != null && isUnsafeEntityRollback(key, tag);
     }
 
@@ -556,7 +588,7 @@ public final class NbtSerde {
     }
 
     private record CreateTarget(BlockPos pos, BlockState expectedState) {}
-    private record WorldBlockBackup(BlockPos pos, BlockState state, String beSnbt, String containerSnbt) {}
+    private record WorldBlockBackup(BlockPos pos, BlockState state, CompoundTag beSnbt, CompoundTag containerSnbt) {}
 
     private static String createRollbackShellClassName(ResourceLocation key) {
         if (key == null) return null;
@@ -700,26 +732,13 @@ public final class NbtSerde {
     }
 
     public static ItemStack readItemStack(String snbt, HolderLookup.Provider provider) {
-        CompoundTag tag = fromSnbt(snbt);
+        return readItemStack(fromSnbt(snbt), provider);
+    }
+
+    public static ItemStack readItemStack(CompoundTag tag, HolderLookup.Provider provider) {
         if (tag == null) return ItemStack.EMPTY;
-
-        // 1.21+: ItemStack.parse(provider, tag) returns Optional<ItemStack>
-        try {
-            Method parse = ItemStack.class.getMethod("parse", HolderLookup.Provider.class, CompoundTag.class);
-            Object opt = parse.invoke(null, provider, tag);
-            if (opt instanceof java.util.Optional<?> o && o.isPresent() && o.get() instanceof ItemStack is) {
-                return is;
-            }
-        } catch (Throwable ignored) {}
-
-        // Legacy fallback
-        try {
-            Method of = ItemStack.class.getMethod("of", CompoundTag.class);
-            Object is = of.invoke(null, tag);
-            if (is instanceof ItemStack s) return s;
-        } catch (Throwable ignored) {}
-
-        return ItemStack.EMPTY;
+        try { return ItemStack.parse(provider, tag).orElse(ItemStack.EMPTY); }
+        catch (Throwable ignored) { return ItemStack.EMPTY; }
     }
 
     private static CompoundTag invokeBlockEntitySave(ServerLevel level, BlockEntity be) {
@@ -905,21 +924,9 @@ public final class NbtSerde {
     }
 
     private static CompoundTag invokeItemStackSave(ItemStack stack, HolderLookup.Provider provider) {
-        // 1.21+: save(provider) -> CompoundTag
         try {
-            Method m = ItemStack.class.getMethod("save", HolderLookup.Provider.class);
-            Object r = m.invoke(stack, provider);
-            if (r instanceof CompoundTag t) return t;
-        } catch (Throwable ignored) {}
-
-        // Legacy: save(CompoundTag)
-        CompoundTag tag = new CompoundTag();
-        try {
-            Method m = ItemStack.class.getMethod("save", CompoundTag.class);
-            m.invoke(stack, tag);
-            return tag;
-        } catch (Throwable ignored) {}
-
-        return tag;
+            Tag saved = stack.save(provider);
+            return saved instanceof CompoundTag compound ? compound : null;
+        } catch (Throwable ignored) { return null; }
     }
 }

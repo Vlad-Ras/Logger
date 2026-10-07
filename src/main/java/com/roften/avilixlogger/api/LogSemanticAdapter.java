@@ -11,7 +11,7 @@ import com.roften.avilixlogger.core.LogEntry;
  * registered directly through {@link LogAdapterRegistry#register(LogSemanticAdapter)} or
  * exposed through {@code META-INF/services/com.roften.avilixlogger.api.LogSemanticAdapter}.</p>
  *
- * <p>Adapters run before deduplication and persistence. They must be fast, must not query or
+ * <p>Adapters run on the ordered event worker before deduplication and persistence. They must be fast, must not query or
  * modify the world, and must not perform blocking I/O.</p>
  */
 public interface LogSemanticAdapter {

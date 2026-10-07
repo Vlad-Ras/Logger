@@ -9,7 +9,20 @@
     "ScheduleItemEntityInteractionMixin",
     "ScheduleItemMixin",
     "CarriageContraptionEntityMixin",
-    "AbstractContraptionEntityMixin"
+    "AbstractContraptionEntityMixin",
+    "MountedContraptionAuditMixin",
+    "CartAssemblerAuditMixin",
+    "CartEntityAuditMixin",
+    "MinecartItemAuditMixin",
+    "ContraptionRemovalAuditMixin",
+    "MountedItemStorageAuditMixin",
+    "CartContraptionAccessor",
+    "CartStorageAccessor",
+    "MountedFluidStorageAuditMixin",
+    "MountedStorageMenuAuditMixin",
+    "BaseCartInventoryAuditMixin",
+    "CartDropLockMixin",
+    "BlockBreakingCargoAuditMixin"
   ],
   "client": [],
   "injectors": {

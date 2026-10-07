@@ -24,10 +24,12 @@ public final class InventoryDiffUtil {
      * Returns a list of deltas (positive = put, negative = take).
      */
     public static List<Delta> diff(String beforeBeSnbt, String afterBeSnbt, HolderLookup.Provider provider) {
+        return diff(NbtSerde.fromSnbt(beforeBeSnbt), NbtSerde.fromSnbt(afterBeSnbt), provider);
+    }
+
+    public static List<Delta> diff(CompoundTag before, CompoundTag after, HolderLookup.Provider provider) {
         try {
-            CompoundTag before = NbtSerde.fromSnbt(beforeBeSnbt);
-            CompoundTag after = NbtSerde.fromSnbt(afterBeSnbt);
-            if (before == null || after == null) return List.of();
+            if (before == null || after == null || before.equals(after)) return List.of();
 
             Map<String, StackAgg> a = aggregateStacks(before, provider);
             Map<String, StackAgg> b = aggregateStacks(after, provider);
@@ -78,7 +80,7 @@ public final class InventoryDiffUtil {
             stackTag.remove("Slot"); // normalize (vanilla)
             stackTag.remove("slot"); // normalize (some mods)
 
-            ItemStack st = NbtSerde.readItemStack(NbtSerde.toSnbt(stackTag), provider);
+            ItemStack st = NbtSerde.readItemStack(stackTag, provider);
             if (st == null || st.isEmpty()) continue;
 
             int count = Math.max(1, st.getCount());

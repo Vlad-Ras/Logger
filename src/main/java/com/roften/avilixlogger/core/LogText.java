@@ -201,6 +201,11 @@ public final class LogText {
             case ENTITY_OWNER_SET -> ChatFormatting.YELLOW;
             case CHAT_MESSAGE -> ChatFormatting.AQUA;
 
+            case CART_ASSEMBLE,CART_PLACE,CART_LOAD -> ChatFormatting.GREEN;
+            case CART_DISASSEMBLE,CART_PACK,CART_REMOVE,CART_UNLOAD -> ChatFormatting.RED;
+            case CART_STATUS,CART_TRANSFER -> ChatFormatting.GOLD;
+            case CART_CONTENT_CHANGE,CART_STRUCTURE_CHANGE -> ChatFormatting.YELLOW;
+            case CART_MOVE,CART_ROLLBACK -> ChatFormatting.AQUA;
             case TRAIN_ASSEMBLE -> ChatFormatting.GREEN;
             case TRAIN_DISASSEMBLE -> ChatFormatting.RED;
             case TRAIN_SCHEDULE_TAKE -> ChatFormatting.GOLD;
@@ -220,7 +225,7 @@ public final class LogText {
         };
     }
 
-    private static String actionLabel(ActionType t) {
+    public static String actionLabel(ActionType t) {
         if (t == null) return "сделал";
         return switch (t) {
             case BLOCK_BREAK -> "сломал";
@@ -238,6 +243,19 @@ public final class LogText {
             case ME_FILTER_CHANGE -> "изменил фильтр МЭ";
             case ME_SETTING_CHANGE -> "изменил настройку МЭ";
             case ME_CELL_CHANGE -> "изменил ячейку МЭ";
+            case CART_ASSEMBLE -> "собрал конструкцию на вагонетке";
+            case CART_DISASSEMBLE -> "разобрал конструкцию на вагонетке";
+            case CART_PACK -> "упаковал конструкцию в предмет";
+            case CART_PLACE -> "установил упакованную конструкцию";
+            case CART_REMOVE -> "удалил конструкцию";
+            case CART_LOAD -> "загрузил конструкцию";
+            case CART_UNLOAD -> "выгрузил конструкцию";
+            case CART_MOVE -> "переместил конструкцию";
+            case CART_STATUS -> "изменил статус конструкции";
+            case CART_CONTENT_CHANGE -> "изменил груз конструкции";
+            case CART_STRUCTURE_CHANGE -> "изменил блок конструкции";
+            case CART_TRANSFER -> "переместил предмет конструкции";
+            case CART_ROLLBACK -> "откатил конструкцию";
 
             case ITEM_PICKUP -> "подобрал";
             case ITEM_DROP -> "выбросил";
@@ -303,6 +321,8 @@ public final class LogText {
             case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE ->
                     Component.literal(e.extra != null ? e.extra : "устройство МЭ");
 
+            case CART_ASSEMBLE,CART_DISASSEMBLE,CART_PACK,CART_PLACE,CART_REMOVE,CART_LOAD,CART_UNLOAD,CART_MOVE,CART_STATUS,CART_CONTENT_CHANGE,CART_STRUCTURE_CHANGE,CART_TRANSFER,CART_ROLLBACK ->
+                    Component.literal(java.util.Objects.toString(CartAuditContext.id(e.source),"вагонеточная конструкция"));
             // schedule: и забрал, и поставил показываем предметом
             case TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT ->
                     itemNameComponent(level, e.itemStackNbt);

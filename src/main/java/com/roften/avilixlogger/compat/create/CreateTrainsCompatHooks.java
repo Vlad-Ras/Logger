@@ -44,7 +44,7 @@ public final class CreateTrainsCompatHooks {
             LogEntry e = base(level, ActionType.TRAIN_SCHEDULE_TAKE, actorUuid, actorName, at);
 
             if (returnedSchedule != null && !returnedSchedule.isEmpty()) {
-                e.itemStackNbt = NbtSerde.writeItemStack(returnedSchedule, level.registryAccess());
+                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(returnedSchedule, level.registryAccess()));
                 e.count = returnedSchedule.getCount();
             }
 
@@ -59,7 +59,7 @@ public final class CreateTrainsCompatHooks {
             LogEntry e = base(level, ActionType.TRAIN_SCHEDULE_PUT, actorUuid, actorName, at);
 
             if (scheduleItem != null && !scheduleItem.isEmpty()) {
-                e.itemStackNbt = NbtSerde.writeItemStack(scheduleItem, level.registryAccess());
+                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(scheduleItem, level.registryAccess()));
                 e.count = scheduleItem.getCount();
             }
 
