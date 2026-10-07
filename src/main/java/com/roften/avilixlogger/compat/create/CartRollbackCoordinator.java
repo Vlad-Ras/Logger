@@ -102,7 +102,12 @@ public final class CartRollbackCoordinator {
         try {
             // Shutdown occurs before level saving; never persist half of an interrupted undo.
             if(active!=null) {
-                if(active.committed){for(Entity drop:active.spawned)if(!drop.isRemoved())drop.discard();}
+                if(active.committed){
+                    if(active.current!=null && !active.current.isRemoved())((CartEntityAccess)active.current).avilixlogger$discardForRollback();
+                    if(active.consumedBase!=null && !active.consumedBase.isRemoved())active.consumedBase.discard();
+                    if(active.staged!=null && active.staged.entity!=null)CreateCartAudit.state(active.staged.entity).locked=false;
+                    for(Entity drop:active.spawned)if(!drop.isRemoved())drop.discard();
+                }
                 else for(int i=active.applied-1;i>=0;i--){var b=active.backups.get(i);apply(b.level,b.pos,b.state,b.be,b.slots);}
                 unlock(active.current);
             }
@@ -305,6 +310,7 @@ public final class CartRollbackCoordinator {
     private static CompoundTag shallowCopy(CompoundTag source){CompoundTag tag=new CompoundTag();for(String key:source.getAllKeys())tag.put(key,source.get(key));return tag;}
     private static void validateSource(Entity entity){
         if(entity==null)return;
+        if(!(entity.getVehicle() instanceof AbstractMinecart base) || base.isRemoved())throw new IllegalStateException("Исходная вагонетка отсутствует или удалена");
         if(!(entity instanceof com.simibubi.create.content.contraptions.OrientedContraptionEntity oriented) || oriented.getCouplingId()!=null || !oriented.getPassengers().isEmpty() || !((com.roften.avilixlogger.compat.create.mixin.CartContraptionAccessor)oriented.getContraption()).avilixlogger$subContraptions().isEmpty())throw new IllegalStateException("Сцепленная или вложенная конструкция требует совместного отката");
         if(entity.getVehicle()!=null && (entity.getVehicle().getPassengers().size()!=1 || entity.getVehicle().getPassengers().getFirst()!=entity))throw new IllegalStateException("На вагонетке есть другие пассажиры");
     }
