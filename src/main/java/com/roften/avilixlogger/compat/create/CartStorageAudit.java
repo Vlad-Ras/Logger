@@ -15,7 +15,17 @@ import java.util.WeakHashMap;
 public final class CartStorageAudit {
     public record Ref(WeakReference<OrientedContraptionEntity> entity, BlockPos pos) {}
     private static final Map<Object, Ref> OWNERS = new WeakHashMap<>();
+    private static final Map<net.minecraft.world.inventory.AbstractContainerMenu,Ref> MENUS=new WeakHashMap<>();
     private CartStorageAudit() {}
+    public static void menu(net.minecraft.world.inventory.AbstractContainerMenu menu,Ref ref){MENUS.put(menu,ref);}
+    public static void lockMenus(java.util.UUID id,net.minecraft.server.MinecraftServer server){
+        for(var player:server.getPlayerList().getPlayers()) {
+            var ref=MENUS.get(player.containerMenu);var entity=ref==null?null:ref.entity.get();
+            if(entity!=null && id.equals(CreateCartAudit.state(entity).id)) {
+                com.roften.avilixlogger.core.CartRestoreLocks.menu(player.containerMenu);player.closeContainer();
+            }
+        }
+    }
     public static void bind(OrientedContraptionEntity entity) {
         var storage = entity.getContraption().getStorage();
         storage.getAllItemStorages().forEach((pos, handler) -> OWNERS.put(handler, new Ref(new WeakReference<>(entity), pos)));
@@ -55,5 +65,5 @@ public final class CartStorageAudit {
         CompoundTag n=new CompoundTag();n.putString("Kind","fluid");n.putLong("LocalPos",pos.asLong());n.putInt("Tank",tank);n.putBoolean("External",CartAuditContext.current()==null);
         if(!stack.isEmpty())n.put("Fluid",stack.save(e.registryAccess()));return n;
     }
-    public static void clear() { OWNERS.clear(); }
+    public static void clear() { MENUS.clear();OWNERS.clear(); }
 }

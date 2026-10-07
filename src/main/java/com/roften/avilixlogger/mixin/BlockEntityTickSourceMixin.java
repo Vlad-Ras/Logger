@@ -17,6 +17,7 @@ public abstract class BlockEntityTickSourceMixin {
 
     @WrapMethod(method = "tick")
     private void avilixlogger$withSource(Operation<Void> original) {
+        if (com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(blockEntity.getLevel(),blockEntity.getBlockPos())) return;
         if (!LoggerConfig.isEnabled() || !(blockEntity.getLevel() instanceof ServerLevel)) {
             original.call();
             return;

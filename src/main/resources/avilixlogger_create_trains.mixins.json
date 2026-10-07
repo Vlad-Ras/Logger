@@ -18,7 +18,8 @@
     "MountedItemStorageAuditMixin",
     "CartContraptionAccessor",
     "CartStorageAccessor",
-    "MountedFluidStorageAuditMixin"
+    "MountedFluidStorageAuditMixin",
+    "MountedStorageMenuAuditMixin"
   ],
   "client": [],
   "injectors": {

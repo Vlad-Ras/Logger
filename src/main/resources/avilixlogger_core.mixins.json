@@ -12,7 +12,10 @@
     "EntityTickSourceMixin",
     "SimulationSourceMixin",
     "ChunkGenerationSourceMixin",
-    "ContainerClickCauseMixin"
+    "ContainerClickCauseMixin",
+    "CartWorldInteractionLockMixin",
+    "CartItemHandlerLockMixin",
+    "CartFluidHandlerLockMixin"
   ],
   "injectors": {
     "defaultRequire": 0

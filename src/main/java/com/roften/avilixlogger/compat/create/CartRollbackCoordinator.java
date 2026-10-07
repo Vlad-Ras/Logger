@@ -42,10 +42,12 @@ public final class CartRollbackCoordinator {
     }
     public static void preview(CommandSourceStack source, UUID id,long checkpoint) {
         var player=source.getPlayer(); if(player==null)return;
+        long request=generation;
         query(source,()->{
             try {
                 var plan=CartRollbackPlan.prepare(LoggerRuntime.storage(source.getLevel()),id,checkpoint);
                 source.getServer().execute(()->{
+                    if(request!=generation || !LoggerConfig.isEnabled())return;
                     PREVIEWS.put(player.getUUID(),new Preview(id,checkpoint,System.currentTimeMillis()+120000));
                     source.sendSystemMessage(Component.literal("Конструкция "+id+": возврат к записи "+checkpoint+", блоков мира: "+plan.blocks().size()+", форма: "+plan.target().getString("Form")+". Подтвердить: /log cart confirm (2 минуты)."));
                 });
@@ -60,8 +62,9 @@ public final class CartRollbackCoordinator {
         if(!LoggerConfig.isEnabled())return;
         Entity current;
         try { current=CreateCartAudit.loaded(preview.id); } catch (IllegalStateException e) { errorNow(source,e); return; }
-        if(current!=null){CreateCartAudit.state(current).locked=true;LOCKED.add(current.getUUID());if(current.getVehicle()!=null)LOCKED.add(current.getVehicle().getUUID());}
+        if(current!=null){CartRestoreLocks.keepLoaded((ServerLevel)current.level(),current.blockPosition());CreateCartAudit.state(current).locked=true;LOCKED.add(current.getUUID());if(current.getVehicle()!=null)LOCKED.add(current.getVehicle().getUUID());}
         preparing=true;CartAuditContext.rollbackActive=true;
+        CartStorageAudit.lockMenus(preview.id,source.getServer());
         preparingEntity=current;preparingActor=player.getUUID();long request=++generation;
         source.sendSystemMessage(Component.literal("Подготовка отката конструкции; ожидаю подтверждения записи журнала…"));
         try { WORKER.execute(()->{
@@ -72,7 +75,7 @@ public final class CartRollbackCoordinator {
                 StagedCartRestore staged=Set.of("entity","blocks").contains(plan.target().getString("Form")) && plan.target().contains("Cart")?new StagedCartRestore(plan.target()):null;
                 source.getServer().execute(()->{if(request!=generation)return;preparing=false;preparingEntity=null;preparingActor=null;active=new Job(source,plan,staged,current);});
             }catch(Exception e){ source.getServer().execute(()->{if(request!=generation)return;preparing=false;preparingEntity=null;preparingActor=null;unlock(current);errorNow(source,e);}); }
-        });}catch(RejectedExecutionException e){preparing=false;unlock(current);errorNow(source,e);}
+        });}catch(RejectedExecutionException e){preparing=false;preparingEntity=null;preparingActor=null;unlock(current);errorNow(source,e);}
     }
     public static void onTick(ServerTickEvent.Post event) {
         Job job=active;if(job==null||!event.hasTime())return;
@@ -102,7 +105,7 @@ public final class CartRollbackCoordinator {
             }
         } finally {CartAuditContext.restoring(previous);unlock(preparingEntity);active=null;preparing=false;preparingEntity=null;preparingActor=null;PREVIEWS.clear();LOCKED.clear();CreateCartAudit.clear();}
     }
-    private static void unlock(Entity e){ CartAuditContext.rollbackActive=false; if(e!=null&&CreateCartAudit.state(e)!=null)CreateCartAudit.state(e).locked=false;LOCKED.clear(); }
+    private static void unlock(Entity e){ CartRestoreLocks.clear();CartAuditContext.rollbackActive=false; if(e!=null&&CreateCartAudit.state(e)!=null)CreateCartAudit.state(e).locked=false;LOCKED.clear(); }
     private static void error(CommandSourceStack s,Exception e){s.getServer().execute(()->errorNow(s,e));}
     private static void errorNow(CommandSourceStack s,Exception e){s.sendFailure(Component.literal("Откат конструкции: "+e.getMessage()));}
     private static ServerLevel level(MinecraftServer server,String dim){var l=server.getLevel(ResourceKey.create(Registries.DIMENSION,ResourceLocation.parse(dim)));if(l==null)throw new IllegalStateException("Измерение недоступно: "+dim);return l;}
@@ -151,11 +154,11 @@ public final class CartRollbackCoordinator {
                     if(!base.hasUUID("UUID"))throw new IllegalStateException("В истории нет полного снимка оставшейся вагонетки");
                     standaloneBase=level(server,plan.latestForm().getString("Dimension")).getEntity(base.getUUID("UUID"));
                     if(!(standaloneBase instanceof AbstractMinecart mc) || !mc.getPassengers().isEmpty() || !CreateCartAudit.baseSnapshot(mc).equals(base))throw new IllegalStateException("Оставшаяся вагонетка отсутствует или изменилась");
-                    LOCKED.add(mc.getUUID());
+                    CartRestoreLocks.keepLoaded((ServerLevel)mc.level(),mc.blockPosition());LOCKED.add(mc.getUUID());
                 }
                 if(current==null&&item==null&&!latest.equals("removed")&&!latest.equals("blocks"))throw new IllegalStateException("Конструкция не найдена среди загруженных сущностей/инвентарей. Загрузите её чанк или верните предмет из хранилища; копия не создана");
                 if(current!=null&&current.isRemoved())throw new IllegalStateException("Конструкция изменилась во время подготовки");
-                if(staged!=null){var dim=level(server,plan.target().getString("Dimension"));var n=plan.target().getCompound(plan.target().getString("Form").equals("entity")?"Entity":"Cart").getList("Pos",6);if(!dim.hasChunkAt(BlockPos.containing(n.getDouble(0),n.getDouble(1),n.getDouble(2))))throw new IllegalStateException("Целевой чанк не загружен");}
+                if(staged!=null){var dim=level(server,plan.target().getString("Dimension"));var n=plan.target().getCompound(plan.target().getString("Form").equals("entity")?"Entity":"Cart").getList("Pos",6);if(!dim.hasChunkAt(BlockPos.containing(n.getDouble(0),n.getDouble(1),n.getDouble(2))))throw new IllegalStateException("Целевой чанк не загружен");CartRestoreLocks.keepLoaded(dim,BlockPos.containing(n.getDouble(0),n.getDouble(1),n.getDouble(2)));}
                 if(plan.target().getString("Form").equals("item") && (!plan.target().hasUUID("Holder") || server.getPlayerList().getPlayer(plan.target().getUUID("Holder"))==null))throw new IllegalStateException("Владелец целевого предмета должен быть онлайн");
                 phase=1;return false;
             }
@@ -163,7 +166,10 @@ public final class CartRollbackCoordinator {
                 if(index<plan.blocks().size()){
                     var b=plan.blocks().get(index++);var l=level(server,b.dimension());
                     if(!l.hasChunkAt(b.pos()))throw new IllegalStateException("Чанк блока не загружен: "+b.pos());
-                    BlockState expected=NbtUtils.readBlockState(l.holderLookup(Registries.BLOCK),b.afterTag());
+                    CartRestoreLocks.keepLoaded(l,b.pos());
+                    CartRestoreLocks.block(l,b.pos());
+                    for(var direction:net.minecraft.core.Direction.values())CartRestoreLocks.block(l,b.pos().relative(direction));
+                    reserveHandlers(l,b.pos(),true);
                     verifyBlock(l,b);
                     return false;
                 }
@@ -231,6 +237,23 @@ public final class CartRollbackCoordinator {
             try{LogEntry row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.CART_ROLLBACK;row.dim=targetLevel.dimension().location().toString();row.actorUuid=source.getPlayer().getUUID();row.actorName=source.getTextName();row.source=CartAuditContext.prefix(plan.cartId())+"rollback:"+plan.checkpointId();row.extra="checkpoint="+plan.checkpointId()+"; blocks="+applied;LoggerRuntime.storage(targetLevel).append(row);}catch(Exception e){CreateCartAudit.failed("rollback receipt",e);}finally{CartAuditContext.restoring(old);}
         }
     }
+    private static void reserveHandlers(ServerLevel level,BlockPos pos,boolean requireSupported){
+        var item=level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK,pos,null);
+        if(requireSupported && item!=null && !supportedItemHandler(item))throw new IllegalStateException("У инвентаря блока нет безопасной блокировки для отката: "+pos);
+        CartRestoreLocks.handler(item);
+        var fluid=level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.FluidHandler.BLOCK,pos,null);
+        if(requireSupported && fluid!=null && !(fluid instanceof net.neoforged.neoforge.fluids.capability.templates.FluidTank))throw new IllegalStateException("У жидкости блока нет безопасной блокировки для отката: "+pos);
+        CartRestoreLocks.handler(fluid);
+    }
+    private static boolean supportedItemHandler(net.neoforged.neoforge.items.IItemHandler handler){
+        try {
+            for(var method:new java.lang.reflect.Method[]{handler.getClass().getMethod("insertItem",int.class,ItemStack.class,boolean.class),handler.getClass().getMethod("extractItem",int.class,int.class,boolean.class)}) {
+                var owner=method.getDeclaringClass();
+                if(owner!=net.neoforged.neoforge.items.ItemStackHandler.class && owner!=net.neoforged.neoforge.items.wrapper.InvWrapper.class && owner!=net.neoforged.neoforge.items.wrapper.CombinedInvWrapper.class)return false;
+            }
+            return true;
+        }catch(ReflectiveOperationException e){return false;}
+    }
     private static void verifyBlock(ServerLevel level,CartRollbackPlan.BlockUndo b){
         if(!level.hasChunkAt(b.pos()) || !level.getBlockState(b.pos()).equals(NbtUtils.readBlockState(level.holderLookup(Registries.BLOCK),b.afterTag())))throw new IllegalStateException("Конфликт блока: "+b.pos());
         CompoundTag actualBe=NbtSerde.snapshotBlockEntity(level,level.getBlockEntity(b.pos()));
@@ -242,5 +265,6 @@ public final class CartRollbackCoordinator {
         if(!level.getBlockState(pos).equals(state))throw new IllegalStateException("Блок отклонил восстановление: "+pos);
         if(be!=null&&!NbtSerde.readBlockEntity(level,pos,be))throw new IllegalStateException("NBT блока не восстановлен: "+pos);
         if(slots!=null&&!ContainerSlotSnapshot.apply(level,pos,slots))throw new IllegalStateException("Инвентарь блока не восстановлен: "+pos);
+        reserveHandlers(level,pos,true);
     }
 }

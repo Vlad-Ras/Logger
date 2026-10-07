@@ -37,6 +37,7 @@ public abstract class ServerLevelSetBlockMixin {
     @WrapMethod(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z")
     private boolean avilixlogger$setBlock(BlockPos pos, BlockState newState, int flags, int recursionLeft,
                                          Operation<Boolean> original) {
+        if (CartRestoreLocks.blockLocked((Level)(Object)this,pos)) return false;
         SetBlockCapture snapshot = capture(pos, newState);
         boolean changed = original.call(pos, newState, flags, recursionLeft);
         if (snapshot != null && changed) after(snapshot, pos);
