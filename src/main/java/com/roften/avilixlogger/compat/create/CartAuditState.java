@@ -20,7 +20,7 @@ public final class CartAuditState {
     private transient CartAuditContext.Stamp workStamp;
     public CartAuditContext.Stamp stamp(String phase) {
         if (!phase.equals("work")) return new CartAuditContext.Stamp(id, owner, ownerName, phase, sequence);
-        if (workStamp == null || workStamp.operation() != sequence || !java.util.Objects.equals(workStamp.owner(),owner)) workStamp = new CartAuditContext.Stamp(id,owner,ownerName,phase,sequence);
+        if (workStamp == null || workStamp.operation() != sequence || !workStamp.id().equals(id) || !java.util.Objects.equals(workStamp.ownerName(),ownerName) || !java.util.Objects.equals(workStamp.owner(),owner)) workStamp = new CartAuditContext.Stamp(id,owner,ownerName,phase,sequence);
         return workStamp;
     }
     public CompoundTag write() {

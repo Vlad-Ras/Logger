@@ -17,7 +17,8 @@
     "ContraptionRemovalAuditMixin",
     "MountedItemStorageAuditMixin",
     "CartContraptionAccessor",
-    "CartStorageAccessor"
+    "CartStorageAccessor",
+    "MountedFluidStorageAuditMixin"
   ],
   "client": [],
   "injectors": {

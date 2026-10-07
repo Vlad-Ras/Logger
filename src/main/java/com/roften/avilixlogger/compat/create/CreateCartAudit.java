@@ -124,7 +124,7 @@ public final class CreateCartAudit {
             // Only the base cart's own payload, not another copy of all contraption passengers.
             METADATA_ONLY.set(true);
             if (e.getVehicle() instanceof AbstractMinecart cart) {
-                CompoundTag base = save(cart); base.remove("Passengers"); out.put("Cart", base);
+                out.put("Cart", baseSnapshot(cart));
             }
         } finally { METADATA_ONLY.set(old); }
         // Create's writer references live BE tags. Freeze them before crossing the queue boundary.
@@ -136,8 +136,15 @@ public final class CreateCartAudit {
         CompoundTag n = new CompoundTag(); n.putString("id", BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString());
         e.saveWithoutId(n); return n;
     }
+    public static CompoundTag baseSnapshot(AbstractMinecart cart) {
+        boolean old=METADATA_ONLY.get();METADATA_ONLY.set(true);
+        try { CompoundTag base=save(cart);base.remove("Passengers");return base.copy(); }
+        finally { METADATA_ONLY.set(old); }
+    }
     public static CompoundTag form(OrientedContraptionEntity e, String form) {
-        CompoundTag n = pose(e); n.putInt("Format", 1); n.putString("Form", form); n.put(CartAuditState.KEY, state(e).write()); return n;
+        CompoundTag n = pose(e); n.putInt("Format", 1); n.putString("Form", form); n.put(CartAuditState.KEY, state(e).write());
+        if(e.getVehicle() instanceof AbstractMinecart cart)n.put("Cart",baseSnapshot(cart));
+        return n;
     }
     public static CompoundTag itemForm(OrientedContraptionEntity e, ItemStack item, Player holder) {
         CompoundTag n = form(e, "item");

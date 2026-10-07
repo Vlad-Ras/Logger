@@ -23,7 +23,7 @@ public final class CartAuditContext {
     public static boolean restoring() { return RESTORING.get(); }
     public static boolean restoring(boolean value) { boolean old = RESTORING.get(); RESTORING.set(value); return old; }
     public static UUID id(String source) {
-        if (source == null || !source.startsWith("create:cart:") || source.length() < 49) return null;
+        if (source == null || !source.startsWith("create:cart:") || source.length() < 49 || source.charAt(48) != ':') return null;
         try { return UUID.fromString(source.substring(12, 48)); } catch (IllegalArgumentException ignored) { return null; }
     }
     public static String phase(String source) {

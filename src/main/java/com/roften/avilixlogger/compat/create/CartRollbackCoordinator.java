@@ -69,7 +69,7 @@ public final class CartRollbackCoordinator {
                 var storage=LoggerRuntime.storage(source.getLevel());long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
                 if(!AsyncLogProcessor.awaitIdle(deadline)||!storage.awaitVisible(deadline))throw new IllegalStateException("Журнал ещё не записан в БД; откат не начат");
                 CartRollbackPlan plan=CartRollbackPlan.prepare(storage,preview.id,preview.checkpoint);
-                StagedCartRestore staged="entity".equals(plan.target().getString("Form"))?new StagedCartRestore(plan.target()):null;
+                StagedCartRestore staged=Set.of("entity","blocks").contains(plan.target().getString("Form")) && plan.target().contains("Cart")?new StagedCartRestore(plan.target()):null;
                 source.getServer().execute(()->{if(request!=generation)return;preparing=false;preparingEntity=null;preparingActor=null;active=new Job(source,plan,staged,current);});
             }catch(Exception e){ source.getServer().execute(()->{if(request!=generation)return;preparing=false;preparingEntity=null;preparingActor=null;unlock(current);errorNow(source,e);}); }
         });}catch(RejectedExecutionException e){preparing=false;unlock(current);errorNow(source,e);}
@@ -111,6 +111,7 @@ public final class CartRollbackCoordinator {
     private static final class Job {
         final CommandSourceStack source;final CartRollbackPlan plan;final StagedCartRestore staged;final Entity current;
         final ArrayList<Backup> backups=new ArrayList<>();
+        Entity standaloneBase;
         final List<ServerPlayer> players;int playerIndex,slotIndex;ItemLocation item;ItemStack expectedItem;
         int phase,index,applied;String failure;boolean itemSearchDone;
         Job(CommandSourceStack source,CartRollbackPlan plan,StagedCartRestore staged,Entity current){this.source=source;this.plan=plan;this.staged=staged;this.current=current;players=List.copyOf(source.getServer().getPlayerList().getPlayers());}
@@ -124,9 +125,16 @@ public final class CartRollbackCoordinator {
                     return false;
                 }
                 String latest=plan.latestForm().getString("Form");
+                if(latest.equals("blocks")) {
+                    var base=plan.latestForm().getCompound("Cart");
+                    if(!base.hasUUID("UUID"))throw new IllegalStateException("В истории нет полного снимка оставшейся вагонетки");
+                    standaloneBase=level(server,plan.latestForm().getString("Dimension")).getEntity(base.getUUID("UUID"));
+                    if(!(standaloneBase instanceof AbstractMinecart mc) || !mc.getPassengers().isEmpty() || !CreateCartAudit.baseSnapshot(mc).equals(base))throw new IllegalStateException("Оставшаяся вагонетка отсутствует или изменилась");
+                    LOCKED.add(mc.getUUID());
+                }
                 if(current==null&&item==null&&!latest.equals("removed")&&!latest.equals("blocks"))throw new IllegalStateException("Конструкция не найдена среди загруженных сущностей/инвентарей. Загрузите её чанк или верните предмет из хранилища; копия не создана");
                 if(current!=null&&current.isRemoved())throw new IllegalStateException("Конструкция изменилась во время подготовки");
-                if(staged!=null){var dim=level(server,plan.target().getString("Dimension"));var n=plan.target().getCompound("Entity").getList("Pos",6);if(!dim.hasChunkAt(BlockPos.containing(n.getDouble(0),n.getDouble(1),n.getDouble(2))))throw new IllegalStateException("Целевой чанк не загружен");}
+                if(staged!=null){var dim=level(server,plan.target().getString("Dimension"));var n=plan.target().getCompound(plan.target().getString("Form").equals("entity")?"Entity":"Cart").getList("Pos",6);if(!dim.hasChunkAt(BlockPos.containing(n.getDouble(0),n.getDouble(1),n.getDouble(2))))throw new IllegalStateException("Целевой чанк не загружен");}
                 if(plan.target().getString("Form").equals("item") && (!plan.target().hasUUID("Holder") || server.getPlayerList().getPlayer(plan.target().getUUID("Holder"))==null))throw new IllegalStateException("Владелец целевого предмета должен быть онлайн");
                 phase=1;return false;
             }
@@ -172,26 +180,29 @@ public final class CartRollbackCoordinator {
                 targetSlot=holder.getInventory().getFreeSlot();if(targetSlot<0)throw new IllegalStateException("Нет свободного слота для предмета");
             }
             ServerLevel targetLevel=level(server,plan.target().getString("Dimension"));
-            Entity oldCart=current==null?null:current.getVehicle();
+            Entity oldCart=current==null?standaloneBase:current.getVehicle();
+            if(standaloneBase instanceof AbstractMinecart mc && (mc.isRemoved() || !CreateCartAudit.baseSnapshot(mc).equals(plan.latestForm().getCompound("Cart"))))throw new IllegalStateException("Вагонетка изменилась во время отката");
             if(current!=null && (current.isRemoved() || CreateCartAudit.loaded(plan.cartId())!=current))throw new IllegalStateException("Исходная конструкция изменилась");
             if(staged!=null){
                 // Engine UUIDs may change; the persistent audit ID must not. Register both replacement
                 // entities while the original is still intact so spawn cancellation cannot destroy it.
-                staged.cart.setUUID(UUID.randomUUID());staged.entity.setUUID(UUID.randomUUID());
+                staged.cart.setUUID(UUID.randomUUID());if(staged.entity!=null)staged.entity.setUUID(UUID.randomUUID());
                 boolean cartAdded=false,entityAdded=false;
                 try {
                     if(!(cartAdded=targetLevel.addFreshEntity(staged.cart)))throw new IllegalStateException("Create не принял восстановленную вагонетку");
+                    if(staged.entity==null){entityAdded=true;}else {
                     if(!staged.entity.startRiding(staged.cart,true))throw new IllegalStateException("Create отклонил посадку конструкции");
                     if(!(entityAdded=targetLevel.addFreshEntity(staged.entity)))throw new IllegalStateException("Create не принял восстановленную конструкцию");
+                    }
                 } finally {
-                    if(!entityAdded){staged.entity.discard();if(cartAdded)staged.cart.discard();}
+                    if(!entityAdded){if(staged.entity!=null)((CartEntityAccess)staged.entity).avilixlogger$discardForRollback();if(cartAdded)staged.cart.discard();}
                 }
             }
             // Commit only after successful registration; no fallible spawn remains after consumption.
-            if(current!=null)current.discard();
+            if(current!=null)((CartEntityAccess)current).avilixlogger$discardForRollback();
             if(oldCart!=null && (staged!=null || form.equals("item") || form.equals("removed")))oldCart.discard();
             if(item!=null)item.set(ItemStack.EMPTY);
-            if(staged!=null){CreateCartAudit.state(staged.entity).locked=false;CreateCartAudit.attach(staged.entity);}
+            if(staged!=null && staged.entity!=null){CreateCartAudit.state(staged.entity).locked=false;CreateCartAudit.attach(staged.entity);}
             else if(form.equals("item")){
                 holder.getInventory().setItem(targetSlot,restored);holder.getInventory().setChanged();holder.containerMenu.broadcastChanges();
             }

@@ -16,6 +16,7 @@ public final class AsyncPipelineTest {
         TickHotPathTest.run();
         JournalPipelineTest.run();
         preparedSnapshots();
+        CartAuditTest.run();
         ClickHouseDeliveryTest.run();
         System.out.println("Async pipeline checks passed: lossless saturation, ordering, snapshots, shutdown, drops, tick deadlines, journal replay.");
     }

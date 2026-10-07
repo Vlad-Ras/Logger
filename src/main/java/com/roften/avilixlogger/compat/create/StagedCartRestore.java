@@ -31,7 +31,9 @@ public final class StagedCartRestore {
     private record Part(String kind, CompoundTag nbt) {}
     /** Called on the preparation worker: all deep copying and list traversal happens here. */
     public StagedCartRestore(CompoundTag envelope) {
-        original = envelope.getCompound("Entity"); skeleton = original.copy(); cartTag = envelope.getCompound("Cart").copy();
+        original = envelope.getCompound("Entity");cartTag = envelope.getCompound("Cart").copy();
+        if(!envelope.getString("Form").equals("entity")){skeleton=null;parts=List.of();cartTag.remove("Passengers");return;}
+        skeleton = original.copy();
         CompoundTag full = original.getCompound("Contraption"), base = skeleton.getCompound("Contraption");
         parts = new ArrayList<>();
         CompoundTag paletted = full.getCompound("Blocks");
@@ -42,7 +44,7 @@ public final class StagedCartRestore {
             n.put("BlockState", palette.getCompound(state)); parts.add(new Part("block",n));
         }
         if (parts.isEmpty()) throw new IllegalStateException("Снимок конструкции не содержит блоков");
-        for (String key : new String[]{"Actors","items","fluids","Superglue","Seats","Passengers","Interactors"}) {
+        for (String key : new String[]{"DisabledActors","Actors","items","fluids","Superglue","Seats","Passengers","Interactors"}) {
             for (Tag t : full.getList(key,Tag.TAG_COMPOUND)) parts.add(new Part(key, ((CompoundTag)t).copy()));
             base.remove(key);
         }
@@ -57,20 +59,21 @@ public final class StagedCartRestore {
         skeleton.remove("Passengers"); cartTag.remove("Passengers");
     }
     public boolean step(ServerLevel level) {
-        if (entity == null) {
+        if (cart == null) {
             var base = EntityType.loadEntityRecursive(cartTag,level,e->e);
+            if(!(base instanceof AbstractMinecart mc))throw new IllegalStateException("Снимок не содержит вагонетку");
+            cart=mc;
+            if(skeleton==null)return true;
             var mounted = EntityType.loadEntityRecursive(skeleton,level,e->e);
-            if (!(base instanceof AbstractMinecart mc) || !(mounted instanceof OrientedContraptionEntity oce)) throw new IllegalStateException("Create не смог создать вагонетку");
-            cart = mc; entity = oce; contraption = oce.getContraption();
+            if (!(mounted instanceof OrientedContraptionEntity oce)) throw new IllegalStateException("Create не смог создать вагонетку");
+            entity = oce; contraption = oce.getContraption();
             CreateCartAudit.state(entity).locked = true;
             ((CartStorageAccessor)contraption.getStorage()).avilixlogger$reset();
             return false;
         }
+        if(skeleton==null)return true;
         if (index >= parts.size()) {
             contraption.getStorage().initialize();
-            // Disabled-actor masks are restored after actors exist.
-            ListTag disabled = original.getCompound("Contraption").getList("DisabledActors",Tag.TAG_COMPOUND);
-            for (Tag t : disabled) { var stack = net.minecraft.world.item.ItemStack.parseOptional(level.registryAccess(), (CompoundTag)t); contraption.setActorsActive(stack,false); }
             return true;
         }
         Part part = parts.get(index++); CompoundTag n = part.nbt; var access = (CartContraptionAccessor)contraption;
@@ -82,10 +85,21 @@ public final class StagedCartRestore {
                 if (n.contains("UpdateTag")) access.avilixlogger$updateTags().put(pos,n.getCompound("UpdateTag"));
                 if (n.contains("Legacy")) contraption.getIsLegacy().put(pos,true);
             }
+            case "DisabledActors" -> contraption.getDisabledActors().add(net.minecraft.world.item.ItemStack.parseOptional(level.registryAccess(),n));
             case "Actors" -> {
                 var info = contraption.getBlocks().get(NBTHelper.readBlockPos(n,"Pos"));
                 if (info == null) throw new IllegalStateException("Актор без блока");
-                contraption.getActors().add(MutablePair.of(info,MovementContext.readNBT(level,info,n,contraption)));
+                MovementContext context=MovementContext.readNBT(level,info,n,contraption);
+                var behaviour=com.simibubi.create.content.contraptions.behaviour.MovementBehaviour.REGISTRY.get(info.state());
+                if(behaviour!=null) {
+                    var filter=behaviour.canBeDisabledVia(context);
+                    if(filter!=null)for(var disabled:contraption.getDisabledActors()) {
+                        if(disabled.isEmpty() || com.simibubi.create.content.contraptions.actors.contraptionControls.ContraptionControlsMovement.isSameFilter(disabled,filter)) {
+                            context.disabled=true;behaviour.onDisabledByControls(context);break;
+                        }
+                    }
+                }
+                contraption.getActors().add(MutablePair.of(info,context));
             }
             case "items" -> {
                 var storage = MountedItemStorage.CODEC.parse(level.registryAccess().createSerializationContext(NbtOps.INSTANCE),n.get("storage")).getOrThrow();

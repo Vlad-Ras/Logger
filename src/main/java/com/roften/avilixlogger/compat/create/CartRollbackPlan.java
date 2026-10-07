@@ -69,6 +69,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
         }
         String form = target.getString("Form");
         if (!Set.of("entity", "item", "blocks", "removed").contains(form)) throw new IllegalStateException("Неизвестная форма конструкции");
+        if(Set.of("entity","blocks").contains(form) && (!target.getCompound("Cart").hasUUID("UUID") || target.getCompound("Cart").getString("id").isEmpty()))throw new IllegalStateException("Отсутствует снимок базовой вагонетки");
         if (form.equals("entity")) validateEntity(target.getCompound("Entity"));
         return new CartRollbackPlan(id, checkpointId, cutoff, checkpoint.ts, target, latest, List.copyOf(blocks.values()), List.copyOf(locations), bytes);
     }

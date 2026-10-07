@@ -44,6 +44,10 @@ base {
 // Mojang ships Java 21 to end users in 1.21.1, so mods should target Java 21.
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+sourceSets { createSmoke }
+sourceSets.createSmoke.compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+sourceSets.createSmoke.runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+
 neoForge {
     // Specify the version of NeoForge to use.
     version = project.neo_version
@@ -68,6 +72,7 @@ neoForge {
 
         server {
             server()
+            if (project.hasProperty('createSmoke')) systemProperty 'avilixlogger.createSmoke', 'true'
             programArgument '--nogui'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
@@ -112,6 +117,7 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
+            if (project.hasProperty('createSmoke')) sourceSet(sourceSets.createSmoke)
         }
     }
 }

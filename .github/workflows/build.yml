@@ -24,14 +24,14 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew build
 
-      - name: Smoke test dedicated server with AE2
+      - name: Smoke test dedicated server with Create and AE2
         timeout-minutes: 10
         run: |
           mkdir -p run
           printf 'eula=true\n' > run/eula.txt
           # runServer is intentionally long-lived. A GameTestServer without registered
           # tests exits before reaching server startup while Gradle still reports success.
-          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PcreateSmoke --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
           tail -n 100 ae2-smoke.log
           if ! grep -qE 'Done \([0-9]+([.][0-9]+)?s\)!' ae2-smoke.log; then
             echo 'Dedicated server did not finish loading with AE2.' >&2
@@ -41,7 +41,8 @@ jobs:
             echo 'Dedicated server reported a fatal loading error.' >&2
             exit 1
           fi
-          echo 'Dedicated server started with AE2 and AvilixLogger.'
+          grep -q 'AVILIX_CREATE_SMOKE_OK' ae2-smoke.log || { echo 'Create cart fixture failed'; exit 1; }
+          echo 'Dedicated server started with Create, AE2 and AvilixLogger; detached cart fixture passed.'
 
       - name: Upload AvilixLogger JAR
         uses: actions/upload-artifact@v4

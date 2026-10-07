@@ -16,6 +16,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(value = AbstractContraptionEntity.class, remap = false)
 public abstract class CartEntityAuditMixin implements CartEntityAccess {
+    @org.spongepowered.asm.mixin.Shadow private boolean skipActorStop;
+    @Override public void avilixlogger$discardForRollback() { skipActorStop=true;((Entity)(Object)this).discard(); }
     @Override public CartAuditState avilixlogger$mountedState() {
         var c = ((AbstractContraptionEntity)(Object)this).getContraption();
         return c instanceof CartAuditAccess a ? a.avilixlogger$cartState() : null;
@@ -40,11 +42,16 @@ public abstract class CartEntityAuditMixin implements CartEntityAccess {
         var e = (OrientedContraptionEntity) self;
         s.sequence++;
         var before = CreateCartAudit.snapshot(e, null);
+        var baseCart=e.getVehicle();
         var previous = CartAuditContext.enter(s.stamp("disassemble"));
         s.removing = true;
         try {
             original.call();
-            if (e.isRemoved()) CreateCartAudit.emit(e, ActionType.CART_DISASSEMBLE, "disassemble", before, CreateCartAudit.form(e, "blocks"), "disassembled");
+            if (e.isRemoved()) {
+                var after=CreateCartAudit.form(e,"blocks");
+                if(baseCart instanceof net.minecraft.world.entity.vehicle.AbstractMinecart cart)after.put("Cart",CreateCartAudit.baseSnapshot(cart));
+                CreateCartAudit.emit(e, ActionType.CART_DISASSEMBLE, "disassemble", before, after, "disassembled");
+            }
         } finally { s.removing = false; CartAuditContext.restore(previous); }
     }
     @Inject(method = "remove", at = @At("HEAD"), require = 1)

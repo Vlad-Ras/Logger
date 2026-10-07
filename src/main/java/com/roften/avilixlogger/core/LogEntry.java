@@ -111,6 +111,12 @@ public final class LogEntry implements QueuedLogEvent {
         if (deferredBlockAfter != null) blockAfter = NbtSerde.writeBlockState(deferredBlockAfter);
         deferredBlockBefore = null;
         deferredBlockAfter = null;
+        // Some container integrations already supplied SNBT; parse those only on the encoder worker.
+        if (CartAuditContext.id(source)==null && itemStackNbt!=null && itemStackNbt.contains("AvilixCartAudit")) {
+            var encoded=NbtSerde.fromSnbt(itemStackNbt);
+            if(encoded!=null){var audit=encoded.getCompound("components").getCompound("create:minecart_contraption_data").getCompound("AvilixCartAudit");
+                if(audit.hasUUID("Id"))source=CartAuditContext.prefix(audit.getUUID("Id"))+"item:0";}
+        }
         if (snapshots == null) return;
         for (int i = 0; i < snapshots.length; i++) {
             net.minecraft.nbt.Tag tag = snapshots[i];
