@@ -25,6 +25,13 @@ public final class CreateCartSmoke {
             var world=event.getServer().overworld();
             MountedContraption c=new MountedContraption();c.bounds=new net.minecraft.world.phys.AABB(BlockPos.ZERO);
             c.getBlocks().put(BlockPos.ZERO,new StructureBlockInfo(BlockPos.ZERO,Blocks.STONE.defaultBlockState(),null));
+            var inventory=new net.neoforged.neoforge.items.ItemStackHandler(9);
+            inventory.setStackInSlot(3,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,12));
+            var storage=(com.roften.avilixlogger.compat.create.mixin.CartStorageAccessor)c.getStorage();
+            storage.avilixlogger$addItem(new com.simibubi.create.impl.contraption.storage.FallbackMountedStorage(inventory),BlockPos.ZERO);
+            var fluid=(net.minecraft.nbt.CompoundTag)new net.neoforged.neoforge.fluids.FluidStack(net.minecraft.world.level.material.Fluids.WATER,1250).save(world.registryAccess());
+            fluid.putInt("Capacity",4000);
+            storage.avilixlogger$addFluid(com.simibubi.create.content.fluids.tank.storage.FluidTankMountedStorage.fromLegacy(world.registryAccess(),fluid),BlockPos.ZERO);
             var entity=OrientedContraptionEntity.create(world,c,Direction.NORTH);
             var cart=new Minecart(world,0,128,0);entity.setPos(0,128,0);entity.startRiding(cart,true);
             CartAuditState state=((CartAuditAccess)c).avilixlogger$cartState();state.owner=java.util.UUID.randomUUID();state.ownerName="smoke";
@@ -38,6 +45,9 @@ public final class CreateCartSmoke {
             check(staged.entity.getContraption().getBlocks().size()==1,"restored block count");
             check(staged.entity.getContraption().getBlocks().get(BlockPos.ZERO).state().is(Blocks.STONE),"restored block state");
             check(state.id.equals(CreateCartAudit.state(staged.entity).id),"restored persistent ID");
+            var restoredStorage=staged.entity.getContraption().getStorage();
+            check(restoredStorage.getAllItemStorages().get(BlockPos.ZERO).getStackInSlot(3).getCount()==12,"restored cargo count");
+            check(restoredStorage.getFluids().storages.get(BlockPos.ZERO).getFluidInTank(0).getAmount()==1250,"restored fluid amount");
             check(world.getEntity(staged.entity.getUUID())!=staged.entity,"staging published entity prematurely");
             System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental");
         }catch(Throwable failure){

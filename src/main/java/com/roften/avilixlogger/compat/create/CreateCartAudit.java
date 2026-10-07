@@ -38,7 +38,7 @@ public final class CreateCartAudit {
         if (entries.size() > 1) throw new IllegalStateException("Найдено несколько загруженных конструкций с одним ID");
         return entries.isEmpty() ? null : entries.iterator().next();
     }
-    public static void clear() { CartStorageAudit.clear(); LOADED.clear(); ASSEMBLING.remove(); METADATA_ONLY.remove(); }
+    public static void clear() { CartItemTracker.clear();CartStorageAudit.clear(); LOADED.clear(); ASSEMBLING.remove(); METADATA_ONLY.remove(); }
     public static OrientedContraptionEntity passenger(AbstractMinecart cart) {
         for (Entity e : cart.getPassengers()) if (e instanceof OrientedContraptionEntity oce && state(e) != null) return oce;
         return null;

@@ -8,10 +8,11 @@ import java.util.*;
 /** Detached, bounded plan prepared entirely off the server thread. */
 public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, long checkpointTs,
                                CompoundTag target, CompoundTag latestForm, List<BlockUndo> blocks,
-                               List<BlockPos> itemLocations, long bytes) {
+                               List<ItemLocation> itemLocations, long bytes) {
     public record BlockUndo(String dimension, BlockPos pos, String before, String after,
                             CompoundTag beforeTag, CompoundTag afterTag, CompoundTag be, CompoundTag slots,
                             CompoundTag afterBe, CompoundTag afterSlots) {}
+    public record ItemLocation(String dimension,BlockPos pos) {}
     private record Key(String dim, BlockPos pos) {}
     private static final int PAGE = 256, MAX_ROWS = 100_000;
     private static final long MAX_BYTES = 128L * 1024 * 1024;
@@ -28,7 +29,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
         if (target == null || target.getInt("Format") != 1) throw new IllegalArgumentException("Нет полного снимка контрольной точки");
         CompoundTag latest = target;
         LinkedHashMap<Key, BlockUndo> blocks = new LinkedHashMap<>();
-        ArrayList<BlockPos> locations = new ArrayList<>();
+        LinkedHashSet<ItemLocation> locations = new LinkedHashSet<>();
         q.afterId = 0; q.sinceTs = checkpoint.ts; q.beforeId = Long.MAX_VALUE; q.limit = PAGE;
         long bytes = target.sizeInBytes(), cutoff = checkpointId; int rows = 0; boolean latestFound = false;
         scan: while (true) {
@@ -60,7 +61,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                     BlockUndo undo = new BlockUndo(e.dim, pos, e.blockBefore, previous == null ? e.blockAfter : previous.after, before, after, be, slots, afterBe, afterSlots);
                     blocks.put(key, undo); bytes += before.sizeInBytes() + after.sizeInBytes() + (be == null ? 0 : be.sizeInBytes()) + (slots == null ? 0 : slots.sizeInBytes()) + (afterBe == null ? 0 : afterBe.sizeInBytes()) + (afterSlots == null ? 0 : afterSlots.sizeInBytes());
                 }
-                if ((e.type == ActionType.CONTAINER_PUT || e.type == ActionType.CONTAINER_TAKE) && locations.size() < 64) locations.add(new BlockPos(e.x,e.y,e.z));
+                if ((e.type == ActionType.CONTAINER_PUT || e.type == ActionType.CONTAINER_TAKE) && locations.size() < 64) locations.add(new ItemLocation(e.dim,new BlockPos(e.x,e.y,e.z)));
                 if (bytes > MAX_BYTES) throw new IllegalStateException("План превышает 128 MiB; выберите более позднюю контрольную точку");
             }
             if (next >= q.beforeId) throw new IllegalStateException("Курсор истории не продвигается");

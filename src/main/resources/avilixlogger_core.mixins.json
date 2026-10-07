@@ -11,7 +11,8 @@
     "BlockEntityTickSourceMixin",
     "EntityTickSourceMixin",
     "SimulationSourceMixin",
-    "ChunkGenerationSourceMixin"
+    "ChunkGenerationSourceMixin",
+    "ContainerClickCauseMixin"
   ],
   "injectors": {
     "defaultRequire": 0

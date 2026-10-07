@@ -112,17 +112,38 @@ public final class CartRollbackCoordinator {
         final CommandSourceStack source;final CartRollbackPlan plan;final StagedCartRestore staged;final Entity current;
         final ArrayList<Backup> backups=new ArrayList<>();
         Entity standaloneBase;
-        final List<ServerPlayer> players;int playerIndex,slotIndex;ItemLocation item;ItemStack expectedItem;
+        final List<ServerPlayer> players;int playerIndex,slotIndex,locationIndex,containerSlot;ItemLocation item;ItemStack expectedItem;
         int phase,index,applied;String failure;boolean itemSearchDone;
         Job(CommandSourceStack source,CartRollbackPlan plan,StagedCartRestore staged,Entity current){this.source=source;this.plan=plan;this.staged=staged;this.current=current;players=List.copyOf(source.getServer().getPlayerList().getPlayers());}
         boolean step(MinecraftServer server){
             if(phase==0){ // Incremental inventory lookup, never a global entity/chunk scan.
                 if(playerIndex<players.size()){
-                    var p=players.get(playerIndex);var inv=p.getInventory();int slot=slotIndex++;
-                    if(slotIndex>=inv.getContainerSize()){slotIndex=0;playerIndex++;}
+                    var p=players.get(playerIndex);int total=p.getInventory().getContainerSize();
+                    net.minecraft.world.Container inv=slotIndex<total?p.getInventory():p.getEnderChestInventory();
+                    int slot=slotIndex<total?slotIndex:slotIndex-total;slotIndex++;
+                    if(slotIndex>=total+p.getEnderChestInventory().getContainerSize()){slotIndex=0;playerIndex++;}
                     ItemStack stack=inv.getItem(slot);
                     if(plan.cartId().equals(CreateCartAudit.itemId(stack))){if(item!=null||current!=null||stack.getCount()!=1)throw new IllegalStateException("Найдено несколько копий ID; откат остановлен");item=new ItemLocation(){public ItemStack get(){return inv.getItem(slot);}public void set(ItemStack v){inv.setItem(slot,v);inv.setChanged();p.containerMenu.broadcastChanges();}};expectedItem=stack.copy();}
                     return false;
+                }
+                if(locationIndex<plan.itemLocations().size()) {
+                    var where=plan.itemLocations().get(locationIndex);var l=level(server,where.dimension());
+                    if(!l.hasChunkAt(where.pos())){locationIndex++;containerSlot=0;return false;}
+                    var handler=l.getCapability(net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK,where.pos(),null);
+                    if(!(handler instanceof net.neoforged.neoforge.items.IItemHandlerModifiable writable) || containerSlot>=handler.getSlots()){locationIndex++;containerSlot=0;return false;}
+                    int slot=containerSlot++;var stack=handler.getStackInSlot(slot);
+                    if(plan.cartId().equals(CreateCartAudit.itemId(stack))) {
+                        if(item!=null || current!=null || stack.getCount()!=1)throw new IllegalStateException("Несколько копий ID конструкции");
+                        var blockEntity=l.getBlockEntity(where.pos());
+                        item=new ItemLocation(){public ItemStack get(){return l.hasChunkAt(where.pos())&&l.getBlockEntity(where.pos())==blockEntity?writable.getStackInSlot(slot):ItemStack.EMPTY;}public void set(ItemStack value){writable.setStackInSlot(slot,value);if(blockEntity!=null)blockEntity.setChanged();}};
+                        expectedItem=stack.copy();
+                    }
+                    return false;
+                }
+                for(var drop:CartItemTracker.loaded(plan.cartId())) {
+                    if(item!=null || current!=null || drop.getItem().getCount()!=1)throw new IllegalStateException("Несколько копий ID конструкции");
+                    item=new ItemLocation(){public ItemStack get(){return drop.isRemoved()?ItemStack.EMPTY:drop.getItem();}public void set(ItemStack value){if(value.isEmpty())drop.discard();else drop.setItem(value);}};
+                    expectedItem=drop.getItem().copy();LOCKED.add(drop.getUUID());
                 }
                 String latest=plan.latestForm().getString("Form");
                 if(latest.equals("blocks")) {

@@ -90,7 +90,7 @@ public final class StagedCartRestore {
                 var info = contraption.getBlocks().get(NBTHelper.readBlockPos(n,"Pos"));
                 if (info == null) throw new IllegalStateException("Актор без блока");
                 MovementContext context=MovementContext.readNBT(level,info,n,contraption);
-                var behaviour=com.simibubi.create.content.contraptions.behaviour.MovementBehaviour.REGISTRY.get(info.state());
+                var behaviour=com.simibubi.create.api.behaviour.movement.MovementBehaviour.REGISTRY.get(info.state());
                 if(behaviour!=null) {
                     var filter=behaviour.canBeDisabledVia(context);
                     if(filter!=null)for(var disabled:contraption.getDisabledActors()) {

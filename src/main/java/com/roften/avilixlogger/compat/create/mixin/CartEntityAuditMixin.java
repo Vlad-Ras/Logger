@@ -62,6 +62,23 @@ public abstract class CartEntityAuditMixin implements CartEntityAccess {
             catch (Throwable error) { CreateCartAudit.failed("remove", error); }
         }
     }
+    @WrapMethod(method = "handlePlayerInteraction")
+    private boolean avilixlogger$interact(net.minecraft.world.entity.player.Player player, BlockPos pos, net.minecraft.core.Direction side, net.minecraft.world.InteractionHand hand, Operation<Boolean> original) {
+        var self=(AbstractContraptionEntity)(Object)this;var state=avilixlogger$mountedState();
+        if(state==null || self.level().isClientSide || !CreateCartAudit.enabled())return original.call(player,pos,side,hand);
+        if(state.locked)return false;
+        try(var cause=CauseContext.push(player,CauseContext.Kind.INTERACT_ENTITY,self.blockPosition(),player.getItemInHand(hand))) {
+            boolean result=original.call(player,pos,side,hand);
+            if(result){
+                net.minecraft.nbt.CompoundTag detail=new net.minecraft.nbt.CompoundTag();detail.putLong("LocalPos",pos.asLong());
+                net.minecraft.nbt.ListTag disabled=new net.minecraft.nbt.ListTag();
+                for(var filter:self.getContraption().getDisabledActors())disabled.add(filter.saveOptional(self.registryAccess()));
+                detail.put("DisabledActors",disabled);
+                CreateCartAudit.emit((OrientedContraptionEntity)self,ActionType.CART_STATUS,"interaction",null,detail,"interaction; local="+pos.toShortString()+"; side="+side);
+            }
+            return result;
+        }
+    }
     @WrapMethod(method = "setBlock")
     private void avilixlogger$structure(BlockPos pos, StructureBlockInfo after, Operation<Void> original) {
         var self = (AbstractContraptionEntity)(Object)this;
