@@ -19,7 +19,8 @@
     "CartContraptionAccessor",
     "CartStorageAccessor",
     "MountedFluidStorageAuditMixin",
-    "MountedStorageMenuAuditMixin"
+    "MountedStorageMenuAuditMixin",
+    "BaseCartInventoryAuditMixin"
   ],
   "client": [],
   "injectors": {

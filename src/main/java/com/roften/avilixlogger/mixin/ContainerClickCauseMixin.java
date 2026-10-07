@@ -19,6 +19,7 @@ public abstract class ContainerClickCauseMixin {
         if(!player.server.isSameThread() || !LoggerConfig.isEnabled()){original.call(packet);return;}
         if(com.roften.avilixlogger.core.CartRestoreLocks.menuLocked(player.containerMenu)){player.containerMenu.broadcastFullState();return;}
         if(com.roften.avilixlogger.core.CartAuditContext.rollbackActive)for(var slot:player.containerMenu.slots) {
+            if(slot.container instanceof net.minecraft.world.entity.Entity entity && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID())){player.containerMenu.broadcastFullState();return;}
             if(slot.container instanceof net.minecraft.world.level.block.entity.BlockEntity be && com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(be.getLevel(),be.getBlockPos())){player.containerMenu.broadcastFullState();return;}
         }
         try(var cause=CauseContext.push(player,CauseContext.Kind.OTHER,player.blockPosition(),ItemStack.EMPTY)){original.call(packet);}

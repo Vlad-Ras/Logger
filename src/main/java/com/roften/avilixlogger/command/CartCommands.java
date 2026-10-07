@@ -36,7 +36,7 @@ public final class CartCommands {
         CartRollbackCoordinator.query(source,()->{try{
             var rows=storage.queryReverse(q);
             source.getServer().execute(()->{Set<UUID> seen=new HashSet<>();for(var row:rows){UUID id=CartAuditContext.id(row.source);if(id==null||!seen.add(id))continue;
-                source.sendSystemMessage(Component.literal(id+" · "+row.type+" · "+row.dim+" "+row.x+" "+row.y+" "+row.z).withStyle(st->st.withColor(ChatFormatting.AQUA).withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,"/log cart history "+id))));}
+                source.sendSystemMessage(Component.literal(id+" · "+LogText.actionLabel(row.type)+" · "+row.dim+" "+row.x+" "+row.y+" "+row.z).withStyle(st->st.withColor(ChatFormatting.AQUA).withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,"/log cart history "+id))));}
                 if(seen.isEmpty())source.sendSystemMessage(Component.literal("Конструкции по действиям "+player+" не найдены"));else source.sendSystemMessage(Component.literal("По последним 200 событиям игрока. Нажмите ID для истории."));});
         }catch(Exception e){error(source,e);}});
     }
@@ -46,7 +46,7 @@ public final class CartCommands {
         CartRollbackCoordinator.query(source,()->{try{var rows=storage.queryReverse(q);source.getServer().execute(()->{
             source.sendSystemMessage(Component.literal("История конструкции "+id).withStyle(ChatFormatting.GOLD));
             for(var row:rows){String suffix=CartRollbackPlan.checkpoint(row.type)?" [контрольная точка]":"";
-                source.sendSystemMessage(Component.literal(row.id+" · "+java.time.Instant.ofEpochMilli(row.ts)+" · "+row.type+" · "+Objects.toString(row.actorName,"SYSTEM")+" · "+row.dim+" "+row.x+" "+row.y+" "+row.z+suffix+" · "+Objects.toString(row.extra,"")).withStyle(st->st.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,"/log cart rollback "+id+" "+row.id))));}
+                source.sendSystemMessage(Component.literal(row.id+" · "+java.time.Instant.ofEpochMilli(row.ts)+" · "+LogText.actionLabel(row.type)+" · "+Objects.toString(row.actorName,"SYSTEM")+" · "+row.dim+" "+row.x+" "+row.y+" "+row.z+suffix+" · "+Objects.toString(row.extra,"")).withStyle(st->st.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,"/log cart rollback "+id+" "+row.id))));}
             if(rows.size()==25)source.sendSystemMessage(Component.literal("[Ещё]").withStyle(st->st.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,"/log cart history "+id+" "+rows.getLast().id))));
         });}catch(Exception e){error(source,e);}});
     }

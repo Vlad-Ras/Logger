@@ -234,7 +234,7 @@ public final class CartRollbackCoordinator {
                 holder.getInventory().setItem(targetSlot,restored);holder.getInventory().setChanged();holder.containerMenu.broadcastChanges();
             }
             boolean old=CartAuditContext.restoring(false);
-            try{LogEntry row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.CART_ROLLBACK;row.dim=targetLevel.dimension().location().toString();row.actorUuid=source.getPlayer().getUUID();row.actorName=source.getTextName();row.source=CartAuditContext.prefix(plan.cartId())+"rollback:"+plan.checkpointId();row.extra="checkpoint="+plan.checkpointId()+"; blocks="+applied;LoggerRuntime.storage(targetLevel).append(row);}catch(Exception e){CreateCartAudit.failed("rollback receipt",e);}finally{CartAuditContext.restoring(old);}
+            try{LogEntry row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.CART_ROLLBACK;row.dim=targetLevel.dimension().location().toString();row.actorUuid=source.getPlayer()==null?null:source.getPlayer().getUUID();row.actorName=source.getTextName();row.source=CartAuditContext.prefix(plan.cartId())+"rollback:"+plan.checkpointId();row.extra="checkpoint="+plan.checkpointId()+"; blocks="+applied;LoggerRuntime.storage(targetLevel).append(row);}catch(Exception e){CreateCartAudit.failed("rollback receipt",e);}finally{CartAuditContext.restoring(old);}
         }
     }
     private static void reserveHandlers(ServerLevel level,BlockPos pos,boolean requireSupported){

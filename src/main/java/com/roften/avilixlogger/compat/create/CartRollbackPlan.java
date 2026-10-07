@@ -39,6 +39,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
             for (LogEntry e : page) {
                 if (e.id <= checkpointId) break scan;
                 if (!id.equals(CartAuditContext.id(e.source))) throw new IllegalStateException("Хранилище вернуло запись другой конструкции");
+                if(e.type==null)throw new IllegalStateException("Запись истории не содержит тип действия");
                 if (++rows > MAX_ROWS) throw new IllegalStateException("Больше 100000 записей: выберите более позднюю контрольную точку");
                 cutoff = Math.max(cutoff, e.id); next = Math.min(next, e.id);
                 if (e.type == ActionType.CART_ROLLBACK) throw new IllegalStateException("Этот период уже пересекает откат; выберите контрольную точку после него");
@@ -49,7 +50,8 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                 }
                 if (e.type == ActionType.CART_CONTENT_CHANGE) {
                     CompoundTag after = NbtSerde.fromSnbt(e.beAfter);
-                    if (after != null && after.getBoolean("External")) throw new IllegalStateException("В периоде есть обмен грузом с внешним инвентарём; нужен связанный откат получателя, чтобы не создать дюп");
+                    if(after==null || !after.contains("External"))throw new IllegalStateException("Неполная запись изменения груза");
+                    if (after.getBoolean("External")) throw new IllegalStateException("В периоде есть обмен грузом с внешним инвентарём; нужен связанный откат получателя, чтобы не создать дюп");
                 }
                 if (e.type == ActionType.BLOCK_BREAK || e.type == ActionType.BLOCK_PLACE || e.type == ActionType.BLOCK_INTERACT || e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE) {
                     var pos = new BlockPos(e.x, e.y, e.z); var key = new Key(e.dim, pos); var previous = blocks.get(key);
@@ -71,7 +73,15 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
         String form = target.getString("Form");
         if (!Set.of("entity", "item", "blocks", "removed").contains(form)) throw new IllegalStateException("Неизвестная форма конструкции");
         if(Set.of("entity","blocks").contains(form) && (!target.getCompound("Cart").hasUUID("UUID") || target.getCompound("Cart").getString("id").isEmpty()))throw new IllegalStateException("Отсутствует снимок базовой вагонетки");
-        if (form.equals("entity")) validateEntity(target.getCompound("Entity"));
+        if (form.equals("entity")) {
+            validateEntity(target.getCompound("Entity"));
+            var audit=target.getCompound("Entity").getCompound("Contraption").getCompound(CartAuditState.KEY);
+            if(!audit.hasUUID("Id") || !id.equals(audit.getUUID("Id")))throw new IllegalStateException("ID в снимке конструкции не совпадает с историей");
+        }
+        if(form.equals("item")) {
+            var audit=target.getCompound("Item").getCompound("components").getCompound("create:minecart_contraption_data").getCompound(CartAuditState.KEY);
+            if(!audit.hasUUID("Id") || !id.equals(audit.getUUID("Id")))throw new IllegalStateException("ID предмета не совпадает с историей");
+        }
         return new CartRollbackPlan(id, checkpointId, cutoff, checkpoint.ts, target, latest, List.copyOf(blocks.values()), List.copyOf(locations), bytes);
     }
     private static void validateEntity(CompoundTag entity) {

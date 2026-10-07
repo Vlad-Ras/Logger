@@ -13,7 +13,7 @@ import java.util.WeakHashMap;
 
 /** O(1) storage attribution; no per-tick inventory polling. Main-thread only. */
 public final class CartStorageAudit {
-    public record Ref(WeakReference<OrientedContraptionEntity> entity, BlockPos pos) {}
+    public record Ref(WeakReference<OrientedContraptionEntity> entity, BlockPos pos,boolean base) {}
     private static final Map<Object, Ref> OWNERS = new WeakHashMap<>();
     private static final Map<net.minecraft.world.inventory.AbstractContainerMenu,Ref> MENUS=new WeakHashMap<>();
     private CartStorageAudit() {}
@@ -21,15 +21,20 @@ public final class CartStorageAudit {
     public static void lockMenus(java.util.UUID id,net.minecraft.server.MinecraftServer server){
         for(var player:server.getPlayerList().getPlayers()) {
             var ref=MENUS.get(player.containerMenu);var entity=ref==null?null:ref.entity.get();
-            if(entity!=null && id.equals(CreateCartAudit.state(entity).id)) {
+            boolean baseMenu=false;
+            if(!baseMenu)for(var slot:player.containerMenu.slots) {
+                if(slot.container instanceof net.minecraft.world.entity.Entity base && base.getPersistentData().getCompound(CartAuditState.KEY).hasUUID("Id") && id.equals(base.getPersistentData().getCompound(CartAuditState.KEY).getUUID("Id"))){baseMenu=true;break;}
+            }
+            if(baseMenu || entity!=null && id.equals(CreateCartAudit.state(entity).id)) {
                 com.roften.avilixlogger.core.CartRestoreLocks.menu(player.containerMenu);player.closeContainer();
             }
         }
     }
     public static void bind(OrientedContraptionEntity entity) {
+        if(entity.getVehicle() instanceof net.minecraft.world.Container)OWNERS.put(entity.getVehicle(),new Ref(new WeakReference<>(entity),BlockPos.ZERO,true));
         var storage = entity.getContraption().getStorage();
-        storage.getAllItemStorages().forEach((pos, handler) -> OWNERS.put(handler, new Ref(new WeakReference<>(entity), pos)));
-        storage.getFluids().storages.forEach((pos, handler) -> OWNERS.put(handler, new Ref(new WeakReference<>(entity), pos)));
+        storage.getAllItemStorages().forEach((pos, handler) -> OWNERS.put(handler, new Ref(new WeakReference<>(entity), pos,false)));
+        storage.getFluids().storages.forEach((pos, handler) -> OWNERS.put(handler, new Ref(new WeakReference<>(entity), pos,false)));
     }
     public static Ref ref(Object handler) {
         if (CartAuditContext.restoring()) return null;
@@ -40,7 +45,7 @@ public final class CartStorageAudit {
     public static void changed(Ref ref, int slot, ItemStack before, ItemStack after) {
         var e = ref == null ? null : ref.entity.get();
         if (e == null || ItemStack.matches(before, after) || !CreateCartAudit.enabled()) return;
-        CompoundTag b = item(e, ref.pos, slot, before), a = item(e, ref.pos, slot, after);
+        CompoundTag b = item(e, ref.pos, slot, before), a = item(e, ref.pos, slot, after);b.putBoolean("BaseCart",ref.base);a.putBoolean("BaseCart",ref.base);
         CreateCartAudit.emit(e, ActionType.CART_CONTENT_CHANGE, "cargo", b, a, "item; local=" + ref.pos.toShortString() + "; slot=" + slot);
     }
     public static CompoundTag item(OrientedContraptionEntity e, BlockPos pos, int slot, ItemStack stack) {

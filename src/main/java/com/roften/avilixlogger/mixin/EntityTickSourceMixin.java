@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.Mixin;
 public abstract class EntityTickSourceMixin {
     @WrapMethod(method = "tickNonPassenger")
     private void avilixlogger$withSource(Entity entity, Operation<Void> original) {
-        if (com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID())) return;
+        if (com.roften.avilixlogger.core.CartAuditContext.rollbackActive && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID())) return;
         if (!LoggerConfig.isEnabled()) { original.call(entity); return; }
         String source = MutationSourceResolver.sourceFor(entity);
         if (source == null) source = MutationSourceResolver.VANILLA_SIMULATION;
@@ -22,7 +22,7 @@ public abstract class EntityTickSourceMixin {
 
     @WrapMethod(method = "tickPassenger")
     private void avilixlogger$withPassengerSource(Entity vehicle, Entity passenger, Operation<Void> original) {
-        if (com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(passenger.getUUID())) return;
+        if (com.roften.avilixlogger.core.CartAuditContext.rollbackActive && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(passenger.getUUID())) return;
         if (!LoggerConfig.isEnabled()) { original.call(vehicle, passenger); return; }
         String source = MutationSourceResolver.sourceFor(passenger);
         if (source == null) source = MutationSourceResolver.VANILLA_SIMULATION;

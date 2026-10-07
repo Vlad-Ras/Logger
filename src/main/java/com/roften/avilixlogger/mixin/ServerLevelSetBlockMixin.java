@@ -143,6 +143,8 @@ public abstract class ServerLevelSetBlockMixin {
             var afterBe = beAfter != null ? NbtSerde.snapshotBlockEntity(level, beAfter) : null;
             var afterSlots = beAfter != null ? ContainerSlotSnapshot.snapshotTag(level, pos, after, beAfter) : null;
 
+            var cart=CartAuditContext.current();
+            if(cart!=null && cart.phase().equals("disassemble") && afterBe!=null)CartAuditContext.rememberPlacedBlock(pos,afterBe,afterSlots);
             // Freeze all world state above. Comparison and SNBT encoding below use only snapshots.
             final long timestamp = System.currentTimeMillis();
             final String afterId = BuiltInRegistries.BLOCK.getKey(after.getBlock()).toString();

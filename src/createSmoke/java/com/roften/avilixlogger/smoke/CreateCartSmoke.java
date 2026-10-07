@@ -23,7 +23,7 @@ public final class CreateCartSmoke {
         if(!Boolean.getBoolean("avilixlogger.createSmoke"))return;
         try {
             var world=event.getServer().overworld();
-            MountedContraption c=new MountedContraption();c.bounds=new net.minecraft.world.phys.AABB(BlockPos.ZERO);
+            MountedContraption c=new MountedContraption();c.anchor=BlockPos.ZERO;c.bounds=new net.minecraft.world.phys.AABB(BlockPos.ZERO);
             c.getBlocks().put(BlockPos.ZERO,new StructureBlockInfo(BlockPos.ZERO,Blocks.STONE.defaultBlockState(),null));
             var inventory=new net.neoforged.neoforge.items.ItemStackHandler(9);
             inventory.setStackInSlot(3,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,12));
@@ -49,10 +49,49 @@ public final class CreateCartSmoke {
             check(restoredStorage.getAllItemStorages().get(BlockPos.ZERO).getStackInSlot(3).getCount()==12,"restored cargo count");
             check(restoredStorage.getFluids().storages.get(BlockPos.ZERO).getFluidInTank(0).getAmount()==1250,"restored fluid amount");
             check(world.getEntity(staged.entity.getUUID())!=staged.entity,"staging published entity prematurely");
-            System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental");
+            exerciseRollback(event,entity,cart,false);
+            exerciseRollback(event,staged.entity,staged.cart,true);
+            System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental+cargo+fluid world=commit+cancel");
         }catch(Throwable failure){
             failure.printStackTrace();System.out.println("AVILIX_CREATE_SMOKE_FAILED");
             event.getServer().halt(false);
+        }
+    }
+    private static void exerciseRollback(ServerStartedEvent event,OrientedContraptionEntity current,AbstractMinecart currentCart,boolean cancel) throws Exception {
+        var world=event.getServer().overworld();var pos=world.getSharedSpawnPos().above(5);
+        currentCart.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);current.setPos(currentCart.position());
+        if(current.getVehicle()!=currentCart)current.startRiding(currentCart,true);
+        check(world.addFreshEntity(currentCart),"source cart spawn");check(world.addFreshEntity(current),"source contraption spawn");CreateCartAudit.attach(current);
+        var target=CreateCartAudit.snapshot(current,null);
+        world.setBlock(pos,Blocks.STONE.defaultBlockState(),3);
+        var state=CreateCartAudit.state(current);state.locked=true;
+        var undo=new CartRollbackPlan.BlockUndo(world.dimension().location().toString(),pos,"","",net.minecraft.nbt.NbtUtils.writeBlockState(Blocks.AIR.defaultBlockState()),net.minecraft.nbt.NbtUtils.writeBlockState(Blocks.STONE.defaultBlockState()),null,null,null,null);
+        var plan=new CartRollbackPlan(state.id,1,2,1,target,target,java.util.List.of(undo),java.util.List.of(),target.sizeInBytes());
+        var replacement=new StagedCartRestore(target);
+        Class<?> type=Class.forName("com.roften.avilixlogger.compat.create.CartRollbackCoordinator$Job");
+        var ctor=type.getDeclaredConstructor(net.minecraft.commands.CommandSourceStack.class,CartRollbackPlan.class,StagedCartRestore.class,net.minecraft.world.entity.Entity.class);ctor.setAccessible(true);
+        Object job=ctor.newInstance(event.getServer().createCommandSourceStack(),plan,replacement,current);
+        var step=type.getDeclaredMethod("step",net.minecraft.server.MinecraftServer.class);step.setAccessible(true);
+        java.lang.reflect.Field phase=type.getDeclaredField("phase"),index=type.getDeclaredField("index"),applied=type.getDeclaredField("applied"),failure=type.getDeclaredField("failure");
+        phase.setAccessible(true);index.setAccessible(true);applied.setAccessible(true);failure.setAccessible(true);
+        boolean previous=com.roften.avilixlogger.core.CartAuditContext.restoring(true);com.roften.avilixlogger.core.CartAuditContext.rollbackActive=true;
+        try {
+            int calls=0;
+            while(!(Boolean)step.invoke(job,event.getServer())) {
+                check(++calls<500,"world rollback did not terminate");
+                if(cancel && applied.getInt(job)>0 && phase.getInt(job)==3){phase.setInt(job,4);index.setInt(job,applied.getInt(job)-1);failure.set(job,"fixture cancellation");}
+            }
+            if(cancel){check(world.getBlockState(pos).is(Blocks.STONE),"cancel did not compensate world");check(!current.isRemoved()&&!currentCart.isRemoved(),"cancel consumed source");}
+            else {
+                check(world.getBlockState(pos).isAir(),"world undo not applied");check(current.isRemoved()&&currentCart.isRemoved(),"commit left source copy");
+                var result=CreateCartAudit.loaded(state.id);check(result==replacement.entity,"committed representation not indexed");
+                check(replacement.entity.getVehicle()==replacement.cart,"committed cart lost passenger");
+            }
+        }finally{
+            com.roften.avilixlogger.core.CartRestoreLocks.clear();com.roften.avilixlogger.core.CartAuditContext.rollbackActive=false;com.roften.avilixlogger.core.CartAuditContext.restoring(previous);
+            if(!current.isRemoved())((CartEntityAccess)current).avilixlogger$discardForRollback();if(!currentCart.isRemoved())currentCart.discard();
+            if(replacement.entity!=null&&!replacement.entity.isRemoved())((CartEntityAccess)replacement.entity).avilixlogger$discardForRollback();if(replacement.cart!=null&&!replacement.cart.isRemoved())replacement.cart.discard();
+            world.setBlock(pos,Blocks.AIR.defaultBlockState(),3);
         }
     }
     private static void check(boolean pass,String message){if(!pass)throw new AssertionError(message);}

@@ -4,14 +4,19 @@ import java.util.UUID;
 
 /** Exact, exception-safe cause for a mounted Create contraption. Contains no live world objects. */
 public final class CartAuditContext {
-    public record Stamp(UUID id, UUID owner, String ownerName, String phase, long operation) {
-        public String source() { return prefix(id) + phase + ":" + operation; }
+    public record Stamp(UUID id, UUID owner, String ownerName, String phase, long operation,String source) {
+        public Stamp(UUID id,UUID owner,String ownerName,String phase,long operation){this(id,owner,ownerName,phase,operation,null);}
+        public Stamp {source=prefix(id)+phase+":"+operation;}
     }
     public static final java.util.Set<UUID> LOCKED_ENTITIES = new java.util.HashSet<>();
     public static boolean rollbackActive;
     private static final ThreadLocal<Stamp> CURRENT = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> RESTORING = ThreadLocal.withInitial(() -> false);
     public record RemovedBlock(net.minecraft.core.BlockPos pos, net.minecraft.nbt.CompoundTag be, net.minecraft.nbt.CompoundTag slots) {}
+    public record PlacedBlock(net.minecraft.core.BlockPos pos,net.minecraft.nbt.CompoundTag be,net.minecraft.nbt.CompoundTag slots) {}
+    private static final ThreadLocal<PlacedBlock> PLACED=new ThreadLocal<>();
+    public static void rememberPlacedBlock(net.minecraft.core.BlockPos pos,net.minecraft.nbt.CompoundTag be,net.minecraft.nbt.CompoundTag slots){PLACED.set(new PlacedBlock(pos.immutable(),be,slots));}
+    public static PlacedBlock takePlacedBlock(net.minecraft.core.BlockPos pos){var old=PLACED.get();PLACED.remove();return old!=null&&old.pos.equals(pos)?old:null;}
     private static final ThreadLocal<RemovedBlock> REMOVED = new ThreadLocal<>();
     public static void rememberRemovedBlock(net.minecraft.core.BlockPos pos, net.minecraft.nbt.CompoundTag be, net.minecraft.nbt.CompoundTag slots) { REMOVED.set(new RemovedBlock(pos.immutable(), be, slots)); }
     public static RemovedBlock takeRemovedBlock(net.minecraft.core.BlockPos pos) { var old = REMOVED.get(); REMOVED.remove(); return old != null && old.pos.equals(pos) ? old : null; }
@@ -19,7 +24,7 @@ public final class CartAuditContext {
     public static String prefix(UUID id) { return "create:cart:" + id + ":"; }
     public static Stamp current() { return CURRENT.get(); }
     public static Stamp enter(Stamp stamp) { Stamp old = CURRENT.get(); CURRENT.set(stamp); return old; }
-    public static void restore(Stamp old) { CURRENT.set(old); REMOVED.remove(); }
+    public static void restore(Stamp old) { CURRENT.set(old); REMOVED.remove();PLACED.remove(); }
     public static boolean restoring() { return RESTORING.get(); }
     public static boolean restoring(boolean value) { boolean old = RESTORING.get(); RESTORING.set(value); return old; }
     public static UUID id(String source) {
