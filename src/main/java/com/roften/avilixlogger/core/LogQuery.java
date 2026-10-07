@@ -76,6 +76,7 @@ public final class LogQuery {
         q.blockIdFilter = this.blockIdFilter;
         q.planeNameFilter = this.planeNameFilter;
         q.extraTextFilter = this.extraTextFilter;
+        q.cartId = this.cartId;
         q.debugSource = this.debugSource;
         q.type = this.type;
         q.types = this.types != null ? this.types.clone() : null;

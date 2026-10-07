@@ -60,7 +60,7 @@ public abstract class ServerLevelSetBlockMixin {
             if (cart == null && cause == null && MutationSourceResolver.VANILLA_SIMULATION.equals(source)) return null;
             // Ignored simulation/client calls need no authorization lookup. Every captured
             // mutation still checks the current authorization before reading world snapshots.
-            if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return null;
+            if (!LoggerConfig.isEnabled() || (cart==null && !LoggerConfig.VALUES.logBlocks.get())) return null;
             BlockState before = level.getBlockState(pos);
             if (before == null || before == newState) return null;
             if (source == null && cause == null) source = MutationSourceResolver.sourceFor(before.getBlock());

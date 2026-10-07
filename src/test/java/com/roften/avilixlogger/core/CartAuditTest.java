@@ -9,7 +9,7 @@ import java.util.*;
 public final class CartAuditTest {
     private static final UUID ID=UUID.fromString("59c687ca-4e6c-4054-ac29-a741e65a7481");
     public static void run() {
-        identityRoundTrip(); nestedScopes(); pagedHistory(); conflictRejection(); itemIdentity();
+        identityRoundTrip(); nestedScopes(); pagedHistory(); conflictRejection(); itemIdentity(); spawnedEffects(); monotonicCapture();
         System.out.println("Cart audit checks passed: persistent identity, nested attribution, 600-row reverse paging, foreign rows/external cargo/incomplete checkpoints rejected.");
     }
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
@@ -23,6 +23,7 @@ public final class CartAuditTest {
         check(b.stamp("work")==b.stamp("work"),"idle work stamp allocation");
     }
     private static void nestedScopes(){
+        LogQuery query=new LogQuery();query.cartId=ID;query.requireDetails=true;check(ID.equals(query.copy().cartId)&&query.copy().requireDetails,"query fallback lost mandatory cart filter");
         var outer=new CartAuditContext.Stamp(ID,UUID.randomUUID(),"owner","work",1);
         var old=CartAuditContext.enter(outer);
         try {
@@ -33,6 +34,8 @@ public final class CartAuditTest {
             check(CartAuditContext.current()==outer,"outer cause not restored");
         }finally{CartAuditContext.restore(old);}
         check(CartAuditContext.current()==null,"cart cause leaked");
+        UUID previous=CartAuditContext.loot(ID);try{check(CartAuditContext.collectingLoot(ID)&&!CartAuditContext.collectingLoot(UUID.randomUUID()),"loot scope crossed cart identities");}finally{CartAuditContext.loot(previous);}
+        check(!CartAuditContext.collectingLoot(ID),"loot scope leaked");
     }
     private static void pagedHistory(){
         Memory history=new Memory();history.rows.add(checkpoint());
@@ -57,6 +60,17 @@ public final class CartAuditTest {
     private static void itemIdentity(){
         CompoundTag root=new CompoundTag(),components=new CompoundTag(),payload=new CompoundTag(),audit=new CompoundTag();audit.putUUID("Id",ID);payload.put("AvilixCartAudit",audit);components.put("create:minecart_contraption_data",payload);root.put("components",components);
         LogEntry e=event(1,ActionType.ITEM_DROP);e.source="player:drop";e.deferSnapshot(LogEntry.SnapshotField.ITEM,root);e.attachCartItemIdentity();check(ID.equals(CartAuditContext.id(e.source)),"packed item lost logical ID");
+    }
+    private static void spawnedEffects(){
+        Memory h=new Memory();h.rows.add(checkpoint());var e=event(2,ActionType.ENTITY_SPAWN);e.entityUuid=UUID.randomUUID();e.entityType="minecraft:item";e.dim="minecraft:overworld";e.entityNbt="{id:\"minecraft:item\"}";e.itemStackNbt="{id:\"minecraft:cobblestone\",count:1}";h.rows.add(e);
+        check(CartRollbackPlan.prepare(h,ID,1).spawned().size()==1,"drill output not included in undo");
+        var pickup=event(3,ActionType.ITEM_PICKUP);pickup.source=CartAuditContext.prefix(ID)+"loot_pickup:0";h.rows.add(pickup);reject(()->CartRollbackPlan.prepare(h,ID,1),"transferred drill output accepted");
+        h.rows.removeLast();e.entityType="minecraft:cow";reject(()->CartRollbackPlan.prepare(h,ID,1),"unsupported external entity accepted");
+        h.rows.clear();var point=checkpoint();point.type=ActionType.CART_ROLLBACK;h.rows.add(point);check(CartRollbackPlan.prepare(h,ID,1).target()!=null,"rollback receipt cannot be a new checkpoint");
+    }
+    private static void monotonicCapture(){
+        long first=LogIdGenerator.next(System.currentTimeMillis()), second=LogIdGenerator.next(1);check(second>first,"clock rollback reversed event order");
+        Memory h=new Memory();h.rows.add(checkpoint());var e=event(2,ActionType.CART_MOVE);e.ts=1;h.rows.add(e);check(CartRollbackPlan.prepare(h,ID,1).cutoffId()==2,"backward clock skipped captured history");
     }
     private static void reject(Runnable task,String message){try{task.run();}catch(IllegalStateException|IllegalArgumentException expected){return;}throw new AssertionError(message);}
     private static LogEntry checkpoint(){var e=event(1,ActionType.CART_DISASSEMBLE);CompoundTag tag=new CompoundTag();tag.putInt("Format",1);tag.putString("Form","blocks");tag.putString("Dimension","minecraft:overworld");CompoundTag base=new CompoundTag();base.putUUID("UUID",UUID.randomUUID());base.putString("id","minecraft:minecart");tag.put("Cart",base);e.beAfter=tag.toString();return e;}

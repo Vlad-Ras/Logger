@@ -23,6 +23,7 @@ public final class AsyncLogStorage implements LogStorage {
         if (CartAuditContext.restoring()) return;
         CartAuditContext.enrich(entry);
         entry.attachCartItemIdentity();
+        if (entry.source != null && entry.source.startsWith("create:cart:")) LogIdGenerator.ensure(entry);
         LogEntry snapshot = entry.copyForQueue();
         queue.put(snapshot, PayloadSizeEstimator.estimate(snapshot));
     }

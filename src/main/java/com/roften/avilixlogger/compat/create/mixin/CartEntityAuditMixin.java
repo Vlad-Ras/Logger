@@ -57,6 +57,7 @@ public abstract class CartEntityAuditMixin implements CartEntityAccess {
     @Inject(method = "remove", at = @At("HEAD"), require = 1)
     private void avilixlogger$remove(Entity.RemovalReason reason, CallbackInfo ci) {
         Entity self = (Entity)(Object)this;
+        if (CartAuditContext.rollbackActive) CartRollbackCoordinator.invalidated(self);
         if (avilixlogger$mountedState() != null && !self.level().isClientSide && !self.isRemoved() && CreateCartAudit.enabled()) {
             try { CreateCartAudit.removed((OrientedContraptionEntity) self, reason); }
             catch (Throwable error) { CreateCartAudit.failed("remove", error); }

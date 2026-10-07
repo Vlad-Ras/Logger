@@ -49,7 +49,7 @@ public final class CartStorageAudit {
         CreateCartAudit.emit(e, ActionType.CART_CONTENT_CHANGE, "cargo", b, a, "item; local=" + ref.pos.toShortString() + "; slot=" + slot);
     }
     public static CompoundTag item(OrientedContraptionEntity e, BlockPos pos, int slot, ItemStack stack) {
-        CompoundTag n = new CompoundTag(); n.putString("Kind", "item"); n.putLong("LocalPos", pos.asLong()); n.putInt("Slot", slot); n.putBoolean("External", CartAuditContext.current() == null);
+        CompoundTag n = new CompoundTag(); n.putString("Kind", "item"); n.putLong("LocalPos", pos.asLong()); n.putInt("Slot", slot); n.putBoolean("External", !CartAuditContext.collectingLoot(CreateCartAudit.state(e).id));
         if (!stack.isEmpty()) n.put("Item", NbtSerde.snapshotItemStack(stack, e.registryAccess())); return n;
     }
     public static net.neoforged.neoforge.fluids.FluidStack[] fluids(net.neoforged.neoforge.fluids.capability.IFluidHandler handler) {
@@ -67,7 +67,7 @@ public final class CartStorageAudit {
         }
     }
     private static CompoundTag fluid(OrientedContraptionEntity e,BlockPos pos,int tank,net.neoforged.neoforge.fluids.FluidStack stack) {
-        CompoundTag n=new CompoundTag();n.putString("Kind","fluid");n.putLong("LocalPos",pos.asLong());n.putInt("Tank",tank);n.putBoolean("External",CartAuditContext.current()==null);
+        CompoundTag n=new CompoundTag();n.putString("Kind","fluid");n.putLong("LocalPos",pos.asLong());n.putInt("Tank",tank);n.putBoolean("External",true);
         if(!stack.isEmpty())n.put("Fluid",stack.save(e.registryAccess()));return n;
     }
     public static void clear() { MENUS.clear();OWNERS.clear(); }

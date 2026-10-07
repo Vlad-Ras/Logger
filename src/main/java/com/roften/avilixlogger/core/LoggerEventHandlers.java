@@ -1168,7 +1168,7 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onEntitySpawn(EntityJoinLevelEvent event) {
-        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
+        if (!LoggerConfig.isEnabled() || (!LoggerConfig.VALUES.logEntities.get() && CartAuditContext.current()==null)) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Entity ent = event.getEntity();
         if (ent instanceof Player) return;
@@ -1181,6 +1181,13 @@ public final class LoggerEventHandlers {
 
         // 1) ItemEntity spawn: only player drops (otherwise too noisy).
         if (ent instanceof ItemEntity itemEnt) {
+            var cartCause=CartAuditContext.current();
+            if(cartCause!=null) {
+                itemEnt.getPersistentData().putUUID("AvilixCartDrop",cartCause.id());
+                LogEntry drop=new LogEntry();drop.ts=System.currentTimeMillis();drop.type=ActionType.ENTITY_SPAWN;drop.dim=level.dimension().location().toString();drop.entityUuid=itemEnt.getUUID();drop.entityType="minecraft:item";
+                drop.x=itemEnt.blockPosition().getX();drop.y=itemEnt.blockPosition().getY();drop.z=itemEnt.blockPosition().getZ();drop.source=cartCause.source();drop.actorUuid=cartCause.owner();drop.actorName=cartCause.ownerName();drop.count=itemEnt.getItem().getCount();drop.extra="cart work: world item drop";
+                drop.deferSnapshot(LogEntry.SnapshotField.ITEM,NbtSerde.snapshotItemStack(itemEnt.getItem(),level.registryAccess()));drop.deferSnapshot(LogEntry.SnapshotField.ENTITY,NbtSerde.snapshotEntity(level,itemEnt));LogIdGenerator.ensure(drop);LoggerRuntime.storage(level).append(drop);return;
+            }
             java.util.UUID throwerUuid = getItemEntityThrowerUuid(itemEnt);
             if (throwerUuid == null) return;
 
@@ -1404,6 +1411,7 @@ public final class LoggerEventHandlers {
         e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(snap, level.registryAccess()));
         e.count = snap.getCount();
         e.extra = "pickup " + BuiltInRegistries.ITEM.getKey(snap.getItem()) + " x" + snap.getCount();
+        if(ie.getPersistentData().hasUUID("AvilixCartDrop")){e.source=CartAuditContext.prefix(ie.getPersistentData().getUUID("AvilixCartDrop"))+"loot_pickup:0";e.entityUuid=ie.getUUID();}
         LoggerRuntime.storage(level).append(e);
     }
 

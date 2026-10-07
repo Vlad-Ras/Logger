@@ -11,6 +11,9 @@ public final class CartAuditContext {
     public static final java.util.Set<UUID> LOCKED_ENTITIES = new java.util.HashSet<>();
     public static boolean rollbackActive;
     private static final ThreadLocal<Stamp> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<UUID> LOOT = new ThreadLocal<>();
+    public static UUID loot(UUID id){UUID previous=LOOT.get();LOOT.set(id);return previous;}
+    public static boolean collectingLoot(UUID id){return id.equals(LOOT.get());}
     private static final ThreadLocal<Boolean> RESTORING = ThreadLocal.withInitial(() -> false);
     public record RemovedBlock(net.minecraft.core.BlockPos pos, net.minecraft.nbt.CompoundTag be, net.minecraft.nbt.CompoundTag slots) {}
     public record PlacedBlock(net.minecraft.core.BlockPos pos,net.minecraft.nbt.CompoundTag be,net.minecraft.nbt.CompoundTag slots) {}

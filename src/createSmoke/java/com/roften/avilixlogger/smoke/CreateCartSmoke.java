@@ -51,7 +51,7 @@ public final class CreateCartSmoke {
             check(world.getEntity(staged.entity.getUUID())!=staged.entity,"staging published entity prematurely");
             exerciseRollback(event,entity,cart,false);
             exerciseRollback(event,staged.entity,staged.cart,true);
-            System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental+cargo+fluid world=commit+cancel");
+            System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental+cargo+fluid world=commit+cancel+32-drops");
         }catch(Throwable failure){
             failure.printStackTrace();System.out.println("AVILIX_CREATE_SMOKE_FAILED");
             event.getServer().halt(false);
@@ -66,7 +66,12 @@ public final class CreateCartSmoke {
         world.setBlock(pos,Blocks.STONE.defaultBlockState(),3);
         var state=CreateCartAudit.state(current);state.locked=true;
         var undo=new CartRollbackPlan.BlockUndo(world.dimension().location().toString(),pos,"","",net.minecraft.nbt.NbtUtils.writeBlockState(Blocks.AIR.defaultBlockState()),net.minecraft.nbt.NbtUtils.writeBlockState(Blocks.STONE.defaultBlockState()),null,null,null,null);
-        var plan=new CartRollbackPlan(state.id,1,2,1,target,target,java.util.List.of(undo),java.util.List.of(),target.sizeInBytes());
+        var drops=new java.util.ArrayList<net.minecraft.world.entity.item.ItemEntity>();var effects=new java.util.ArrayList<CartRollbackPlan.SpawnUndo>();
+        for(int i=0;i<32;i++){
+            var drop=new net.minecraft.world.entity.item.ItemEntity(world,pos.getX()+.5,pos.getY()+2,pos.getZ()+.5,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.COBBLESTONE,i+1));check(world.addFreshEntity(drop),"fixture output spawn");drops.add(drop);
+            effects.add(new CartRollbackPlan.SpawnUndo(world.dimension().location().toString(),drop.getUUID(),"minecraft:item",com.roften.avilixlogger.core.NbtSerde.snapshotEntity(world,drop),com.roften.avilixlogger.core.NbtSerde.snapshotItemStack(drop.getItem(),world.registryAccess())));
+        }
+        var plan=new CartRollbackPlan(state.id,1,2,1,target,target,java.util.List.of(undo),java.util.List.of(),effects,target.sizeInBytes());
         var replacement=new StagedCartRestore(target);
         Class<?> type=Class.forName("com.roften.avilixlogger.compat.create.CartRollbackCoordinator$Job");
         var ctor=type.getDeclaredConstructor(net.minecraft.commands.CommandSourceStack.class,CartRollbackPlan.class,StagedCartRestore.class,net.minecraft.world.entity.Entity.class);ctor.setAccessible(true);
@@ -81,14 +86,16 @@ public final class CreateCartSmoke {
                 check(++calls<500,"world rollback did not terminate");
                 if(cancel && applied.getInt(job)>0 && phase.getInt(job)==3){phase.setInt(job,4);index.setInt(job,applied.getInt(job)-1);failure.set(job,"fixture cancellation");}
             }
-            if(cancel){check(world.getBlockState(pos).is(Blocks.STONE),"cancel did not compensate world");check(!current.isRemoved()&&!currentCart.isRemoved(),"cancel consumed source");}
+            if(cancel){check(world.getBlockState(pos).is(Blocks.STONE),"cancel did not compensate world");check(!current.isRemoved()&&!currentCart.isRemoved(),"cancel consumed source");check(drops.stream().noneMatch(net.minecraft.world.entity.Entity::isRemoved),"cancel consumed drill output");}
             else {
                 check(world.getBlockState(pos).isAir(),"world undo not applied");check(current.isRemoved()&&currentCart.isRemoved(),"commit left source copy");
                 var result=CreateCartAudit.loaded(state.id);check(result==replacement.entity,"committed representation not indexed");
                 check(replacement.entity.getVehicle()==replacement.cart,"committed cart lost passenger");
+                check(drops.stream().allMatch(net.minecraft.world.entity.Entity::isRemoved),"rollback duplicated drill output");
             }
         }finally{
             com.roften.avilixlogger.core.CartRestoreLocks.clear();com.roften.avilixlogger.core.CartAuditContext.rollbackActive=false;com.roften.avilixlogger.core.CartAuditContext.restoring(previous);
+            com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.clear();for(var drop:drops)if(!drop.isRemoved())drop.discard();
             if(!current.isRemoved())((CartEntityAccess)current).avilixlogger$discardForRollback();if(!currentCart.isRemoved())currentCart.discard();
             if(replacement.entity!=null&&!replacement.entity.isRemoved())((CartEntityAccess)replacement.entity).avilixlogger$discardForRollback();if(replacement.cart!=null&&!replacement.cart.isRemoved())replacement.cart.discard();
             world.setBlock(pos,Blocks.AIR.defaultBlockState(),3);

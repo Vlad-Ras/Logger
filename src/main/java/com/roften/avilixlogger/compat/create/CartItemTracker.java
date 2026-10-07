@@ -23,6 +23,7 @@ public final class CartItemTracker {
     }
     public static void leave(EntityLeaveLevelEvent event){
         if(!(event.getEntity() instanceof ItemEntity item))return;
+        CartRollbackCoordinator.invalidated(item);
         Entry entry=ENTITIES.remove(item.getUUID());if(entry==null)return;
         var set=CARTS.get(entry.cart);if(set!=null){set.remove(item.getUUID());if(set.isEmpty())CARTS.remove(entry.cart);}
         if(CreateCartAudit.enabled())record(item,entry.cart,"item_entity_removed; reason="+item.getRemovalReason());

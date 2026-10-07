@@ -15,4 +15,5 @@ public interface CartContraptionAccessor {
     @Accessor("updateTags") Map<BlockPos, CompoundTag> avilixlogger$updateTags();
     @Accessor("superglue") List<AABB> avilixlogger$superglue();
     @Accessor("capturedMultiblocks") Multimap<BlockPos, StructureBlockInfo> avilixlogger$multiblocks();
+    @Accessor("stabilizedSubContraptions") Map<UUID, net.createmod.catnip.math.BlockFace> avilixlogger$subContraptions();
 }
