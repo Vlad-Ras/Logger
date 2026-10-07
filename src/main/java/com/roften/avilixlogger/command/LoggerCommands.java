@@ -77,6 +77,8 @@ public final class LoggerCommands {
             .requires(LoggerCommands::hasAnyLoggerPermission)
             .executes(LoggerCommands::lookupDefaultRoot)
 
+            .then(CartCommands.node())
+
             // Short help + examples
             .then(literal("help").executes(LoggerCommands::help))
 

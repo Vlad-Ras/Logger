@@ -17,7 +17,12 @@ public final class CartAuditState {
     public transient boolean removing;
     public transient boolean locked;
     public transient boolean joined;
-    public CartAuditContext.Stamp stamp(String phase) { return new CartAuditContext.Stamp(id, owner, ownerName, phase, sequence); }
+    private transient CartAuditContext.Stamp workStamp;
+    public CartAuditContext.Stamp stamp(String phase) {
+        if (!phase.equals("work")) return new CartAuditContext.Stamp(id, owner, ownerName, phase, sequence);
+        if (workStamp == null || workStamp.operation() != sequence || !java.util.Objects.equals(workStamp.owner(),owner)) workStamp = new CartAuditContext.Stamp(id,owner,ownerName,phase,sequence);
+        return workStamp;
+    }
     public CompoundTag write() {
         CompoundTag n = new CompoundTag(); n.putInt("Version", 1); n.putUUID("Id", id);
         if (owner != null) n.putUUID("Owner", owner);

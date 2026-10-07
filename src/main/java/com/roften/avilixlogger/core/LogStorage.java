@@ -27,6 +27,9 @@ public interface LogStorage {
      */
     List<LogEntry> queryReverse(LogQuery q);
 
+    /** Called only on a worker before a destructive query; wait for accepted rows to become visible. */
+    default boolean awaitVisible(long deadlineNanos) throws InterruptedException { return true; }
+
     /** Flush and shutdown background writers. */
     void shutdown();
 }

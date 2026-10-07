@@ -61,6 +61,14 @@ final class WeightedQueue<T> {
         } finally { lock.unlock(); }
     }
 
+    boolean awaitEmpty(long deadlineNanos) throws InterruptedException {
+        lock.lockInterruptibly();
+        try {
+            while (outstanding > 0) { long remaining = deadlineNanos - System.nanoTime(); if (remaining <= 0) return false; space.awaitNanos(remaining); }
+            return true;
+        } finally { lock.unlock(); }
+    }
+
     void close() {
         lock.lock();
         try { closed = true; ready.signalAll(); space.signalAll(); }

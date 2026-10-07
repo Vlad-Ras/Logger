@@ -2,6 +2,7 @@ package com.roften.avilixlogger.compat.create.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.roften.avilixlogger.compat.create.*;
 import com.roften.avilixlogger.core.*;
 import com.simibubi.create.AllDataComponents;
@@ -42,7 +43,7 @@ public abstract class MinecartItemAuditMixin {
     @WrapMethod(method = "wrenchCanBeUsedToPickUpMinecartContraptions")
     private static void avilixlogger$pack(PlayerInteractEvent.EntityInteract event, Operation<Void> original) {
         var e = CreateCartAudit.target(event.getTarget());
-        if (e == null || !(event.getLevel() instanceof ServerLevel) || !CreateCartAudit.enabled()) { original.call(event); return; }
+        if (e == null || !(event.getLevel() instanceof ServerLevel) || !CreateCartAudit.enabled() || !com.simibubi.create.AllItems.WRENCH.isIn(event.getItemStack())) { original.call(event); return; }
         var s = CreateCartAudit.state(e); if (s.locked) { event.setCanceled(true); return; }
         // Only metadata here. The full payload is reused from Create's successful item writer below.
         var capture = new CartPickupCapture(); capture.before = CreateCartAudit.snapshot(e, new CompoundTag());
@@ -62,6 +63,11 @@ public abstract class MinecartItemAuditMixin {
         var tag = cir.getReturnValue().get(AllDataComponents.MINECRAFT_CONTRAPTION_DATA);
         if (tag == null) return;
         capture.before.getCompound("Entity").put("Contraption", tag.copy());
-        capture.packed = cir.getReturnValue().copy();
+    }
+    @WrapOperation(method = "wrenchCanBeUsedToPickUpMinecartContraptions", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Inventory;placeItemBackInInventory(Lnet/minecraft/world/item/ItemStack;)V"), require = 1)
+    private static void avilixlogger$finalItem(net.minecraft.world.entity.player.Inventory inventory, ItemStack stack, Operation<Void> original) {
+        var capture = CartPickupCapture.CURRENT.get();
+        if (capture != null) capture.packed = stack.copy();
+        original.call(inventory, stack);
     }
 }

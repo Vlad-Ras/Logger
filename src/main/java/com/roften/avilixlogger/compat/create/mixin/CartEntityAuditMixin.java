@@ -27,6 +27,7 @@ public abstract class CartEntityAuditMixin implements CartEntityAccess {
         if (s == null || self.level().isClientSide) { original.call(); return; }
         if (s.locked) return;
         if (!CreateCartAudit.enabled()) { original.call(); return; }
+        CreateCartAudit.beforeTick((OrientedContraptionEntity) self);
         var previous = CartAuditContext.enter(s.stamp("work"));
         try { original.call(); CreateCartAudit.afterTick((OrientedContraptionEntity) self); }
         finally { CartAuditContext.restore(previous); }

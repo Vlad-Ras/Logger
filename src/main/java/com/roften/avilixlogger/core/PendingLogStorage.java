@@ -138,6 +138,16 @@ public final class PendingLogStorage implements LogStorage {
         return current;
     }
 
+    @Override public boolean awaitVisible(long deadline) throws InterruptedException {
+        if (!queue.awaitEmpty(deadline)) return false;
+        while (System.nanoTime() < deadline) {
+            try { if (initialized && delegate != null && journal.pending().isEmpty()) return true; }
+            catch (java.io.IOException e) { throw new IllegalStateException("Журнал недоступен",e); }
+            Thread.sleep(25);
+        }
+        return false;
+    }
+
     public void setDelegate(BatchLogStorage storage) { delegate = storage; signal(); }
 
     @Override public void shutdown() {

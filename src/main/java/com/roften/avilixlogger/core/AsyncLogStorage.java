@@ -74,6 +74,8 @@ public final class AsyncLogStorage implements LogStorage {
     @Override public List<LogEntry> query(LogQuery query) { return delegate.query(query); }
     @Override public List<LogEntry> queryReverse(LogQuery query) { return delegate.queryReverse(query); }
 
+    @Override public boolean awaitVisible(long deadline) throws InterruptedException { return queue.awaitEmpty(deadline) && delegate.awaitVisible(deadline); }
+
     @Override public void shutdown() {
         queue.close();
         WeightedQueue.join(worker);

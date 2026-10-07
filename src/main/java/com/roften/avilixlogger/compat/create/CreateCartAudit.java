@@ -23,7 +23,7 @@ import java.util.*;
 public final class CreateCartAudit {
     private static final ThreadLocal<Boolean> METADATA_ONLY = ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<CartAuditState> ASSEMBLING = new ThreadLocal<>();
-    private static final Map<UUID, Entity> LOADED = new HashMap<>();
+    private static final Map<UUID, Set<Entity>> LOADED = new HashMap<>();
     private CreateCartAudit() {}
     public static boolean enabled() { return !CartAuditContext.restoring() && LoggerConfig.isEnabled(); }
     public static CartAuditState state(Entity e) {
@@ -32,7 +32,12 @@ public final class CreateCartAudit {
     public static boolean metadataOnly() { return METADATA_ONLY.get(); }
     public static CartAuditState assembling(CartAuditState value) { var old = ASSEMBLING.get(); ASSEMBLING.set(value); return old; }
     public static CartAuditState assembling() { return ASSEMBLING.get(); }
-    public static Entity loaded(UUID id) { Entity e = LOADED.get(id); return e != null && !e.isRemoved() ? e : null; }
+    public static Entity loaded(UUID id) {
+        Set<Entity> entries = LOADED.get(id); if (entries == null) return null;
+        entries.removeIf(Entity::isRemoved);
+        if (entries.size() > 1) throw new IllegalStateException("Найдено несколько загруженных конструкций с одним ID");
+        return entries.isEmpty() ? null : entries.iterator().next();
+    }
     public static void clear() { CartStorageAudit.clear(); LOADED.clear(); ASSEMBLING.remove(); METADATA_ONLY.remove(); }
     public static OrientedContraptionEntity passenger(AbstractMinecart cart) {
         for (Entity e : cart.getPassengers()) if (e instanceof OrientedContraptionEntity oce && state(e) != null) return oce;
@@ -74,8 +79,12 @@ public final class CreateCartAudit {
     }
     public static void attach(OrientedContraptionEntity e) {
         CartAuditState s = state(e); if (s == null) return;
-        LOADED.put(s.id, e); s.joined = true; CartStorageAudit.bind(e);
+        LOADED.computeIfAbsent(s.id, ignored -> new HashSet<>()).add(e); s.joined = true; CartStorageAudit.bind(e);
         if (e.getVehicle() instanceof AbstractMinecart cart) cart.getPersistentData().put(CartAuditState.KEY, s.write());
+    }
+    public static void beforeTick(OrientedContraptionEntity e) {
+        CartAuditState s = state(e);
+        if (s != null && !s.joined) { attach(e); emit(e, ActionType.CART_LOAD, "load", null, pose(e), "loaded"); }
     }
     /** No serialization, inventory scan, nearby-entity search or allocation on unchanged ticks. */
     public static void afterTick(OrientedContraptionEntity e) {
@@ -119,7 +128,9 @@ public final class CreateCartAudit {
             }
         } finally { METADATA_ONLY.set(old); }
         // Create's writer references live BE tags. Freeze them before crossing the queue boundary.
-        return out.copy();
+        CompoundTag frozen = out.copy();
+        frozen.getCompound("Entity").getCompound("Contraption").put(CartAuditState.KEY, state(e).write());
+        return frozen;
     }
     public static CompoundTag save(Entity e) {
         CompoundTag n = new CompoundTag(); n.putString("id", BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).toString());
@@ -154,9 +165,10 @@ public final class CreateCartAudit {
     }
     public static void removed(OrientedContraptionEntity e, Entity.RemovalReason reason) {
         CartAuditState s = state(e); if (s == null) return;
-        LOADED.remove(s.id, e);
+        Set<Entity> entries = LOADED.get(s.id);
+        if (entries != null) { entries.remove(e); if (entries.isEmpty()) LOADED.remove(s.id); }
         if (s.removing || CartAuditContext.restoring()) return;
-        if (reason == Entity.RemovalReason.UNLOADED_TO_CHUNK || reason == Entity.RemovalReason.UNLOADED_WITH_PLAYER) {
+        if (reason == Entity.RemovalReason.UNLOADED_TO_CHUNK || reason == Entity.RemovalReason.UNLOADED_WITH_PLAYER || reason == Entity.RemovalReason.CHANGED_DIMENSION) {
             emit(e, ActionType.CART_UNLOAD, "unload", null, pose(e), "reason=" + reason); s.joined = false;
         } else {
             s.sequence++;

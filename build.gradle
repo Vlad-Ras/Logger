@@ -33,8 +33,8 @@ repositories {
     // Modrinth Maven (LDLib2, etc.)
     maven { url = uri("https://api.modrinth.com/maven") }
     maven { url = uri("https://maven.createmod.net") }
-    maven { url = uri("https://maven.tterrag.com") }
-    maven { url = uri("https://maven.engine-room.dev/releases") }
+    maven { url = uri("https://maven.ithundxr.dev/snapshots") }
+    maven { url = uri("https://raw.githubusercontent.com/Fuzss/modresources/main/maven") }
 }
 
 base {

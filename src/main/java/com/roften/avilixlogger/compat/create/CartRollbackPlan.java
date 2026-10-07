@@ -10,7 +10,8 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                                CompoundTag target, CompoundTag latestForm, List<BlockUndo> blocks,
                                List<BlockPos> itemLocations, long bytes) {
     public record BlockUndo(String dimension, BlockPos pos, String before, String after,
-                            CompoundTag beforeTag, CompoundTag afterTag, CompoundTag be, CompoundTag slots) {}
+                            CompoundTag beforeTag, CompoundTag afterTag, CompoundTag be, CompoundTag slots,
+                            CompoundTag afterBe, CompoundTag afterSlots) {}
     private record Key(String dim, BlockPos pos) {}
     private static final int PAGE = 256, MAX_ROWS = 100_000;
     private static final long MAX_BYTES = 128L * 1024 * 1024;
@@ -54,8 +55,10 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                     CompoundTag before = NbtSerde.fromSnbt(e.blockBefore), after = previous == null ? NbtSerde.fromSnbt(e.blockAfter) : previous.afterTag;
                     if (before == null || after == null) throw new IllegalStateException("Неполный снимок блока " + pos);
                     CompoundTag be = NbtSerde.fromSnbt(e.beBefore), slots = NbtSerde.fromSnbt(e.containerSlotsBefore);
-                    BlockUndo undo = new BlockUndo(e.dim, pos, e.blockBefore, previous == null ? e.blockAfter : previous.after, before, after, be, slots);
-                    blocks.put(key, undo); bytes += before.sizeInBytes() + after.sizeInBytes() + (be == null ? 0 : be.sizeInBytes()) + (slots == null ? 0 : slots.sizeInBytes());
+                    CompoundTag afterBe = previous == null ? NbtSerde.fromSnbt(e.beAfter) : previous.afterBe;
+                    CompoundTag afterSlots = previous == null ? NbtSerde.fromSnbt(e.containerSlotsAfter) : previous.afterSlots;
+                    BlockUndo undo = new BlockUndo(e.dim, pos, e.blockBefore, previous == null ? e.blockAfter : previous.after, before, after, be, slots, afterBe, afterSlots);
+                    blocks.put(key, undo); bytes += before.sizeInBytes() + after.sizeInBytes() + (be == null ? 0 : be.sizeInBytes()) + (slots == null ? 0 : slots.sizeInBytes()) + (afterBe == null ? 0 : afterBe.sizeInBytes()) + (afterSlots == null ? 0 : afterSlots.sizeInBytes());
                 }
                 if ((e.type == ActionType.CONTAINER_PUT || e.type == ActionType.CONTAINER_TAKE) && locations.size() < 64) locations.add(new BlockPos(e.x,e.y,e.z));
                 if (bytes > MAX_BYTES) throw new IllegalStateException("План превышает 128 MiB; выберите более позднюю контрольную точку");

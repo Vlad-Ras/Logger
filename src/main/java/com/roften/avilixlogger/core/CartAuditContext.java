@@ -7,6 +7,8 @@ public final class CartAuditContext {
     public record Stamp(UUID id, UUID owner, String ownerName, String phase, long operation) {
         public String source() { return prefix(id) + phase + ":" + operation; }
     }
+    public static final java.util.Set<UUID> LOCKED_ENTITIES = new java.util.HashSet<>();
+    public static boolean rollbackActive;
     private static final ThreadLocal<Stamp> CURRENT = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> RESTORING = ThreadLocal.withInitial(() -> false);
     public record RemovedBlock(net.minecraft.core.BlockPos pos, net.minecraft.nbt.CompoundTag be, net.minecraft.nbt.CompoundTag slots) {}

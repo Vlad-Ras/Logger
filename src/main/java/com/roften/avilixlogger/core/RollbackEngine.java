@@ -286,6 +286,7 @@ public final class RollbackEngine {
             if (batch.isEmpty()) break;
 
             for (LogEntry e : batch) {
+                if (CartAuditContext.id(e.source) != null) throw new IllegalStateException("В области есть вагонеточная конструкция Create. Используйте /log cart rollback <ID> <контрольная точка>, чтобы одновременно откатить конструкцию, груз и блоки");
                 if (isBlockRestoreType(e.type)) {
                     BlockPos pos = new BlockPos(e.x, e.y, e.z);
                     // Overwrite as we go backwards in time; the last value wins => oldest snapshot.

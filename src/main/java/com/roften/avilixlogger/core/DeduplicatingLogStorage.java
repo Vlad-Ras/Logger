@@ -64,6 +64,8 @@ public final class DeduplicatingLogStorage implements LogStorage {
         return delegate.queryReverse(query);
     }
 
+    @Override public boolean awaitVisible(long deadline) throws InterruptedException { return delegate.awaitVisible(deadline); }
+
     @Override
     public void shutdown() {
         recent.clear();

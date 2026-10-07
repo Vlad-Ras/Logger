@@ -33,6 +33,8 @@ public final class AsyncLogProcessor {
         pool().queue.put(task, Math.max(128L, bytes));
     }
 
+    public static boolean awaitIdle(long deadlineNanos) throws InterruptedException { Pool current = pool; return current == null || current.queue.awaitEmpty(deadlineNanos); }
+
     public static void shutdown() {
         stopping = true;
         Pool current = pool;
