@@ -109,7 +109,10 @@ public final class CartHistoryScreen extends Screen {
     private static String dimension(S2CCartHistoryPayload.Row r){return r.location().split(" · ",2)[0];}
     public void acceptDetails(S2CLogDetailsPayload p){
         if(p.mode()==C2SRequestDetailsPayload.Mode.DETAILS){var r=chosen();if(r!=null&&r.entry()==p.entryId())extraDetails="\n\n"+p.lines().stream().map(Component::getString).collect(java.util.stream.Collectors.joining("\n"));return;}
-        if(p.entryId()!=jsonRequest||p.mode()!=C2SRequestDetailsPayload.Mode.JSON)return;jsonRequest=-1;copy(p.lines().stream().map(Component::getString).collect(java.util.stream.Collectors.joining("\n")));
+        if(p.entryId()!=jsonRequest||p.mode()!=C2SRequestDetailsPayload.Mode.JSON)return;
+        long expected=jsonRequest;jsonRequest=-1;String value=p.lines().stream().map(Component::getString).collect(java.util.stream.Collectors.joining("\n"));
+        try{var json=com.google.gson.JsonParser.parseString(value).getAsJsonObject();if(!json.has("id")||json.get("id").getAsLong()!=expected)throw new IllegalArgumentException("выбранная запись не найдена");copy(value);}
+        catch(RuntimeException e){message("JSON не скопирован: "+value,true);}
     }
     private void select(int index){selected=index;idBox.setValue(rows.get(index).cartId());detailScroll=0;extraDetails="";updateButtons();var r=chosen();PacketDistributor.sendToServer(new C2SRequestDetailsPayload(r.entry(),C2SRequestDetailsPayload.Mode.DETAILS,new long[]{r.entry()},dimension(r)));}
     private void copy(String value){Minecraft.getInstance().keyboardHandler.setClipboard(value);status="Скопировано в буфер обмена";}

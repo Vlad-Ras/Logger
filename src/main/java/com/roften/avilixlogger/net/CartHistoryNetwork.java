@@ -22,6 +22,7 @@ public final class CartHistoryNetwork {
     private static final DateTimeFormatter TIME=DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss");
     private CartHistoryNetwork(){}
     public static boolean viewing(CommandSourceStack source){return source.getPlayer()!=null&&VIEWERS.contains(source.getPlayer().getUUID())&&LoggerNetwork.isClientPresent(source.getPlayer());}
+    public static boolean detailsAllowed(ServerPlayer p){return VIEWERS.contains(p.getUUID())&&allowed(p);}
     private static boolean allowed(ServerPlayer p){return ModList.get().isLoaded("create")&&AuthCoreBridge.isAuthorized(p.getServer())&&PermissionUtil.has(p.createCommandSourceStack(),"avilixlogger.command.lookup",2);}
     public static boolean open(CommandSourceStack source,String id){
         var p=source.getPlayer();if(p==null||!LoggerNetwork.isClientPresent(p))return false;VIEWERS.add(p.getUUID());

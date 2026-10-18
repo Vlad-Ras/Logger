@@ -456,6 +456,9 @@ public final class LoggerNetwork {
                     ServerPlayer livePlayer = playerRef.get();
                     if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
 
+                    if(!hasGuiPermission(livePlayer)&&!CartHistoryNetwork.detailsAllowed(livePlayer)){
+                        PacketDistributor.sendToPlayer(livePlayer,new S2CLogDetailsPayload(payload.entryId(),payload.mode(),List.of(Component.literal("Авторизация или права изменились"))));return;
+                    }
                     PacketDistributor.sendToPlayer(livePlayer,
                             new S2CLogDetailsPayload(payload.entryId(), payload.mode(), linesToSend));
                 });
@@ -627,7 +630,9 @@ public final class LoggerNetwork {
     private static void handleRequestDetails(C2SRequestDetailsPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> {
             if (!(ctx.player() instanceof ServerPlayer sp)) return;
-            if (!hasGuiPermission(sp)) return;
+            if (!hasGuiPermission(sp)&&!CartHistoryNetwork.detailsAllowed(sp)) {
+                PacketDistributor.sendToPlayer(sp,new S2CLogDetailsPayload(payload.entryId(),payload.mode(),List.of(Component.literal("Нет доступа к подробностям записи"))));return;
+            }
 
             long now = System.currentTimeMillis();
             String requestSig = payload.mode().name() + "|" + payload.entryId() + "|" + payload.dimHint() + "|" + (payload.rawIds() == null ? 0 : java.util.Arrays.hashCode(payload.rawIds()));
@@ -1155,9 +1160,9 @@ public final class LoggerNetwork {
     private static List<Component> buildJsonLines(ServerLevel level, long entryId) {
         if (level == null) return List.of(Component.literal("{}").withStyle(net.minecraft.ChatFormatting.GRAY));
         LogQuery q = new LogQuery();
-        q.dim = level.dimension().location().toString();
-        q.beforeId = entryId + 1;
-        q.limit = 64;
+        q.dim = "*";q.untilTs=Long.MAX_VALUE;
+        q.beforeId = entryId==Long.MAX_VALUE?0:entryId+1;
+        q.limit = 1;
         q.requireDetails = true;
         List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
         if (got == null || got.isEmpty()) {
@@ -1167,7 +1172,6 @@ public final class LoggerNetwork {
         if (got == null) got = List.of();
         LogEntry target = null;
         for (LogEntry e : got) if (e.id == entryId) { target = e; break; }
-        if (target == null) target = got.isEmpty() ? null : got.get(0);
         if (target == null) return List.of(Component.literal("{}").withStyle(net.minecraft.ChatFormatting.GRAY));
 
         java.util.LinkedHashMap<String, Object> m = new java.util.LinkedHashMap<>();

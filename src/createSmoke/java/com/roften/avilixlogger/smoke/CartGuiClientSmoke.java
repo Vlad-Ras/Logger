@@ -25,12 +25,18 @@ public final class CartGuiClientSmoke {
         var mc=Minecraft.getInstance();
         try{
             if(root==null){
-                if(mc.screen==null||mc.getOverlay()!=null||++readyTicks<40)return;
+                if(!(mc.screen instanceof net.minecraft.client.gui.screens.TitleScreen)||mc.getOverlay()!=null||++readyTicks<40)return;
                 root=new CartHistoryScreen(mc.screen,"");mc.setScreen(root);
                 var rows=new ArrayList<S2CCartHistoryPayload.Row>();for(int i=0;i<12;i++)rows.add(new S2CCartHistoryPayload.Row(ID,100-i,"18.10.2026 23:50:00","Штуковина: упаковка","MaxKuz","minecraft:overworld · -1775 38 -2726","Полный снимок: 125 блоков. Хранилища предметов и жидкости сохранены.",true,true));
                 root.apply(new S2CCartHistoryPayload(S2CCartHistoryPayload.PAGE,0,"",88,true,"Все операции доступны через GUI","",rows));
                 var selected=CartHistoryScreen.class.getDeclaredField("selected");selected.setAccessible(true);selected.setInt(root,0);
                 root.apply(new S2CCartHistoryPayload(S2CCartHistoryPayload.DONE,0,"",0,false,"Штуковина выдана в свободный слот. entry=100. Сохранены блоки, компоненты предметов и жидкости.","",List.of()));
+                var jsonRequest=CartHistoryScreen.class.getDeclaredField("jsonRequest");jsonRequest.setAccessible(true);
+                mc.keyboardHandler.setClipboard("GUI smoke sentinel");jsonRequest.setLong(root,100);
+                root.acceptDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(100,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal("{\"id\":99}"))));
+                check(mc.keyboardHandler.getClipboard().equals("GUI smoke sentinel"),"neighbour JSON copied as selected entry");
+                jsonRequest.setLong(root,100);root.acceptDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(100,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal("{\"id\":100}"))));
+                check(mc.keyboardHandler.getClipboard().equals("{\"id\":100}"),"selected JSON not copied");
                 layout(root,mc);ticks=0;return;
             }
             if(++ticks<15)return;ticks=0;

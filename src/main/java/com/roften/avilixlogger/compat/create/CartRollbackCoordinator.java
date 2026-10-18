@@ -52,8 +52,9 @@ public final class CartRollbackCoordinator {
             try {
                 var plan=CartRollbackPlan.prepare(LoggerRuntime.storage(source.getLevel()),id,checkpoint);
                 source.getServer().execute(()->{
-                    if(request!=generation||!Objects.equals(PREVIEW_REQUESTS.get(player.getUUID()),token))return;
+                    if(!Objects.equals(PREVIEW_REQUESTS.get(player.getUUID()),token))return;
                     PREVIEW_REQUESTS.remove(player.getUUID());
+                    if(request!=generation){CartHistoryNetwork.error(source,"Состояние отката изменилось во время подготовки. Запросите предпросмотр заново");return;}
                     if(!LoggerConfig.isEnabled()||source.getServer().getPlayerList().getPlayer(player.getUUID())!=player||!PermissionUtil.has(source,"avilixlogger.command.rollback",2)){CartHistoryNetwork.error(source,"Авторизация или права изменились");return;}
                     PREVIEWS.put(player.getUUID(),new Preview(id,checkpoint,System.currentTimeMillis()+120000));
                     CartHistoryNetwork.confirm(source,"ОТКАТ ДЕЙСТВИЙ конструкции "+id+" к entry="+checkpoint+". Будет изменён мир: блоков "+plan.blocks().size()+", слотов игроков "+plan.recipients().size()+", внешних слотов/баков "+plan.automation().size()+". Целевая форма: "+plan.target().getString("Form")+". Это не отдельная выдача пропавшей штуковины. Подтверждение действует 2 минуты.","log cart confirm "+id+" "+checkpoint);
