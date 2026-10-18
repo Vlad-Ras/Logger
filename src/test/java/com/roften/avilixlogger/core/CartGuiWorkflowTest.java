@@ -31,6 +31,10 @@ final class CartGuiWorkflowTest {
             var p=new S2CCartHistoryPayload(kind,0,"",0,false,"Полное сообщение результата","",List.of());var b=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
             try{S2CCartHistoryPayload.STREAM_CODEC.encode(b,p);check(S2CCartHistoryPayload.STREAM_CODEC.decode(b).equals(p),"GUI result/progress lost on wire");}finally{b.release();}
         }
+        String largeJson="{\"id\":42,\"beAfter\":\""+"сохранённые-данные-".repeat(4000)+"\"}";
+        var large=new S2CLogDetailsPayload(42,C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal(largeJson)));
+        var jsonBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
+        try{S2CLogDetailsPayload.STREAM_CODEC.encode(jsonBuffer,large);check(S2CLogDetailsPayload.STREAM_CODEC.decode(jsonBuffer).lines().getFirst().getString().equals(largeJson),"large JSON export truncated/disconnected at the old 32767 character boundary");}finally{jsonBuffer.release();}
         System.out.println("CART_GUI_WORKFLOW_OK: action/filter/result codecs, actor+ID+cursor+checkpoints before LIMIT, typed confirmation, mutation validation");
     }
     private static void reject(Runnable task,String message){try{task.run();}catch(IllegalArgumentException expected){return;}throw new AssertionError(message);}

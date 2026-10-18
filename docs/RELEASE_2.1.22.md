@@ -12,6 +12,8 @@ GUI viewers receive previews, progress, errors and terminal results in the GUI. 
 
 Cancel/close invalidates pending preview tokens so delayed workers cannot reopen an obsolete confirmation. Closing the page cancels previews; an already confirmed active rollback continues and can be inspected/cancelled when reopening. Cancellation of a committed item reservation cannot undo a delivered item; this is stated in the GUI. Cancelling another administrator's work is not allowed. Logout clears pending queries and previews and cancels an uncommitted rollback owned by the departing administrator.
 
+JSON export selects the exact entry and supports a single component up to 250000 serialized characters, with an explicit GUI refusal above that bound instead of a network encoding failure. It never substitutes a neighbouring entry. Lookup-authorized minecart viewers can read details without requiring an unrelated main-GUI permission; authorization is checked again before sending the result.
+
 The real client rendering check also exposed late vanilla background blur on already drawn text. All minecart windows now draw their own background and widgets without Screen.render/background blur, matching the existing main log viewer.
 
 ## Validation

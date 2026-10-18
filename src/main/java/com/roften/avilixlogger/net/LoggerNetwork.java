@@ -1196,8 +1196,11 @@ public final class LoggerNetwork {
         m.put("beAfter", target.beAfter);
 
         String json = com.roften.avilixlogger.core.GzipJson.GSON.toJson(m);
-        // Return as a single line component (clipboard-friendly). GUI will copy it.
-        return List.of(Component.literal(json).withStyle(net.minecraft.ChatFormatting.GRAY));
+        // One bounded component; never disconnect the player with an oversized JSON export.
+        Component result=Component.literal(json).withStyle(net.minecraft.ChatFormatting.GRAY);
+        if(Component.Serializer.toJson(result,level.registryAccess()).length()>S2CLogDetailsPayload.JSON_MAX_CHARS)
+            return List.of(Component.literal("JSON этой записи превышает размер экспорта. Восстановление штуковины из серверного снимка доступно отдельно.").withStyle(net.minecraft.ChatFormatting.RED));
+        return List.of(result);
     }
 
     private static void appendSignedList(List<Component> out, String prefix, java.util.LinkedHashMap<String, ItemAgg> map, net.minecraft.ChatFormatting color) {

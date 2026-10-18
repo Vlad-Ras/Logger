@@ -14,6 +14,9 @@ import java.util.List;
 /** Server -> Client: details or raw rows for a selection in the GUI. */
 public record S2CLogDetailsPayload(long entryId, C2SRequestDetailsPayload.Mode mode, List<Component> lines) implements CustomPacketPayload {
 
+    /** One JSON component stays below the clientbound payload byte limit even with UTF-8. */
+    public static final int JSON_MAX_CHARS=250000;
+
     public static final Type<S2CLogDetailsPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "gui_details_data")
     );
@@ -26,7 +29,7 @@ public record S2CLogDetailsPayload(long entryId, C2SRequestDetailsPayload.Mode m
                 buf.writeVarInt(lines.size());
                     for (Component c : lines) {
                         String json = c == null ? "\"\"" : Component.Serializer.toJson(c, buf.registryAccess());
-                    buf.writeUtf(json, 32767);
+                    buf.writeUtf(json,msg.mode==C2SRequestDetailsPayload.Mode.JSON?JSON_MAX_CHARS:32767);
                 }
             },
             buf -> {
@@ -36,9 +39,10 @@ public record S2CLogDetailsPayload(long entryId, C2SRequestDetailsPayload.Mode m
                         ? C2SRequestDetailsPayload.Mode.values()[o]
                         : C2SRequestDetailsPayload.Mode.DETAILS;
                 int n = buf.readVarInt();
-                List<Component> lines = new ArrayList<>(Math.max(0, n));
+                if(n<0||n>2048||mode==C2SRequestDetailsPayload.Mode.JSON&&n>1)throw new IllegalArgumentException("Слишком много строк подробностей");
+                List<Component> lines = new ArrayList<>(n);
                 for (int i = 0; i < n; i++) {
-                    String json = buf.readUtf(32767);
+                    String json = buf.readUtf(mode==C2SRequestDetailsPayload.Mode.JSON?JSON_MAX_CHARS:32767);
                     Component c;
                     try {
                         c = Component.Serializer.fromJson(json, buf.registryAccess());
