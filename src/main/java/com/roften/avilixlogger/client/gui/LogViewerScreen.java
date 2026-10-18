@@ -670,7 +670,8 @@ public final class LogViewerScreen extends Screen {
         String train = (trainBox != null && !trainBox.getValue().isBlank()) ? trainBox.getValue().trim() : (trainFilter == null ? "" : trainFilter);
         String planeName = (planeNameBox != null && !planeNameBox.getValue().isBlank()) ? planeNameBox.getValue().trim() : (planeNameFilter == null ? "" : planeNameFilter);
         String blockId = (blockIdBox != null && !blockIdBox.getValue().isBlank()) ? blockIdBox.getValue().trim() : (blockIdFilter == null ? "" : blockIdFilter);
-        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName, blockId, time.since(), time.until(), searchBox == null ? "" : searchBox.getValue().trim());
+        String search=searchBox==null?"":searchBox.getValue().trim();
+        return new GuiFilters(timePresetIdx,radiusPresetIdx,typePresetIdx,customTime,customRadius,actor,train,planeName,blockId,time.since(),time.until(),search,LocalizedLogSearch.search(search),LocalizedLogSearch.blocks(blockId));
     }
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {

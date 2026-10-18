@@ -122,6 +122,9 @@ final class ClickHouseDeliveryTest {
             check(selects.getFirst().contains("target_id")&&!selects.getFirst().contains("entity_nbt"),"ordinary GUI search fetched heavy snapshots");
             search.textFilter="сломал";selects.clear();database.queryReverse(search);
             check(selects.stream().allMatch(sql->sql.contains("OR action = "+ActionType.BLOCK_BREAK.ordinal())),"display action text search was not pushed into SQL");
+            search.textFilter="Незерак";search.textAliases=List.of("minecraft:netherrack");search.blockIdFilter="Незерак";search.blockAliases=search.textAliases;selects.clear();database.queryReverse(search);
+            check(selects.stream().allMatch(sql->sql.contains("minecraft:netherrack")&&sql.contains("multiSearchAnyCaseInsensitiveUTF8")&&sql.indexOf("minecraft:netherrack")<sql.lastIndexOf("LIMIT")),"localized aliases not applied before LIMIT on every query path");
+            search.textFilter="сломал";search.textAliases=List.of();search.blockIdFilter="stone";search.blockAliases=List.of();
             System.out.println("GUI_SEARCH_HTTP_OK: date bounds, all search predicates, action labels and escaped input preserved before LIMIT on feed and split fallback");
             schemaFailure.set(true);selects.clear();boolean refused=false;
             try{database.queryReverse(search);}catch(IllegalStateException expected){refused=true;}

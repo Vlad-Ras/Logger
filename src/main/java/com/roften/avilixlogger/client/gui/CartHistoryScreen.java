@@ -43,14 +43,16 @@ public final class CartHistoryScreen extends Screen {
         copyId.setTooltip(Tooltip.create(Component.literal("Скопировать полный ID штуковины")));
         copyEntry.setTooltip(Tooltip.create(Component.literal("Скопировать номер выбранной записи (entry)")));
         int w=(width-30)/3;
-        latest=button("Последний снимок → предмет",margin,height-48,w,()->recover(0));
-        restore=button("Выбранный снимок → предмет",margin+w+5,height-48,w,()->{var r=chosen();if(r!=null)recover(r.entry());});
+        latest=button("Последнее состояние → предмет",margin,height-48,w,()->recover(0));
+        restore=button("Состояние строки → предмет",margin+w+5,height-48,w,()->{var r=chosen();if(r!=null)recover(r.entry());});
         rollback=button("Откат действий к строке",margin+2*(w+5),height-48,width-margin-(margin+2*(w+5)),()->{var r=chosen();if(r!=null)command("log cart rollback "+r.cartId()+" "+r.entry());});
         restore.setTooltip(Tooltip.create(Component.literal("Выдать сохранённую штуковину в свободный слот; действия в мире не откатываются.")));
         rollback.setTooltip(Tooltip.create(Component.literal("Предпросмотр отката периода: может изменять мир и связанные инвентари. Для пропавшей штуковины используйте выдачу в предмет.")));
         updateButtons();
     }
-    private Button button(String text,int x,int y,int w,Runnable action){return addRenderableWidget(Button.builder(Component.literal(text),b->action.run()).bounds(x,y,Math.max(20,w),20).build());}
+    private Button button(String text,int x,int y,int w,Runnable action){int available=Math.max(20,w);String label=font.width(text)>available-10?font.plainSubstrByWidth(text,Math.max(1,available-18))+"…":text;
+        var button=addRenderableWidget(Button.builder(Component.literal(label),b->action.run()).bounds(x,y,available,20).build());
+        button.setTooltip(Tooltip.create(Component.literal(text)));return button;}
     public void load(){
         if(loading)return;
         try{if(!id.isBlank())UUID.fromString(id);}catch(IllegalArgumentException e){status="Неверный UUID штуковины";return;}
@@ -64,7 +66,7 @@ public final class CartHistoryScreen extends Screen {
     }
     private void updateButtons(){if(prev==null)return;var r=chosen();prev.active=!loading&&!previous.isEmpty();nextButton.active=!loading&&next>0;
         copyId.active=!selectedId().isBlank();copyEntry.active=r!=null;json.active=r!=null&&!loading;
-        latest.active=canRestore&&!loading&&!selectedId().isBlank();restore.active=canRestore&&!loading&&r!=null&&r.snapshot();rollback.active=canRestore&&!loading&&r!=null&&r.checkpoint();}
+        latest.active=canRestore&&!loading&&!selectedId().isBlank();restore.active=canRestore&&!loading&&r!=null;rollback.active=canRestore&&!loading&&r!=null&&r.checkpoint();}
     private S2CCartHistoryPayload.Row chosen(){return selected>=0&&selected<rows.size()?rows.get(selected):null;}
     private String selectedId(){var r=chosen();return r==null?id:r.cartId();}
     private void recover(long entry){if(!selectedId().isBlank())command("log cart recover "+selectedId()+" "+(entry==0?"latest":entry));}
@@ -93,10 +95,10 @@ public final class CartHistoryScreen extends Screen {
             if(i==selected)g.fill(listX,y,listX+listW,y+37,0xFF29496B);
             g.drawString(font,font.plainSubstrByWidth("entry="+r.entry()+"  "+r.time()+"  "+r.action(),listW-12),listX+6,y+4,0xFFFFFF);
             g.drawString(font,font.plainSubstrByWidth(r.actor()+" · "+r.location(),listW-12),listX+6,y+16,0xB5C5D5);
-            g.drawString(font,font.plainSubstrByWidth(r.snapshot()?"Полный снимок · можно вернуть в предмет":"Событие · полного снимка нет",listW-12),listX+6,y+27,r.snapshot()?0x8ED5A1:0x8294A6);
+            g.drawString(font,font.plainSubstrByWidth(r.snapshot()?"Полный снимок состояния":"Состояние можно собрать из истории",listW-12),listX+6,y+27,r.snapshot()?0x8ED5A1:0x8294A6);
         }g.disableScissor();
         g.fill(detailX,detailY,detailX+detailW,detailY+detailH,0xFF19212A);
-        var r=chosen();String text=r==null?"Выберите строку.\n\nСнимок → предмет: вернуть саму штуковину.\n\nОткат действий: изменить мир за период.\n\nID и entry копируются кнопками.":r.action()+"\n"+r.time()+"\n"+r.actor()+"\n"+r.location()+"\n\n"+r.detail()+extraDetails;
+        var r=chosen();String text=r==null?"Выберите строку.\n\nСостояние → предмет: вернуть саму штуковину.\n\nОткат действий: изменить мир за период.\n\nID и entry копируются кнопками.":r.action()+"\n"+r.time()+"\n"+r.actor()+"\n"+r.location()+"\n\n"+r.detail()+extraDetails;
         var lines=font.split(Component.literal(text),Math.max(30,detailW-12));detailScroll=Math.min(detailScroll,Math.max(0,lines.size()-Math.max(1,detailH/11)));
         g.enableScissor(detailX,detailY,detailX+detailW,detailY+detailH);
         for(int i=detailScroll;i<lines.size();i++){int y=detailY+5+(i-detailScroll)*11;if(y>=detailY+detailH)break;g.drawString(font,lines.get(i),detailX+6,y,0xDCE6F0);}g.disableScissor();

@@ -29,15 +29,16 @@ public final class CartItemRecovery {
         submit(source,()->{try{
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
             if(!AsyncLogProcessor.awaitIdle(deadline)||!storage.awaitVisible(deadline))throw new IllegalStateException("Журнал ещё не подтверждён. Повторите запрос");
-            var plan=CartRecoveryPlan.prepare(storage,id,entry);
+            var plan=CartRecoveryPlan.prepare(storage,id,entry,registries);
             var stack=ItemStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE),plan.item()).getOrThrow();
             if(stack.isEmpty()||stack.getCount()!=1||!id.equals(CreateCartAudit.itemId(stack)))throw new IllegalStateException("Предмет не прочитан полностью");
             if(com.simibubi.create.content.contraptions.data.ContraptionPickupLimiting.isTooLargeForPickup(plan.item()))throw new IllegalStateException("Штуковина превышает размер предмета, разрешённый Create");
+            var contents=CartRecoveryContents.validate(plan.item(),registries);
             var receiptItem=plan.item().copy();
             source.getServer().execute(()->{if(request!=generation||!authorized(actor)||!Objects.equals(REQUESTS.get(actor.getUUID()),token))return;REQUESTS.remove(actor.getUUID());try{
                 absent(source,id);if(actor.getInventory().getFreeSlot()<0)throw new IllegalStateException("Освободите слот инвентаря");
                 PREVIEWS.put(actor.getUUID(),new Preview(plan,actor.getUUID(),System.currentTimeMillis()+120000,stack,receiptItem));
-                String message="Вернуть штуковину в предмет: "+id+"; entry="+plan.entry()+" ("+plan.side()+"), "+java.time.Instant.ofEpochMilli(plan.timestamp())+", блоков: "+plan.blocks()+". Получатель: "+actor.getGameProfile().getName()+". Мир и действия штуковины не откатываются. Используется полный снимок этого момента; более поздние изменения не добавляются. Проверены загруженные конструкции/дропы и онлайн-инвентари; проверьте, что оригинал не остался в выгруженном чанке или хранилище.";
+                String message="Вернуть штуковину в предмет: "+id+"; entry="+plan.entry()+" ("+plan.side()+"), "+java.time.Instant.ofEpochMilli(plan.timestamp())+", блоков: "+plan.blocks()+". Получатель: "+actor.getGameProfile().getName()+". Основа: снимок entry="+plan.snapshotEntry()+", применено изменений состояния: "+plan.changes()+". Хранилищ предметов: "+contents.itemStorages()+", предметов: "+contents.items()+"; баков: "+contents.fluidStorages()+", жидкости: "+contents.fluidAmount()+" mB. Восстанавливается состояние по записанной истории до выбранной строки; незаписанные изменения восстановить невозможно. Мир и действия штуковины не откатываются. Проверены загруженные конструкции/дропы и онлайн-инвентари; проверьте, что оригинал не остался в выгруженном чанке или хранилище.";
                 com.roften.avilixlogger.net.CartHistoryNetwork.confirm(source,message,"log cart confirm-recovery "+id+" "+plan.entry());
             }catch(Exception e){error(source,e);}});
         }catch(Exception e){error(source,e);}});
@@ -62,7 +63,7 @@ public final class CartItemRecovery {
                 try{var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.CART_ROLLBACK;row.actorUuid=actor.getUUID();row.actorName=actor.getGameProfile().getName();
                 row.source=CartAuditContext.prefix(p.plan.id())+"recover_item:"+p.plan.entry();row.dim=actor.level().dimension().location().toString();row.x=actor.blockPosition().getX();row.y=actor.blockPosition().getY();row.z=actor.blockPosition().getZ();
                 var receipt=new CompoundTag();receipt.putInt("Format",1);receipt.putString("Form","item");receipt.put("Item",p.receiptItem);receipt.putUUID("Holder",actor.getUUID());receipt.putString("Dimension",row.dim);
-                row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,receipt);row.extra="item_recovery; entry="+p.plan.entry()+"; side="+p.plan.side()+"; world_changes=0";LogIdGenerator.ensure(row);LoggerRuntime.storage(actor.serverLevel()).append(row);
+                row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,receipt);row.extra="item_recovery; entry="+p.plan.entry()+"; side="+p.plan.side()+"; snapshot="+p.plan.snapshotEntry()+"; state_changes="+p.plan.changes()+"; world_changes=0";LogIdGenerator.ensure(row);LoggerRuntime.storage(actor.serverLevel()).append(row);
                 }catch(Exception journalError){CreateCartAudit.failed("delivered recovery receipt",journalError);source.sendFailure(Component.literal("Предмет уже выдан; не удалось записать квитанцию. Повторная выдача заблокирована резервом."));}
                 source.sendSystemMessage(Component.literal("Штуковина выдана в свободный слот. entry="+p.plan.entry()+". Блоки мира и действия не откатывались."));
             }catch(Exception e){error(source,e);}finally{BUSY.remove(p.plan.id());}});

@@ -1118,7 +1118,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (q == null) return;
         String block = normalizeSqlNeedle(q.blockIdFilter);
         if (!block.isBlank()) {
-            appendInsensitiveContainsAny(sql, block, "target_id", "short_text", "extra", "source");
+            appendSearchAlternatives(sql,block,q.blockAliases,"target_id","short_text","extra","source");
         }
         String planeName = normalizeSqlNeedle(q.planeNameFilter);
         if (!planeName.isBlank()) {
@@ -1136,8 +1136,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         String block = normalizeSqlNeedle(q.blockIdFilter);
         if (!block.isBlank()) {
             switch (kind) {
-                case BLOCKS, CONTAINERS, COMPAT -> appendInsensitiveContainsAny(sql, block, "block_before", "block_after", "extra", "source");
-                default -> appendInsensitiveContainsAny(sql, block, "extra", "source");
+                case BLOCKS, CONTAINERS, COMPAT -> appendSearchAlternatives(sql,block,q.blockAliases,"block_before","block_after","extra","source");
+                default -> appendSearchAlternatives(sql,block,q.blockAliases,"extra","source");
             }
         }
 
@@ -1175,9 +1175,21 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             String needle=q.textFilter.trim().toLowerCase(Locale.ROOT);var columns=new java.util.ArrayList<String>(List.of("actor_name",source,extra,entity,nbt));columns.addAll(List.of(targets));
             sql.append(" AND (");int n=0;
             for(String column:columns){if(n++>0)sql.append(" OR ");sql.append("positionCaseInsensitiveUTF8(").append(column).append(", ").append(sqlString(needle)).append(") > 0");}
+            appendAliases(sql,q.textAliases,columns.toArray(String[]::new));
             for(ActionType type:ActionType.values())if(LogText.actionLabel(type).toLowerCase(Locale.ROOT).contains(needle))sql.append(" OR action = ").append(type.ordinal());
             sql.append(')');
         }
+    }
+
+    private static void appendAliases(StringBuilder sql,List<String> aliases,String... columns){
+        if(aliases==null||aliases.isEmpty())return;
+        String values=aliases.stream().map(ClickHouseLogStorage::sqlString).collect(java.util.stream.Collectors.joining(",","[","]"));
+        for(String column:columns)sql.append(" OR multiSearchAnyCaseInsensitiveUTF8(").append(column).append(", ").append(values).append(") > 0");
+    }
+    private static void appendSearchAlternatives(StringBuilder sql,String needle,List<String> aliases,String... columns){
+        if(needle==null||needle.isBlank())return;
+        sql.append(" AND (");int n=0;for(String column:columns){if(n++>0)sql.append(" OR ");sql.append("positionCaseInsensitiveUTF8(").append(column).append(", ").append(sqlString(needle)).append(") > 0");}
+        appendAliases(sql,aliases,columns);sql.append(')');
     }
 
     private static void appendInsensitiveContainsAny(StringBuilder sql, String needle, String... columns) {

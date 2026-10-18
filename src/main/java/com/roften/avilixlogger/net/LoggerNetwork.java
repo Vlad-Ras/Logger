@@ -264,7 +264,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "5");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "6");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
@@ -734,6 +734,7 @@ public final class LoggerNetwork {
 
         if (gf != null) {
             q.textFilter = gf.search() == null ? "" : gf.search().trim();
+            q.textAliases=gf.searchIds();q.blockAliases=gf.blockIds();
             q.planeOnly = gf.typePresetIdx() == 8;
             if (gf.typePresetIdx() != 8 && gf.typePresetIdx() != 9 && gf.typePresetIdx() != 10) q.trainNameFilter = gf.train();
             String blockNeedle = normalizeFilterNeedle(gf.blockId());

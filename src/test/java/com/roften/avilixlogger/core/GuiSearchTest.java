@@ -18,6 +18,15 @@ final class GuiSearchTest {
         check(GuiTimeFilter.parse("30m",now).minutes()==30&&GuiTimeFilter.parse("2h",now).minutes()==120&&GuiTimeFilter.parse("7d",now).minutes()==10080&&GuiTimeFilter.parse("",now).minutes()==-1,"duration/preset compatibility");
         for(String value:List.of("31.02.2026","25:99","2026-10-13..2026-10-12","2026-10-13..","999999999d","-1h","junk"))reject(()->GuiTimeFilter.parse(value,now),"invalid time silently broadened query: "+value);
         reject(()->GuiTimeFilter.parse("2026-03-29 02:30",now.withZoneSameInstant(ZoneId.of("Europe/Berlin"))),"DST gap silently changed time");
+        var names=List.of(new LocalizedSearchTerms.Name("minecraft:netherrack","Незерак"),new LocalizedSearchTerms.Name("minecraft:stone","Камень"));
+        var ids=LocalizedSearchTerms.resolve("НеЗеРаК",names);check(ids.equals(List.of("minecraft:netherrack")),"localized name was not resolved");
+        var localQuery=new LogQuery();localQuery.textFilter="Незерак";localQuery.textAliases=ids;
+        var localRow=row("unrelated");localRow.blockBefore="minecraft:netherrack";
+        check(LogSearchPredicate.matches(localRow,localQuery)&&localQuery.copy().textAliases.equals(ids),"translated name did not match ID or copy lost aliases");
+        localQuery.blockIdFilter="Незерак";localQuery.blockAliases=ids;check(LogSearchPredicate.matches(localRow,localQuery),"localized block field did not match");
+        localQuery.actorName="another-filter";localRow.blockBefore="minecraft:stone";check(!LogSearchPredicate.matches(localRow,localQuery),"localized query broadened to unrelated IDs");
+        reject(()->LocalizedSearchTerms.checked(List.of("bad'); DROP TABLE logs")),"invalid registry alias accepted");
+        var broad=new ArrayList<LocalizedSearchTerms.Name>();for(int i=0;i<257;i++)broad.add(new LocalizedSearchTerms.Name("test:item"+i,"широкое имя"));reject(()->LocalizedSearchTerms.resolve("широкое",broad),"broad name silently truncated matching IDs");
         var executor=Executors.newSingleThreadExecutor(r->new Thread(r,"GUI-search-test-worker"));
         try{
             List<LogEntry> data=new ArrayList<>();for(int i=4000;i>0;i--){var row=row(i%31==0?"needle Express owner:alice":"unrelated");row.id=i;row.type=ActionType.BLOCK_PLACE;row.blockAfter="minecraft:stone";data.add(row);}

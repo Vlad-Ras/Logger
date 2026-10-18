@@ -33,6 +33,7 @@ public final class LogQuery {
     /** Optional text marker filter for compat logs such as trains/cannons. */
     public String extraTextFilter;
     public String textFilter;
+    public java.util.List<String> textAliases=java.util.List.of(),blockAliases=java.util.List.of();
     public String trainNameFilter;
     public String backpackNeedle;
     public boolean planeOnly;
@@ -82,6 +83,7 @@ public final class LogQuery {
         q.blockIdFilter = this.blockIdFilter;
         q.planeNameFilter = this.planeNameFilter;
         q.extraTextFilter = this.extraTextFilter;
+        q.textAliases=java.util.List.copyOf(this.textAliases);q.blockAliases=java.util.List.copyOf(this.blockAliases);
         q.textFilter = this.textFilter; q.trainNameFilter = this.trainNameFilter;
         q.backpackNeedle = this.backpackNeedle; q.planeOnly = this.planeOnly;
         q.cartId = this.cartId;

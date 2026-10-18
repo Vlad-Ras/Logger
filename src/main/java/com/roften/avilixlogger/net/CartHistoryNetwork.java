@@ -34,7 +34,7 @@ public final class CartHistoryNetwork {
             var found=storage.queryReverse(q);var rows=new ArrayList<S2CCartHistoryPayload.Row>();
             for(var e:found.subList(0,Math.min(12,found.size()))){var cart=CartAuditContext.id(e.source);if(cart==null||id!=null&&!id.equals(cart))throw new IllegalStateException("Чужая строка в истории штуковины");
                 var before=NbtSerde.fromSnbt(e.beBefore);var after=NbtSerde.fromSnbt(e.beAfter);boolean snapshot=CartRecoveryPlan.full(after)||CartRecoveryPlan.full(before);
-                String detail="entry="+e.id+"\nID: "+cart+"\n"+(snapshot?"Есть полный снимок: можно запросить восстановление в предмет.":"Полного снимка в этой строке нет.")+"\n"+Objects.toString(e.extra,"");
+                String detail="entry="+e.id+"\nID: "+cart+"\n"+(snapshot?"Есть полный снимок состояния.":"Состояние запрашивается из предшествующего полного снимка и записанных изменений.")+"\n"+Objects.toString(e.extra,"");
                 if(before!=null)detail+="\nДо: "+before.getString("Form");if(after!=null)detail+="\nПосле: "+after.getString("Form");
                 rows.add(new S2CCartHistoryPayload.Row(cart.toString(),e.id,TIME.format(Instant.ofEpochMilli(e.ts).atZone(zone)),LogText.actionLabel(e.type),Objects.toString(e.actorName,"SYSTEM"),e.dim+" · "+e.x+" "+e.y+" "+e.z,clip(detail,4000),CartRollbackPlan.checkpoint(e.type),snapshot));
             }
