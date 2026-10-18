@@ -30,8 +30,9 @@ public final class CartStateReplay {
             var before=NbtSerde.fromSnbt(row.beBefore);var after=NbtSerde.fromSnbt(row.beAfter);
             if(row.type==ActionType.CART_CONTENT_CHANGE){cargo(before,after);applied++;}
             else if(row.type==ActionType.CART_STRUCTURE_CHANGE){structure(before,after);applied++;}
-            else if(row.type==ActionType.CART_STATUS&&after!=null&&after.contains("DisabledActors",9)){
-                data.put("DisabledActors",after.get("DisabledActors").copy());applied++;
+            else if(row.type==ActionType.CART_STATUS){
+                if(CartAuditContext.phase(row.source).equals("interaction"))require(after!=null&&after.contains("DisabledActors",9),"Нет сохранённых настроек управления");
+                if(after!=null&&after.contains("DisabledActors",9)){data.put("DisabledActors",after.get("DisabledActors").copy());applied++;}
             }
         }catch(RuntimeException e){throw new IllegalStateException("Не удалось восстановить состояние на entry="+row.id+": "+e.getMessage(),e);}
     }
@@ -47,6 +48,10 @@ public final class CartStateReplay {
         block.remove("UpdateTag");
     }
     private void cargo(CompoundTag before,CompoundTag after){
+        boolean old=CartAuditContext.restoring(true);
+        try{cargoDetached(before,after);}finally{CartAuditContext.restoring(old);}
+    }
+    private void cargoDetached(CompoundTag before,CompoundTag after){
         require(registries!=null,"Для содержимого необходимы реестры сервера");
         require(before!=null&&after!=null&&!before.getBoolean("Incomplete")&&!after.getBoolean("Incomplete"),"Неполные данные содержимого");
         String kind=after.getString("Kind");require(kind.equals(before.getString("Kind"))&&Set.of("item","fluid").contains(kind),"Неизвестный вид содержимого");

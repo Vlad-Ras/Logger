@@ -83,8 +83,12 @@ public final class CreateCartSmoke {
         change=smokeRow(id,3,com.roften.avilixlogger.core.ActionType.CART_CONTENT_CHANGE);change.beBefore=fluidBefore.toString();change.beAfter=fluidAfter.toString();rows.add(change);
         var controls=new net.minecraft.nbt.CompoundTag();var disabled=new net.minecraft.nbt.ListTag();disabled.add(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.REDSTONE).save(registries));controls.put("DisabledActors",disabled);
         change=smokeRow(id,4,com.roften.avilixlogger.core.ActionType.CART_STATUS);change.beAfter=controls.toString();rows.add(change);
-        var plan=java.util.concurrent.CompletableFuture.supplyAsync(()->CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries)).join();check(plan.entry()==4&&plan.snapshotEntry()==1&&plan.changes()==3,"latest state omitted cargo/controls");
-        var summary=CartRecoveryContents.validate(plan.item(),registries);check(summary.items()==5&&summary.fluidAmount()==3000&&summary.itemStorages()==1&&summary.fluidStorages()==1,"recovery contents summary wrong");
+        var plan=java.util.concurrent.CompletableFuture.supplyAsync(()->{
+            check(!com.roften.avilixlogger.core.CartAuditContext.restoring(),"worker started in restore scope");
+            var prepared=CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries);
+            check(!com.roften.avilixlogger.core.CartAuditContext.restoring(),"replay leaked restore scope");return prepared;
+        }).join();check(plan.entry()==4&&plan.snapshotEntry()==1&&plan.changes()==3,"latest state omitted cargo/controls");
+        var summary=CartRecoveryContents.validate(plan.item(),registries);check(!com.roften.avilixlogger.core.CartAuditContext.restoring(),"validation leaked restore scope");check(summary.items()==5&&summary.fluidAmount()==3000&&summary.itemStorages()==1&&summary.fluidStorages()==1,"recovery contents summary wrong");
         var item=net.minecraft.world.item.ItemStack.CODEC.parse(registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE),plan.item()).getOrThrow();
         var restored=Contraption.fromNBT(world,item.get(com.simibubi.create.AllDataComponents.MINECRAFT_CONTRAPTION_DATA),false);
         check(net.minecraft.world.item.ItemStack.matches(restored.getStorage().getAllItemStorages().get(BlockPos.ZERO).getStackInSlot(3),named),"replayed item lost components/count");

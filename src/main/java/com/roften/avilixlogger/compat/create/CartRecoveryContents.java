@@ -26,6 +26,10 @@ public final class CartRecoveryContents {
         if(result.isEmpty())throw new IllegalStateException("Сохранённая жидкость прочитана как пустая");return result;
     }
     public static Summary validate(CompoundTag item,HolderLookup.Provider registries){
+        boolean old=com.roften.avilixlogger.core.CartAuditContext.restoring(true);
+        try{return validateDetached(item,registries);}finally{com.roften.avilixlogger.core.CartAuditContext.restoring(old);}
+    }
+    private static Summary validateDetached(CompoundTag item,HolderLookup.Provider registries){
         var ops=registries.createSerializationContext(NbtOps.INSTANCE);var data=item.getCompound("components").getCompound("create:minecart_contraption_data");
         var positions=new HashSet<Long>();for(var raw:data.getCompound("Blocks").getList("BlockList",10))positions.add(((CompoundTag)raw).getLong("Pos"));
         for(var raw:data.getCompound("Blocks").getList("Palette",10)){
@@ -34,6 +38,7 @@ public final class CartRecoveryContents {
         }
         for(String key:List.of("items","fluids"))if(data.contains(key)&&(!data.contains(key,9)||((ListTag)data.get(key)).getElementType()!=10&&!((ListTag)data.get(key)).isEmpty()))throw new IllegalStateException("Повреждён список хранилищ: "+key);
         if(!data.getList("Storage",10).isEmpty()||!data.getList("FluidStorage",10).isEmpty())throw new IllegalStateException("Старый формат хранилища требует нового полного снимка");
+        for(var raw:data.getList("DisabledActors",10))ItemStack.OPTIONAL_CODEC.parse(ops,raw).getOrThrow();
         long items=0,fluids=0;int itemStores=0,fluidStores=0;
         for(String key:List.of("items","fluids")){
             var seen=new HashSet<Long>();
