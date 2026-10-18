@@ -12,6 +12,8 @@ GUI viewers receive previews, progress, errors and terminal results in the GUI. 
 
 Cancel/close invalidates pending preview tokens so delayed workers cannot reopen an obsolete confirmation. Closing the page cancels previews; an already confirmed active rollback continues and can be inspected/cancelled when reopening. Cancellation of a committed item reservation cannot undo a delivered item; this is stated in the GUI. Cancelling another administrator's work is not allowed. Logout clears pending queries and previews and cancels an uncommitted rollback owned by the departing administrator.
 
+The real client rendering check also exposed late vanilla background blur on already drawn text. All minecart windows now draw their own background and widgets without Screen.render/background blur, matching the existing main log viewer.
+
 ## Validation
 
 Pending Java 21 build, wire/filter/data regressions and native Create cancellation/regression tests. GUI rendering and the full authorized production AuthCore/DB/admin flow still require a real Minecraft client.

@@ -140,8 +140,9 @@ public final class CartHistoryScreen extends Screen {
         }g.disableScissor();
         if(detailW>0){g.fill(detailX,detailY,detailX+detailW,detailY+detailH,0xFF19212A);var lines=font.split(Component.literal(details()),detailW-12);detailScroll=Math.min(detailScroll,Math.max(0,lines.size()-Math.max(1,detailH/11)));g.enableScissor(detailX,detailY,detailX+detailW,detailY+detailH);
             for(int i=detailScroll;i<lines.size();i++){int y=detailY+5+(i-detailScroll)*11;if(y>=detailY+detailH)break;g.drawString(font,lines.get(i),detailX+6,y,0xDCE6F0);}g.disableScissor();}
-        g.drawString(font,font.plainSubstrByWidth((operationRunning?"Выполняется · ":"")+status,width-110),10,height-19,0xC9D7E4);super.render(g,mx,my,dt);
+        g.drawString(font,font.plainSubstrByWidth((operationRunning?"Выполняется · ":"")+status,width-110),10,height-19,0xC9D7E4);for(var widget:renderables)widget.render(g,mx,my,dt);
     }
+    @Override public void renderBackground(GuiGraphics g,int x,int y,float dt){}
     public void onClose(){action(Action.CLOSE,"",0);Minecraft.getInstance().setScreen(parent);}
     public boolean isPauseScreen(){return false;}
     public static CartHistoryScreen owner(Screen current){return current instanceof CartHistoryScreen s?s:current instanceof Panel panel?panel.parent:null;}
@@ -153,6 +154,8 @@ public final class CartHistoryScreen extends Screen {
         final CartHistoryScreen parent;int scroll;
         Panel(CartHistoryScreen parent,String title){super(Component.literal(title));this.parent=parent;}
         void widget(Button b){addRenderableWidget(b);}
+        @Override public void renderBackground(GuiGraphics g,int x,int y,float dt){}
+        @Override public void render(GuiGraphics g,int x,int y,float dt){for(var widget:renderables)widget.render(g,x,y,dt);}
         public boolean isPauseScreen(){return false;}
         public void onClose(){Minecraft.getInstance().setScreen(parent);}
         void background(GuiGraphics g){g.fill(0,0,width,height,0xF511151B);g.drawCenteredString(font,title,width/2,12,0xFFFFFF);}
