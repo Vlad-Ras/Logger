@@ -264,7 +264,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "6");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "7");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
@@ -274,6 +274,7 @@ public final class LoggerNetwork {
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
+        r.playToServer(C2SCartActionPayload.TYPE,C2SCartActionPayload.STREAM_CODEC,CartHistoryNetwork::handleAction);
         r.playToServer(C2SCartHistoryPayload.TYPE, C2SCartHistoryPayload.STREAM_CODEC, CartHistoryNetwork::handle);
         r.playToClient(S2CCartHistoryPayload.TYPE, S2CCartHistoryPayload.STREAM_CODEC, (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptCart", new Class<?>[]{S2CCartHistoryPayload.class}, new Object[]{payload})));
 

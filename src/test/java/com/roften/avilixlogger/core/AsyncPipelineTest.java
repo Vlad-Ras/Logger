@@ -19,6 +19,7 @@ public final class AsyncPipelineTest {
         preparedSnapshots();
         CartAuditTest.run();
         GuiSearchTest.run();
+        CartGuiWorkflowTest.run();
         ClickHouseDeliveryTest.run();
         System.out.println("Async pipeline checks passed: lossless saturation, ordering, snapshots, shutdown, drops, tick deadlines, journal replay.");
     }

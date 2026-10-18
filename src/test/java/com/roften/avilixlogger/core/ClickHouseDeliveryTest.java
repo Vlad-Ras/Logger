@@ -125,6 +125,8 @@ final class ClickHouseDeliveryTest {
             search.textFilter="Незерак";search.textAliases=List.of("minecraft:netherrack");search.blockIdFilter="Незерак";search.blockAliases=search.textAliases;selects.clear();database.queryReverse(search);
             check(selects.stream().allMatch(sql->sql.contains("minecraft:netherrack")&&sql.contains("multiSearchAnyCaseInsensitiveUTF8")&&sql.indexOf("minecraft:netherrack")<sql.lastIndexOf("LIMIT")),"localized aliases not applied before LIMIT on every query path");
             search.textFilter="сломал";search.textAliases=List.of();search.blockIdFilter="stone";search.blockAliases=List.of();
+            var cartGui=com.roften.avilixlogger.net.CartHistoryQuery.build(new com.roften.avilixlogger.net.C2SCartHistoryPayload(1,autoCart.toString(),99,"MaxKuz",true));selects.clear();database.queryReverse(cartGui);
+            check(!selects.isEmpty()&&selects.stream().allMatch(sql->sql.contains("maxkuz")&&sql.contains(autoCart.toString())&&sql.contains("id < 99")&&sql.indexOf("maxkuz")<sql.lastIndexOf("LIMIT")),"cart GUI actor/ID/cursor not applied in SQL before LIMIT");
             System.out.println("GUI_SEARCH_HTTP_OK: date bounds, all search predicates, action labels and escaped input preserved before LIMIT on feed and split fallback");
             schemaFailure.set(true);selects.clear();boolean refused=false;
             try{database.queryReverse(search);}catch(IllegalStateException expected){refused=true;}
