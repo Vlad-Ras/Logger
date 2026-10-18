@@ -26,6 +26,17 @@ jobs:
           tail -n 120 create-smoke.log
           grep -q 'AVILIX_CREATE_SMOKE_OK' create-smoke.log
           if grep -qE '(AVILIX_CREATE_SMOKE_FAILED|MixinApplyError|MixinTransformerError|Failed to start the minecraft server)' create-smoke.log; then exit 1; fi
+      - name: Real client minecart GUI checks
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          if ! command -v xvfb-run >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y xvfb libgl1-mesa-dri; fi
+          mkdir -p run
+          printf 'onboardAccessibility:false\n' > run/options.txt
+          LIBGL_ALWAYS_SOFTWARE=1 timeout --signal=INT --kill-after=30s 480s xvfb-run --auto-servernum ./gradlew --no-daemon -PcreateSmoke -PguiSmoke runClient --console=plain > gui-smoke.log 2>&1 || true
+          tail -n 140 gui-smoke.log
+          grep -q 'CART_GUI_CLIENT_OK' gui-smoke.log
+          if grep -qE '(CART_GUI_CLIENT_FAILED|MixinApplyError|MixinTransformerError)' gui-smoke.log; then exit 1; fi
       - name: Upload tested release
         uses: actions/upload-artifact@v4
         with:
@@ -39,6 +50,8 @@ jobs:
           name: diagnostics-2.1.22
           path: |
             create-smoke.log
+            gui-smoke.log
+            run/screenshots/cart-gui-*.png
             build/reports/
             build/obfuscation/mapping.txt
           if-no-files-found: ignore
