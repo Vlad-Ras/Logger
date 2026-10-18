@@ -27,12 +27,12 @@
   "gui.avilixlogger.input.actor": "actor",
   "gui.avilixlogger.input.train": "train",
   "gui.avilixlogger.input.search": "search",
-  "gui.avilixlogger.hint.time": "напр. 30m / 2h / 1d",
+  "gui.avilixlogger.hint.time": "дата / HH:mm / 30m",
   "gui.avilixlogger.hint.radius": "напр. 50 / world",
   "gui.avilixlogger.hint.actor": "ник игрока",
   "gui.avilixlogger.hint.train": "имя или UUID",
   "gui.avilixlogger.hint.owner": "имя или UUID",
-  "gui.avilixlogger.hint.search": "поиск по тексту…",
+  "gui.avilixlogger.hint.search": "ник / ID / текст; Enter",
   "gui.avilixlogger.apply": "Применить",
   "gui.avilixlogger.copy_xyz": "Копировать XYZ",
   "gui.avilixlogger.copy_tp": "TP команда",
@@ -68,5 +68,9 @@
   "gui.avilixlogger.inspect_tool.saved": "Установлен: %s",
   "gui.avilixlogger.inspect_tool.reset_done": "Сброшен: %s",
   "gui.avilixlogger.inspect_tool.invalid": "Предмет не найден: %s",
-  "gui.avilixlogger.inspect_tool.no_permission": "Нет права avilixlogger.command.admin"
+  "gui.avilixlogger.inspect_tool.no_permission": "Нет права avilixlogger.command.admin",
+  "gui.avilixlogger.type.cart": "Create: вагонетки",
+  "gui.avilixlogger.type.backpack": "Рюкзаки",
+  "gui.avilixlogger.hint.audit_id": "ID / владелец",
+  "gui.avilixlogger.filter.audit_id.v": "ID / владелец: %s"
 }

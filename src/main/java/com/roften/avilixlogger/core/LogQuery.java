@@ -32,6 +32,15 @@ public final class LogQuery {
 
     /** Optional text marker filter for compat logs such as trains/cannons. */
     public String extraTextFilter;
+    public String textFilter;
+    public String trainNameFilter;
+    public String backpackNeedle;
+    public boolean planeOnly;
+
+    /** Exact logical Create cart; required filter, never removed on query fallback. */
+    public java.util.UUID cartId;
+    public java.util.UUID backpackId;
+    public String sourcePrefix;
 
     /** Optional source label for diagnostics (chat/gui/rollback). */
     public String debugSource;
@@ -73,6 +82,11 @@ public final class LogQuery {
         q.blockIdFilter = this.blockIdFilter;
         q.planeNameFilter = this.planeNameFilter;
         q.extraTextFilter = this.extraTextFilter;
+        q.textFilter = this.textFilter; q.trainNameFilter = this.trainNameFilter;
+        q.backpackNeedle = this.backpackNeedle; q.planeOnly = this.planeOnly;
+        q.cartId = this.cartId;
+        q.backpackId = this.backpackId;
+        q.sourcePrefix = this.sourcePrefix;
         q.debugSource = this.debugSource;
         q.type = this.type;
         q.types = this.types != null ? this.types.clone() : null;

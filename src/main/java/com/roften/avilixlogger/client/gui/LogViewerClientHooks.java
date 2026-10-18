@@ -35,13 +35,26 @@ public final class LogViewerClientHooks {
         RollbackPreviewRenderer.clear();
     }
 
-    public static void open() {
+    public static void open() { open(java.time.ZoneId.systemDefault().getId()); }
+    public static void open(String timeZone) {
+        LogViewerScreen.setLogTimeZone(timeZone);
         Minecraft mc = Minecraft.getInstance();
         if (mc == null) return;
         OPEN_SCREEN = new LogViewerScreen();
         mc.setScreen(OPEN_SCREEN);
         // Load using the filters/mode restored by the screen, not hard-coded defaults.
         OPEN_SCREEN.requestInitialData();
+    }
+
+    public static void acceptCart(com.roften.avilixlogger.net.S2CCartHistoryPayload payload) {
+        Minecraft mc=Minecraft.getInstance();
+        if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.OPEN){
+            var screen=new CartHistoryScreen(mc.screen,payload.cartId());mc.setScreen(screen);screen.load();
+        }else {
+            var screen=CartHistoryScreen.owner(mc.screen);if(screen==null)return;
+            if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.CONFIRM)screen.confirmation(payload.message(),payload.command());
+            else screen.apply(payload);
+        }
     }
 
     public static void acceptPage(S2CLogPagePayload payload) {
@@ -51,6 +64,8 @@ public final class LogViewerClientHooks {
 
     public static void acceptDetails(S2CLogDetailsPayload payload) {
         if (payload == null) return;
+        var cartScreen=CartHistoryScreen.owner(Minecraft.getInstance().screen);
+        if (cartScreen!=null) cartScreen.acceptDetails(payload);
         if (OPEN_SCREEN != null) OPEN_SCREEN.applyDetails(payload);
     }
 

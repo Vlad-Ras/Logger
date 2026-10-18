@@ -1,0 +1,32 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.backpacked.mixin",
+  "plugin": "com.roften.avilixlogger.compat.backpacked.mixin.BackpackedMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "BackpackInventoryAccessor",
+    "BackpackShelfStackAccessor",
+    "BackpackContentsMixin",
+    "BackpackChangedMixin",
+    "BackpackHelperMixin",
+    "BackpackDockMixin",
+    "BackpackShelfMixin",
+    "BackpackItemEntityMixin",
+    "BackpackMenuMixin",
+    "BackpackAugmentsMixin",
+    "BackpackUpgradePacketsMixin",
+    "BackpackInventoryTrackingMixin",
+    "BackpackBlockLifecycleMixin",
+    "BackpackConsumedMixin",
+    "BackpackMenuOpenMixin",
+    "BackpackRawContentsAccessor",
+    "BackpackAmmoMixin",
+    "BackpackTrackedContainerAccessor",
+    "BackpackCraftResultMixin",
+    "BackpackCraftQuickMoveMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -96,6 +96,35 @@ public final class ChatLogPager {
         }
     }
 
+    public static void queryConsole(net.minecraft.commands.CommandSourceStack source, ServerLevel level,
+                                    LogQuery query, Component title) {
+        LogStorage storage = LoggerRuntime.storage(level);
+        LogQuery snapshot = query.copy();
+        MinecraftServer server = source.getServer();
+        source.sendSystemMessage(Component.literal("[Логгер] Загрузка записей..."));
+        try {
+            executor().execute(() -> {
+                try {
+                    List<LogEntry> entries = storage.queryReverse(snapshot);
+                    server.execute(() -> {
+                        source.sendSystemMessage(title);
+                        if (entries.isEmpty()) source.sendSystemMessage(Component.literal("(нет записей)"));
+                        for (LogEntry entry : entries) {
+                            if (entry != null && entry.type == ActionType.BLOCK_ENTITY_NBT_CHANGE
+                                    && entry.extra != null && entry.extra.startsWith("container change")) continue;
+                            source.sendSystemMessage(LogText.toChatLine(level, entry));
+                        }
+                    });
+                } catch (Throwable failure) {
+                    AvilixLoggerMod.LOGGER.error("[AvilixLogger] Console query failed", failure);
+                    server.execute(() -> source.sendFailure(Component.literal("Ошибка запроса логов; смотри server log.")));
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            source.sendFailure(Component.literal("Очередь запросов занята. Повтори позже."));
+        }
+    }
+
     private static PageResult query(ServerLevel level, QuerySnapshot snapshot,
                                     java.util.function.BooleanSupplier cancelled) {
         int size = pageSize();

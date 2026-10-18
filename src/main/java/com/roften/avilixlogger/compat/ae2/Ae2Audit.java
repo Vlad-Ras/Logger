@@ -97,7 +97,7 @@ public final class Ae2Audit {
             LogEntry e = entry(level, pos, player, insert ? ActionType.ME_PUT : ActionType.ME_TAKE,
                     "ae2:" + origin);
             if (key instanceof AEItemKey item) {
-                e.itemStackNbt = NbtSerde.writeItemStack(item.toStack(), level.registryAccess());
+                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(item.toStack(), level.registryAccess()));
                 e.count = (int) Math.min(Integer.MAX_VALUE, amount);
                 e.extra = "resource=" + key.getId() + "; amount=" + amount;
             } else {
@@ -230,7 +230,7 @@ public final class Ae2Audit {
                                ActionType type, int slot, ItemStack old, ItemStack now) {
         LogEntry e = entry(level, pos, player, type, source);
         e.extra = "slot " + slot + ": " + describe(old) + " → " + describe(now);
-        e.itemStackNbt = NbtSerde.writeItemStack(now.isEmpty() ? old : now, level.registryAccess());
+        e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(now.isEmpty() ? old : now, level.registryAccess()));
         LoggerRuntime.storage(level).append(e);
     }
 
@@ -257,7 +257,7 @@ public final class Ae2Audit {
     private static void physicalRow(ServerLevel level, BlockPos pos, ServerPlayer player,
                                     String source, ActionType type, ItemStack stack, int count) {
         LogEntry e = entry(level, pos, player, type, source);
-        e.itemStackNbt = NbtSerde.writeItemStack(stack, level.registryAccess());
+        e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(stack, level.registryAccess()));
         e.count = count;
         e.extra = "device inventory " + source;
         LoggerRuntime.storage(level).append(e);

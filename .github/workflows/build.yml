@@ -1,51 +1,44 @@
-name: Build
+name: Build AvilixLogger
 
-on: [push, pull_request]
-
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'temurin'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build with Gradle
-        run: ./gradlew build
-
-      - name: Smoke test dedicated server with AE2
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Compile, test and obfuscate
+        run: ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3G clean build compileCreateSmokeJava
+      - name: Native Create recovery and rollback smoke
         timeout-minutes: 10
+        shell: bash
         run: |
           mkdir -p run
           printf 'eula=true\n' > run/eula.txt
-          # runServer is intentionally long-lived. A GameTestServer without registered
-          # tests exits before reaching server startup while Gradle still reports success.
-          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
-          tail -n 100 ae2-smoke.log
-          if ! grep -qE 'Done \([0-9]+([.][0-9]+)?s\)!' ae2-smoke.log; then
-            echo 'Dedicated server did not finish loading with AE2.' >&2
-            exit 1
-          fi
-          if grep -qE '(Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then
-            echo 'Dedicated server reported a fatal loading error.' >&2
-            exit 1
-          fi
-          echo 'Dedicated server started with AE2 and AvilixLogger.'
-
-      - name: Upload AvilixLogger JAR
+          timeout --signal=INT --kill-after=30s 480s ./gradlew --no-daemon -PcreateSmoke runServer --console=plain > create-smoke.log 2>&1 || true
+          tail -n 120 create-smoke.log
+          grep -q 'AVILIX_CREATE_SMOKE_OK' create-smoke.log
+          if grep -qE '(AVILIX_CREATE_SMOKE_FAILED|MixinApplyError|MixinTransformerError|Failed to start the minecraft server)' create-smoke.log; then exit 1; fi
+      - name: Upload tested release
         uses: actions/upload-artifact@v4
         with:
-          name: AvilixLogger-2.1.8
-          path: build/libs/avilixlogger-2.1.8.jar
+          name: AvilixLogger-2.1.20
+          path: build/libs/avilixlogger-2.1.20.jar
           if-no-files-found: error
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostics-2.1.20
+          path: |
+            create-smoke.log
+            build/reports/
+            build/obfuscation/mapping.txt
+          if-no-files-found: ignore

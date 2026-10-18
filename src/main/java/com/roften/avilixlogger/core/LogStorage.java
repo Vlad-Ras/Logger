@@ -10,7 +10,7 @@ import java.util.List;
  */
 public interface LogStorage {
 
-    /** Enqueue a log entry for persistence (non-blocking). */
+    /** Hand off a log entry; the runtime queues it in memory, applying backpressure only on saturation. */
     void append(LogEntry entry);
 
     /**
@@ -26,6 +26,9 @@ public interface LogStorage {
      * Implementations should push down the filters to the storage engine.
      */
     List<LogEntry> queryReverse(LogQuery q);
+
+    /** Called only on a worker before a destructive query; wait for accepted rows to become visible. */
+    default boolean awaitVisible(long deadlineNanos) throws InterruptedException { return true; }
 
     /** Flush and shutdown background writers. */
     void shutdown();

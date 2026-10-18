@@ -27,12 +27,12 @@
   "gui.avilixlogger.input.actor": "actor",
   "gui.avilixlogger.input.train": "train",
   "gui.avilixlogger.input.search": "search",
-  "gui.avilixlogger.hint.time": "e.g. 30m / 2h / 1d",
+  "gui.avilixlogger.hint.time": "date / HH:mm / 30m",
   "gui.avilixlogger.hint.radius": "e.g. 50 / world",
   "gui.avilixlogger.hint.actor": "player nick",
   "gui.avilixlogger.hint.train": "name or UUID",
   "gui.avilixlogger.hint.owner": "name or UUID",
-  "gui.avilixlogger.hint.search": "text filter…",
+  "gui.avilixlogger.hint.search": "name / ID / text; Enter",
   "gui.avilixlogger.apply": "Apply",
   "gui.avilixlogger.copy_xyz": "Copy XYZ",
   "gui.avilixlogger.copy_tp": "TP cmd",
@@ -68,5 +68,9 @@
   "gui.avilixlogger.inspect_tool.saved": "Set to: %s",
   "gui.avilixlogger.inspect_tool.reset_done": "Reset to: %s",
   "gui.avilixlogger.inspect_tool.invalid": "Item not found: %s",
-  "gui.avilixlogger.inspect_tool.no_permission": "Missing avilixlogger.command.admin permission"
+  "gui.avilixlogger.inspect_tool.no_permission": "Missing avilixlogger.command.admin permission",
+  "gui.avilixlogger.type.cart": "Create: minecarts",
+  "gui.avilixlogger.type.backpack": "Backpacks",
+  "gui.avilixlogger.hint.audit_id": "ID / owner",
+  "gui.avilixlogger.filter.audit_id.v": "ID / owner: %s"
 }

@@ -182,7 +182,7 @@ public final class LogViewerScreen extends Screen {
     ) {}
 
     private List<DisplayLine> displayLines() {
-        String filter = this.searchBox == null ? "" : this.searchBox.getValue().trim().toLowerCase(java.util.Locale.ROOT);
+        String filter = ""; // All search predicates are applied by the database before LIMIT.
         int width = listWidth();
         if (cachedRowsVersion == rowsVersion
                 && cachedListWidth == width
@@ -196,7 +196,6 @@ public final class LogViewerScreen extends Screen {
         for (int i = 0; i < rows.size(); i++) {
             LogRow row = rows.get(i);
             Component line = row.line() == null ? Component.empty() : row.line();
-            if (!filter.isEmpty() && !line.getString().toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
             boolean expandable = row.aggregated() && row.groupedLines() != null && !row.groupedLines().isEmpty();
             appendWrappedDisplayLines(out, i, line, expandable, false);
             if (expandable && expandedRows.contains(row.id())) {
@@ -383,6 +382,8 @@ public final class LogViewerScreen extends Screen {
                 leftX, y, btnW, leftRowH);
         this.timeBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.time"));
         this.timeBox.setHint(Component.translatable("gui.avilixlogger.hint.time"));
+        this.timeBox.setMaxLength(96);
+        this.timeBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("От даты/времени: 13.10.2026 03:00, 13.10.2026, 03:00; диапазон: начало..конец; период: 30m / 2h. Часовой пояс журнала: " + logTimeZone)));
         this.timeBox.setValue(savedTimeInput);
         this.addRenderableWidget(this.timeBox);
         y += leftRowH + leftGap;
@@ -445,6 +446,8 @@ public final class LogViewerScreen extends Screen {
         btnSearch.active = false;
         this.searchBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.search"));
         this.searchBox.setHint(Component.translatable("gui.avilixlogger.hint.search"));
+        this.searchBox.setMaxLength(128);
+        this.searchBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Поиск в журнале: имя игрока, ID блока/предмета/сущности, источник, текст и название действия. Применить или Enter.")));
         this.searchBox.setValue(savedSearchInput);
         this.addRenderableWidget(this.searchBox);
         y += leftRowH + leftGap;
@@ -496,6 +499,11 @@ public final class LogViewerScreen extends Screen {
         y2 += btnH + gap;
         this.btnShowRaw = addButton(sideLabel("gui.avilixlogger.show_raw", "RAW"), b -> requestRawIfNeeded(),
                 rightX, y2, rightW, btnH);
+
+        y2 += btnH + gap;
+        addButton(Component.literal("Вагонеточные штуковины"), b -> {
+            var screen=new CartHistoryScreen(this, "");Minecraft.getInstance().setScreen(screen);screen.load();
+        }, rightX, y2, rightW, btnH);
 
         // Details panel must start BELOW the right-side controls to avoid overlap.
         this.detailsPanelTop = y2 + btnH + gap + 2;
@@ -650,20 +658,27 @@ public final class LogViewerScreen extends Screen {
         return compactControlLabels() ? Component.literal(compact) : Component.translatable(translationKey);
     }
 
+    private static java.time.ZoneId logTimeZone = java.time.ZoneId.of("UTC");
+    public static void setLogTimeZone(String value) {
+        try { logTimeZone = java.time.ZoneId.of(value); } catch (RuntimeException ignored) { logTimeZone = java.time.ZoneId.of("UTC"); }
+    }
     private GuiFilters currentFilters() {
-        int customTime = parseTimeMinutes(timeBox != null ? timeBox.getValue() : "");
+        var time = com.roften.avilixlogger.net.GuiTimeFilter.parse(timeBox != null ? timeBox.getValue() : "", java.time.ZonedDateTime.now(logTimeZone));
+        int customTime = time.minutes();
         int customRadius = parseRadius(radiusBox != null ? radiusBox.getValue() : "");
         String actor = (actorBox != null && !actorBox.getValue().isBlank()) ? actorBox.getValue().trim() : (actorFilter == null ? "" : actorFilter);
         String train = (trainBox != null && !trainBox.getValue().isBlank()) ? trainBox.getValue().trim() : (trainFilter == null ? "" : trainFilter);
         String planeName = (planeNameBox != null && !planeNameBox.getValue().isBlank()) ? planeNameBox.getValue().trim() : (planeNameFilter == null ? "" : planeNameFilter);
         String blockId = (blockIdBox != null && !blockIdBox.getValue().isBlank()) ? blockIdBox.getValue().trim() : (blockIdFilter == null ? "" : blockIdFilter);
-        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName, blockId);
+        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName, blockId, time.since(), time.until(), searchBox == null ? "" : searchBox.getValue().trim());
     }
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
         saveGuiStateFromInstance();
-        PacketDistributor.sendToServer(new C2SRequestPagePayload(
-                nav, aggregatedMode, currentFilters(), savedPageSize));
+        try { PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, currentFilters(), savedPageSize)); }
+        catch (IllegalArgumentException failure) {
+            if (Minecraft.getInstance().player != null) Minecraft.getInstance().player.displayClientMessage(Component.literal(failure.getMessage()).withStyle(ChatFormatting.RED), false);
+        }
     }
 
     /** Called once after Minecraft has initialized all widgets for this screen. */
@@ -1202,6 +1217,7 @@ public final class LogViewerScreen extends Screen {
     private void cycleTime() {
         int[] mins = new int[] { 5, 30, 120, 1440, 10080 };
         timePresetIdx = (timePresetIdx + 1) % mins.length;
+        if (timeBox != null) timeBox.setValue("");
         refreshFilterButtonLabels();
         sendPage(C2SRequestPagePayload.Nav.FIRST);
     }
@@ -1236,7 +1252,7 @@ public final class LogViewerScreen extends Screen {
         }
     }
 
-    private static final int TYPE_COUNT = 9;
+    private static final int TYPE_COUNT = 11;
 
     private record DropdownLayout(int x, int y, int width, int itemHeight, int firstIndex, int visibleCount) {}
 
@@ -1341,6 +1357,8 @@ public final class LogViewerScreen extends Screen {
             case 6 -> "cannon";
             case 7 -> "chat";
             case 8 -> "plane";
+            case 9 -> "cart";
+            case 10 -> "backpack";
             default -> "all";
         };
     }
@@ -1476,12 +1494,12 @@ public final class LogViewerScreen extends Screen {
         // - Type=PLANES: owner name/needle
         boolean planes = typePresetIdx == 8;
         if (trainBox != null) {
-            trainBox.setHint(Component.translatable(planes ? "gui.avilixlogger.hint.owner" : "gui.avilixlogger.hint.train"));
+            trainBox.setHint(Component.translatable(typePresetIdx == 9 || typePresetIdx == 10 ? "gui.avilixlogger.hint.audit_id" : planes ? "gui.avilixlogger.hint.owner" : "gui.avilixlogger.hint.train"));
         }
         if (btnTrain != null) {
-            String key = planes ? "gui.avilixlogger.filter.owner.v" : "gui.avilixlogger.filter.train.v";
+            String key = typePresetIdx == 9 || typePresetIdx == 10 ? "gui.avilixlogger.filter.audit_id.v" : planes ? "gui.avilixlogger.filter.owner.v" : "gui.avilixlogger.filter.train.v";
             Component trainValue = train.isBlank() ? Component.translatable("gui.avilixlogger.value.any") : Component.literal(trimLabel(train, compact ? 8 : 16));
-            btnTrain.setMessage(compact ? Component.literal(planes ? "Вл: " : "По: ").append(trainValue) : Component.translatable(key, trainValue));
+            btnTrain.setMessage(compact ? Component.literal(typePresetIdx == 9 || typePresetIdx == 10 ? "ID: " : planes ? "Вл: " : "По: ").append(trainValue) : Component.translatable(key, trainValue));
         }
 
         // Plane name filter widgets are only meaningful in planes preset.
@@ -1493,6 +1511,8 @@ public final class LogViewerScreen extends Screen {
     }
 
     private String timeLabel() {
+        String entered = timeBox == null ? "" : timeBox.getValue().trim();
+        if (!entered.isEmpty() && !entered.matches("[0-9]+[mMhHdD]?")) return "от даты";
         int custom = parseTimeMinutes(timeBox != null ? timeBox.getValue() : "");
         if (custom >= 0) {
             if (custom % 1440 == 0 && custom >= 1440) return (custom / 1440) + "d";
@@ -1578,7 +1598,7 @@ public final class LogViewerScreen extends Screen {
 
         // Enter applies custom inputs.
         if (keyCode == 257 /* GLFW_KEY_ENTER */ || keyCode == 335 /* GLFW_KEY_KP_ENTER */) {
-            if ((timeBox != null && timeBox.isFocused())
+            if ((searchBox != null && searchBox.isFocused()) || (timeBox != null && timeBox.isFocused())
                     || (radiusBox != null && radiusBox.isFocused())
                     || (actorBox != null && actorBox.isFocused())
                     || (trainBox != null && trainBox.isFocused())

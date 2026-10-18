@@ -29,10 +29,7 @@ public final class ActorTracker {
         if (entityUuid == null || actorUuid == null) return;
         ENTITY_ACTOR.put(entityUuid, new ActorRef(System.currentTimeMillis(), actorUuid, actorName));
 
-        // Best-effort cleanup.
-        if (ENTITY_ACTOR.size() > 50_000) {
-            cleanup(10_000L);
-        }
+
     }
 
     /**
@@ -59,7 +56,7 @@ public final class ActorTracker {
         for (var it = ENTITY_ACTOR.entrySet().iterator(); it.hasNext(); ) {
             var e = it.next();
             ActorRef r = e.getValue();
-            if (r == null || r.tsMs < cutoff) it.remove();
+            if (r == null || r.tsMs < cutoff) ENTITY_ACTOR.remove(e.getKey(), r);
         }
     }
 }

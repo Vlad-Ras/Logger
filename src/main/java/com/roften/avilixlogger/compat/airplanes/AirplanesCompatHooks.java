@@ -238,7 +238,7 @@ public final class AirplanesCompatHooks {
             e.x = pos.getX();
             e.y = pos.getY();
             e.z = pos.getZ();
-            e.itemStackNbt = NbtSerde.writeItemStack(usedStack, level.registryAccess());
+            e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(usedStack, level.registryAccess()));
             e.extra = "plane place " + usedStack.getDescriptionId();
             LoggerRuntime.storage(level).append(e);
         } catch (Throwable ignored) {
@@ -262,7 +262,7 @@ public final class AirplanesCompatHooks {
             e.z = pos.getZ();
             e.entityType = net.minecraft.world.entity.EntityType.getKey(planeEntity.getType()).toString();
             e.entityUuid = planeEntity.getUUID();
-            try { e.entityNbt = NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
+            try { e.deferSnapshot(LogEntry.SnapshotField.ENTITY, NbtSerde.snapshotEntity(level, planeEntity)); } catch (Throwable ignored) {}
 
             String planeName = null;
             String customName = null;
@@ -308,7 +308,7 @@ public final class AirplanesCompatHooks {
             e.entityType = net.minecraft.world.entity.EntityType.getKey(planeEntity.getType()).toString();
             e.entityUuid = planeEntity.getUUID();
 
-            try { e.entityNbt = NbtSerde.writeEntity(level, planeEntity); } catch (Throwable ignored) {}
+            try { e.deferSnapshot(LogEntry.SnapshotField.ENTITY, NbtSerde.snapshotEntity(level, planeEntity)); } catch (Throwable ignored) {}
             String planeName = null;
             String customName = null;
             String ownerName = null;
@@ -355,34 +355,8 @@ public final class AirplanesCompatHooks {
     /**
      * If a plane entity appears right after a player used a plane item, attribute the spawn to that player.
      */
+    /** Item placement now has an exact exception-safe scope; delayed proximity is not proof. */
     public static ActorTracker.ActorRef consumeRecentPlacer(ServerLevel level, Entity planeEntity) {
-        if (!LoggerConfig.isEnabled()) {
-            RECENT_PLACERS.clear();
-            return null;
-        }
-        if (level == null || planeEntity == null) return null;
-        try {
-            long now = System.currentTimeMillis();
-            String dim = level.dimension().location().toString();
-            BlockPos ep = planeEntity.blockPosition();
-            Placement best = null;
-            java.util.UUID bestKey = null;
-            for (var ent : RECENT_PLACERS.entrySet()) {
-                Placement p = ent.getValue();
-                if (p == null) continue;
-                if (now - p.ts > PLACER_TTL_MS) continue;
-                if (!dim.equals(p.dim)) continue;
-                if (p.pos.distManhattan(ep) > 6) continue;
-                best = p;
-                bestKey = ent.getKey();
-                break;
-            }
-            if (bestKey != null) RECENT_PLACERS.remove(bestKey);
-            if (best != null) {
-                ActorTracker.note(planeEntity.getUUID(), best.actorUuid, best.actorName);
-                return new ActorTracker.ActorRef(now, best.actorUuid, best.actorName);
-            }
-        } catch (Throwable ignored) {}
         return null;
     }
 
