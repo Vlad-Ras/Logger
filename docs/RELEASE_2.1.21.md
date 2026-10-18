@@ -18,7 +18,11 @@ A client-side registry name index maps translated block/item/entity names to reg
 
 ## Validation
 
-Pending remote Java 21 build, data regressions and native Create server tests. Tests include selected/latest/cursor recovery, same-type block settings, item components, fluid replacement, controls, corrupted chains/codecs/capacity, Russian name lookup and SQL pushdown. Existing release checks remain enabled. New GUI has not yet been exercised in a real Minecraft client.
+Passed Java 21 compilation, obfuscation, mixin safety, async/data regressions and native Create server tests: https://github.com/Vlad-Ras/Logger/actions/runs/39163571628 . Runtime commit: `ea09252e664ca93dd248f1189f002c709fd3df13`; source tree exactly matches local `dc71e83e0c62d0455b114ef4e9431a37e3f81407`.
+
+Tests cover selected/latest/cursor recovery, same-type block settings, item components, fluid replacement, controls, corrupted chains/codecs/capacity, Russian name lookup and SQL pushdown. Existing rollback commit/cancel, recipient, automation, native menu and loot tests also pass. Detached replay restores its thread scope. No smoke classes are packaged in the delivered JAR.
+
+Delivered `avilixlogger-2.1.21.jar`: 713859 bytes; SHA-256 `93cd66557c32e7aa36f0f54953bd1b81e34412cfc3dafdf51233c16bbc7fb40d`. Downloaded Actions artifact digest and ZIP/JAR CRC verified; embedded mod version is 2.1.21. GUI rendering and the full authorized production AuthCore/DB/admin flow have not yet been exercised in a Minecraft client.
 
 ## Explicit boundaries
 
