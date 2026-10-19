@@ -16,6 +16,8 @@ final class CartGuiWorkflowTest {
             var buffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
             try{C2SCartActionPayload.STREAM_CODEC.encode(buffer,value);check(C2SCartActionPayload.STREAM_CODEC.decode(buffer).equals(value),"action codec changed "+action);}finally{buffer.release();}
         }
+        var opened=new S2CCartHistoryPayload(S2CCartHistoryPayload.OPEN,0,id,0,true,"Europe/Moscow","",List.of());
+        var ob=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);try{S2CCartHistoryPayload.STREAM_CODEC.encode(ob,opened);check(S2CCartHistoryPayload.STREAM_CODEC.decode(ob).message().equals("Europe/Moscow"),"direct cart GUI lost the journal time zone");}finally{ob.release();}
         var filters=new C2SCartHistoryPayload(17,id,1234,"MaxKuz",true);
         var buffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
         try{C2SCartHistoryPayload.STREAM_CODEC.encode(buffer,filters);check(C2SCartHistoryPayload.STREAM_CODEC.decode(buffer).equals(filters),"GUI actor/cursor/checkpoint filter lost on wire");}finally{buffer.release();}

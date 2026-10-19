@@ -52,6 +52,7 @@ public final class LogViewerClientHooks {
     public static void acceptCart(com.roften.avilixlogger.net.S2CCartHistoryPayload payload) {
         Minecraft mc=Minecraft.getInstance();
         if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.OPEN){
+            LogViewerScreen.setLogTimeZone(payload.message());
             var existing=CartHistoryScreen.owner(mc.screen);
             if(existing!=null&&!payload.cartId().isBlank()){existing.showHistory(payload.cartId());return;}
             var screen=new CartHistoryScreen(mc.screen,payload.cartId());mc.setScreen(screen);screen.load();

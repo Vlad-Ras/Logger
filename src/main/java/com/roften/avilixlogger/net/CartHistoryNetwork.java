@@ -26,7 +26,7 @@ public final class CartHistoryNetwork {
     private static boolean allowed(ServerPlayer p){return ModList.get().isLoaded("create")&&AuthCoreBridge.isAuthorized(p.getServer())&&PermissionUtil.has(p.createCommandSourceStack(),"avilixlogger.command.lookup",2);}
     public static boolean open(CommandSourceStack source,String id){
         var p=source.getPlayer();if(p==null||!LoggerNetwork.isClientPresent(p))return false;VIEWERS.add(p.getUUID());
-        PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.OPEN,0,id,0,restore(p),"","",List.of()));return true;
+        PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.OPEN,0,id,0,restore(p),ZoneId.systemDefault().getId(),"",List.of()));return true;
     }
     public static void handleAction(C2SCartActionPayload payload,IPayloadContext ctx){ctx.enqueueWork(()->{
         if(!(ctx.player() instanceof ServerPlayer p))return;var source=p.createCommandSourceStack();
