@@ -59,7 +59,9 @@ public final class ChatLogPager {
         render(level, player, state);
     }
 
-    public static void render(ServerLevel level, ServerPlayer player, LastQueryManager.State state) {
+    public static void renderAndSend(ServerLevel level,ServerPlayer player,LastQueryManager.State state,net.minecraft.commands.CommandSourceStack output){render(level,player,state,output);}
+    public static void render(ServerLevel level,ServerPlayer player,LastQueryManager.State state){render(level,player,state,player.createCommandSourceStack());}
+    private static void render(ServerLevel level, ServerPlayer player, LastQueryManager.State state,net.minecraft.commands.CommandSourceStack output) {
         if (level == null || player == null || state == null || player.server == null) return;
 
         UUID playerId = player.getUUID();
@@ -69,7 +71,7 @@ public final class ChatLogPager {
                 state.pageIndex(), state.title);
         WeakReference<ServerPlayer> playerRef = new WeakReference<>(player);
         MinecraftServer server = player.server;
-        player.sendSystemMessage(Component.literal("[Логгер] Загрузка страницы...").withStyle(ChatFormatting.AQUA));
+        output.sendSystemMessage(Component.literal("[Логгер] Загрузка страницы...").withStyle(ChatFormatting.AQUA));
 
         try {
             executor().execute(() -> {
@@ -77,21 +79,21 @@ public final class ChatLogPager {
                     PageResult result = query(level, snapshot, () -> Thread.currentThread().isInterrupted()
                             || !Long.valueOf(sequence).equals(LATEST.get(playerId)));
                     if (result == null || !Long.valueOf(sequence).equals(LATEST.get(playerId))) return;
-                    server.execute(() -> deliver(level, playerRef, playerId, sequence, state, snapshot, result));
+                    server.execute(() -> deliver(level, playerRef, playerId, sequence, state, snapshot, result,output));
                 } catch (Throwable error) {
                     AvilixLoggerMod.LOGGER.error("[AvilixLogger] Chat log query failed", error);
                     server.execute(() -> {
                         if (!Long.valueOf(sequence).equals(LATEST.get(playerId))) return;
                         ServerPlayer live = playerRef.get();
                         if (live != null && live.isAlive()) {
-                            live.sendSystemMessage(Component.literal("Ошибка полного запроса логов. Неполные данные не показаны; смотри server log.")
+                            output.sendSystemMessage(Component.literal("Ошибка полного запроса логов. Неполные данные не показаны; смотри server log.")
                                     .withStyle(ChatFormatting.RED));
                         }
                     });
                 }
             });
         } catch (java.util.concurrent.RejectedExecutionException rejected) {
-            player.sendSystemMessage(Component.literal("Очередь запросов логов занята. Повтори через несколько секунд.")
+            output.sendSystemMessage(Component.literal("Очередь запросов логов занята. Повтори через несколько секунд.")
                     .withStyle(ChatFormatting.RED));
         }
     }
@@ -175,7 +177,7 @@ public final class ChatLogPager {
 
     private static void deliver(ServerLevel level, WeakReference<ServerPlayer> playerRef, UUID playerId,
                                 long sequence, LastQueryManager.State requestedState,
-                                QuerySnapshot snapshot, PageResult result) {
+                                QuerySnapshot snapshot, PageResult result,net.minecraft.commands.CommandSourceStack output) {
         if (!Long.valueOf(sequence).equals(LATEST.get(playerId))) return;
         ServerPlayer player = playerRef.get();
         if (player == null || !player.isAlive()) return;
@@ -187,13 +189,13 @@ public final class ChatLogPager {
         MutableComponent header = Component.literal("[Логгер] ").withStyle(ChatFormatting.DARK_GRAY)
                 .append(Component.literal(snapshot.title == null ? "Логи" : snapshot.title).withStyle(ChatFormatting.GOLD))
                 .append(Component.literal("  (стр. " + snapshot.pageIndex + ")").withStyle(ChatFormatting.GRAY));
-        player.sendSystemMessage(header);
+        output.sendSystemMessage(header);
         if (result.entries.isEmpty()) {
-            player.sendSystemMessage(Component.literal("Нет записей.").withStyle(ChatFormatting.GRAY));
+            output.sendSystemMessage(Component.literal("Нет записей.").withStyle(ChatFormatting.GRAY));
         } else {
-            for (LogEntry entry : result.entries) player.sendSystemMessage(LogText.toChatLine(level, entry));
+            for (LogEntry entry : result.entries) output.sendSystemMessage(LogText.toChatLine(level, entry));
         }
-        renderNav(player, liveState);
+        renderNav(player, liveState, output);
     }
 
     private static boolean hasPostFilters(LogQuery q) {
@@ -227,7 +229,7 @@ public final class ChatLogPager {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
-    private static void renderNav(ServerPlayer player, LastQueryManager.State state) {
+    private static void renderNav(ServerPlayer player, LastQueryManager.State state,net.minecraft.commands.CommandSourceStack output) {
         boolean hasPrev = state.cursors.size() > 1;
         boolean hasNext = state.hasNext && state.nextCursorCandidate > 0;
         MutableComponent nav = Component.literal("[ ").withStyle(ChatFormatting.DARK_GRAY);
@@ -244,7 +246,7 @@ public final class ChatLogPager {
         nav.append(Component.literal("В начало").withStyle(ChatFormatting.YELLOW)
                 .withStyle(s -> s.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/log page first"))));
         nav.append(Component.literal(" ]").withStyle(ChatFormatting.DARK_GRAY));
-        player.sendSystemMessage(nav);
+        output.sendSystemMessage(nav);
     }
 
     public static void clear(ServerPlayer player) {

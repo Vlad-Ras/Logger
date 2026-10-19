@@ -179,7 +179,7 @@ public final class LogText {
                 || t == ActionType.BACKPACK_PUT || t == ActionType.BACKPACK_TAKE;
     }
 
-    private static ChatFormatting actionColor(ActionType t) {
+    public static ChatFormatting actionColor(ActionType t) {
         if (t == null) return ChatFormatting.GRAY;
         return switch (t) {
             case BLOCK_BREAK -> ChatFormatting.RED;

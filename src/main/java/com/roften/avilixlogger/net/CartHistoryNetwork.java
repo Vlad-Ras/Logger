@@ -86,7 +86,7 @@ public final class CartHistoryNetwork {
         case CART_UNLOAD -> "выгружена, это не удаление";
         case CART_ROLLBACK -> source!=null&&source.contains("recover_item")?"сохранённое состояние выдано предметом":"записан результат восстановления";
         default -> "";};}
-    private static int color(ActionType type){return switch(type){case CART_REMOVE,BLOCK_BREAK,CONTAINER_TAKE -> 0xFF7777;case CART_ASSEMBLE,CART_PLACE,BLOCK_PLACE,CONTAINER_PUT -> 0x77DD88;case CART_PACK,CART_DISASSEMBLE -> 0xFFCC66;case CART_ROLLBACK -> 0xBB99FF;default -> 0x77CCEE;};}
+    private static int color(ActionType type){return Objects.requireNonNullElse(LogText.actionColor(type).getColor(),0xAAAAAA);}
     private static void pageError(ServerPlayer p,long request,String message){PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.ERROR,request,"",0,false,clip(message,4000),"",List.of()));}
     private static boolean restore(ServerPlayer p){return PermissionUtil.has(p.createCommandSourceStack(),"avilixlogger.command.rollback",2);}
     public static void confirm(CommandSourceStack source,String message,String command){

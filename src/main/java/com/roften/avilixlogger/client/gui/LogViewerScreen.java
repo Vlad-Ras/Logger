@@ -514,6 +514,12 @@ public class LogViewerScreen extends Screen {
         addButton(Component.literal("Все функции / помощь"), b -> Minecraft.getInstance().setScreen(new LoggerFunctionsScreen(this)), rightX, y2, rightW, btnH);
         this.detailsPanelTop = y2 + btnH + gap + 2;
 
+        btnCopy.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Скопировать координаты выбранной строки")));
+        btnTp.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Телепорт к координатам выбранной строки; нужны права на телепорт")));
+        btnCopyFull.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Скопировать полный текст открытой вкладки подробностей")));
+        btnCopyJson.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Загрузить и скопировать JSON именно выбранного entry")));
+        btnTabDetails.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Читаемые подробности выбранной записи")));
+        btnTabRaw.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Исходные данные и NBT выбранной записи")));
         updateButtons();
         refreshFilterButtonLabels();
     }

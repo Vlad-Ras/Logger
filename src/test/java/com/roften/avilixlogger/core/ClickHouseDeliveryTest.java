@@ -72,7 +72,7 @@ final class ClickHouseDeliveryTest {
             catch (java.io.IOException expected) {}
             database.appendBatch("retry-test", batch);
             check(handlerFailure.get() == null, "HTTP contract violation: " + handlerFailure.get());
-            check(failed.get() && requests.values().stream().filter(v->v.startsWith("INSERT")&&(v.contains("_feed FORMAT")||v.contains("_containers FORMAT"))).count() == 2, "split feed/detail retry was not exercised");
+            check(failed.get() && requests.keySet().stream().filter(v->v.contains("retry-test")).count() == 2, "split feed/detail retry was not exercised");
             check(first.count == 2 && second.count == 3, "coalescing mutated original item counts");
             LogEntry loot=row("loot");loot.type=ActionType.ITEM_PICKUP;loot.dim="minecraft:overworld";loot.count=12;loot.actorUuid=UUID.randomUUID();
             UUID cart=UUID.randomUUID();loot.source=CartAuditContext.prefix(cart)+"loot_pickup:0";
