@@ -1058,7 +1058,7 @@ public final class LoggerCommands {
 
         if (src.getEntity() instanceof ServerPlayer sp) {
             LastQueryManager.State st = LastQueryManager.set(sp, q, "Логи @ " + pos.getX() + "," + pos.getY() + "," + pos.getZ());
-            ChatLogPager.renderAndSend(level, sp, st, ctx.getSource());
+            ChatLogPager.renderAndSend(level, sp, st, src);
             return;
         }
 

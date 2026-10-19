@@ -61,8 +61,8 @@ public final class CartItemRecovery {
         if(!BUSY.add(p.plan.id())){com.roften.avilixlogger.net.CartHistoryNetwork.error(source,"Эта штуковина уже восстанавливается");return;}
         CompoundTag original;
         try{idle();p.origin.validate(actor);if(p.origin.mode!=CartStateRecoveryOrigin.Mode.HELD&&actor.getInventory().getFreeSlot()<0)throw new IllegalStateException("Нет свободного слота");p.origin.lock();original=p.origin.backup(actor);}
-        catch(Exception e){p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());error(source,e);return;}
-        ORIGINS.put(actor.getUUID(),p.origin);ISSUING.put(actor.getUUID(),p.plan.id());CartHistoryNetwork.progress(source,"Подтверждение принято. Резервирую восстановление и выдаю предмет…");
+        catch(Exception e){p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());CartAuditContext.itemRecoveryActive=!ISSUING.isEmpty();error(source,e);return;}
+        ORIGINS.put(actor.getUUID(),p.origin);ISSUING.put(actor.getUUID(),p.plan.id());CartAuditContext.itemRecoveryActive=true;CartHistoryNetwork.progress(source,"Подтверждение принято. Резервирую восстановление и выдаю предмет…");
         var claim=source.getServer().getWorldPath(LevelResource.ROOT).resolve("data/avilix-cart-recovery/"+p.plan.id()+(p.origin.mode==CartStateRecoveryOrigin.Mode.MISSING?"":"-replace-"+UUID.randomUUID())+".nbt");long request=generation;
         if(!submit(source,()->{try{
             reserve(claim,p.plan,p.recipient,original);
@@ -76,8 +76,8 @@ public final class CartItemRecovery {
                 row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,receipt);row.extra="item_recovery; entry="+p.plan.entry()+"; side="+p.plan.side()+"; snapshot="+p.plan.snapshotEntry()+"; state_changes="+p.plan.changes()+"; world_changes=0; mode="+p.origin.mode;LogIdGenerator.ensure(row);LoggerRuntime.storage(actor.serverLevel()).append(row);
                 }catch(Exception journalError){CreateCartAudit.failed("delivered recovery receipt",journalError);CartHistoryNetwork.notice(source,"Предмет уже выдан; не удалось записать квитанцию. Повторная выдача заблокирована резервом.");}
                 CartHistoryNetwork.done(source,"Штуковина выдана в свободный слот. entry="+p.plan.entry()+". Блоки мира и действия не откатывались.");
-            }catch(Exception e){error(source,e);}finally{p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());}});
-        }catch(Exception e){source.getServer().execute(()->{p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());error(source,e);});}})){p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());}
+            }catch(Exception e){error(source,e);}finally{p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());CartAuditContext.itemRecoveryActive=!ISSUING.isEmpty();}});
+        }catch(Exception e){source.getServer().execute(()->{p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());CartAuditContext.itemRecoveryActive=!ISSUING.isEmpty();error(source,e);});}})){p.origin.unlock();ORIGINS.remove(actor.getUUID());BUSY.remove(p.plan.id());ISSUING.remove(actor.getUUID());CartAuditContext.itemRecoveryActive=!ISSUING.isEmpty();}
     }
     private static boolean authorized(ServerPlayer player){return LoggerConfig.isEnabled()&&player.getServer()!=null&&player.getServer().getPlayerList().getPlayer(player.getUUID())==player&&PermissionUtil.has(player.createCommandSourceStack(),"avilixlogger.command.rollback",2);}
     private static void idle(){if(!ISSUING.isEmpty()||CartRollbackCoordinator.busy()||RollbackCoordinator.hasActiveRollback()||CartAuditContext.rollbackActive)throw new IllegalStateException("Дождитесь завершения текущего восстановления или отката");}
@@ -98,5 +98,5 @@ public final class CartItemRecovery {
     }
     public static void cancel(CommandSourceStack source){if(source.getPlayer()!=null){PREVIEWS.remove(source.getPlayer().getUUID());REQUESTS.remove(source.getPlayer().getUUID());}}
     public static void logout(UUID actor){PREVIEWS.remove(actor);REQUESTS.remove(actor);}
-    public static void stop(){generation++;for(var origin:ORIGINS.values())origin.unlock();ORIGINS.clear();PREVIEWS.clear();REQUESTS.clear();BUSY.clear();ISSUING.clear();IO.getQueue().clear();}
+    public static void stop(){generation++;for(var origin:ORIGINS.values())origin.unlock();ORIGINS.clear();PREVIEWS.clear();REQUESTS.clear();BUSY.clear();ISSUING.clear();CartAuditContext.itemRecoveryActive=false;IO.getQueue().clear();}
 }

@@ -97,7 +97,7 @@ public final class CartHistoryScreen extends LogViewerScreen {
         }
         super.apply(new S2CLogPagePayload("Вагонеточные штуковины",previous.size()+1,!previous.isEmpty(),next>0,display));
         setDetails(List.of(Component.literal(p.message()),Component.literal("Выберите строку → «Вернуть состояние строки». Получатель предмета — вы."),Component.literal("ID и entry копируются кнопками справа. Поиск применяется ко всему журналу.")));
-        if(seekEntry>0){selectEntry(seekEntry);seekEntry=0;}
+        if(seekEntry>0){selectEntry(seekEntry);if(selectedRow()==null)message("Запись entry="+seekEntry+" не найдена у этого ID",true);seekEntry=0;}
         updateButtons();
     }
     @Override protected void updateButtons(){super.updateButtons();if(restore!=null)restore.active=canRestore&&!loading&&!operationRunning&&chosen()!=null;if(latest!=null)latest.active=canRestore&&!loading&&!operationRunning&&!selectedId().isBlank();}
@@ -127,7 +127,7 @@ public final class CartHistoryScreen extends LogViewerScreen {
             id=makeEditBox(x,y,w,h,Component.literal("ID"));id.setMaxLength(36);id.setValue(parent.selectedId());id.setTooltip(Tooltip.create(Component.literal("Полный ID штуковины")));addRenderableWidget(id);y+=step;
             entry=makeEditBox(x,y,w,h,Component.literal("entry"));entry.setMaxLength(19);entry.setValue(selected==null?"":Long.toString(selected.entry()));entry.setHint(Component.literal("entry — номер строки"));addRenderableWidget(entry);y+=step;
             addButton(Component.literal("Открыть историю ID"),b->parent.showHistory(id.getValue().trim()),x,y,w,h);y+=step;
-            addButton(Component.literal("Перейти к entry"),b->withEntry(e->{if(parent.loading)return;parent.id=id.getValue().trim();parent.seekEntry=e;parent.cursor=e==Long.MAX_VALUE?0:e+1;parent.previous.clear();Minecraft.getInstance().setScreen(parent);parent.load();}),x,y,w,h);y+=step;
+            addButton(Component.literal("Перейти к entry"),b->withEntry(e->{if(parent.loading)return;parent.id=id.getValue().trim();parent.owner=parent.actor=parent.time=parent.search="";parent.dimension="*";parent.actionFilter="ALL";parent.seekEntry=e;parent.cursor=e==Long.MAX_VALUE?0:e+1;parent.previous.clear();Minecraft.getInstance().setScreen(parent);parent.load();}),x,y,w,h);y+=step;
             addButton(Component.literal("Последнее состояние → мне в инвентарь"),b->{parent.recover(id.getValue().trim(),0);onClose();},x,y,w,h);y+=step;
             addButton(Component.literal("Состояние entry → мне в инвентарь"),b->withEntry(e->{parent.recover(id.getValue().trim(),e);onClose();}),x,y,w,h);y+=step;
             addButton(Component.literal("Отменить подготовку восстановления"),b->{parent.action(Action.CANCEL_RECOVERY,"",0);onClose();},x,y,w,h);y+=step;

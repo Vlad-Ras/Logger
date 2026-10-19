@@ -10,6 +10,7 @@ public final class CartAuditContext {
     }
     public static final java.util.Set<UUID> LOCKED_ENTITIES = new java.util.HashSet<>();
     public static boolean rollbackActive;
+    public static boolean itemRecoveryActive;
     private static final ThreadLocal<Stamp> CURRENT = new ThreadLocal<>();
     private static final ThreadLocal<UUID> LOOT = new ThreadLocal<>();
     public static UUID loot(UUID id){UUID previous=LOOT.get();LOOT.set(id);return previous;}

@@ -1327,6 +1327,8 @@ public class LogViewerScreen extends Screen {
         return true;
     }
 
+    protected final boolean choiceDropdownOpen(){return typeDropdownOpen;}
+    protected final void renderChoiceDropdown(GuiGraphics g,int x,int y){if(typeDropdownOpen){g.pose().pushPose();g.pose().translate(0,0,500);renderTypeDropdown(g,x,y);g.pose().popPose();}}
     private void renderTypeDropdown(GuiGraphics g, int mouseX, int mouseY) {
         if (!typeDropdownOpen) return;
         DropdownLayout layout = typeDropdownLayout();

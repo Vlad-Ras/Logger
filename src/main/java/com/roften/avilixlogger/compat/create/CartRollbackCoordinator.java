@@ -81,7 +81,7 @@ public final class CartRollbackCoordinator {
         ServerPlayer player=source.getPlayer(); if(player==null)return;
         Preview preview=PREVIEWS.remove(player.getUUID());
         if(preview==null || preview.expires<System.currentTimeMillis()){ CartHistoryNetwork.error(source,"Предпросмотр отсутствует или истёк");return; }
-        if(busy() || RollbackCoordinator.hasActiveRollback()){CartHistoryNetwork.error(source,"Уже выполняется откат");return;}
+        if(busy() || RollbackCoordinator.hasActiveRollback()||CartAuditContext.rollbackActive||CartAuditContext.itemRecoveryActive){CartHistoryNetwork.error(source,"Уже выполняется откат");return;}
         if(!LoggerConfig.isEnabled()){CartHistoryNetwork.error(source,"Logger не авторизован");return;}
         Entity current;
         try { current=CreateCartAudit.loaded(preview.id); } catch (IllegalStateException e) { errorNow(source,e); return; }
