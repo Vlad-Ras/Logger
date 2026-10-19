@@ -82,7 +82,7 @@ public class LogViewerScreen extends Screen {
     private int rowsVersion = 0;
     private int cachedRowsVersion = -1;
     private int cachedListWidth = -1;
-    private int cachedTextScalePercent = -1;
+    private int cachedTextScaleKey = -1;
     private String cachedDisplayFilter = null;
     private Set<Long> cachedExpandedRows = Set.of();
     private List<DisplayLine> cachedDisplayLines = List.of();
@@ -103,6 +103,9 @@ public class LogViewerScreen extends Screen {
     private List<Component> detailLines = List.of();
     private List<Component> rawLines = List.of();
     private int detailsScroll = 0;
+    private List<Component> cachedDetailSource;
+    private int cachedDetailWidth=-1,cachedDetailScale=-1;
+    private List<net.minecraft.util.FormattedCharSequence> cachedDetailDisplay=List.of();
 
     private String lastJson = "";
     private boolean pendingCopyJson = false;
@@ -186,7 +189,7 @@ public class LogViewerScreen extends Screen {
         int width = listWidth();
         if (cachedRowsVersion == rowsVersion
                 && cachedListWidth == width
-                && cachedTextScalePercent == savedLogTextScalePercent
+                && cachedTextScaleKey == Math.round(logTextScale()*1000)
                 && java.util.Objects.equals(cachedDisplayFilter, filter)
                 && cachedExpandedRows.equals(expandedRows)) {
             return cachedDisplayLines;
@@ -207,7 +210,7 @@ public class LogViewerScreen extends Screen {
         }
         cachedRowsVersion = rowsVersion;
         cachedListWidth = width;
-        cachedTextScalePercent = savedLogTextScalePercent;
+        cachedTextScaleKey = Math.round(logTextScale()*1000);
         cachedDisplayFilter = filter;
         cachedExpandedRows = Set.copyOf(expandedRows);
         cachedDisplayLines = List.copyOf(out);
@@ -908,17 +911,13 @@ public class LogViewerScreen extends Screen {
         }
 
         int rightX = rightPanelX();
-        int detailsTop = listTop() + 8;
-        int detailsBottom = this.height - 36;
+        int detailsTop = Math.max(detailsPanelTop,listTop());
+        int detailsBottom = this.height - 30;
         if (mouseX >= rightX && mouseX <= this.width - 10 && mouseY >= detailsTop && mouseY <= detailsBottom) {
             int step = (int) Math.signum(deltaY);
-            List<Component> lines = showRawTab ? rawLines : detailLines;
-            if (lines == null) lines = List.of();
-            int headerH = 14;
-            int y = detailsTop + headerH;
-            int maxLines = Math.max(0, (detailsBottom - y) / detailLineH());
-            int maxStart = Math.max(0, lines.size() - maxLines);
-            this.detailsScroll = Math.max(0, Math.min(maxStart, this.detailsScroll - step));
+            int maxLines=Math.max(0,(detailsBottom-detailsTop-14)/detailLineH());
+            int maxStart=Math.max(0,wrappedDetailLines().size()-maxLines);
+            this.detailsScroll=Math.max(0,Math.min(maxStart,this.detailsScroll-step*3));
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, deltaX, deltaY);
@@ -1062,22 +1061,7 @@ public class LogViewerScreen extends Screen {
 
         g.fill(panelLeft, panelTop, panelRight, panelBottom, 0x44000000);
 
-        List<Component> base = showRawTab ? rawLines : detailLines;
-        if (base == null) base = List.of();
-
-        // Wrap lines to fit the panel width.
-        int wrapW = Math.max(10, (panelRight - panelLeft) - 8);
-        int splitW = Math.max(10, Math.round(wrapW / Math.max(0.25f, logTextScale())));
-        java.util.ArrayList<net.minecraft.util.FormattedCharSequence> lines = new java.util.ArrayList<>();
-        for (Component c : base) {
-            if (c == null) continue;
-            var split = this.font.split(c, splitW);
-            if (split == null || split.isEmpty()) {
-                lines.add(net.minecraft.util.FormattedCharSequence.EMPTY);
-            } else {
-                lines.addAll(split);
-            }
-        }
+        List<net.minecraft.util.FormattedCharSequence> lines=wrappedDetailLines();
 
         // Fixed header inside the panel
         Component hdr = Component.translatable(showRawTab ? "gui.avilixlogger.hdr.raw" : "gui.avilixlogger.hdr.details")
@@ -1114,6 +1098,16 @@ public class LogViewerScreen extends Screen {
             int thumbY = barTop + (int) ((barBottom - barTop - thumbH) * frac);
             g.fill(barX, thumbY, barX + 2, thumbY + thumbH, 0x99AAAAAA);
         }
+    }
+
+    private List<net.minecraft.util.FormattedCharSequence> wrappedDetailLines(){
+        List<Component> base=showRawTab?rawLines:detailLines;if(base==null)base=List.of();
+        int wrapW=Math.max(10,rightPanelW()-8);
+        if(base==cachedDetailSource&&wrapW==cachedDetailWidth&&Math.round(logTextScale()*1000)==cachedDetailScale)return cachedDetailDisplay;
+        int splitW=Math.max(10,Math.round(wrapW/Math.max(0.25f,logTextScale())));
+        var lines=new java.util.ArrayList<net.minecraft.util.FormattedCharSequence>();
+        for(var c:base){if(c==null)continue;var split=font.split(c,splitW);if(split==null||split.isEmpty())lines.add(net.minecraft.util.FormattedCharSequence.EMPTY);else lines.addAll(split);}
+        cachedDetailSource=base;cachedDetailWidth=wrapW;cachedDetailScale=Math.round(logTextScale()*1000);cachedDetailDisplay=List.copyOf(lines);return cachedDetailDisplay;
     }
 
     private void updateAdaptiveInputWidths() {

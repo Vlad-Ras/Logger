@@ -45,6 +45,9 @@ public final class CartGuiClientSmoke {
                 check(mc.keyboardHandler.getClipboard().equals("GUI smoke sentinel"),"neighbour JSON copied as selected entry");
                 pending.setBoolean(root,true);root.acceptDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(100,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal("{\"id\":100}"))));
                 check(mc.keyboardHandler.getClipboard().equals("{\"id\":100}"),"selected JSON not copied");
+                root.acceptDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(100,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.DETAILS,List.of(net.minecraft.network.chat.Component.literal("Очень длинное описание сохранённого состояния. ".repeat(300)))));
+                root.mouseScrolled(root.width-20,root.height-40,0,-1);
+                var ds=LogViewerScreen.class.getDeclaredField("detailsScroll");ds.setAccessible(true);check(ds.getInt(root)>0,"wrapped details were rendered but could not be scrolled");
                 String largeJson="{\"id\":42,\"beAfter\":\""+"сохранённые-данные-".repeat(4000)+"\"}";
                 var large=new com.roften.avilixlogger.net.S2CLogDetailsPayload(42,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal(largeJson)));
                 var buf=new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(),net.minecraft.core.RegistryAccess.EMPTY);
