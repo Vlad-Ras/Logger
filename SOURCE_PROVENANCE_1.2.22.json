@@ -1,0 +1,13 @@
+{
+  "version": "1.2.22",
+  "minecraft": "1.21.1",
+  "neoforge": "21.1.219",
+  "built_commit": "4abc37be8bb7e735438d942c790ef929343da4c5",
+  "built_tree": "7f6a33d319b69a503800b43abb804601293bf11c",
+  "workflow_run": 39207371569,
+  "workflow_url": "https://github.com/Vlad-Ras/Logger/actions/runs/39207371569",
+  "jar": "avilixlogger-1.2.22.jar",
+  "jar_sha256": "ef1467bdeb25b3924ba44f886ecedbe5b53be327f972e0d6b69938dbb65f95c1",
+  "jar_bytes": 760692,
+  "network_protocol": 8
+}

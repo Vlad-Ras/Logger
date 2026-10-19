@@ -1,5 +1,7 @@
 # 2.1.22 — complete minecart GUI workflow
 
+Промежуточные заметки. Актуальный выпуск с объединённым GUI называется **1.2.22** по запросу владельца; см. [RELEASE_1.2.22.md](RELEASE_1.2.22.md).
+
 Based on 2.1.21, retaining recorded-state reconstruction, strict mounted-storage validation and translated GUI search.
 
 The dedicated page now includes player lookup, general history, exact ID history, the item held in the main hand, lifecycle/checkpoint filtering, cursor navigation, manual entry lookup, selected/latest state recovery into an item, period/action rollback, confirmation, cancellation of either preparation/preview/active rollback, details/JSON/ID/entry copying, operation status and a scrollable/copyable result journal. A normal workflow can start from the existing minecart button in the main log GUI and requires no chat commands.
