@@ -27,6 +27,18 @@ public interface LogStorage {
      */
     List<LogEntry> queryReverse(LogQuery q);
 
+    /** Lightweight owner metadata; never infer ownership from an event actor. Called on workers only. */
+    default java.util.Map<java.util.UUID,String> cartOwners(java.util.Set<java.util.UUID> ids) {
+        return readCartOwners(this,ids);
+    }
+    static java.util.Map<java.util.UUID,String> readCartOwners(LogStorage storage,java.util.Set<java.util.UUID> ids) {
+        if(ids.isEmpty())return java.util.Map.of();
+        var q=new LogQuery();q.dim="*";q.sinceTs=0;q.untilTs=Long.MAX_VALUE;q.cartIds=ids;q.sourcePrefix="create:cart:";q.types=com.roften.avilixlogger.net.CartHistoryQuery.checkpoints();q.limit=4096;
+        var out=new java.util.HashMap<java.util.UUID,String>();
+        for(var e:storage.queryReverse(q)){var id=CartAuditContext.id(e.source);String owner=CartOwnerMetadata.owner(e.extra);if(id!=null&&!owner.isBlank())out.putIfAbsent(id,owner);}
+        return java.util.Map.copyOf(out);
+    }
+
     /** Called only on a worker before a destructive query; wait for accepted rows to become visible. */
     default boolean awaitVisible(long deadlineNanos) throws InterruptedException { return true; }
 

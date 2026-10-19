@@ -125,4 +125,6 @@ public final class DeduplicatingLogStorage implements LogStorage {
                     e.playerInvBefore, e.playerInvAfter, e.extra);
         }
     }
+    @Override public java.util.Map<java.util.UUID,String> cartOwners(java.util.Set<java.util.UUID> ids) { return delegate.cartOwners(ids); }
+
 }

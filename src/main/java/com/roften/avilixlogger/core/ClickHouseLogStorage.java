@@ -1033,6 +1033,30 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     }
 
 
+    private static final String CART_OWNER_PATTERN="(?:^|;\\s*)owner=([^;]*)";
+    private String cartOwnerRows() {
+        // Lifecycle metadata is retained in compat; feed-only installations are supported too.
+        return "SELECT id, source, extra FROM "+qualifiedSplitTable(TableKind.COMPAT)
+            +(useFeedTable?" UNION ALL SELECT id, source, extra FROM "+qualifiedFeedTable():"");
+    }
+    private String ownerGroups(java.util.Set<java.util.UUID> ids) {
+        String where=ids.isEmpty()?"":" AND substring(source, 13, 36) IN ("+ids.stream().map(x->sqlString(x.toString())).collect(java.util.stream.Collectors.joining(","))+")";
+        return "SELECT substring(source, 13, 36) AS cart_key, argMax(trimBoth(extract(extra, "+sqlString(CART_OWNER_PATTERN)+")), id) AS cart_owner FROM ("+cartOwnerRows()+") WHERE startsWith(source, 'create:cart:') AND notEmpty(extract(extra, "+sqlString(CART_OWNER_PATTERN)+"))"+where+" GROUP BY cart_key";
+    }
+    private void appendCartOwnerWhere(StringBuilder sql, LogQuery q) {
+        if(!q.cartIds.isEmpty())sql.append(" AND substring(source, 13, 36) IN (").append(q.cartIds.stream().map(x->sqlString(x.toString())).collect(java.util.stream.Collectors.joining(","))).append(')');
+        if(q.cartOwner!=null&&!q.cartOwner.isBlank())sql.append(" AND substring(source, 13, 36) IN (SELECT cart_key FROM (").append(ownerGroups(q.cartId==null?java.util.Set.of():java.util.Set.of(q.cartId))).append(") WHERE lowerUTF8(cart_owner) = lowerUTF8(").append(sqlString(q.cartOwner.trim())).append("))");
+    }
+    @Override public java.util.Map<java.util.UUID,String> cartOwners(java.util.Set<java.util.UUID> ids) {
+        if(ids.isEmpty())return java.util.Map.of();
+        if(!splitSchema)return LogStorage.readCartOwners(this,ids);
+        var out=new java.util.HashMap<java.util.UUID,String>();
+        try {String data=execute(ownerGroups(ids)+" FORMAT JSONEachRow",timeoutSec());
+            for(String line:data.split("\\n")){if(line.isBlank())continue;var row=com.google.gson.JsonParser.parseString(line).getAsJsonObject();out.put(java.util.UUID.fromString(row.get("cart_key").getAsString()),row.get("cart_owner").getAsString());}
+        }catch(Exception e){throw new IllegalStateException("Не удалось прочитать владельцев штуковин",e);}
+        return java.util.Map.copyOf(out);
+    }
+
     private void appendFeedWhere(StringBuilder sql, LogQuery q, boolean reverse) {
         appendFeedWhere(sql, q, reverse, true);
     }
@@ -1063,6 +1087,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (q.sourcePrefix != null) sql.append(" AND startsWith(source, ").append(sqlString(q.sourcePrefix)).append(')');
         if (q.backpackId != null) sql.append(" AND startsWith(source, ").append(sqlString(BackpackIds.prefix(q.backpackId))).append(')');
         if (q.cartId != null) sql.append(" AND startsWith(source, ").append(sqlString(CartAuditContext.prefix(q.cartId))).append(')');
+        appendCartOwnerWhere(sql, q);
         appendPositionWhere(sql, q);
         appendFeedOptionalFilters(sql, q);
 
@@ -1103,6 +1128,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (q.sourcePrefix != null) sql.append(" AND startsWith(source, ").append(sqlString(q.sourcePrefix)).append(')');
         if (q.backpackId != null) sql.append(" AND startsWith(source, ").append(sqlString(BackpackIds.prefix(q.backpackId))).append(')');
         if (q.cartId != null) sql.append(" AND startsWith(source, ").append(sqlString(CartAuditContext.prefix(q.cartId))).append(')');
+        appendCartOwnerWhere(sql, q);
         appendPositionWhere(sql, q);
         appendSplitOptionalFilters(sql, q, kind);
 
@@ -1158,7 +1184,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     }
 
     private static boolean requiresSearchColumns(LogQuery q) {
-        return q.sourcePrefix!=null||q.cartId!=null||q.backpackId!=null||q.planeOnly
+        return q.sourcePrefix!=null||q.cartId!=null||!q.cartIds.isEmpty()||q.cartOwner!=null||q.backpackId!=null||q.planeOnly
                 ||java.util.stream.Stream.of(q.blockIdFilter,q.planeNameFilter,q.extraTextFilter,q.owner,q.textFilter,q.trainNameFilter,q.backpackNeedle).anyMatch(x->x!=null&&!x.isBlank());
     }
     private static void appendSearchFilters(StringBuilder sql,LogQuery q,String entity,String extra,String nbt,String source,String... targets) {
@@ -1274,7 +1300,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         while(out.size()<Math.max(1,q.limit)){
             if(Thread.currentThread().isInterrupted()||System.nanoTime()>deadline||scanned>=32000)throw new IllegalStateException("Поиск в старом сжатом журнале превысил лимит; сузьте дату/радиус");
             var raw=selectLegacyBatch(scan,reverse);scanned+=raw.size();
-            for(var row:raw)if(LogSearchPredicate.matches(row,q)){out.add(row);if(out.size()>=Math.max(1,q.limit))break;}
+            java.util.Map<java.util.UUID,String> owners=java.util.Map.of();
+            if(q.cartOwner!=null&&!q.cartOwner.isBlank()){var ids=new java.util.HashSet<java.util.UUID>();for(var row:raw){var id=CartAuditContext.id(row.source);if(id!=null)ids.add(id);}owners=cartOwners(ids);}
+            for(var row:raw)if(LogSearchPredicate.matches(row,q)&&(q.cartOwner==null||q.cartOwner.isBlank()||q.cartOwner.equalsIgnoreCase(owners.get(CartAuditContext.id(row.source))))){out.add(row);if(out.size()>=Math.max(1,q.limit))break;}
             if(raw.size()<scan.limit)break;
             long cursor=raw.getLast().id;if(cursor<=0||cursor==(reverse?scan.beforeId:scan.afterId))throw new IllegalStateException("Неверный курсор старого журнала");
             if(reverse)scan.beforeId=cursor;else scan.afterId=cursor;

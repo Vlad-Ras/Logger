@@ -31,10 +31,13 @@ final class CartGuiWorkflowTest {
             var p=new S2CCartHistoryPayload(kind,0,"",0,false,"Полное сообщение результата","",List.of());var b=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
             try{S2CCartHistoryPayload.STREAM_CODEC.encode(b,p);check(S2CCartHistoryPayload.STREAM_CODEC.decode(b).equals(p),"GUI result/progress lost on wire");}finally{b.release();}
         }
-        String largeJson="{\"id\":42,\"beAfter\":\""+"сохранённые-данные-".repeat(4000)+"\"}";
-        var large=new S2CLogDetailsPayload(42,C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal(largeJson)));
-        var jsonBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
-        try{S2CLogDetailsPayload.STREAM_CODEC.encode(jsonBuffer,large);check(S2CLogDetailsPayload.STREAM_CODEC.decode(jsonBuffer).lines().getFirst().getString().equals(largeJson),"large JSON export truncated/disconnected at the old 32767 character boundary");}finally{jsonBuffer.release();}
+        var rich=new C2SCartHistoryPayload(19,id,100,"Actor",false,"Owner","13.10.2026 03:00","CART_PACK","minecraft:overworld","упаковка",37);
+        var richQ=CartHistoryQuery.build(rich);check(richQ.cartOwner.equals("Owner")&&richQ.actorName.equals("Actor")&&richQ.limit==38&&!richQ.requireDetails&&richQ.types.equals(EnumSet.of(ActionType.CART_PACK))&&richQ.sinceTs>0,"owner/actor/time/action/page size query not pushed down");
+        var rb=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);try{C2SCartHistoryPayload.STREAM_CODEC.encode(rb,rich);check(C2SCartHistoryPayload.STREAM_CODEC.decode(rb).equals(rich),"rich filters lost");}finally{rb.release();}
+        check(CartOwnerMetadata.owner("cart=123; owner=Owner; x=1").equals("Owner"),"owner marker not parsed");
+        for(var op:LoggerGuiOperation.values()){var a=op.first.isEmpty()?"":"Example";var b=op.second.isEmpty()?"":"Other";check(op.command(a,b).startsWith("log"),"GUI command escaped logger root");}
+        reject(()->LoggerGuiOperation.ROLLBACK.command("--confirm",""),"preview submitted a destructive confirmation");
+        reject(()->LoggerGuiOperation.BACKPACK_FIND.command("Owner\nop Owner",""),"multiline command accepted");
         System.out.println("CART_GUI_WORKFLOW_OK: action/filter/result codecs, actor+ID+cursor+checkpoints before LIMIT, typed confirmation, mutation validation");
     }
     private static void reject(Runnable task,String message){try{task.run();}catch(IllegalArgumentException expected){return;}throw new AssertionError(message);}

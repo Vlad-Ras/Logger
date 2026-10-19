@@ -8,6 +8,7 @@ public final class LogSearchPredicate {
     public static boolean matches(LogEntry e, LogQuery q) {
         if(e == null) return false;
         if(q.sourcePrefix != null && (e.source == null || !e.source.startsWith(q.sourcePrefix))) return false;
+        if(!q.cartIds.isEmpty()&&!q.cartIds.contains(CartAuditContext.id(e.source)))return false;
         if(q.cartId != null && !q.cartId.equals(CartAuditContext.id(e.source))) return false;
         if(q.backpackId != null && !q.backpackId.equals(BackpackIds.fromSource(e.source))) return false;
         if(!anyAliases(q.blockIdFilter,q.blockAliases,e.blockBefore,e.blockAfter,e.source,e.extra)) return false;

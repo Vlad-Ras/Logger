@@ -46,6 +46,9 @@ public final class LogViewerClientHooks {
         OPEN_SCREEN.requestInitialData();
     }
 
+    public static void acceptFunction(com.roften.avilixlogger.net.S2CLoggerFunctionPayload payload) {
+        if(Minecraft.getInstance().screen instanceof LoggerFunctionsScreen screen)screen.accept(payload);
+    }
     public static void acceptCart(com.roften.avilixlogger.net.S2CCartHistoryPayload payload) {
         Minecraft mc=Minecraft.getInstance();
         if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.OPEN){
@@ -73,7 +76,9 @@ public final class LogViewerClientHooks {
 
     public static void acceptInspectTool(S2CInspectToolPayload payload) {
         if (payload == null) return;
-        if (OPEN_SCREEN != null) OPEN_SCREEN.applyInspectTool(payload);
+        var current=LogViewerScreen.activeViewer(Minecraft.getInstance().screen);
+        if(current!=null)current.applyInspectTool(payload);
+        if (OPEN_SCREEN != null&&OPEN_SCREEN!=current) OPEN_SCREEN.applyInspectTool(payload);
     }
 
     public static void acceptRollbackPreview(S2CRollbackPreviewPayload payload) {

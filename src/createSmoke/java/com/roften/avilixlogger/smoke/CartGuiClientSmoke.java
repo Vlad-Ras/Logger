@@ -1,6 +1,6 @@
 package com.roften.avilixlogger.smoke;
 
-import com.roften.avilixlogger.client.gui.CartHistoryScreen;
+import com.roften.avilixlogger.client.gui.*;
 import com.roften.avilixlogger.net.S2CCartHistoryPayload;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
@@ -27,16 +27,23 @@ public final class CartGuiClientSmoke {
             if(root==null){
                 if(!(mc.screen instanceof net.minecraft.client.gui.screens.TitleScreen)||mc.getOverlay()!=null||++readyTicks<40)return;
                 root=new CartHistoryScreen(mc.screen,"");mc.setScreen(root);
-                var rows=new ArrayList<S2CCartHistoryPayload.Row>();for(int i=0;i<12;i++)rows.add(new S2CCartHistoryPayload.Row(ID,100-i,"18.10.2026 23:50:00","Штуковина: упаковка","MaxKuz","minecraft:overworld · -1775 38 -2726","Полный снимок: 125 блоков. Хранилища предметов и жидкости сохранены.",true,true));
+                var rows=new ArrayList<S2CCartHistoryPayload.Row>();for(int i=0;i<12;i++)rows.add(new S2CCartHistoryPayload.Row(ID,100-i,"18.10.2026 23:50:00","Штуковина: упаковка","MaxKuz","minecraft:overworld · -1775 38 -2726","Сохранены блоки, механизмы, ресурсы и жидкости.",true,true,"Owner","конструкция упакована в предмет",0xFFCC66));
                 root.apply(new S2CCartHistoryPayload(S2CCartHistoryPayload.PAGE,0,"",88,true,"Все операции доступны через GUI","",rows));
-                var selected=CartHistoryScreen.class.getDeclaredField("selected");selected.setAccessible(true);selected.setInt(root,0);
+                var select=LogViewerScreen.class.getDeclaredMethod("selectEntry",long.class);select.setAccessible(true);select.invoke(root,100L);
                 root.apply(new S2CCartHistoryPayload(S2CCartHistoryPayload.DONE,0,"",0,false,"Штуковина выдана в свободный слот. entry=100. Сохранены блоки, компоненты предметов и жидкости.","",List.of()));
-                var jsonRequest=CartHistoryScreen.class.getDeclaredField("jsonRequest");jsonRequest.setAccessible(true);
-                mc.keyboardHandler.setClipboard("GUI smoke sentinel");jsonRequest.setLong(root,100);
+                var pending=LogViewerScreen.class.getDeclaredField("pendingCopyJson");pending.setAccessible(true);
+                mc.keyboardHandler.setClipboard("GUI smoke sentinel");pending.setBoolean(root,true);
                 root.acceptDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(100,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal("{\"id\":99}"))));
                 check(mc.keyboardHandler.getClipboard().equals("GUI smoke sentinel"),"neighbour JSON copied as selected entry");
-                jsonRequest.setLong(root,100);root.acceptDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(100,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal("{\"id\":100}"))));
+                pending.setBoolean(root,true);root.acceptDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(100,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal("{\"id\":100}"))));
                 check(mc.keyboardHandler.getClipboard().equals("{\"id\":100}"),"selected JSON not copied");
+                String largeJson="{\"id\":42,\"beAfter\":\""+"сохранённые-данные-".repeat(4000)+"\"}";
+                var large=new com.roften.avilixlogger.net.S2CLogDetailsPayload(42,com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.JSON,List.of(net.minecraft.network.chat.Component.literal(largeJson)));
+                var buf=new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(),net.minecraft.core.RegistryAccess.EMPTY);
+                try{com.roften.avilixlogger.net.S2CLogDetailsPayload.STREAM_CODEC.encode(buf,large);check(com.roften.avilixlogger.net.S2CLogDetailsPayload.STREAM_CODEC.decode(buf).lines().getFirst().getString().equals(largeJson),"large JSON export truncated");}finally{buf.release();}
+                check(root instanceof LogViewerScreen,"cart renderer is not the main logger renderer");
+                check(root.children().stream().filter(net.minecraft.client.gui.components.Button.class::isInstance).allMatch(w->w.getClass().getName().contains("LogViewerScreen$ScaledTextButton")),"cart uses separate button styling");
+                var functions=new LoggerFunctionsScreen(root);mc.setScreen(functions);layout(functions,mc);mc.setScreen(root);
                 layout(root,mc);ticks=0;return;
             }
             if(++ticks<15)return;ticks=0;
@@ -49,14 +56,14 @@ public final class CartGuiClientSmoke {
                 if(stage<FILES.size())layout(mc.screen,mc);
             }else{
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);
-                System.out.println("CART_GUI_CLIENT_OK: actual history/actions/confirmation/results rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks");finished=true;mc.stop();
+                System.out.println("CART_GUI_CLIENT_OK: shared main logger renderer/widgets, forms, JSON exactness+large wire, history/actions/confirmation/results rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks");finished=true;mc.stop();
             }
         }catch(Throwable error){error.printStackTrace();System.out.println("CART_GUI_CLIENT_FAILED");finished=true;mc.stop();}
     }
     private static Screen panel(String name)throws Exception{var c=Class.forName(CartHistoryScreen.class.getName()+"$"+name).getDeclaredConstructor(CartHistoryScreen.class);c.setAccessible(true);return (Screen)c.newInstance(root);}
     private static void layout(Screen screen,Minecraft mc){
         for(int[] size:new int[][]{{320,240},{640,360},{960,540}}){
-            screen.resize(mc,size[0],size[1]);var widgets=screen.children().stream().filter(AbstractWidget.class::isInstance).map(AbstractWidget.class::cast).toList();
+            screen.resize(mc,size[0],size[1]);var widgets=screen.children().stream().filter(AbstractWidget.class::isInstance).map(AbstractWidget.class::cast).filter(w->w.visible).toList();
             for(int i=0;i<widgets.size();i++){var a=widgets.get(i);check(a.getX()>=0&&a.getY()>=0&&a.getX()+a.getWidth()<=size[0]&&a.getY()+a.getHeight()<=size[1],"widget outside screen: "+a.getMessage().getString());
                 for(int j=i+1;j<widgets.size();j++){var b=widgets.get(j);check(a.getX()+a.getWidth()<=b.getX()||b.getX()+b.getWidth()<=a.getX()||a.getY()+a.getHeight()<=b.getY()||b.getY()+b.getHeight()<=a.getY(),"widgets overlap: "+a.getMessage().getString()+" / "+b.getMessage().getString());}}
         }

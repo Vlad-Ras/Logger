@@ -159,4 +159,6 @@ public final class PendingLogStorage implements LogStorage {
     }
 
     long retainedBytes() { return queue.retainedBytes(); }
+    @Override public java.util.Map<java.util.UUID,String> cartOwners(java.util.Set<java.util.UUID> ids) { return requireDelegate().cartOwners(ids); }
+
 }

@@ -40,6 +40,8 @@ public final class LogQuery {
 
     /** Exact logical Create cart; required filter, never removed on query fallback. */
     public java.util.UUID cartId;
+    public java.util.Set<java.util.UUID> cartIds=java.util.Set.of();
+    public String cartOwner;
     public java.util.UUID backpackId;
     public String sourcePrefix;
 
@@ -87,6 +89,7 @@ public final class LogQuery {
         q.textFilter = this.textFilter; q.trainNameFilter = this.trainNameFilter;
         q.backpackNeedle = this.backpackNeedle; q.planeOnly = this.planeOnly;
         q.cartId = this.cartId;
+        q.cartIds = java.util.Set.copyOf(this.cartIds); q.cartOwner=this.cartOwner;
         q.backpackId = this.backpackId;
         q.sourcePrefix = this.sourcePrefix;
         q.debugSource = this.debugSource;

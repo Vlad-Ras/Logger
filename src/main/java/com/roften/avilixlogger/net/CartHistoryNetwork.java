@@ -40,6 +40,8 @@ public final class CartHistoryNetwork {
         try{switch(payload.action()){
             case HELD->{var id=CreateCartAudit.itemId(p.getMainHandItem());if(id==null)error(source,"В основной руке нет учтённой вагонеточной штуковины");else open(source,id.toString());}
             case RECOVER->{CartRollbackCoordinator.cancelPreview(source);CartItemRecovery.preview(source,UUID.fromString(payload.cartId()),payload.entry());}
+            case RESTORE_HELD->{CartRollbackCoordinator.cancelPreview(source);CartItemRecovery.previewHeld(source,UUID.fromString(payload.cartId()),payload.entry());}
+            case RESTORE_WORLD->{CartRollbackCoordinator.cancelPreview(source);CartItemRecovery.previewWorld(source,UUID.fromString(payload.cartId()),payload.entry());}
             case ROLLBACK->{CartItemRecovery.cancel(source);CartRollbackCoordinator.preview(source,UUID.fromString(payload.cartId()),payload.entry());}
             case CONFIRM_RECOVERY->CartItemRecovery.confirm(source,UUID.fromString(payload.cartId()),payload.entry());
             case CONFIRM_ROLLBACK->CartRollbackCoordinator.confirm(source,UUID.fromString(payload.cartId()),payload.entry());
@@ -59,18 +61,32 @@ public final class CartHistoryNetwork {
         var storage=LoggerRuntime.storage(p.serverLevel());var server=p.getServer();boolean canRestore=restore(p);var zone=ZoneId.systemDefault();
         try{boolean queued=CartRollbackCoordinator.query(p.createCommandSourceStack(),()->{try{
             var found=storage.queryReverse(q);var rows=new ArrayList<S2CCartHistoryPayload.Row>();
-            for(var e:found.subList(0,Math.min(12,found.size()))){var cart=CartAuditContext.id(e.source);if(cart==null||q.cartId!=null&&!q.cartId.equals(cart))throw new IllegalStateException("Чужая строка в истории штуковины");
-                var before=NbtSerde.fromSnbt(e.beBefore);var after=NbtSerde.fromSnbt(e.beAfter);boolean snapshot=CartRecoveryPlan.full(after)||CartRecoveryPlan.full(before);
-                String detail="entry="+e.id+"\nID: "+cart+"\n"+(snapshot?"Есть полный снимок состояния.":"Состояние запрашивается из предшествующего полного снимка и записанных изменений.")+"\n"+Objects.toString(e.extra,"");
-                if(before!=null)detail+="\nДо: "+before.getString("Form");if(after!=null)detail+="\nПосле: "+after.getString("Form");
-                rows.add(new S2CCartHistoryPayload.Row(cart.toString(),e.id,TIME.format(Instant.ofEpochMilli(e.ts).atZone(zone)),LogText.actionLabel(e.type),Objects.toString(e.actorName,"SYSTEM"),e.dim+" · "+e.x+" "+e.y+" "+e.z,clip(detail,4000),CartRollbackPlan.checkpoint(e.type),snapshot));
+            var page=found.subList(0,Math.min(payload.pageSize(),found.size()));
+            var ids=new HashSet<UUID>();for(var e:page){var id=CartAuditContext.id(e.source);if(id!=null)ids.add(id);}
+            var owners=storage.cartOwners(ids);
+            for(var e:page){var cart=CartAuditContext.id(e.source);if(cart==null||q.cartId!=null&&!q.cartId.equals(cart))throw new IllegalStateException("Чужая строка в истории штуковины");
+                boolean checkpoint=CartRollbackPlan.checkpoint(e.type);
+                String effect=effect(e.type,e.source);
+                String owner=owners.getOrDefault(cart,CartOwnerMetadata.owner(e.extra));if(owner.isBlank())owner="не записан";
+                String detail="Владелец: "+owner+"\nID: "+cart+"\nentry="+e.id+"\nПоследствия: "+effect+"\n"+Objects.toString(e.extra,"");
+                rows.add(new S2CCartHistoryPayload.Row(cart.toString(),e.id,TIME.format(Instant.ofEpochMilli(e.ts).atZone(zone)),LogText.actionLabel(e.type),Objects.toString(e.actorName,"Сервер"),e.dim+" · "+e.x+" "+e.y+" "+e.z,clip(detail,4000),checkpoint,false,owner,effect,color(e.type)));
             }
-            long next=found.size()>12?rows.getLast().entry():0;
+            long next=found.size()>payload.pageSize()?rows.getLast().entry():0;
             server.execute(()->{if(!Objects.equals(LAST_REQUEST.get(p.getUUID()),token))return;LAST_REQUEST.remove(p.getUUID());if(server.getPlayerList().getPlayer(p.getUUID())==p&&!allowed(p)){pageError(p,payload.request(),"Авторизация или права изменились");return;}if(server.getPlayerList().getPlayer(p.getUUID())==p)PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.PAGE,payload.request(),payload.cartId(),next,canRestore,"Часовой пояс: "+zone+" · записей на странице: "+rows.size(),"",List.copyOf(rows)));});
         }catch(Exception e){server.execute(()->{if(!Objects.equals(LAST_REQUEST.get(p.getUUID()),token))return;LAST_REQUEST.remove(p.getUUID());pageError(p,payload.request(),e.getMessage());});}});
         if(!queued){LAST_REQUEST.remove(p.getUUID());pageError(p,payload.request(),"Очередь истории занята или Logger отключён");}
         }catch(RuntimeException e){LAST_REQUEST.remove(p.getUUID());pageError(p,payload.request(),e.getMessage());}
     });}
+    private static String effect(ActionType type,String source){return switch(type){
+        case CART_ASSEMBLE -> "блоки собраны в конструкцию";
+        case CART_PLACE -> "предмет установлен в мир";
+        case CART_PACK -> "конструкция упакована в предмет";
+        case CART_DISASSEMBLE -> "конструкция разобрана на блоки";
+        case CART_REMOVE -> "конструкция удалена";
+        case CART_UNLOAD -> "выгружена, это не удаление";
+        case CART_ROLLBACK -> source!=null&&source.contains("recover_item")?"сохранённое состояние выдано предметом":"записан результат восстановления";
+        default -> "";};}
+    private static int color(ActionType type){return switch(type){case CART_REMOVE,BLOCK_BREAK,CONTAINER_TAKE -> 0xFF7777;case CART_ASSEMBLE,CART_PLACE,BLOCK_PLACE,CONTAINER_PUT -> 0x77DD88;case CART_PACK,CART_DISASSEMBLE -> 0xFFCC66;case CART_ROLLBACK -> 0xBB99FF;default -> 0x77CCEE;};}
     private static void pageError(ServerPlayer p,long request,String message){PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.ERROR,request,"",0,false,clip(message,4000),"",List.of()));}
     private static boolean restore(ServerPlayer p){return PermissionUtil.has(p.createCommandSourceStack(),"avilixlogger.command.rollback",2);}
     public static void confirm(CommandSourceStack source,String message,String command){

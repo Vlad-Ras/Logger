@@ -26,6 +26,8 @@ public final class CartCommands {
                 .executes(c->{recover(c.getSource(),StringArgumentType.getString(c,"id"),0);return 1;})
                 .then(literal("latest").executes(c->{recover(c.getSource(),StringArgumentType.getString(c,"id"),0);return 1;}))
                 .then(argument("entry",LongArgumentType.longArg(1)).executes(c->{recover(c.getSource(),StringArgumentType.getString(c,"id"),LongArgumentType.getLong(c,"entry"));return 1;}))))
+            .then(stateNode("restore-held",true))
+            .then(stateNode("restore-world",false))
             .then(literal("confirm-recovery").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CartItemRecovery.confirm(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
             .then(literal("cancel-recovery").executes(c->{CartItemRecovery.cancel(c.getSource());return 1;}))
@@ -39,6 +41,10 @@ public final class CartCommands {
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CartRollbackCoordinator.confirm(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
             .then(literal("cancel").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).executes(c->{CartRollbackCoordinator.cancel(c.getSource());return 1;}));
     }
+    private static LiteralArgumentBuilder<CommandSourceStack> stateNode(String name,boolean held){return literal(name).requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).then(argument("id",StringArgumentType.word())
+        .executes(c->{state(c.getSource(),StringArgumentType.getString(c,"id"),0,held);return 1;})
+        .then(argument("entry",LongArgumentType.longArg(1)).executes(c->{state(c.getSource(),StringArgumentType.getString(c,"id"),LongArgumentType.getLong(c,"entry"),held);return 1;})));}
+    private static void state(CommandSourceStack source,String value,long entry,boolean held){var id=parse(source,value);if(id!=null){if(held)CartItemRecovery.previewHeld(source,id,entry);else CartItemRecovery.previewWorld(source,id,entry);}}
     private static void recover(CommandSourceStack source,String value,long entry){UUID id=parse(source,value);if(id!=null)CartItemRecovery.preview(source,id,entry);}
     private static UUID parse(CommandSourceStack s,String value){try{return UUID.fromString(value);}catch(IllegalArgumentException e){s.sendFailure(Component.literal("Неверный ID конструкции"));return null;}}
     private static void find(CommandSourceStack source,String player){

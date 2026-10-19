@@ -115,6 +115,7 @@ public final class LoggerNetwork {
         if (player != null) {
             UUID uuid = player.getUUID();
             CLIENT_PRESENT.remove(uuid);
+            LoggerFunctionsNetwork.clear(uuid);
             CartHistoryNetwork.logout(uuid);
             GUI_FILTERS.remove(uuid);
             GUI_PAGE_SIZES.remove(uuid);
@@ -264,7 +265,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "7");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "8");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
@@ -274,6 +275,8 @@ public final class LoggerNetwork {
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
+        r.playToServer(C2SLoggerFunctionPayload.TYPE,C2SLoggerFunctionPayload.STREAM_CODEC,LoggerFunctionsNetwork::handle);
+        r.playToClient(S2CLoggerFunctionPayload.TYPE,S2CLoggerFunctionPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptFunction",new Class<?>[]{S2CLoggerFunctionPayload.class},new Object[]{payload})));
         r.playToServer(C2SCartActionPayload.TYPE,C2SCartActionPayload.STREAM_CODEC,CartHistoryNetwork::handleAction);
         r.playToServer(C2SCartHistoryPayload.TYPE, C2SCartHistoryPayload.STREAM_CODEC, CartHistoryNetwork::handle);
         r.playToClient(S2CCartHistoryPayload.TYPE, S2CCartHistoryPayload.STREAM_CODEC, (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptCart", new Class<?>[]{S2CCartHistoryPayload.class}, new Object[]{payload})));

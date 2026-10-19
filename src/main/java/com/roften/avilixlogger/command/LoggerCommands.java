@@ -1429,27 +1429,7 @@ public final class LoggerCommands {
     }
 
     private static void sendShortHelp(CommandSourceStack src) {
-        src.sendSystemMessage(Component.literal("AvilixLogger — /log").withStyle(ChatFormatting.GOLD));
-
-        src.sendSystemMessage(Component.literal("Просмотр").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --t 30m --r 10 --m theft").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --d 2026-01-25 --r 20 --p Steve").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --d 2026-01-25 --ad   (все миры)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log i [флаги...]   |   /log last [флаги...]" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Откат").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log rollback --t 2h --r 30 --m grief   (состояние 2 часа назад)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log rollback --at 2026-08-27T12:30 --we   (состояние на точный момент)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log rollback --confirm   |   /log rollback --cancel" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Флаги (коротко)").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  --t time | --at yyyy-MM-ddTHH:mm | --d date (00:00) | --r radius | --we | --block" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  mode: grief | theft | combat | planes | all   |   types: --ty break,place,container_take" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  dim: overworld | nether | end   (или полный id: minecraft:overworld)" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Пресеты").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log preset save <name> <args...>   |   /log preset run <name> [args...]" ).withStyle(ChatFormatting.GRAY));
+        for(String line:com.roften.avilixlogger.net.LoggerGuiOperation.help())src.sendSystemMessage(Component.literal(line));
     }
 
     private static final class ParsedFlags {

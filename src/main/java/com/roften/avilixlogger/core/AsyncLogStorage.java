@@ -87,4 +87,6 @@ public final class AsyncLogStorage implements LogStorage {
 
     long backpressureCount() { return queue.backpressureCount(); }
     long retainedBytes() { return queue.retainedBytes(); }
+    @Override public java.util.Map<java.util.UUID,String> cartOwners(java.util.Set<java.util.UUID> ids) { return delegate.cartOwners(ids); }
+
 }
