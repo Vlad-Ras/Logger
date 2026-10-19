@@ -10,7 +10,7 @@ import java.util.*;
 public final class CartAuditTest {
     private static final UUID ID=UUID.fromString("59c687ca-4e6c-4054-ac29-a741e65a7481");
     public static void run() {
-        identityRoundTrip(); nestedScopes(); pagedHistory(); conflictRejection(); itemIdentity(); spawnedEffects(); monotonicCapture(); menuTransfers(); lootTransfers();
+        identityRoundTrip(); extraFormats(); nestedScopes(); pagedHistory(); conflictRejection(); itemIdentity(); spawnedEffects(); monotonicCapture(); menuTransfers(); lootTransfers();
         CartAutomationPlanTest.run();
         com.roften.avilixlogger.compat.create.CartRecoveryPlanTest.run();
         System.out.println("Cart audit checks passed: persistent identity, nested attribution, 600-row reverse paging, foreign rows/external cargo/incomplete checkpoints rejected.");
@@ -24,6 +24,14 @@ public final class CartAuditTest {
         check(CartAuditContext.phase(b.stamp("pack").source()).equals("pack"),"phase parser failed");
         check(CartAuditContext.id("create:cart:"+ID+"Xwork:1")==null,"malformed identity delimiter accepted");
         check(b.stamp("work")==b.stamp("work"),"idle work stamp allocation");
+    }
+    private static void extraFormats(){
+        var previous=CartAuditContext.enter(new CartAuditContext.Stamp(ID,UUID.randomUUID(),"Owner","work",1));
+        try{for(String extra:new String[]{"{\"kind\":\"container\",\"count\":2}","container change: slot 1",null}){
+            var row=new LogEntry();row.extra=extra;CartAuditContext.enrich(row);
+            check(Objects.equals(row.extra,extra),"owner metadata changed an existing JSON/semantic marker");
+            check(row.actorUuid==null&&row.actorName==null,"owner was substituted for an actor");
+        }}finally{CartAuditContext.restore(previous);}
     }
     private static void nestedScopes(){
         LogQuery query=new LogQuery();query.cartId=ID;query.requireDetails=true;check(ID.equals(query.copy().cartId)&&query.copy().requireDetails,"query fallback lost mandatory cart filter");

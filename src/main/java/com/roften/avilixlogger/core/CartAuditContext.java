@@ -44,9 +44,6 @@ public final class CartAuditContext {
         Stamp stamp = CURRENT.get();
         if (stamp == null) return;
         if (id(row.source) == null) row.source = stamp.source();
-        // One small marker at capture time; no NBT serialization or owner/actor substitution.
-        if (stamp.ownerName()!=null&&!stamp.ownerName().isBlank()&&CartOwnerMetadata.owner(row.extra).isBlank())
-            row.extra="owner="+stamp.ownerName()+"; "+java.util.Objects.toString(row.extra,"");
         // Owner remains in the mechanism metadata; never substitute it for an actor.
         LogIdGenerator.ensure(row); // Preserve capture order, independent of CPU worker completion order.
     }

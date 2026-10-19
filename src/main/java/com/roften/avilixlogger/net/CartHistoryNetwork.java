@@ -68,8 +68,9 @@ public final class CartHistoryNetwork {
                 boolean checkpoint=CartRollbackPlan.checkpoint(e.type);
                 String effect=effect(e.type,e.source);
                 String owner=CartOwnerMetadata.owner(e.extra);if(owner.isBlank())owner=owners.containsKey(cart)?"последний: "+owners.get(cart):"не записан";
+                owner=clip(owner,120);String actor=Objects.toString(e.actorName,"");if(actor.isBlank()||e.actorUuid==null&&actor.equalsIgnoreCase("SYSTEM"))actor="Сервер";
                 String detail="Владелец: "+owner+"\nID: "+cart+"\nentry="+e.id+"\nПоследствия: "+effect+"\n"+Objects.toString(e.extra,"");
-                rows.add(new S2CCartHistoryPayload.Row(cart.toString(),e.id,TIME.format(Instant.ofEpochMilli(e.ts).atZone(zone)),LogText.actionLabel(e.type),Objects.toString(e.actorName,"Сервер"),e.dim+" · "+e.x+" "+e.y+" "+e.z,clip(detail,4000),checkpoint,false,owner,effect,color(e.type)));
+                rows.add(new S2CCartHistoryPayload.Row(cart.toString(),e.id,TIME.format(Instant.ofEpochMilli(e.ts).atZone(zone)),LogText.actionLabel(e.type),clip(actor,128),clip(e.dim+" · "+e.x+" "+e.y+" "+e.z,256),clip(detail,4000),checkpoint,false,owner,effect,color(e.type)));
             }
             long next=found.size()>payload.pageSize()?rows.getLast().entry():0;
             server.execute(()->{if(!Objects.equals(LAST_REQUEST.get(p.getUUID()),token))return;LAST_REQUEST.remove(p.getUUID());if(server.getPlayerList().getPlayer(p.getUUID())==p&&!allowed(p)){pageError(p,payload.request(),"Авторизация или права изменились");return;}if(server.getPlayerList().getPlayer(p.getUUID())==p)PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.PAGE,payload.request(),payload.cartId(),next,canRestore,"Часовой пояс: "+zone+" · записей на странице: "+rows.size(),"",List.copyOf(rows)));});
