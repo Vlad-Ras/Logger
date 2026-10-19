@@ -38,6 +38,8 @@ final class CartGuiWorkflowTest {
         var rb=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);try{C2SCartHistoryPayload.STREAM_CODEC.encode(rb,rich);check(C2SCartHistoryPayload.STREAM_CODEC.decode(rb).equals(rich),"rich filters lost");}finally{rb.release();}
         check(CartOwnerMetadata.owner("cart=123; owner=Owner; x=1").equals("Owner"),"owner marker not parsed");
         for(var op:LoggerGuiOperation.values()){var a=op.first.isEmpty()?"":"Example";var b=op.second.isEmpty()?"":"Other";check(op.command(a,b).startsWith("log"),"GUI command escaped logger root");}
+        check(LoggerGuiOperation.PRESET_RUN.command("кражи","").equals("log preset run кражи"),"GUI rejected an existing Unicode preset name");
+        check(LoggerGuiOperation.TOOL_SET.command("example:tools/inspector","").endsWith("example:tools/inspector"),"GUI rejected a valid registry path");
         reject(()->LoggerGuiOperation.ROLLBACK.command("--confirm",""),"preview submitted a destructive confirmation");
         reject(()->LoggerGuiOperation.BACKPACK_FIND.command("Owner\nop Owner",""),"multiline command accepted");
         System.out.println("CART_GUI_WORKFLOW_OK: action/filter/result codecs, actor+ID+cursor+checkpoints before LIMIT, typed confirmation, mutation validation");

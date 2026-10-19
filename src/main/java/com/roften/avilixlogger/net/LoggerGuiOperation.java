@@ -41,8 +41,8 @@ public enum LoggerGuiOperation {
             a=(searchFlags(form)+" "+a).trim();b="";
         }
         if(first.isEmpty()&&!a.isEmpty()||second.isEmpty()&&!b.isEmpty())throw new IllegalArgumentException("Лишние параметры операции");
-        if(!Set.of(LOOKUP,INSPECT,LAST,ROLLBACK).contains(this)&&!a.isEmpty()&&!a.matches("[A-Za-z0-9_:.@+\\-]+"))throw new IllegalArgumentException("Первое поле должно содержать одно имя, ID или номер");
-        if(!Set.of(PRESET_SAVE,PRESET_RUN).contains(this)&&!b.isEmpty()&&!b.matches("[A-Za-z0-9_:.@+\\-]+"))throw new IllegalArgumentException("Второе поле должно содержать одно имя или номер");
+        if(!Set.of(LOOKUP,INSPECT,LAST,ROLLBACK).contains(this)&&!a.isEmpty()&&!a.matches("[\\p{L}\\p{N}_:.@+/\\-]+"))throw new IllegalArgumentException("Первое поле должно содержать одно имя, ID или номер");
+        if(!Set.of(PRESET_SAVE,PRESET_RUN).contains(this)&&!b.isEmpty()&&!b.matches("[\\p{L}\\p{N}_:.@+/\\-]+"))throw new IllegalArgumentException("Второе поле должно содержать одно имя или номер");
         // The search forms cannot smuggle destructive flags into a preview button.
         if((this==LOOKUP||this==INSPECT||this==LAST||this==ROLLBACK)&&a.matches("(?s).*--(?:confirm|cancel)(?:\\s.*|$)"))throw new IllegalArgumentException("Для подтверждения или отмены используйте отдельную кнопку");
         return command+(a.isBlank()?"":" "+a)+(b.isBlank()?"":" "+b);
@@ -56,7 +56,7 @@ public enum LoggerGuiOperation {
                 if(parsed.minutes()>=0)flags.append(" --t ").append(parsed.minutes()).append('m');
                 else flags.append(" --at ").append(java.time.format.DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss").format(java.time.Instant.ofEpochMilli(parsed.since()).atZone(now.getZone())));
             }else{
-                if(!value.matches("[A-Za-z0-9_:.+\\-]+"))throw new IllegalArgumentException("Неверное поле: "+key);
+                if(!value.matches("[\\p{L}\\p{N}_:.+/\\-]+"))throw new IllegalArgumentException("Неверное поле: "+key);
                 if(key.equals("radius")){int radius=Integer.parseInt(value);if(radius<0||radius>30000)throw new IllegalArgumentException("Радиус: 0..30000");}
                 if(key.equals("mode")&&!Set.of("all","grief","theft","combat","planes").contains(value))throw new IllegalArgumentException("Режим: all, grief, theft, combat, planes");
                 flags.append(switch(key){case "radius"->" --r ";case "player"->" --p ";case "dimension"->" --dim ";case "mode"->" --m ";default->" --owner ";}).append(value);
