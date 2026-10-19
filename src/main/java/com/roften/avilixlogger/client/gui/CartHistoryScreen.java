@@ -87,12 +87,11 @@ public final class CartHistoryScreen extends LogViewerScreen {
         if(p.kind()!=S2CCartHistoryPayload.PAGE||p.request()!=request||!p.cartId().equals(id))return;
         loading=false;cartRows.clear();cartRows.addAll(p.rows());next=p.next();canRestore=p.canRestore();var display=new ArrayList<LogRow>();
         for(var r:cartRows){String[] loc=r.location().split(" · ",2);String[] xyz=loc.length==2?loc[1].split(" "):new String[0];int x=0,y=0,z=0;try{if(xyz.length==3){x=Integer.parseInt(xyz[0]);y=Integer.parseInt(xyz[1]);z=Integer.parseInt(xyz[2]);}}catch(NumberFormatException ignored){}
-            var line=Component.literal(r.time()+" · ").withStyle(ChatFormatting.DARK_GRAY)
-                .append(Component.literal("Владелец: "+r.owner()).withStyle(ChatFormatting.AQUA))
+            var line=Component.literal("Владелец: "+r.owner()).withStyle(ChatFormatting.AQUA)
                 .append(Component.literal(" · ID: "+r.cartId().substring(0,8)+"… · entry="+r.entry()+" · ").withStyle(ChatFormatting.GRAY))
                 .append(Component.literal(r.action()).withStyle(s->s.withColor(r.color())))
                 .append(Component.literal(r.effect().isBlank()?"":" → "+r.effect()).withStyle(ChatFormatting.YELLOW))
-                .append(Component.literal(" · "+r.actor()+" · "+r.location()).withStyle(ChatFormatting.GRAY));
+                .append(Component.literal(" · "+x+" "+y+" "+z+" · "+loc[0]+" · "+r.time()+" · "+r.actor()).withStyle(ChatFormatting.DARK_GRAY));
             display.add(LogRow.single(r.entry(),loc[0],x,y,z,line));
         }
         super.apply(new S2CLogPagePayload("Вагонеточные штуковины",previous.size()+1,!previous.isEmpty(),next>0,display));

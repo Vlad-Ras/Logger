@@ -179,6 +179,16 @@ public final class LogText {
                 || t == ActionType.BACKPACK_PUT || t == ActionType.BACKPACK_TAKE;
     }
 
+    /** Noun labels for compact audit rows; sentence-style chat verbs stay backwards compatible. */
+    public static String briefCartAction(LogEntry e){return switch(e.type){
+        case CART_ASSEMBLE -> "Сборка";case CART_PLACE -> "Установка";case CART_PACK -> "Упаковка";
+        case CART_DISASSEMBLE -> "Разборка";case CART_REMOVE -> "Удаление";case CART_LOAD -> "Загрузка";
+        case CART_UNLOAD -> "Выгрузка";case CART_MOVE -> "Перемещение";case CART_STATUS -> "Статус";
+        case CART_CONTENT_CHANGE -> "Груз";case CART_STRUCTURE_CHANGE -> "Блок конструкции";case CART_TRANSFER -> "Передача";
+        case CART_ROLLBACK -> e.source!=null&&e.source.contains("recover_item")?"Возврат состояния":"Откат действий";
+        default -> actionLabel(e.type);
+    };}
+
     public static ChatFormatting actionColor(ActionType t) {
         if (t == null) return ChatFormatting.GRAY;
         return switch (t) {
