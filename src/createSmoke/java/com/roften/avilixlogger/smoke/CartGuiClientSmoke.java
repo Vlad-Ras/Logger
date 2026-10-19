@@ -19,7 +19,13 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","cart-gui-main.png","cart-gui-functions.png");
+    @SubscribeEvent public static void backdrop(net.neoforged.neoforge.client.event.ScreenEvent.Render.Pre event){
+        // A real world redraws behind the transparent overlay every frame. At the title screen,
+        // provide an equivalent fresh backdrop so old menu/widget pixels cannot contaminate QA.
+        if(Boolean.getBoolean("avilixlogger.guiSmoke")&&root!=null&&event.getScreen() instanceof LogViewerScreen)
+            event.getGuiGraphics().fill(0,0,event.getScreen().width,event.getScreen().height,0xFF16191D);
+    }
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -27,7 +33,9 @@ public final class CartGuiClientSmoke {
             if(root==null){
                 if(!(mc.screen instanceof net.minecraft.client.gui.screens.TitleScreen)||mc.getOverlay()!=null||++readyTicks<40)return;
                 root=new CartHistoryScreen(mc.screen,"");mc.setScreen(root);
-                var rows=new ArrayList<S2CCartHistoryPayload.Row>();for(int i=0;i<12;i++)rows.add(new S2CCartHistoryPayload.Row(ID,100-i,"18.10.2026 23:50:00","Штуковина: упаковка","MaxKuz","minecraft:overworld · -1775 38 -2726","Сохранены блоки, механизмы, ресурсы и жидкости.",true,true,"Owner","конструкция упакована в предмет",0xFFCC66));
+                var rows=new ArrayList<S2CCartHistoryPayload.Row>();
+                var types=new com.roften.avilixlogger.core.ActionType[]{com.roften.avilixlogger.core.ActionType.CART_PACK,com.roften.avilixlogger.core.ActionType.CART_PLACE,com.roften.avilixlogger.core.ActionType.CART_ROLLBACK};
+                for(int i=0;i<12;i++){var type=types[i%types.length];rows.add(new S2CCartHistoryPayload.Row(ID,100-i,"18.10.2026 23:50:00",com.roften.avilixlogger.core.LogText.actionLabel(type),"MaxKuz","minecraft:overworld · -1775 38 -2726","Владелец: Owner\nID: "+ID+"\nentry="+(100-i)+"\nСохранены блоки, механизмы, ресурсы и жидкости.",true,true,"Owner",i%3==0?"конструкция упакована в предмет":i%3==1?"предмет установлен в мир":"сохранённое состояние выдано предметом",com.roften.avilixlogger.core.LogText.actionColor(type).getColor()));}
                 root.apply(new S2CCartHistoryPayload(S2CCartHistoryPayload.PAGE,0,"",88,true,"Все операции доступны через GUI","",rows));
                 var select=LogViewerScreen.class.getDeclaredMethod("selectEntry",long.class);select.setAccessible(true);select.invoke(root,100L);
                 root.apply(new S2CCartHistoryPayload(S2CCartHistoryPayload.DONE,0,"",0,false,"Штуковина выдана в свободный слот. entry=100. Сохранены блоки, компоненты предметов и жидкости.","",List.of()));
@@ -44,7 +52,7 @@ public final class CartGuiClientSmoke {
                 check(root instanceof LogViewerScreen,"cart renderer is not the main logger renderer");
                 check(root.children().stream().filter(net.minecraft.client.gui.components.Button.class::isInstance).allMatch(w->w.getClass().getName().contains("LogViewerScreen$ScaledTextButton")),"cart uses separate button styling");
                 var functions=new LoggerFunctionsScreen(root);mc.setScreen(functions);layout(functions,mc);mc.setScreen(root);
-                layout(root,mc);ticks=0;return;
+                select.invoke(root,100L);layout(root,mc);ticks=0;return;
             }
             if(++ticks<15)return;ticks=0;
             if(stage<FILES.size()){
@@ -53,10 +61,12 @@ public final class CartGuiClientSmoke {
                 if(stage==1)mc.setScreen(panel("Actions"));
                 else if(stage==2)root.confirmation("Вернуть саму штуковину в предмет: "+ID+". entry=100; блоков: 125. Основа: снимок entry=80, применено изменений состояния: 12. Хранилищ предметов: 4, предметов: 128; баков: 2, жидкости: 3000 mB. Мир и действия штуковины не откатываются. Подтверждение действует две минуты.","log cart confirm-recovery "+ID+" 100");
                 else if(stage==3)mc.setScreen(panel("Journal"));
+                else if(stage==4){var main=new LogViewerScreen();mc.setScreen(main);var f=LogViewerScreen.class.getDeclaredField("rows");f.setAccessible(true);@SuppressWarnings("unchecked") var displayed=(List<com.roften.avilixlogger.net.LogRow>)f.get(root);main.apply(new com.roften.avilixlogger.net.S2CLogPagePayload("Логгер · сравнение оформления",1,false,true,List.copyOf(displayed)));}
+                else if(stage==5){var functions=new LoggerFunctionsScreen(root);var f=LoggerFunctionsScreen.class.getDeclaredField("operation");f.setAccessible(true);f.set(functions,com.roften.avilixlogger.net.LoggerGuiOperation.LOOKUP);mc.setScreen(functions);}
                 if(stage<FILES.size())layout(mc.screen,mc);
             }else{
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);
-                System.out.println("CART_GUI_CLIENT_OK: shared main logger renderer/widgets, forms, JSON exactness+large wire, history/actions/confirmation/results rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks");finished=true;mc.stop();
+                System.out.println("CART_GUI_CLIENT_OK: shared main logger renderer/widgets, forms, JSON exactness+large wire, clean-frame main/history/actions/confirmation/results/search-form rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks");finished=true;mc.stop();
             }
         }catch(Throwable error){error.printStackTrace();System.out.println("CART_GUI_CLIENT_FAILED");finished=true;mc.stop();}
     }
