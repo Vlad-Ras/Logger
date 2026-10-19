@@ -80,7 +80,7 @@ final class ClickHouseDeliveryTest {
             loot.deferSnapshot(LogEntry.SnapshotField.PLAYER_INV_BEFORE,before);loot.deferSnapshot(LogEntry.SnapshotField.PLAYER_INV_AFTER,after);
             var encoded=loot.copyForQueue();encoded.materializeSnapshots();check(loot.playerInvBefore==null&&encoded.playerInvBefore.equals(before.toString()),"recipient snapshot was serialized on the producer or lost in queue copy");
             database.appendBatch("cart-loot-test",List.of(encoded));
-            String itemInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_items")).findFirst().orElseThrow();
+            String itemInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.indexOf('\n')>0&&body.substring(0,body.indexOf('\n')).contains("_items")).findFirst().orElseThrow();
             var itemRow=com.google.gson.JsonParser.parseString(itemInsert.substring(itemInsert.indexOf('\n')+1).trim()).getAsJsonObject();
             check(itemRow.get("player_inv_before").getAsString().equals(encoded.playerInvBefore)&&itemRow.get("player_inv_after").getAsString().equals(encoded.playerInvAfter),"split ITEMS omitted linked pickup snapshots");
             itemRow.addProperty("entity_uuid","");itemRow.addProperty("entity_type","");lookupResponse.set(itemRow.toString()+"\n");
@@ -92,7 +92,7 @@ final class ClickHouseDeliveryTest {
             bag.containerSlotsBefore="{Size:1,Items:[{Slot:0,id:'minecraft:diamond',count:12}]}";
             bag.containerSlotsAfter="{Size:1,Items:[]}";
             database.appendBatch("backpack-test",List.of(bag));
-            String bagInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_compat")).findFirst().orElseThrow();
+            String bagInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.indexOf('\n')>0&&body.substring(0,body.indexOf('\n')).contains("_compat")).findFirst().orElseThrow();
             var bagRow=com.google.gson.JsonParser.parseString(bagInsert.substring(bagInsert.indexOf('\n')+1).trim()).getAsJsonObject();
             check(bagRow.get("item_stack").getAsString().equals(bag.itemStackNbt)&&bagRow.get("container_slots_before").getAsString().equals(bag.containerSlotsBefore),"Backpack recovery/details snapshots discarded as non-rollback data");
             var bagQuery=new LogQuery();bagQuery.dim="*";bagQuery.backpackId=bagId;bagQuery.types=BackpackIds.types();bagQuery.requireDetails=true;
@@ -114,7 +114,7 @@ final class ClickHouseDeliveryTest {
             automation.beBefore="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:100}}]}";
             automation.beAfter="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:850}}]}";
             database.appendBatch("cart-automation-test",List.of(automation));
-            String autoInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_compat")&&body.contains(autoCart.toString())).findFirst().orElseThrow();
+            String autoInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.indexOf('\n')>0&&body.substring(0,body.indexOf('\n')).contains("_compat")&&body.contains(autoCart.toString())).findFirst().orElseThrow();
             var autoRow=com.google.gson.JsonParser.parseString(autoInsert.substring(autoInsert.indexOf('\n')+1).trim()).getAsJsonObject();
             check(autoRow.get("be_before").getAsString().equals(automation.beBefore)&&autoRow.get("be_after").getAsString().equals(automation.beAfter),"Create automation snapshots discarded with non-rollback details disabled");
             var autoQuery=new LogQuery();autoQuery.type=ActionType.CART_TRANSFER;autoQuery.cartId=autoCart;autoQuery.requireDetails=true;autoQuery.dim="*";lookupResponse.set(autoRow+"\n");

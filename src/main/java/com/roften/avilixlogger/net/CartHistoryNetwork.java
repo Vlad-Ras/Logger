@@ -15,7 +15,7 @@ import java.util.*;
 
 /** Database queries, NBT parsing and formatting run on the bounded history worker. */
 public final class CartHistoryNetwork {
-    private static final Map<UUID,Long> LAST_REQUEST=new HashMap<>();
+    private static final Map<UUID,Long> LAST_REQUEST=new java.util.concurrent.ConcurrentHashMap<>();
     private static final Set<UUID> VIEWERS=new HashSet<>();
     private static final Map<UUID,String> LAST_RESULT=new HashMap<>();
     private static long sequence;
@@ -59,7 +59,7 @@ public final class CartHistoryNetwork {
         if(LAST_REQUEST.containsKey(p.getUUID())){pageError(p,payload.request(),"Предыдущая страница ещё загружается");return;}
         long token=++sequence;LAST_REQUEST.put(p.getUUID(),token);
         var storage=LoggerRuntime.storage(p.serverLevel());var server=p.getServer();boolean canRestore=restore(p);var zone=ZoneId.systemDefault();
-        try{boolean queued=CartRollbackCoordinator.query(p.createCommandSourceStack(),()->{try{
+        try{boolean queued=LoggerNetwork.submitJournalQuery(()->{if(!Objects.equals(LAST_REQUEST.get(p.getUUID()),token))return;try{
             var found=storage.queryReverse(q);var rows=new ArrayList<S2CCartHistoryPayload.Row>();
             var page=found.subList(0,Math.min(payload.pageSize(),found.size()));
             var ids=new HashSet<UUID>();for(var e:page){var id=CartAuditContext.id(e.source);if(id!=null)ids.add(id);}

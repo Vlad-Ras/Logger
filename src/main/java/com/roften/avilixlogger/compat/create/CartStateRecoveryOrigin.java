@@ -44,14 +44,15 @@ final class CartStateRecoveryOrigin {
     }
     void lock(){if(mode!=Mode.WORLD)return;CartAuditContext.rollbackActive=true;locked=true;
         CartRestoreLocks.keepLoaded((ServerLevel)entity.level(),entity.blockPosition());CartAuditContext.LOCKED_ENTITIES.add(entity.getUUID());
-        if(base!=null){CartAuditContext.LOCKED_ENTITIES.add(base.getUUID());CreateCartAudit.state(entity).locked=true;}
+        if(base!=null){CartAuditContext.LOCKED_ENTITIES.add(base.getUUID());CreateCartAudit.state(entity).locked=true;CartStorageAudit.lockMenus(id,entity.getServer());}
     }
     void unlock(){if(!locked)return;if(entity!=null&&CreateCartAudit.state(entity)!=null)CreateCartAudit.state(entity).locked=false;CartAuditContext.LOCKED_ENTITIES.clear();CartRestoreLocks.clear();CartAuditContext.rollbackActive=false;locked=false;}
     void deliver(ServerPlayer actor,ItemStack stack){
-        int target=mode==Mode.HELD?slot:actor.getInventory().getFreeSlot();if(target<0)throw new IllegalStateException("Освободите слот инвентаря");
         validate(actor);
         boolean restoring=CartAuditContext.restoring(true);
         try{
+            if(mode==Mode.WORLD)CartStorageAudit.closeLockedMenus(actor.getServer());
+            int target=mode==Mode.HELD?slot:actor.getInventory().getFreeSlot();if(target<0)throw new IllegalStateException("Освободите слот инвентаря");
             if(entity instanceof ItemEntity drop)drop.discard();
             else if(entity!=null){((CartEntityAccess)entity).avilixlogger$discardForRollback();base.discard();}
             actor.getInventory().setItem(target,stack);actor.getInventory().setChanged();actor.containerMenu.broadcastChanges();

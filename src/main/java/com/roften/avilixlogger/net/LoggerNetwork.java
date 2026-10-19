@@ -68,6 +68,10 @@ public final class LoggerNetwork {
     }
 
     private static final ThreadPoolExecutor PAGE_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-PAGE-", 2, 256);
+    static boolean submitJournalQuery(Runnable task){
+        if(!com.roften.avilixlogger.LoggerConfig.isEnabled())return false;
+        try{PAGE_EXECUTOR.execute(task);return true;}catch(java.util.concurrent.RejectedExecutionException rejected){return false;}
+    }
     private static final ThreadPoolExecutor DETAILS_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-DETAILS-", 2, 128);
     private static final ScheduledExecutorService GUI_WATCHDOG_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "AvilixLogger-GUI-WATCHDOG");
