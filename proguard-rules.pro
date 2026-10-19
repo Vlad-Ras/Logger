@@ -26,6 +26,7 @@
     public static void open(...);
     public static void acceptPage(...);
     public static void acceptCart(...);
+    public static void acceptFunction(...);
     public static void acceptDetails(...);
     public static void acceptInspectTool(...);
     public static void acceptRollbackPreview(...);

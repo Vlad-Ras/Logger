@@ -342,3 +342,11 @@ tasks.register('testAsyncPipeline', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.roften.avilixlogger.core.AsyncPipelineTest'
 }
+
+tasks.register('testCartOwnerDatabase', JavaExec) {
+    group = 'verification'
+    description = 'Runs the minecart owner index and pagination against a real CI ClickHouse.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.roften.avilixlogger.core.CartOwnerIndexIntegrationTest'
+}

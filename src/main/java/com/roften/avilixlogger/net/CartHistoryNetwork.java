@@ -67,7 +67,7 @@ public final class CartHistoryNetwork {
             for(var e:page){var cart=CartAuditContext.id(e.source);if(cart==null||q.cartId!=null&&!q.cartId.equals(cart))throw new IllegalStateException("Чужая строка в истории штуковины");
                 boolean checkpoint=CartRollbackPlan.checkpoint(e.type);
                 String effect=effect(e.type,e.source);
-                String owner=owners.getOrDefault(cart,CartOwnerMetadata.owner(e.extra));if(owner.isBlank())owner="не записан";
+                String owner=CartOwnerMetadata.owner(e.extra);if(owner.isBlank())owner=owners.containsKey(cart)?"последний: "+owners.get(cart):"не записан";
                 String detail="Владелец: "+owner+"\nID: "+cart+"\nentry="+e.id+"\nПоследствия: "+effect+"\n"+Objects.toString(e.extra,"");
                 rows.add(new S2CCartHistoryPayload.Row(cart.toString(),e.id,TIME.format(Instant.ofEpochMilli(e.ts).atZone(zone)),LogText.actionLabel(e.type),Objects.toString(e.actorName,"Сервер"),e.dim+" · "+e.x+" "+e.y+" "+e.z,clip(detail,4000),checkpoint,false,owner,effect,color(e.type)));
             }

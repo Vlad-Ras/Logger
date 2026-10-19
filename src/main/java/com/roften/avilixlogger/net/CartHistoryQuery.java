@@ -16,12 +16,12 @@ public final class CartHistoryQuery {
         q.dim=p.dimension().isBlank()?"*":p.dimension().trim();q.textFilter=p.text().trim();
         if(!p.actionFilter().equals("ALL")) {
             if(p.actionFilter().equals("STATE"))q.types=checkpoints();
-            else if(p.actionFilter().equals("CARGO"))q.types=EnumSet.of(ActionType.CONTAINER_PUT,ActionType.CONTAINER_TAKE);
+            else if(p.actionFilter().equals("CARGO"))q.types=EnumSet.of(ActionType.CONTAINER_PUT,ActionType.CONTAINER_TAKE,ActionType.CART_CONTENT_CHANGE,ActionType.CART_TRANSFER);
             else {var type=ActionType.valueOf(p.actionFilter());q.types=EnumSet.of(type);}
         }
         var now=java.time.ZonedDateTime.now();var time=GuiTimeFilter.parse(p.time(),now);
         q.sinceTs=time.since()>=0?time.since():time.minutes()>=0?Math.max(0,now.toInstant().toEpochMilli()-time.minutes()*60000L):0;
         q.untilTs=time.until()>=0?time.until():Long.MAX_VALUE;
-        q.beforeId=p.before();q.requireDetails=false;q.limit=p.pageSize()+1;return q;
+        q.beforeId=p.before();q.debugSource="cart_gui";q.requireDetails=false;q.limit=p.pageSize()+1;return q;
     }
 }

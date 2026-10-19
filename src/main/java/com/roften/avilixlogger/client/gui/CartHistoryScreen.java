@@ -32,12 +32,12 @@ public final class CartHistoryScreen extends LogViewerScreen {
     @Override protected void initViewFilters(int top){
         int y=top,h=controlH(),step=h+controlGap(),w=leftPanelW();
         trainBox=filter("ID",id,"Полный UUID штуковины. Можно скопировать из выбранной строки кнопкой ID.",y,36);y+=step;
-        planeNameBox=filter("Владелец",owner,"Точный ник владельца из метаданных конструкции. Исполнитель действия — отдельный фильтр.",y,64);y+=step;
+        planeNameBox=filter("Владелец",owner,"Поиск штуковин по последнему записанному владельцу. В строках указан владелец из события, если он записан. Исполнитель — отдельный фильтр.",y,64);y+=step;
         actorBox=filter("Исполнитель",actor,"Ник того, кто выполнил действие. Сервер не подменяется владельцем или соседним игроком.",y,64);y+=step;
         timeBox=filter("От времени",time,"Как в основном журнале: 30m, 19.10.2026, 03:00, 19.10.2026 03:00; диапазон начало..конец. Пояс: "+logTimeZone,y,96);y+=step;
         radiusBox=filter("Мир",dimension,"* — все миры; иначе полный ID, например minecraft:overworld.",y,128);y+=step;
-        var action=addButton(Component.literal(actionLabel()),b->{int i=Arrays.asList(ACTIONS).indexOf(actionFilter);actionFilter=ACTIONS[(i+1)%ACTIONS.length];b.setMessage(Component.literal(actionLabel()));applyCustomInputs();},10,y,w,h);
-        action.setTooltip(Tooltip.create(Component.literal("Нажмите для выбора следующего вида действия. Фильтр применяется запросом, до разбивки на страницы.")));y+=step;
+        btnType=addButton(Component.literal(actionLabel()),b->toggleTypeDropdown(),10,y,w,h);
+        btnType.setTooltip(Tooltip.create(Component.literal("Выбрать действие из списка, как в основном журнале. Все фильтры применяются до LIMIT.")));y+=step;
         searchBox=filter("Поиск",search,"Текст, блок, предмет или название действия. Применить или Enter.",y,128);y+=step;
         addButton(Component.literal("Сбросить"),b->clearFilters(),10,y,w,h);y+=step;
         addButton(Component.literal("Применить"),b->applyCustomInputs(),10,y,w,h);y+=step;
@@ -63,14 +63,18 @@ public final class CartHistoryScreen extends LogViewerScreen {
         addButton(Component.literal("Основной журнал"),b->onClose(),x,y,w,h);return y+step;
     }
     private String modeLabel(){return switch(recoveryMode){case 1->"Получение: заменить в руке";case 2->"Получение: забрать из мира";default->"Получение: пропавшая";};}
+    @Override protected int typeChoiceCount(){return ACTIONS.length;}
+    @Override protected int typeChoiceIndex(){return Math.max(0,Arrays.asList(ACTIONS).indexOf(actionFilter));}
+    @Override protected Component typeChoiceLabel(int index){return Component.literal(LABELS[index]);}
+    @Override protected void typeChoiceSelected(int index){actionFilter=ACTIONS[index];btnType.setMessage(Component.literal(actionLabel()));applyCustomInputs();}
     private String actionLabel(){int i=Arrays.asList(ACTIONS).indexOf(actionFilter);return i<0?"Все действия":LABELS[i];}
     @Override protected void refreshFilterButtonLabels(){}
-    @Override protected void clearFilters(){id=owner=actor=time=search="";dimension="*";actionFilter="ALL";cursor=0;previous.clear();rebuildWidgets();load();}
+    @Override protected void clearFilters(){id=owner=actor=time=search="";dimension="*";actionFilter="ALL";cursor=0;previous.clear();refreshCartWidgets();load();}
     @Override protected void applyCustomInputs(){if(loading)return;readFilters();cursor=0;previous.clear();load();}
     private void readFilters(){id=trainBox.getValue().trim();owner=planeNameBox.getValue().trim();actor=actorBox.getValue().trim();time=timeBox.getValue().trim();dimension=radiusBox.getValue().trim();search=searchBox.getValue().trim();}
-    private void rebuildWidgets(){clearWidgets();init();}
+    private void refreshCartWidgets(){clearWidgets();init();}
     @Override protected void sendPage(C2SRequestPagePayload.Nav nav){if(loading)return;if(nav==C2SRequestPagePayload.Nav.NEXT){if(next==0)return;previous.push(cursor);cursor=next;}else if(nav==C2SRequestPagePayload.Nav.PREV){if(previous.isEmpty())return;cursor=previous.pop();}else if(nav==C2SRequestPagePayload.Nav.FIRST){readFilters();cursor=0;previous.clear();}load();}
-    public void showHistory(String value){if(value==null||value.isBlank()){message("Введите ID или выберите строку",true);return;}if(loading)return;id=value;owner=actor=time=search="";dimension="*";actionFilter="ALL";cursor=0;previous.clear();Minecraft.getInstance().setScreen(this);rebuildWidgets();load();}
+    public void showHistory(String value){if(value==null||value.isBlank()){message("Введите ID или выберите строку",true);return;}if(loading)return;id=value;owner=actor=time=search="";dimension="*";actionFilter="ALL";cursor=0;previous.clear();Minecraft.getInstance().setScreen(this);refreshCartWidgets();load();}
     public void load(){if(loading)return;
         try{if(!id.isBlank())UUID.fromString(id);GuiTimeFilter.parse(time,java.time.ZonedDateTime.now(logTimeZone));
             request=++sequence;PacketDistributor.sendToServer(new C2SCartHistoryPayload(request,id,cursor,actor,false,owner,time,actionFilter,dimension,search,configuredPageSize()));

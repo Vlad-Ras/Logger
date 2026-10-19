@@ -121,7 +121,7 @@ public class LogViewerScreen extends Screen {
 
     private Button btnTime;
     private Button btnRadius;
-    private Button btnType;
+    protected Button btnType;
     private Button btnActor;
     private Button btnTrain;
     private Button btnPlaneName;
@@ -883,7 +883,7 @@ public class LogViewerScreen extends Screen {
         if (typeDropdownOpen) {
             DropdownLayout layout = typeDropdownLayout();
             if (layout != null) {
-                int maxScroll = Math.max(0, TYPE_COUNT - layout.visibleCount());
+                int maxScroll = Math.max(0, typeChoiceCount() - layout.visibleCount());
                 int step = (int) Math.signum(deltaY);
                 this.typeDropdownScroll = clampInt(this.typeDropdownScroll - step, 0, maxScroll);
             }
@@ -1245,28 +1245,31 @@ public class LogViewerScreen extends Screen {
 
     private void cycleType() {
         // 0: ALL, 1: BLOCKS, 2: CONTAINERS, 3: ENTITIES, 4: ITEMS, 5: TRAINS, 6: CANNON, 7: CHAT, 8: PLANES
-        typePresetIdx = (typePresetIdx + 1) % TYPE_COUNT;
+        typePresetIdx = (typePresetIdx + 1) % typeChoiceCount();
         refreshFilterButtonLabels();
         sendPage(C2SRequestPagePayload.Nav.FIRST);
     }
 
-    private void toggleTypeDropdown() {
+    protected final void toggleTypeDropdown() {
         typeDropdownOpen = !typeDropdownOpen;
         if (typeDropdownOpen) {
             this.typeDropdownScroll = 0;
             DropdownLayout layout = typeDropdownLayout();
             if (layout != null) {
-                if (typePresetIdx >= layout.visibleCount()) {
+                if (typeChoiceIndex() >= layout.visibleCount()) {
                     this.typeDropdownScroll = clampInt(
-                            typePresetIdx - layout.visibleCount() + 1,
+                            typeChoiceIndex() - layout.visibleCount() + 1,
                             0,
-                            TYPE_COUNT - layout.visibleCount());
+                            typeChoiceCount() - layout.visibleCount());
                 }
             }
         }
     }
 
-    private static final int TYPE_COUNT = 11;
+    protected int typeChoiceCount(){return 11;}
+    protected int typeChoiceIndex(){return typePresetIdx;}
+    protected Component typeChoiceLabel(int index){return Component.translatable("gui.avilixlogger.type."+typeKey(index));}
+    protected void typeChoiceSelected(int index){typePresetIdx=index;refreshFilterButtonLabels();sendPage(C2SRequestPagePayload.Nav.FIRST);}
 
     private record DropdownLayout(int x, int y, int width, int itemHeight, int firstIndex, int visibleCount) {}
 
@@ -1277,9 +1280,9 @@ public class LogViewerScreen extends Screen {
 
         float preferredTextScale = clampFloat(controlScale(), 0.45f, 1.0f);
         int maxTextW = 1;
-        for (int i = 0; i < TYPE_COUNT; i++) {
+        for (int i = 0; i < typeChoiceCount(); i++) {
             maxTextW = Math.max(maxTextW,
-                    this.font.width(Component.translatable("gui.avilixlogger.type." + typeKey(i))));
+                    this.font.width(typeChoiceLabel(i)));
         }
         int availableW = Math.max(20, this.width - margin * 2);
         int desiredW = Math.max(btnType.getWidth(), Math.round(maxTextW * preferredTextScale) + 14);
@@ -1289,15 +1292,15 @@ public class LogViewerScreen extends Screen {
         int belowY = btnType.getY() + btnType.getHeight();
         int spaceBelow = Math.max(0, this.height - margin - belowY);
         int spaceAbove = Math.max(0, btnType.getY() - margin);
-        int fullHeight = TYPE_COUNT * itemH;
+        int fullHeight = typeChoiceCount() * itemH;
         boolean openDown = spaceBelow >= fullHeight || spaceBelow >= spaceAbove;
         int availableH = openDown ? spaceBelow : spaceAbove;
 
         // At extreme resolutions keep every pixel inside the screen and expose remaining options
         // through wheel scrolling instead of letting the popup leave the viewport.
         if (availableH < itemH) itemH = Math.max(1, availableH);
-        int visible = Math.max(1, Math.min(TYPE_COUNT, availableH / Math.max(1, itemH)));
-        int maxScroll = Math.max(0, TYPE_COUNT - visible);
+        int visible = Math.max(1, Math.min(typeChoiceCount(), availableH / Math.max(1, itemH)));
+        int maxScroll = Math.max(0, typeChoiceCount() - visible);
         this.typeDropdownScroll = clampInt(this.typeDropdownScroll, 0, maxScroll);
         int popupH = visible * itemH;
         int y = openDown ? belowY : btnType.getY() - popupH;
@@ -1312,11 +1315,9 @@ public class LogViewerScreen extends Screen {
         if (mouseX < layout.x() || mouseX > layout.x() + layout.width()
                 || mouseY < layout.y() || mouseY > layout.y() + h) return false;
         int idx = layout.firstIndex() + (int) ((mouseY - layout.y()) / layout.itemHeight());
-        if (idx < 0 || idx >= TYPE_COUNT) return false;
-        this.typePresetIdx = idx;
+        if (idx < 0 || idx >= typeChoiceCount()) return false;
         this.typeDropdownOpen = false;
-        refreshFilterButtonLabels();
-        sendPage(C2SRequestPagePayload.Nav.FIRST);
+        typeChoiceSelected(idx);
         return true;
     }
 
@@ -1331,9 +1332,9 @@ public class LogViewerScreen extends Screen {
             int yy = layout.y() + slot * layout.itemHeight();
             boolean hover = mouseX >= layout.x() && mouseX <= layout.x() + layout.width()
                     && mouseY >= yy && mouseY <= yy + layout.itemHeight();
-            if (i == typePresetIdx) g.fill(layout.x(), yy, layout.x() + layout.width(), yy + layout.itemHeight(), 0x55333333);
+            if (i == typeChoiceIndex()) g.fill(layout.x(), yy, layout.x() + layout.width(), yy + layout.itemHeight(), 0x55333333);
             if (hover) g.fill(layout.x(), yy, layout.x() + layout.width(), yy + layout.itemHeight(), 0x55222222);
-            Component label = Component.translatable("gui.avilixlogger.type." + typeKey(i));
+            Component label = typeChoiceLabel(i);
             g.enableScissor(layout.x() + 2, yy + 1,
                     layout.x() + layout.width() - 2, yy + layout.itemHeight() - 1);
             drawDropdownLabel(g, label, layout.x() + 5, yy, layout.width() - 10, layout.itemHeight());
@@ -1342,7 +1343,7 @@ public class LogViewerScreen extends Screen {
 
         // Thin edge markers indicate that more choices are available with the mouse wheel.
         if (layout.firstIndex() > 0) g.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + 1, 0xFFFFAA00);
-        if (layout.firstIndex() + layout.visibleCount() < TYPE_COUNT) {
+        if (layout.firstIndex() + layout.visibleCount() < typeChoiceCount()) {
             g.fill(layout.x(), layout.y() + h - 1, layout.x() + layout.width(), layout.y() + h, 0xFFFFAA00);
         }
     }

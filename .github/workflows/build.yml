@@ -7,6 +7,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_USER: logger_test
+          CLICKHOUSE_PASSWORD: logger_test
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user logger_test --password logger_test --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -16,6 +30,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Compile, test and obfuscate
         run: ./gradlew --no-daemon -Dorg.gradle.jvmargs=-Xmx3G clean build compileCreateSmokeJava
+      - name: Real ClickHouse owner index and pagination
+        env:
+          AVILIX_TEST_CLICKHOUSE_URL: http://127.0.0.1:8123
+        run: ./gradlew --no-daemon testCartOwnerDatabase --console=plain
       - name: Native Create recovery and rollback smoke
         timeout-minutes: 10
         shell: bash

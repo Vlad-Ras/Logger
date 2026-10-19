@@ -72,7 +72,7 @@ final class ClickHouseDeliveryTest {
             catch (java.io.IOException expected) {}
             database.appendBatch("retry-test", batch);
             check(handlerFailure.get() == null, "HTTP contract violation: " + handlerFailure.get());
-            check(failed.get() && requests.size() == 2, "split feed/detail retry was not exercised");
+            check(failed.get() && requests.values().stream().filter(v->v.startsWith("INSERT")&&(v.contains("_feed FORMAT")||v.contains("_containers FORMAT"))).count() == 2, "split feed/detail retry was not exercised");
             check(first.count == 2 && second.count == 3, "coalescing mutated original item counts");
             LogEntry loot=row("loot");loot.type=ActionType.ITEM_PICKUP;loot.dim="minecraft:overworld";loot.count=12;loot.actorUuid=UUID.randomUUID();
             UUID cart=UUID.randomUUID();loot.source=CartAuditContext.prefix(cart)+"loot_pickup:0";
@@ -102,6 +102,12 @@ final class ClickHouseDeliveryTest {
             check(!selects.isEmpty()&&selects.stream().allMatch(sql->sql.contains("startsWith(source, '"+BackpackIds.prefix(bagId)+"')")),"GUI/feed/fallback query broadened mandatory backpack ID");
             selects.clear();var cartQuery=new LogQuery();cartQuery.dim="*";cartQuery.sourcePrefix="create:cart:";database.queryReverse(cartQuery);
             check(!selects.isEmpty()&&selects.stream().allMatch(sql->sql.contains("startsWith(source, 'create:cart:')")),"GUI cart category broadened source prefix");
+            selects.clear();var ownedCart=new com.roften.avilixlogger.net.C2SCartHistoryPayload(1,cart.toString(),777,"Actor",false,"Owner","13.10.2026","CART_PACK","minecraft:overworld","упаковка",31);
+            database.queryReverse(com.roften.avilixlogger.net.CartHistoryQuery.build(ownedCart));
+            check(!selects.isEmpty()&&selects.stream().allMatch(sql->sql.contains("_cart_owners")&&sql.contains("argMaxMerge(owner_state)")&&sql.contains("lowerUTF8('Owner')")&&sql.contains("id < 777")&&sql.contains("LIMIT 32")),"cart owner/cursor/page criteria lost before LIMIT");
+            check(selects.stream().allMatch(sql->!sql.contains("be_before AS be_before")&&!sql.contains("be_after AS be_after")),"cart list fallback fetched full construction NBT");
+            lookupResponse.set("{\"cart_key\":\""+cart+"\",\"cart_owner\":\"Owner\"}\n");
+            check(database.cartOwners(Set.of(cart)).get(cart).equals("Owner"),"owner metadata batch not read from dedicated index");lookupResponse.set(null);
             check(handlerFailure.get()==null,"Backpack HTTP contract violation: "+handlerFailure.get());
             System.out.println("Backpack HTTP checks passed: persisted recovery snapshots and mandatory GUI/feed/fallback ID filters.");
             UUID autoCart=UUID.randomUUID();var automation=row("cart_automation");automation.type=ActionType.CART_TRANSFER;automation.dim="minecraft:overworld";automation.source=CartAuditContext.prefix(autoCart)+"automation_transfer:1";

@@ -207,6 +207,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 if (useFeedTable) ensureFeedTable();
                 for (TableKind kind : splitKinds()) ensureSplitTable(kind);
                 ensureSplitSchemaCompatibility();
+                ensureCartOwnerIndex();
                 if (addSkippingIndexes) ensureSkippingIndexes();
                 AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse split+feed schema ready. DB={}, prefix={}, feed={}, detailMode={}", database, tablePrefix, useFeedTable, detailMode);
             } else {
@@ -975,19 +976,19 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         sql.append("SELECT ")
                 .append("id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, source, ")
                 .append(extraSelectExpr(kind)).append(" AS extra, ")
-                .append(selectExpr(kind, "block_before")).append(" AS block_before, ")
-                .append(selectExpr(kind, "be_before")).append(" AS be_before, ")
-                .append(selectExpr(kind, "block_after")).append(" AS block_after, ")
-                .append(selectExpr(kind, "be_after")).append(" AS be_after, ")
-                .append(selectExpr(kind, "entity_type")).append(" AS entity_type, ")
-                .append(selectExpr(kind, "entity_uuid")).append(" AS entity_uuid, ")
-                .append(selectExpr(kind, "entity_nbt")).append(" AS entity_nbt, ")
-                .append(selectExpr(kind, "item_stack")).append(" AS item_stack, ")
-                .append(selectExpr(kind, "count")).append(" AS count, ")
-                .append(selectExpr(kind, "player_inv_before")).append(" AS player_inv_before, ")
-                .append(selectExpr(kind, "player_inv_after")).append(" AS player_inv_after, ")
-                .append(selectExpr(kind, "container_slots_before")).append(" AS container_slots_before, ")
-                .append(selectExpr(kind, "container_slots_after")).append(" AS container_slots_after ")
+                .append(viewSelectExpr(kind, q, "block_before")).append(" AS block_before, ")
+                .append(viewSelectExpr(kind, q, "be_before")).append(" AS be_before, ")
+                .append(viewSelectExpr(kind, q, "block_after")).append(" AS block_after, ")
+                .append(viewSelectExpr(kind, q, "be_after")).append(" AS be_after, ")
+                .append(viewSelectExpr(kind, q, "entity_type")).append(" AS entity_type, ")
+                .append(viewSelectExpr(kind, q, "entity_uuid")).append(" AS entity_uuid, ")
+                .append(viewSelectExpr(kind, q, "entity_nbt")).append(" AS entity_nbt, ")
+                .append(viewSelectExpr(kind, q, "item_stack")).append(" AS item_stack, ")
+                .append(viewSelectExpr(kind, q, "count")).append(" AS count, ")
+                .append(viewSelectExpr(kind, q, "player_inv_before")).append(" AS player_inv_before, ")
+                .append(viewSelectExpr(kind, q, "player_inv_after")).append(" AS player_inv_after, ")
+                .append(viewSelectExpr(kind, q, "container_slots_before")).append(" AS container_slots_before, ")
+                .append(viewSelectExpr(kind, q, "container_slots_after")).append(" AS container_slots_after ")
                 .append("FROM ").append(qualifiedSplitTable(kind));
         appendWhere(sql, q, reverse, kind);
         return sql.toString();
@@ -1017,6 +1018,10 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         return "extra";
     }
 
+    private String viewSelectExpr(TableKind kind,LogQuery q,String column){
+        if("cart_gui".equals(q.debugSource)&&!q.requireDetails&&java.util.Set.of("be_before","be_after","entity_nbt","item_stack","player_inv_before","player_inv_after","container_slots_before","container_slots_after").contains(column))return "''";
+        return selectExpr(kind,column);
+    }
     private String selectExpr(TableKind kind, String column) {
         boolean has = switch (column) {
             case "block_before", "be_before", "block_after", "be_after" -> kind == TableKind.BLOCKS || kind == TableKind.CONTAINERS || kind == TableKind.COMPAT;
@@ -1034,14 +1039,25 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
 
     private static final String CART_OWNER_PATTERN="(?:^|;\\s*)owner=([^;]*)";
-    private String cartOwnerRows() {
-        // Lifecycle metadata is retained in compat; feed-only installations are supported too.
-        return "SELECT id, source, extra FROM "+qualifiedSplitTable(TableKind.COMPAT)
-            +(useFeedTable?" UNION ALL SELECT id, source, extra FROM "+qualifiedFeedTable():"");
+    private String qualifiedCartOwners(){return quoteIdent(database)+"."+quoteIdent(tablePrefix+"_cart_owners");}
+    private String ownerStateSelect(String source){return "SELECT substring(source, 13, 36) AS cart_key, argMaxState(trimBoth(extract(extra, "+sqlString(CART_OWNER_PATTERN)+")), id) AS owner_state FROM "+source+" WHERE startsWith(source, 'create:cart:') AND notEmpty(extract(extra, "+sqlString(CART_OWNER_PATTERN)+")) GROUP BY cart_key";}
+    private void ensureCartOwnerIndex() throws IOException {
+        String owners=qualifiedCartOwners();
+        execute("CREATE TABLE IF NOT EXISTS "+owners+" (cart_key String, owner_state AggregateFunction(argMax, String, UInt64)) ENGINE = AggregatingMergeTree ORDER BY cart_key SETTINGS non_replicated_deduplication_window = 1024",timeoutSec());
+        execute("CREATE MATERIALIZED VIEW IF NOT EXISTS "+quoteIdent(database)+"."+quoteIdent(tablePrefix+"_cart_owners_compat_mv")+" TO "+owners+" AS "+ownerStateSelect(qualifiedSplitTable(TableKind.COMPAT)),timeoutSec());
+        if(useFeedTable)execute("CREATE MATERIALIZED VIEW IF NOT EXISTS "+quoteIdent(database)+"."+quoteIdent(tablePrefix+"_cart_owners_feed_mv")+" TO "+owners+" AS "+ownerStateSelect(qualifiedFeedTable()),timeoutSec());
+        if(execute("SELECT count() FROM "+owners+" WHERE cart_key = '__bootstrap_v1__'",timeoutSec()).trim().equals("0")){
+            // One idempotent metadata-only migration, on the storage initialisation worker.
+            // Compatibility checkpoints already carry ownership on pre-1.2.22 installations.
+            deliveryToken="cart-owners-bootstrap-v1";
+            try{execute("INSERT INTO "+owners+" "+ownerStateSelect(qualifiedSplitTable(TableKind.COMPAT)),timeoutSec(),false,true,true);
+                deliveryToken="cart-owners-bootstrap-marker-v1";execute("INSERT INTO "+owners+" SELECT '__bootstrap_v1__', argMaxState('', toUInt64(0))",timeoutSec(),false,true,true);
+            }finally{deliveryToken=null;}
+        }
     }
     private String ownerGroups(java.util.Set<java.util.UUID> ids) {
-        String where=ids.isEmpty()?"":" AND substring(source, 13, 36) IN ("+ids.stream().map(x->sqlString(x.toString())).collect(java.util.stream.Collectors.joining(","))+")";
-        return "SELECT substring(source, 13, 36) AS cart_key, argMax(trimBoth(extract(extra, "+sqlString(CART_OWNER_PATTERN)+")), id) AS cart_owner FROM ("+cartOwnerRows()+") WHERE startsWith(source, 'create:cart:') AND notEmpty(extract(extra, "+sqlString(CART_OWNER_PATTERN)+"))"+where+" GROUP BY cart_key";
+        String where=ids.isEmpty()?"cart_key != '__bootstrap_v1__'":"cart_key IN ("+ids.stream().map(x->sqlString(x.toString())).collect(java.util.stream.Collectors.joining(","))+")";
+        return "SELECT cart_key, argMaxMerge(owner_state) AS cart_owner FROM "+qualifiedCartOwners()+" WHERE "+where+" GROUP BY cart_key";
     }
     private void appendCartOwnerWhere(StringBuilder sql, LogQuery q) {
         if(!q.cartIds.isEmpty())sql.append(" AND substring(source, 13, 36) IN (").append(q.cartIds.stream().map(x->sqlString(x.toString())).collect(java.util.stream.Collectors.joining(","))).append(')');
@@ -1054,6 +1070,10 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         try {String data=execute(ownerGroups(ids)+" FORMAT JSONEachRow",timeoutSec());
             for(String line:data.split("\\n")){if(line.isBlank())continue;var row=com.google.gson.JsonParser.parseString(line).getAsJsonObject();out.put(java.util.UUID.fromString(row.get("cart_key").getAsString()),row.get("cart_owner").getAsString());}
         }catch(Exception e){throw new IllegalStateException("Не удалось прочитать владельцев штуковин",e);}
+        if(shouldReadLegacyUnifiedTable()){
+            var missing=new java.util.HashSet<>(ids);missing.removeAll(out.keySet());
+            if(!missing.isEmpty())out.putAll(LogStorage.readCartOwners(this,missing));
+        }
         return java.util.Map.copyOf(out);
     }
 
@@ -1179,8 +1199,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (!text.isBlank()) {
             appendInsensitiveContainsAny(sql, text, "extra", "source");
         }
-        appendSearchFilters(sql,q,selectExpr(kind,"entity_type"),extraSelectExpr(kind),selectExpr(kind,"entity_nbt"),"source",
-                selectExpr(kind,"block_before"),selectExpr(kind,"block_after"),selectExpr(kind,"item_stack"));
+        appendSearchFilters(sql,q,selectExpr(kind,"entity_type"),extraSelectExpr(kind),viewSelectExpr(kind,q,"entity_nbt"),"source",
+                selectExpr(kind,"block_before"),selectExpr(kind,"block_after"),viewSelectExpr(kind,q,"item_stack"));
     }
 
     private static boolean requiresSearchColumns(LogQuery q) {
@@ -1575,7 +1595,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (insert) {
             // Already batched on a background sender. Synchronous acknowledgment works on older
             // MergeTree versions too, and avoids acknowledging data still in an async RAM buffer.
-            String table = sql.substring(0, sql.indexOf(" FORMAT "));
+            int format=sql.indexOf(" FORMAT "), select=sql.indexOf(" SELECT ");
+            String table = sql.substring(0,format>=0?format:select);
             query += "&async_insert=0&insert_deduplicate=1&insert_deduplication_token="
                     + urlEncode(deliveryToken + ":" + table);
         }
