@@ -25,6 +25,13 @@ public final class CreateDeployerRuntimeTest {
                 "expanded active stack count was lost during projection");
         largeUse.getCompound("UseItem").putInt("count",0);
         reject(()->CreateLivingRuntime.validate(largeUse),"empty active stack accepted");
+        var inventory=saved.copy();var persistent=inventory.getCompound("Persistent");
+        persistent.putInt("SelectedItemSlot",0);var items=new ListTag();var offhand=new CompoundTag();
+        offhand.putByte("Slot",(byte)150);offhand.putString("id","minecraft:apple");offhand.putInt("count",2048);
+        items.add(offhand);persistent.put("Inventory",items);CreateLivingRuntime.validate(inventory);
+        items.add(offhand.copy());reject(()->CreateLivingRuntime.validate(inventory),"duplicate runtime inventory slot accepted");
+        items.remove(1);offhand.putByte("Slot",(byte)41);
+        reject(()->CreateLivingRuntime.validate(inventory),"unknown runtime inventory slot accepted");
         for(String field:List.of("LastDamageTime","Start","End","InCombat","TakingDamage","Entries")){
             var broken=saved.copy();broken.getCompound("Tracker").remove(field);reject(()->CreateLivingRuntime.validate(broken),"missing tracker field accepted: "+field);
         }

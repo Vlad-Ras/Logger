@@ -87,6 +87,7 @@
     "DeployerResultAuditMixin",
     "DeployerRuntimeMixin",
     "LivingRuntimeMixin",
+    "PlayerRuntimeInventoryMixin",
     "DeployerRuntimeReservationMixin",
     "CombatRuntimeMixin",
     "AttributePermanentAccessor",

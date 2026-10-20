@@ -20,6 +20,7 @@ import java.util.*;
 /** Operation-bound, registry-aware runtime. An actor reference can never resolve to its human owner. */
 public final class CreateLivingRuntime {
     private static final ThreadLocal<Bindings> BOUND=new ThreadLocal<>();
+    private static final ThreadLocal<LivingEntity> SAVING=new ThreadLocal<>();
     private CreateLivingRuntime(){}
     public static final class Bindings {
         private final LivingEntity actor;private final Map<CompoundTag,Entity> values=new HashMap<>();
@@ -77,6 +78,31 @@ public final class CreateLivingRuntime {
             throw new IllegalStateException("Предмет runtime не прочитан полностью");
         return stack;
     }
+    public static boolean savingInventory(Player player){return SAVING.get()==player;}
+    /** Same slot addresses as Inventory.save, with expanded counts preserved. */
+    public static ListTag inventorySnapshot(Player player){
+        var inventory=player.getInventory();if(inventory.getContainerSize()!=41)throw new IllegalStateException("Неизвестный размер инвентаря runtime");
+        var list=new ListTag();
+        for(int slot=0;slot<41;slot++){
+            var stack=inventory.getItem(slot);if(stack.isEmpty())continue;
+            var value=NbtSerde.snapshotItemStack(stack,player.registryAccess());
+            if(value==null)throw new IllegalStateException("Предмет инвентаря runtime не сохранён");
+            value.putByte("Slot",(byte)(slot<36?slot:slot<40?slot+64:150));list.add(value);
+        }
+        return list;
+    }
+    private static int inventorySlot(CompoundTag value){
+        int slot=value.getByte("Slot")&255;
+        return slot<36?slot:slot>=100&&slot<104?slot-64:slot==150?40:-1;
+    }
+    private static void validateInventory(CompoundTag persistent){
+        var inventory=list(persistent,"Inventory");var slots=new HashSet<Integer>();
+        if(inventory.size()>41||!persistent.contains("SelectedItemSlot",3)||persistent.getInt("SelectedItemSlot")<0||persistent.getInt("SelectedItemSlot")>=9)
+            throw new IllegalStateException("Неполный инвентарь runtime");
+        for(var raw:inventory){var value=(CompoundTag)raw;int slot=inventorySlot(value);
+            if(!value.contains("Slot",1)||slot<0||!slots.add(slot)||!value.contains("id",8)||!value.contains("count",3)||value.getInt("count")<=0)
+                throw new IllegalStateException("Некорректный слот инвентаря runtime");}
+    }
     public static CompoundTag capture(LivingEntity entity,LivingEntity actor){
         var tag=((CreateLivingRuntimeAccess)entity).avilixlogger$livingRuntime(actor);
         var attributes=new ListTag();
@@ -93,7 +119,9 @@ public final class CreateLivingRuntime {
         }
         // Materialize supported attributes before saving native data so capture itself cannot
         // make the next snapshot appear to contain a new attribute definition.
-        var persistent=new CompoundTag();entity.addAdditionalSaveData(persistent);tag.put("Persistent",persistent);
+        var persistent=new CompoundTag();var previous=SAVING.get();SAVING.set(entity);
+        try{entity.addAdditionalSaveData(persistent);}finally{if(previous==null)SAVING.remove();else SAVING.set(previous);}
+        tag.put("Persistent",persistent);
         tag.put("Attributes",attributes);if(entity instanceof Player player){var food=new CompoundTag();player.getFoodData().addAdditionalSaveData(food);tag.put("Food",food);}
         if(entity instanceof Mob mob){tag.put("MobTarget",reference(mob.getTarget(),actor));tag.putBoolean("Aggressive",mob.isAggressive());}
         if(tag.sizeInBytes()>2*1024*1024)throw new IllegalStateException("Runtime активатора превышает 2 MiB");return tag;
@@ -103,6 +131,8 @@ public final class CreateLivingRuntime {
         validate(tag);validateReferences(tag,actor);
         if(entity instanceof Player){
             if(!tag.contains("Food",10))throw new IllegalStateException("Нет снимка питания активатора");
+            validateInventory(tag.getCompound("Persistent"));
+            for(var raw:tag.getCompound("Persistent").getList("Inventory",10))item((CompoundTag)raw,entity);
         }
         if(entity instanceof Mob&&(!tag.contains("MobTarget",10)||!tag.contains("Aggressive",1)))throw new IllegalStateException("Нет состояния цели моба");
         var ops=entity.registryAccess().createSerializationContext(NbtOps.INSTANCE);
@@ -126,13 +156,21 @@ public final class CreateLivingRuntime {
         tag=project(tag,entity.tickCount);
         var states=decode(entity,actor,tag);
         ((CreateLivingRuntimeAccess)entity).avilixlogger$clearEffectsForRestore();
-        entity.readAdditionalSaveData(tag.getCompound("Persistent").copy());
+        var nativeData=tag.getCompound("Persistent").copy();
+        // Inventory.load uses the vanilla count-limited codec. Decode these stacks
+        // separately, after native data is loaded, without changing the saved snapshot.
+        if(entity instanceof Player)nativeData.put("Inventory",new ListTag());
+        entity.readAdditionalSaveData(nativeData);
         for(var state:states){state.instance.removeModifiers();state.instance.setBaseValue(state.base);for(var modifier:state.permanent)state.instance.addPermanentModifier(modifier);for(var modifier:state.temporary)state.instance.addTransientModifier(modifier);}
         // Native loading clamps health before transient max-health modifiers are back.
         // Reapply these values only after restoring the complete attribute set.
         entity.setHealth(tag.getCompound("Persistent").getFloat("Health"));
         entity.setAbsorptionAmount(tag.getCompound("Persistent").getFloat("AbsorptionAmount"));
-        if(entity instanceof Player player)player.getFoodData().readAdditionalSaveData(tag.getCompound("Food"));
+        if(entity instanceof Player player){
+            player.getFoodData().readAdditionalSaveData(tag.getCompound("Food"));
+            var inventory=player.getInventory();inventory.clearContent();
+            for(var raw:tag.getCompound("Persistent").getList("Inventory",10)){var value=(CompoundTag)raw;inventory.setItem(inventorySlot(value),item(value,player));}
+        }
         ((CreateLivingRuntimeAccess)entity).avilixlogger$livingRuntime(tag,actor);
         if(entity instanceof Mob mob){var target=reference(tag.getCompound("MobTarget"),actor);if(target!=null&&!(target instanceof LivingEntity))throw new IllegalStateException("Цель моба сменила тип");
             ((MobTargetRuntimeAccessor)mob).avilixlogger$target((LivingEntity)target);mob.setAggressive(tag.getBoolean("Aggressive"));}
@@ -186,6 +224,7 @@ public final class CreateLivingRuntime {
                 ||!persistent.contains("AbsorptionAmount",5)||!Float.isFinite(persistent.getFloat("AbsorptionAmount"))||persistent.getFloat("AbsorptionAmount")<0
                 ||!persistent.contains("attributes",9))throw new IllegalStateException("Нет полного здоровья/атрибутов runtime");
         list(persistent,"attributes");
+        if(persistent.contains("Inventory"))validateInventory(persistent);
         for(String key:List.of("LastMob","LastVictim","LastPlayer")){if(!tag.contains(key,10))throw new IllegalStateException("Отсутствует ссылка боя: "+key);referenceSchema(tag.getCompound(key));}
         if(!tag.contains("LastSource",10))throw new IllegalStateException("Нет последнего источника урона");damageSchema(tag.getCompound("LastSource"));
         var useItem=tag.getCompound("UseItem");

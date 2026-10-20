@@ -148,14 +148,21 @@ public final class CreateDeployerJointSmoke {
         var healthy=CreateLivingRuntime.capture(sheep,fake);health.removeModifiers();sheep.setHealth(4);
         CreateLivingRuntime.bind(fake,List.of(healthy)).run(()->CreateLivingRuntime.restore(sheep,fake,healthy));
         check(sheep.getHealth()==35&&CreateLivingRuntime.matches(sheep,fake,healthy),"transient max-health restore clamped saved health");
-        fake.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(Items.APPLE,1024));
+        var expandedHand=new ItemStack(Items.APPLE,1024);expandedHand.set(DataComponents.CUSTOM_NAME,Component.literal("runtime expanded hand"));
+        fake.setItemInHand(InteractionHand.MAIN_HAND,expandedHand);
+        fake.getInventory().setItem(36,new ItemStack(Items.IRON_BOOTS,200));
+        fake.setItemInHand(InteractionHand.OFF_HAND,new ItemStack(Items.APPLE,2048));
         fake.startUsingItem(InteractionHand.MAIN_HAND);
         var using=CreateLivingRuntime.capture(fake,fake);
         check(using.getCompound("UseItem").getInt("count")==1024,"active item lost expanded count during capture");
+        check(fake.getMainHandItem()==expandedHand&&expandedHand.getCount()==1024,"capture mutated the live expanded hand");
         fake.stopUsingItem();
+        fake.getInventory().clearContent();
         CreateLivingRuntime.bind(fake,List.of(using)).run(()->CreateLivingRuntime.restore(fake,fake,using));
-        check(fake.getUseItem().getCount()==1024&&CreateLivingRuntime.matches(fake,fake,using),
-                "expanded active item was not restored exactly");
+        check(fake.getUseItem().getCount()==1024&&fake.getMainHandItem().getCount()==1024
+                &&fake.getMainHandItem().has(DataComponents.CUSTOM_NAME)&&fake.getInventory().getItem(36).getCount()==200
+                &&fake.getOffhandItem().getCount()==2048&&CreateLivingRuntime.matches(fake,fake,using),
+                "expanded active item, armor or offhand was not restored exactly");
     }
     private static Method method(Class<?> type,String name,Class<?>...args)throws Exception{var m=type.getDeclaredMethod(name,args);m.setAccessible(true);return m;}
     private static Field field(Class<?> type,String name)throws Exception{var f=type.getDeclaredField(name);f.setAccessible(true);return f;}
