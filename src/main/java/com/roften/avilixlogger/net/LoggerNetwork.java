@@ -115,6 +115,7 @@ public final class LoggerNetwork {
         if (player != null) {
             UUID uuid = player.getUUID();
             CLIENT_PRESENT.remove(uuid);
+            CartHistoryNetwork.logout(uuid);
             GUI_FILTERS.remove(uuid);
             GUI_PAGE_SIZES.remove(uuid);
             LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
@@ -142,6 +143,7 @@ public final class LoggerNetwork {
         LAST_GUI_DETAILS_REQUEST_AT.clear();
         LAST_GUI_DETAILS_REQUEST_SIG.clear();
         CLIENT_PRESENT.clear();
+        CartHistoryNetwork.stop();
         GUI_FILTERS.clear();
         GUI_PAGE_SIZES.clear();
         LATEST_GUI_PAGE_SEQ.clear();
@@ -262,7 +264,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "3");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "5");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
@@ -271,6 +273,9 @@ public final class LoggerNetwork {
             Object rr = r.getClass().getMethod("optional").invoke(r);
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
+
+        r.playToServer(C2SCartHistoryPayload.TYPE, C2SCartHistoryPayload.STREAM_CODEC, CartHistoryNetwork::handle);
+        r.playToClient(S2CCartHistoryPayload.TYPE, S2CCartHistoryPayload.STREAM_CODEC, (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptCart", new Class<?>[]{S2CCartHistoryPayload.class}, new Object[]{payload})));
 
         // Client -> Server
         r.playToServer(C2SHelloPayload.TYPE, C2SHelloPayload.STREAM_CODEC, LoggerNetwork::handleHello);
@@ -290,7 +295,7 @@ public final class LoggerNetwork {
     // -------- client handlers (reflection-dispatched) --------
 
     private static void handleOpenGuiClient(S2COpenGuiPayload payload, IPayloadContext ctx) {
-        ctx.enqueueWork(() -> invokeClientHook("open", new Class<?>[0], new Object[0]));
+        ctx.enqueueWork(() -> invokeClientHook("open", new Class<?>[] { boolean.class, String.class }, new Object[] { payload.createAvailable(), payload.timeZone() }));
     }
 
     private static void handleLogPageClient(S2CLogPagePayload payload, IPayloadContext ctx) {
@@ -689,6 +694,10 @@ public final class LoggerNetwork {
             q.sinceTs = now - (mins[tidx] * 60_000L);
         }
 
+        if (gf != null && gf.absoluteSinceTs() >= 0) {
+            q.sinceTs = gf.absoluteSinceTs(); q.untilTs = gf.absoluteUntilTs() >= 0 ? Math.min(now, gf.absoluteUntilTs()) : now;
+        }
+
         // Radius: custom blocks override presets. Radius=0 means WORLD.
         int r;
         int customRadius = gf != null ? gf.customRadiusBlocks() : -1;
@@ -724,18 +733,62 @@ public final class LoggerNetwork {
         }
 
         if (gf != null) {
+            q.textFilter = gf.search() == null ? "" : gf.search().trim();
+            q.planeOnly = gf.typePresetIdx() == 8;
+            var constructionKind = com.roften.avilixlogger.core.CreateContraptionKind.forGuiPreset(gf.typePresetIdx());
+            if ((gf.typePresetIdx() != 8 && gf.typePresetIdx() != 10 && constructionKind == com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN)
+                    || constructionKind == com.roften.avilixlogger.core.CreateContraptionKind.TRAIN) q.trainNameFilter = gf.train();
             String blockNeedle = normalizeFilterNeedle(gf.blockId());
             if (!blockNeedle.isBlank()) q.blockIdFilter = blockNeedle;
 
             String planeNeedle = normalizeFilterNeedle(gf.planeName());
-            if (!planeNeedle.isBlank()) q.planeNameFilter = planeNeedle;
+            if (gf.typePresetIdx() == 8 && !planeNeedle.isBlank()) q.planeNameFilter = planeNeedle;
 
-            if (gf.typePresetIdx() == 5) q.extraTextFilter = "train";
-            else if (gf.typePresetIdx() == 6) q.extraTextFilter = "cannon";
+            if (gf.typePresetIdx() == 6) q.extraTextFilter = "cannon";
         }
 
         // Types (preset index)
         q.types = mapTypePreset(gf != null ? gf.typePresetIdx() : 0);
+        if (gf != null) {
+            var kind = com.roften.avilixlogger.core.CreateContraptionKind.forGuiPreset(gf.typePresetIdx());
+            if (kind != com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN
+                    && kind != com.roften.avilixlogger.core.CreateContraptionKind.MINECART) {
+                q.sourcePrefix = kind == com.roften.avilixlogger.core.CreateContraptionKind.TRAIN ? "create:train" : kind.prefix();
+                String value = gf.train() == null ? "" : gf.train().trim();
+                if (!value.isBlank() && kind == com.roften.avilixlogger.core.CreateContraptionKind.TRAIN) {
+                    try { q.constructionId = java.util.UUID.fromString(value); q.trainNameFilter = null; }
+                    catch (IllegalArgumentException ignored) {}
+                }
+                if (!value.isBlank() && kind != com.roften.avilixlogger.core.CreateContraptionKind.TRAIN) {
+                    try { q.sourcePrefix = kind.prefix() + java.util.UUID.fromString(value) + ":"; }
+                    catch (IllegalArgumentException ignored) { q.extraTextFilter = value; }
+                }
+            }
+        }
+        if (gf != null && gf.typePresetIdx() == 9) {
+            q.sourcePrefix = "create:cart:";
+            String value = gf.train() == null ? "" : gf.train().trim();
+            if (!value.isBlank()) {
+                try { q.cartId = java.util.UUID.fromString(value); }
+                catch (IllegalArgumentException ignored) { q.extraTextFilter = value; }
+            }
+        }
+        if (gf != null && gf.typePresetIdx() == 10) {
+            String value = gf.train() == null ? "" : gf.train().trim();
+            if (!value.isBlank()) {
+                java.util.UUID id = null;
+                try { id = java.util.UUID.fromString(value); }
+                catch (IllegalArgumentException ignored) {
+                    var index = com.roften.avilixlogger.compat.backpacked.BackpackIndex.get(sp.getServer());
+                    if (index != null) id = index.resolve(value);
+                }
+                if (id != null) q.backpackId = id;
+                else if (value.toUpperCase(java.util.Locale.ROOT).startsWith("BP-") || value.indexOf('-') >= 0)
+                    q.backpackId = new java.util.UUID(0, 0);
+                else q.backpackNeedle = value;
+            }
+        }
+
 
         // GUI has its own page size; keep chat page size independent.
         q.limit = C2SRequestPagePayload.clampPageSize(pageSize);
@@ -747,6 +800,8 @@ public final class LoggerNetwork {
         // 0: ALL
         if (presetIdx <= 0) return null;
         return switch (presetIdx) {
+            case 5, 9, 11, 12 -> null; // include mechanism/world events, refine by exact construction source
+            case 10 -> com.roften.avilixlogger.core.BackpackIds.types();
             case 1 -> java.util.EnumSet.of(
                     com.roften.avilixlogger.core.ActionType.BLOCK_BREAK,
                     com.roften.avilixlogger.core.ActionType.BLOCK_PLACE,
@@ -794,19 +849,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT
             );
-            // 5: TRAINS, 6: CANNON — we still keep a broad type set and then refine with extra filtering.
-            case 5 -> java.util.EnumSet.of(
-                    com.roften.avilixlogger.core.ActionType.BLOCK_INTERACT,
-                    com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_SPAWN,
-                    com.roften.avilixlogger.core.ActionType.ENTITY_DEATH,
-                    com.roften.avilixlogger.core.ActionType.TRAIN_ASSEMBLE,
-                    com.roften.avilixlogger.core.ActionType.TRAIN_DISASSEMBLE,
-                    com.roften.avilixlogger.core.ActionType.TRAIN_SCHEDULE_TAKE,
-                    com.roften.avilixlogger.core.ActionType.TRAIN_CONTROL_START,
-                    com.roften.avilixlogger.core.ActionType.TRAIN_CONTROL_STOP,
-                    com.roften.avilixlogger.core.ActionType.TRAIN_SCHEDULE_PUT
-            );
+            // Cannon events use their existing marker filtering.
             case 6 -> java.util.EnumSet.of(
                     com.roften.avilixlogger.core.ActionType.BLOCK_PLACE,
                     com.roften.avilixlogger.core.ActionType.BLOCK_INTERACT,
@@ -846,69 +889,10 @@ public final class LoggerNetwork {
         LogQuery q = state.baseQuery.copy();
         q.beforeId = state.currentBeforeId();
 
-        // GUI can aggregate spammy sequences (drops/places/container click-spam). To avoid returning
-        // too few rows after aggregation, we overfetch.
-        int desired = size + 1;
-        int fetchLimit = Math.min(5000, desired * 12);
-        if (gf != null && gf.typePresetIdx() == 8) {
-            // Plane preset includes generic legacy entity rows too; keep the first DB slice bounded.
-            fetchLimit = Math.min(2200, desired * 10);
-            if (q.owner != null && !q.owner.isBlank()) fetchLimit = Math.min(2500, desired * 12);
-            if (hasExtraGuiFilters(gf)) fetchLimit = Math.min(3500, Math.max(fetchLimit, desired * 16));
-        } else {
-            if (q.owner != null && !q.owner.isBlank()) fetchLimit = Math.min(8000, desired * 25);
-            if (hasExtraGuiFilters(gf)) fetchLimit = Math.min(8000, Math.max(fetchLimit, desired * 40));
-        }
-        q.limit = fetchLimit;
-
-        int neededFiltered = aggregated ? Math.max(desired * 6, size * 8) : desired;
-        neededFiltered = Math.min(1200, Math.max(neededFiltered, desired));
-        java.util.ArrayList<LogEntry> filtered = new java.util.ArrayList<>(Math.min(neededFiltered, fetchLimit));
-        long scanBeforeId = q.beforeId;
-        boolean exhausted = false;
-        boolean brokeEarly = false;
-        while (filtered.size() < neededFiltered && !cancelled.getAsBoolean()) {
-            LogQuery pageQ = q.copy();
-            pageQ.beforeId = scanBeforeId;
-            List<LogEntry> raw = LoggerRuntime.storage(level).queryReverse(pageQ);
-            if (raw == null || raw.isEmpty()) {
-                exhausted = true;
-                break;
-            }
-
-            List<LogEntry> pageFiltered = raw;
-
-            // Optional owner post-filter (planes)
-            if (q.owner != null && !q.owner.isBlank()) {
-                ArrayList<LogEntry> tmp = new ArrayList<>(Math.min(raw.size(), desired * 4));
-                for (LogEntry e : raw) {
-                    if (com.roften.avilixlogger.core.PlaneLogFilters.matchesOwner(e, q.owner)) {
-                        tmp.add(e);
-                    }
-                }
-                pageFiltered = tmp;
-            }
-
-            // GUI-only extra filters that aren't part of LogQuery (train name, cannon, create-train events).
-            pageFiltered = applyGuiExtraFilters(pageFiltered, gf, neededFiltered - filtered.size());
-            if (!pageFiltered.isEmpty()) filtered.addAll(pageFiltered);
-
-            long nextScanBeforeId = raw.get(raw.size() - 1).id;
-            if (nextScanBeforeId <= 0L || nextScanBeforeId == scanBeforeId) {
-                exhausted = true;
-                break;
-            }
-            scanBeforeId = nextScanBeforeId;
-
-            if (raw.size() < pageQ.limit) {
-                exhausted = true;
-                break;
-            }
-            if (filtered.size() >= neededFiltered) {
-                brokeEarly = true;
-                break;
-            }
-        }
+        var slice = com.roften.avilixlogger.core.GuiPageLoader.load(LoggerRuntime.storage(level), q, size, aggregated, cancelled,
+                candidates -> aggregateForGui(level, candidates, size).hasNext);
+        List<LogEntry> filtered = slice.entries();
+        boolean exhausted = slice.exhausted();
 
         if (cancelled.getAsBoolean()) return errorPage(level, state, "Запрос заменён новым.");
 
@@ -918,7 +902,7 @@ public final class LoggerNetwork {
         if (aggregated) {
             // Aggregate ONLY for GUI output. Chat commands remain raw.
             AggregationResult agg = aggregateForGui(level, filtered, size);
-            hasNext = agg.hasNext || !exhausted || brokeEarly;
+            hasNext = agg.hasNext || !exhausted;
             nextCursorCandidate = agg.nextCursorCandidate;
             rows = agg.rows;
         } else {
@@ -930,7 +914,7 @@ public final class LoggerNetwork {
                 n++;
                 if (n >= size) break;
             }
-            hasNext = filtered.size() > size || !exhausted || brokeEarly;
+            hasNext = filtered.size() > size || !exhausted;
             nextCursorCandidate = (rr.isEmpty() ? 0L : rr.get(rr.size() - 1).id());
             rows = List.copyOf(rr);
         }
@@ -956,109 +940,6 @@ public final class LoggerNetwork {
         }
 
         return new Page(state.title == null ? "Логи" : state.title, state.pageIndex(), hasPrev, hasNext, outRows);
-    }
-
-    private static boolean hasExtraGuiFilters(GuiFilters gf) {
-        if (gf == null) return false;
-        return (gf.train() != null && !gf.train().isBlank())
-                || (gf.planeName() != null && !gf.planeName().isBlank())
-                || (gf.blockId() != null && !gf.blockId().isBlank())
-                || gf.typePresetIdx() == 5
-                || gf.typePresetIdx() == 6
-                || gf.typePresetIdx() == 8;
-    }
-
-    private static List<LogEntry> applyGuiExtraFilters(List<LogEntry> in, GuiFilters gf, int desired) {
-        if (in == null || in.isEmpty()) return List.of();
-        if (gf == null) return in;
-
-        final String train = gf.train() == null ? "" : gf.train().trim();
-        final boolean wantTrainName = !train.isBlank();
-        final String planeNeedle = normalizeFilterNeedle(gf.planeName());
-        final boolean wantPlaneName = !planeNeedle.isBlank();
-        final String blockNeedle = normalizeFilterNeedle(gf.blockId());
-        final boolean wantBlock = !blockNeedle.isBlank();
-        final int typePreset = gf.typePresetIdx();
-        final boolean wantCreateTrainsOnly = typePreset == 5;
-        final boolean wantCannonOnly = typePreset == 6;
-
-        // Planes: filter generic entity events down to plane-related ones.
-        final boolean wantPlanesOnly = typePreset == 8;
-
-        if (!wantTrainName && !wantPlaneName && !wantCreateTrainsOnly && !wantCannonOnly && !wantPlanesOnly && !wantBlock) return in;
-
-        ArrayList<LogEntry> out = new ArrayList<>(Math.min(desired, in.size()));
-        for (LogEntry e : in) {
-            String extra = e.extra;
-            if (extra == null) extra = "";
-
-            if (wantBlock && !matchesBlockNeedle(e, blockNeedle)) continue;
-
-            String extraLower = extra.toLowerCase(java.util.Locale.ROOT);
-            if (wantCannonOnly) {
-                // Heuristic: our cannon hooks write marker strings to extra.
-                if (!extraLower.contains("schematic_cannon") && !extraLower.contains("schematicannon") && !extraLower.contains("create_cannon") && !extraLower.contains("cannon")) continue;
-            }
-            if (wantCreateTrainsOnly) {
-                if (!extraLower.contains("create_train") && !extraLower.contains("carriage_contraption") && !extraLower.contains("train")) continue;
-            }
-
-            if (wantPlanesOnly) {
-                // Always include dedicated plane action types (they're already plane-only).
-                boolean dedicatedPlaneAction = e.type == com.roften.avilixlogger.core.ActionType.PLANE_PLACE
-                        || e.type == com.roften.avilixlogger.core.ActionType.PLANE_REMOVE
-                        || e.type == com.roften.avilixlogger.core.ActionType.PLANE_MOUNT
-                        || e.type == com.roften.avilixlogger.core.ActionType.PLANE_PICKUP
-                        || e.type == com.roften.avilixlogger.core.ActionType.ENTITY_OWNER_SET;
-
-                if (!dedicatedPlaneAction) {
-                    // For generic entity events, require that the entityType/extra looks like a plane/aircraft.
-                    String et = e.entityType == null ? "" : e.entityType;
-                    String etLower = et.toLowerCase(java.util.Locale.ROOT);
-                    String exLower = extra.toLowerCase(java.util.Locale.ROOT);
-                    boolean looksPlane = etLower.contains("aircraft") || etLower.contains("airplane") || etLower.contains("plane")
-                            || exLower.contains("aircraft") || exLower.contains("airplane") || exLower.contains("plane")
-                            || exLower.contains("immersive_aircraft") || etLower.contains("immersive_aircraft");
-                    if (!looksPlane) continue;
-                }
-
-                // If user typed something into the "owner" box while in plane preset, interpret it as owner needle.
-                if (wantTrainName) {
-                    if (!com.roften.avilixlogger.core.PlaneLogFilters.matchesOwner(e, train)) continue;
-                }
-                // Optional plane name filter.
-                if (wantPlaneName) {
-                    if (!com.roften.avilixlogger.core.PlaneLogFilters.matchesPlaneName(e, planeNeedle)) continue;
-                }
-            } else {
-                // Non-plane presets: keep original meaning of the "train" needle.
-                if (wantTrainName) {
-                    if (!extra.toLowerCase(java.util.Locale.ROOT).contains(train.toLowerCase(java.util.Locale.ROOT))) continue;
-                }
-            }
-            out.add(e);
-            if (out.size() >= desired) break;
-        }
-        return out;
-    }
-
-
-    private static boolean matchesBlockNeedle(LogEntry e, String blockNeedle) {
-        if (blockNeedle == null || blockNeedle.isBlank() || e == null) return true;
-        java.util.Locale L = java.util.Locale.ROOT;
-        String bb = e.blockBefore == null ? "" : e.blockBefore.toLowerCase(L);
-        String ba = e.blockAfter == null ? "" : e.blockAfter.toLowerCase(L);
-        String src = e.source == null ? "" : e.source.toLowerCase(L);
-        String extra = e.extra == null ? "" : e.extra.toLowerCase(L);
-
-        if (bb.contains(blockNeedle) || ba.contains(blockNeedle) || src.contains(blockNeedle) || extra.contains(blockNeedle)) {
-            return true;
-        }
-
-        return extractResourceLikeId(bb).equals(blockNeedle)
-                || extractResourceLikeId(ba).equals(blockNeedle)
-                || extractResourceLikeId(src).equals(blockNeedle)
-                || extractResourceLikeId(extra).equals(blockNeedle);
     }
 
     private static String normalizeFilterNeedle(String s) {
@@ -1200,6 +1081,44 @@ public final class LoggerNetwork {
             out.add(Component.literal(" "));
         }
 
+        if (com.roften.avilixlogger.core.BackpackIds.fromSource(first.source) != null) {
+            try {
+                var info = com.google.gson.JsonParser.parseString(first.extra).getAsJsonObject();
+                for (String key : new String[]{"shortId", "owner", "holder", "state", "location", "reason", "slot"})
+                    if (info.has(key)) out.add(Component.literal(key + ": " + info.get(key).getAsString()));
+            } catch (RuntimeException ignored) {}
+            if (first.beBefore != null && first.beAfter != null) {
+                var before = com.roften.avilixlogger.core.NbtSerde.fromSnbt(first.beBefore);
+                var after = com.roften.avilixlogger.core.NbtSerde.fromSnbt(first.beAfter);
+                if (before != null && after != null) {
+                    var a = before.getCompound("components"); var b = after.getCompound("components");
+                    java.util.Set<String> keys = new java.util.TreeSet<>(a.getAllKeys()); keys.addAll(b.getAllKeys());
+                    for (String key : keys) if (!java.util.Objects.equals(a.get(key), b.get(key))) {
+                        String old = java.util.Objects.toString(a.get(key), "∅"); String value = java.util.Objects.toString(b.get(key), "∅");
+                        out.add(Component.literal(key + ": " + (old.length()>512?old.substring(0,512)+"…":old) + " → " + (value.length()>512?value.substring(0,512)+"…":value)));
+                    }
+                }
+            }
+        }
+
+        var constructionKind = com.roften.avilixlogger.core.CreateContraptionKind.fromSource(first.source);
+        if (constructionKind != com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN) {
+            out.add(Component.literal("Тип конструкции: " + constructionKind.label()));
+            var constructionId = com.roften.avilixlogger.core.CreateContraptionKind.id(first.source);
+            if (constructionId != null) out.add(Component.literal("ID конструкции: " + constructionId));
+            var mechanism = com.roften.avilixlogger.core.CreateMechanismContext.description(first.source);
+            if (mechanism != null) out.add(Component.literal("Механизм (блок и локальная позиция): " + mechanism));
+        }
+        var deployerDetails=com.roften.avilixlogger.core.CreateDeployerDetails.describe(level,first);
+        if(!deployerDetails.isEmpty()){out.addAll(deployerDetails);return List.copyOf(out);}
+        out.addAll(com.roften.avilixlogger.core.BlockChangeDetails.describe(first));
+        var cartDetails=com.roften.avilixlogger.core.CartLogDetails.describe(level,first);
+        if(!cartDetails.isEmpty()){out.addAll(cartDetails);return List.copyOf(out);}
+        if(first.entityUuid!=null||first.entityName!=null){
+            out.add(Component.literal("Цель: ").append(com.roften.avilixlogger.core.EntityLogIdentity.label(first)));
+            if(first.entityUuid!=null)out.add(Component.literal("UUID цели: "+first.entityUuid));
+        }
+
         if (hasContainer) {
             out.add(Component.literal("Изменения контейнера:").withStyle(net.minecraft.ChatFormatting.YELLOW));
             appendSignedList(out, "+ ", put, net.minecraft.ChatFormatting.GREEN);
@@ -1281,6 +1200,7 @@ public final class LoggerNetwork {
         m.put("actorName", target.actorName);
         // Target fields are not part of LogEntry in this project; keep entity info instead.
         m.put("entityType", target.entityType);
+        m.put("entityName", target.entityName);
         m.put("entityUuid", target.entityUuid == null ? null : target.entityUuid.toString());
         m.put("count", target.count);
         m.put("blockBefore", target.blockBefore);

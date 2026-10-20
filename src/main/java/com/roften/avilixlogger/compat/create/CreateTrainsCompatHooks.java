@@ -16,6 +16,13 @@ import java.util.UUID;
 public final class CreateTrainsCompatHooks {
 
     private CreateTrainsCompatHooks() {}
+    public static UUID actorUuid(net.minecraft.world.entity.player.Player player){
+        return player == null || player instanceof net.neoforged.neoforge.common.util.FakePlayer
+                || com.roften.avilixlogger.core.CreateActorContext.isTechnicalPlayer(player) ? null : player.getUUID();
+    }
+    public static String actorName(net.minecraft.world.entity.player.Player player){
+        return actorUuid(player)==null ? "SYSTEM" : player.getScoreboardName();
+    }
 
     public static void logTrainAssembled(ServerLevel level, Object train, BlockPos at) {
         if (!enabled()) return;
@@ -23,7 +30,8 @@ public final class CreateTrainsCompatHooks {
             UUID owner = readUuidField(train, "owner");
             String ownerName = resolvePlayerName(level, owner);
 
-            LogEntry e = base(level, ActionType.TRAIN_ASSEMBLE, owner, ownerName, at);
+            var cause = com.roften.avilixlogger.core.CauseContext.peek();
+            LogEntry e = base(level, ActionType.TRAIN_ASSEMBLE, cause==null?null:cause.actorUuid(), cause==null?"SYSTEM":cause.actorName(), at);
             fillTrainExtra(e, "train_assemble", train, null);
             LoggerRuntime.storage(level).append(e);
         } catch (Throwable ignored) {}
@@ -44,7 +52,7 @@ public final class CreateTrainsCompatHooks {
             LogEntry e = base(level, ActionType.TRAIN_SCHEDULE_TAKE, actorUuid, actorName, at);
 
             if (returnedSchedule != null && !returnedSchedule.isEmpty()) {
-                e.itemStackNbt = NbtSerde.writeItemStack(returnedSchedule, level.registryAccess());
+                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(returnedSchedule, level.registryAccess()));
                 e.count = returnedSchedule.getCount();
             }
 
@@ -59,7 +67,7 @@ public final class CreateTrainsCompatHooks {
             LogEntry e = base(level, ActionType.TRAIN_SCHEDULE_PUT, actorUuid, actorName, at);
 
             if (scheduleItem != null && !scheduleItem.isEmpty()) {
-                e.itemStackNbt = NbtSerde.writeItemStack(scheduleItem, level.registryAccess());
+                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(scheduleItem, level.registryAccess()));
                 e.count = scheduleItem.getCount();
             }
 
@@ -88,7 +96,7 @@ public final class CreateTrainsCompatHooks {
 
     private static boolean enabled() {
         try {
-            return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logEntities.get();
+            return com.roften.avilixlogger.core.CreateSupport.available() && LoggerConfig.isEnabled() && LoggerConfig.VALUES.logEntities.get();
         } catch (Throwable t) {
             return false;
         }
@@ -113,6 +121,7 @@ public final class CreateTrainsCompatHooks {
 
     private static void fillTrainExtra(LogEntry e, String kind, Object train, String note) {
         UUID trainUuid = readUuidField(train, "id");
+        if (trainUuid != null) e.source = com.roften.avilixlogger.core.CreateContraptionKind.TRAIN.source(trainUuid, kind);
         UUID ownerUuid = readUuidField(train, "owner");
         String trainName = safeStr(readTrainName(train));
 

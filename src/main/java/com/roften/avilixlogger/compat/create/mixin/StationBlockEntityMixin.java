@@ -1,95 +1,39 @@
 package com.roften.avilixlogger.compat.create.mixin;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.roften.avilixlogger.compat.create.CreateTrainsCompatHooks;
+import com.simibubi.create.content.trains.GlobalRailwayManager;
+import com.simibubi.create.content.trains.entity.Train;
+import com.simibubi.create.content.trains.station.StationBlockEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.block.entity.BlockEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.Coerce;
 
-import java.lang.reflect.Method;
-
-@Mixin(targets = "com.simibubi.create.content.trains.station.StationBlockEntity")
-public class StationBlockEntityMixin {
-
-    @Redirect(
-            method = "assemble",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lcom/simibubi/create/content/trains/GlobalRailwayManager;addTrain(Lcom/simibubi/create/content/trains/entity/Train;)V"
-            ),
-            require = 0
-    )
-    private void avilixlogger$addTrainAndLog(@Coerce Object railwaysManager, @Coerce Object train) {
-        // вызвать оригинал
-        tryInvoke1(railwaysManager, "addTrain", train);
-
-        // залогировать
-        try {
-            BlockEntity be = (BlockEntity) (Object) this;
-            if (!(be.getLevel() instanceof ServerLevel sl)) return;
-
-            BlockPos at = be.getBlockPos();
-            CreateTrainsCompatHooks.logTrainAssembled(sl, train, at);
-        } catch (Throwable ignored) {}
+@Mixin(value=StationBlockEntity.class, remap=false)
+public abstract class StationBlockEntityMixin {
+    @org.spongepowered.asm.mixin.injection.Inject(method="read",at=@At("HEAD"),require=1)
+    private void avilixlogger$clearAbsentName(net.minecraft.nbt.CompoundTag tag,net.minecraft.core.HolderLookup.Provider registries,boolean clientPacket,org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci){if(com.roften.avilixlogger.core.CartAuditContext.restoring()&&!tag.contains("PrevTrainName",8))((StationBlockEntity)(Object)this).lastDisassembledTrainName=null;}
+    @org.spongepowered.asm.mixin.injection.Inject(method={"assemble","dropSchedule","updateMapColor","cancelAssembly"},at=@At("HEAD"),cancellable=true,require=1)
+    private void avilixlogger$voidLock(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci){var self=(StationBlockEntity)(Object)this;if(com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(self.getLevel(),self.getBlockPos()))ci.cancel();}
+    @org.spongepowered.asm.mixin.injection.Inject(method={"enterAssemblyMode","exitAssemblyMode","tryDisassembleTrain","tryEnterAssemblyMode","updateName"},at=@At("HEAD"),cancellable=true,require=1)
+    private void avilixlogger$booleanLock(org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable<Boolean> ci){var self=(StationBlockEntity)(Object)this;if(com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(self.getLevel(),self.getBlockPos()))ci.setReturnValue(false);}
+    @WrapOperation(method="assemble", at=@At(value="INVOKE", target="Lcom/simibubi/create/content/trains/GlobalRailwayManager;addTrain(Lcom/simibubi/create/content/trains/entity/Train;)V"), require=1)
+    private void avilixlogger$assembled(GlobalRailwayManager manager, Train train, Operation<Void> original) {
+        original.call(manager, train);
+        var station=(StationBlockEntity)(Object)this;
+        if (station.getLevel() instanceof ServerLevel level)
+            CreateTrainsCompatHooks.logTrainAssembled(level,train,station.getBlockPos());
     }
-
-    @Redirect(
-            method = "tryDisassembleTrain",
-            at = @At(
-                    value = "INVOKE",
-                    target = "Lcom/simibubi/create/content/trains/entity/Train;disassemble(Lnet/minecraft/core/Direction;Lnet/minecraft/core/BlockPos;Lnet/minecraft/server/level/ServerPlayer;)Z"
-            ),
-            require = 0
-    )
-    private boolean avilixlogger$disassembleAndLog(@Coerce Object train,
-                                                   Direction assemblyDirection,
-                                                   BlockPos pos,
-                                                   ServerPlayer sender) {
-        boolean ok = (boolean) tryInvoke3Bool(train, "disassemble", assemblyDirection, pos, sender);
-
-        if (ok) {
-            try {
-                BlockEntity be = (BlockEntity) (Object) this;
-                if (!(be.getLevel() instanceof ServerLevel sl)) return ok;
-
-                BlockPos at = be.getBlockPos();
-                var actorUuid = sender != null ? sender.getUUID() : null;
-                var actorName = sender != null ? sender.getGameProfile().getName() : null;
-
-                CreateTrainsCompatHooks.logTrainDisassembled(sl, train, actorUuid, actorName, at);
-            } catch (Throwable ignored) {}
-        }
-
-        return ok;
-    }
-
-    private static void tryInvoke1(Object instance, String name, Object a1) {
-        if (instance == null) return;
-        try {
-            for (Method m : instance.getClass().getMethods()) {
-                if (!m.getName().equals(name)) continue;
-                if (m.getParameterCount() != 1) continue;
-                m.invoke(instance, a1);
-                return;
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    private static Object tryInvoke3Bool(Object instance, String name, Object a1, Object a2, Object a3) {
-        if (instance == null) return Boolean.FALSE;
-        try {
-            for (Method m : instance.getClass().getMethods()) {
-                if (!m.getName().equals(name)) continue;
-                if (m.getParameterCount() != 3) continue;
-                Object r = m.invoke(instance, a1, a2, a3);
-                return r instanceof Boolean b ? b : Boolean.FALSE;
-            }
-        } catch (Throwable ignored) {}
-        return Boolean.FALSE;
+    @WrapOperation(method="tryDisassembleTrain", at=@At(value="INVOKE", target="Lcom/simibubi/create/content/trains/entity/Train;disassemble(Lnet/minecraft/core/Direction;Lnet/minecraft/core/BlockPos;)Z"), require=1)
+    private boolean avilixlogger$disassembled(Train train, Direction direction, BlockPos pos, Operation<Boolean> original, ServerPlayer sender) {
+        boolean result;try(var cause=sender==null?com.roften.avilixlogger.core.CauseContext.unattributed():com.roften.avilixlogger.core.CauseContext.push(sender,com.roften.avilixlogger.core.CauseContext.Kind.OTHER,pos,sender.getMainHandItem())){result=original.call(train,direction,pos);}
+        var station=(StationBlockEntity)(Object)this;
+        if (result && station.getLevel() instanceof ServerLevel level)
+            CreateTrainsCompatHooks.logTrainDisassembled(level,train,CreateTrainsCompatHooks.actorUuid(sender),CreateTrainsCompatHooks.actorName(sender),station.getBlockPos());
+        return result;
     }
 }

@@ -13,13 +13,19 @@ public record GuiFilters(
         String actor,
         String train,
         String planeName,
-        String blockId
+        String blockId,
+        long absoluteSinceTs,
+        long absoluteUntilTs,
+        String search
 ) {
 
     /**
      * customTimeMinutes/customRadiusBlocks: -1 means "use presets".
      * Radius: 0 means WORLD.
      */
+    public GuiFilters(int t,int r,int y,int minutes,int radius,String actor,String train,String plane,String block) {
+        this(t,r,y,minutes,radius,actor,train,plane,block,-1,-1,"");
+    }
     public static final GuiFilters DEFAULT = new GuiFilters(1, 1, 0, -1, -1, "", "", "", "");
 
     public static final StreamCodec<RegistryFriendlyByteBuf, GuiFilters> STREAM_CODEC = StreamCodec.of(
@@ -33,6 +39,8 @@ public record GuiFilters(
                 buf.writeUtf(f.train == null ? "" : f.train, 64);
                 buf.writeUtf(f.planeName == null ? "" : f.planeName, 64);
                 buf.writeUtf(f.blockId == null ? "" : f.blockId, 128);
+                buf.writeLong(f.absoluteSinceTs); buf.writeLong(f.absoluteUntilTs);
+                buf.writeUtf(f.search == null ? "" : f.search, 128);
             },
             buf -> {
                 int t = buf.readVarInt();
@@ -42,19 +50,9 @@ public record GuiFilters(
                 int crb = buf.readVarInt();
                 String actor = buf.readUtf(64);
                 String train = buf.readUtf(64);
-                String planeName = "";
-                try {
-                    planeName = buf.readUtf(64);
-                } catch (Throwable ignored) {
-                    // backward compat
-                }
-                String blockId = "";
-                try {
-                    blockId = buf.readUtf(128);
-                } catch (Throwable ignored) {
-                    // backward compat
-                }
-                return new GuiFilters(t, r, y, ctm, crb, actor, train, planeName, blockId);
+                String planeName = buf.readUtf(64);
+                String blockId = buf.readUtf(128);
+                return new GuiFilters(t, r, y, ctm, crb, actor, train, planeName, blockId, buf.readLong(), buf.readLong(), buf.readUtf(128));
             }
     );
 }

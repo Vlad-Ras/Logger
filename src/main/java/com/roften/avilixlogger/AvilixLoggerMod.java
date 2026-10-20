@@ -57,6 +57,31 @@ public final class AvilixLoggerMod {
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(RollbackCoordinator::onServerTick);
+        if (com.roften.avilixlogger.core.CreateSupport.available()) {
+            com.roften.avilixlogger.core.CartAutomationHooks.install(new com.roften.avilixlogger.compat.create.CartAutomationAudit());
+            com.roften.avilixlogger.compat.create.CreateStructuralAudit.install();
+            com.roften.avilixlogger.compat.create.CreateDeployerTransaction.install();
+            NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.compat.create.CreateDeployerTransaction::join);
+            NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.compat.create.CreateStructuralAudit::join);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartRollbackCoordinator::onTick);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator::onTick);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator::onTick);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator::onTick);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartItemTracker::join);
+            NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.compat.create.CreateLifecycleAudit::join);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartItemTracker::leave);
+        }
+        NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.core.ServerTickScheduler::onServerTick);
+        if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available()) {
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::crafted);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::join);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::leave);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::dimension);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::death);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::itemJoin);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::itemLeave);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::tooltip);
+        }
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
@@ -65,6 +90,8 @@ public final class AvilixLoggerMod {
 
     private void onServerStarting(ServerStartingEvent event) {
         if (AuthCoreBridge.attach(event.getServer())) {
+            if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available())
+                com.roften.avilixlogger.compat.backpacked.BackpackIndex.start(event.getServer());
             LOGGER.info("[AvilixLogger] AvilixAuthCore accepted this server. Logger mechanisms are enabled.");
             // Warm up DB storage off-thread so the first player join does not block the server tick.
             LoggerRuntime.warmupAsync();
@@ -84,12 +111,21 @@ public final class AvilixLoggerMod {
 
     private void onServerStopping(ServerStoppingEvent event) {
         // Ensure we flush writers and stop GUI/database helper executors.
+        com.roften.avilixlogger.core.ServerTickScheduler.finish(event.getServer());
         LoggerEventHandlers.shutdownBackground();
         ChatLogPager.shutdown();
         LoggerNetwork.shutdown();
         RollbackCoordinator.shutdown();
+        if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();}
         LoggerRuntime.shutdown();
+        if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available()) {
+            com.roften.avilixlogger.compat.backpacked.BackpackRecovery.stop();
+            com.roften.avilixlogger.compat.backpacked.BackpackAudit.stop();
+            com.roften.avilixlogger.compat.backpacked.BackpackIndex.stop();
+        }
         AuthCoreBridge.clear(event.getServer());
+        com.roften.avilixlogger.core.CauseContext.clearCurrentThread();
+        com.roften.avilixlogger.core.MutationSourceResolver.clearCurrentThread();
     }
 
     /**

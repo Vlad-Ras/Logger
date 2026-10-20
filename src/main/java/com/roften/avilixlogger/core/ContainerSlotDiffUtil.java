@@ -21,9 +21,11 @@ public final class ContainerSlotDiffUtil {
      * Strict slot diff: returns list of slot changes.
      */
     public static List<SlotChange> diffSlots(String beforeSnbt, String afterSnbt, HolderLookup.Provider provider) {
-        CompoundTag b = NbtSerde.fromSnbt(beforeSnbt);
-        CompoundTag a = NbtSerde.fromSnbt(afterSnbt);
-        if (b == null || a == null) return List.of();
+        return diffSlots(NbtSerde.fromSnbt(beforeSnbt), NbtSerde.fromSnbt(afterSnbt), provider);
+    }
+
+    public static List<SlotChange> diffSlots(CompoundTag b, CompoundTag a, HolderLookup.Provider provider) {
+        if (b == null || a == null || b.equals(a)) return List.of();
 
         int sizeB = b.contains("Size") ? b.getInt("Size") : 0;
         int sizeA = a.contains("Size") ? a.getInt("Size") : 0;
@@ -53,9 +55,11 @@ public final class ContainerSlotDiffUtil {
      * Aggregated delta for human-readable +/-. Keyed by normalized stack (count=1) SNBT.
      */
     public static Map<String, Integer> diffAggregated(String beforeSnbt, String afterSnbt, HolderLookup.Provider provider) {
-        CompoundTag b = NbtSerde.fromSnbt(beforeSnbt);
-        CompoundTag a = NbtSerde.fromSnbt(afterSnbt);
-        if (b == null || a == null) return Map.of();
+        return diffAggregated(NbtSerde.fromSnbt(beforeSnbt), NbtSerde.fromSnbt(afterSnbt), provider);
+    }
+
+    public static Map<String, Integer> diffAggregated(CompoundTag b, CompoundTag a, HolderLookup.Provider provider) {
+        if (b == null || a == null || b.equals(a)) return Map.of();
 
         Map<String, Integer> out = new HashMap<>();
         Map<String, Integer> bCount = countAll(b, provider);
@@ -78,7 +82,7 @@ public final class ContainerSlotDiffUtil {
             CompoundTag it = items.getCompound(i);
             int slot = ContainerSlotSnapshot.readSlot(it);
             if (slot < 0 || slot >= arr.length) continue;
-            arr[slot] = ItemStack.parse(provider, it).orElse(ItemStack.EMPTY);
+            arr[slot] = NbtSerde.readItemStack(it, provider);
         }
     }
 
@@ -87,7 +91,7 @@ public final class ContainerSlotDiffUtil {
         ListTag items = tag.getList("Items", Tag.TAG_COMPOUND);
         for (int i = 0; i < items.size(); i++) {
             CompoundTag it = items.getCompound(i);
-            ItemStack st = ItemStack.parse(provider, it).orElse(ItemStack.EMPTY);
+            ItemStack st = NbtSerde.readItemStack(it, provider);
             if (st.isEmpty()) continue;
             int c = st.getCount();
             ItemStack keySt = st.copy();

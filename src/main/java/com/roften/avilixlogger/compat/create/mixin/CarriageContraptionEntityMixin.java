@@ -16,6 +16,24 @@ import java.lang.reflect.Method;
 
 @Mixin(targets = "com.simibubi.create.content.trains.entity.CarriageContraptionEntity")
 public class CarriageContraptionEntityMixin {
+    @Inject(method="tick",at=@At("HEAD"),cancellable=true,require=1)
+    private void avilixlogger$restoreLock(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci){
+        var self=(Entity)(Object)this;
+        if(!self.level().isClientSide&&com.roften.avilixlogger.compat.create.CreateCargoAudit.restoreLocked((com.simibubi.create.content.trains.entity.CarriageContraptionEntity)self))ci.cancel();
+    }
+
+
+    // Carriages override setBlock without calling the base method.
+    @com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod(method = "setBlock")
+    private void avilixlogger$structure(BlockPos pos, net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo after,
+                                       com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var self = (com.simibubi.create.content.trains.entity.CarriageContraptionEntity)(Object)this;
+        if(com.roften.avilixlogger.compat.create.CreateCargoAudit.restoreLocked(self))return;
+        if (!com.roften.avilixlogger.compat.create.CreateCargoAudit.active(self)) { original.call(pos, after); return; }
+        var before = com.roften.avilixlogger.compat.create.CreateStructureAudit.beforeChange(self, pos);
+        original.call(pos, after);
+        com.roften.avilixlogger.compat.create.CreateStructureAudit.changed(self, pos, before);
+    }
 
     @Inject(method = "startControlling", at = @At("RETURN"), require = 0)
     private void avilixlogger$controlStart(BlockPos controlsLocalPos, Player player, CallbackInfoReturnable<Boolean> cir) {

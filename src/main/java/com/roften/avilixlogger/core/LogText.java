@@ -63,7 +63,7 @@ public final class LogText {
         // Actor attribution is not always possible for server-side actions (worldgen, automation, async spawns).
         // In such cases, show a neutral "server" actor instead of "?" to reduce noise without blaming players.
         boolean hasActor = e.actorName != null && !e.actorName.isBlank();
-        String who = hasActor ? e.actorName : "Сервер";
+        String who = e.type == ActionType.CREATE_DEPLOYER_ACTION ? "Активатор" + (hasActor ? " (владелец: " + e.actorName + ")" : "") : hasActor ? e.actorName : "Сервер";
 
         MutableComponent whoComp = Component.literal(who)
                 .withStyle(hasActor ? ChatFormatting.AQUA : ChatFormatting.DARK_GRAY);
@@ -72,7 +72,7 @@ public final class LogText {
             whoComp = whoComp.withStyle(s -> s.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
                     Component.literal("UUID: " + e.actorUuid).withStyle(ChatFormatting.GRAY))));
             // удобнее быстро подставлять ник в команду
-            whoComp = whoComp.withStyle(s -> s.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/log lookup 10m " + who)));
+            whoComp = whoComp.withStyle(s -> s.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/log lookup 10m " + (hasActor ? e.actorName : who))));
         }
         c.append(whoComp);
         c.append(Component.literal(" "));
@@ -99,6 +99,9 @@ public final class LogText {
                     c.append(where.withStyle(ChatFormatting.YELLOW));
                 }
             }
+            if((e.type==ActionType.CONTAINER_PUT||e.type==ActionType.CONTAINER_TAKE)&&e.entityUuid!=null){
+                c.append(Component.literal(e.type==ActionType.CONTAINER_PUT?" в ":" из ")).append(EntityLogIdentity.label(e));
+            }
             c.append(Component.literal(" "));
         }
 
@@ -106,6 +109,13 @@ public final class LogText {
         c.append(Component.literal("(").withStyle(ChatFormatting.DARK_GRAY));
         c.append(coordComponent(e));
         c.append(Component.literal(")").withStyle(ChatFormatting.DARK_GRAY));
+
+        var blockChanges=BlockChangeDetails.changes(e);
+        if(!blockChanges.isEmpty()){
+            String summary=String.join("; ",blockChanges.subList(0,Math.min(2,blockChanges.size())));
+            if(summary.length()>260)summary=summary.substring(0,260)+"…";
+            c.append(Component.literal(" · "+summary).withStyle(ChatFormatting.GRAY));
+        }
 
         // For container snapshot entries, append a short + / - summary directly in the main line.
         try {
@@ -175,7 +185,8 @@ public final class LogText {
                 || t == ActionType.ITEM_USE_STOP
                 || t == ActionType.ITEM_CONSUME
                 || t == ActionType.ME_PUT
-                || t == ActionType.ME_TAKE;
+                || t == ActionType.ME_TAKE
+                || t == ActionType.BACKPACK_PUT || t == ActionType.BACKPACK_TAKE;
     }
 
     private static ChatFormatting actionColor(ActionType t) {
@@ -188,8 +199,8 @@ public final class LogText {
 
             case CONTAINER_PUT, ITEM_PICKUP, ITEM_CRAFT, ITEM_SMELT, ITEM_CONSUME, ITEM_USE_START, PROJECTILE_SHOOT -> ChatFormatting.GREEN;
             case CONTAINER_TAKE, ITEM_DROP, ITEM_USE_STOP -> ChatFormatting.RED;
-            case ME_PUT -> ChatFormatting.GREEN;
-            case ME_TAKE -> ChatFormatting.RED;
+            case ME_PUT, BACKPACK_PUT -> ChatFormatting.GREEN;
+            case ME_TAKE, BACKPACK_TAKE, BACKPACK_DESTROY -> ChatFormatting.RED;
             case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE -> ChatFormatting.YELLOW;
 
             case PLAYER_JOIN, PLAYER_RESPAWN, PLAYER_DIMENSION_CHANGE, GUI_OPEN -> ChatFormatting.GREEN;
@@ -201,6 +212,11 @@ public final class LogText {
             case ENTITY_OWNER_SET -> ChatFormatting.YELLOW;
             case CHAT_MESSAGE -> ChatFormatting.AQUA;
 
+            case CART_ASSEMBLE,CART_PLACE,CART_LOAD -> ChatFormatting.GREEN;
+            case CART_DISASSEMBLE,CART_PACK,CART_REMOVE,CART_UNLOAD -> ChatFormatting.RED;
+            case CART_STATUS,CART_TRANSFER,CREATE_DEPLOYER_ACTION -> ChatFormatting.GOLD;
+            case CART_CONTENT_CHANGE,CART_STRUCTURE_CHANGE -> ChatFormatting.YELLOW;
+            case CART_MOVE,CART_ROLLBACK -> ChatFormatting.AQUA;
             case TRAIN_ASSEMBLE -> ChatFormatting.GREEN;
             case TRAIN_DISASSEMBLE -> ChatFormatting.RED;
             case TRAIN_SCHEDULE_TAKE -> ChatFormatting.GOLD;
@@ -220,7 +236,7 @@ public final class LogText {
         };
     }
 
-    private static String actionLabel(ActionType t) {
+    public static String actionLabel(ActionType t) {
         if (t == null) return "сделал";
         return switch (t) {
             case BLOCK_BREAK -> "сломал";
@@ -238,6 +254,42 @@ public final class LogText {
             case ME_FILTER_CHANGE -> "изменил фильтр МЭ";
             case ME_SETTING_CHANGE -> "изменил настройку МЭ";
             case ME_CELL_CHANGE -> "изменил ячейку МЭ";
+                        case BACKPACK_CREATE -> "создал рюкзак";
+            case BACKPACK_DISCOVER -> "учёл рюкзак";
+            case BACKPACK_EQUIP -> "надел рюкзак";
+            case BACKPACK_UNEQUIP -> "снял рюкзак";
+            case BACKPACK_OPEN -> "открыл рюкзак";
+            case BACKPACK_CLOSE -> "закрыл рюкзак";
+            case BACKPACK_PUT -> "положил в рюкзак";
+            case BACKPACK_TAKE -> "достал из рюкзака";
+            case BACKPACK_CONTENT_CHANGE -> "изменил содержимое рюкзака";
+            case BACKPACK_PLACE -> "поставил рюкзак";
+            case BACKPACK_REMOVE -> "снял рюкзак с подставки";
+            case BACKPACK_DROP -> "выбросил рюкзак";
+            case BACKPACK_PICKUP -> "подобрал рюкзак";
+            case BACKPACK_DESTROY -> "уничтожен рюкзак";
+            case BACKPACK_LOAD -> "загрузил рюкзак";
+            case BACKPACK_UNLOAD -> "выгрузил рюкзак";
+            case BACKPACK_TRANSFER -> "переместил рюкзак";
+            case BACKPACK_UPGRADE_CHANGE -> "изменил улучшения или настройки рюкзака";
+            case BACKPACK_UPGRADE_USE -> "сработало улучшение рюкзака";
+            case BACKPACK_STATE -> "изменил состояние рюкзака";
+            case BACKPACK_RECOVER -> "восстановил рюкзак";
+            case BACKPACK_RETURN -> "вернул рюкзак";
+            case CART_ASSEMBLE -> "собрал конструкцию";
+            case CART_DISASSEMBLE -> "разобрал конструкцию";
+            case CART_PACK -> "упаковал конструкцию в предмет";
+            case CART_PLACE -> "установил упакованную конструкцию";
+            case CART_REMOVE -> "удалил конструкцию";
+            case CART_LOAD -> "загрузил конструкцию";
+            case CART_UNLOAD -> "выгрузил конструкцию";
+            case CART_MOVE -> "переместил конструкцию";
+            case CART_STATUS -> "изменил статус конструкции";
+            case CREATE_DEPLOYER_ACTION -> "выполнил действие:";
+            case CART_CONTENT_CHANGE -> "изменил груз конструкции";
+            case CART_STRUCTURE_CHANGE -> "изменил блок конструкции";
+            case CART_TRANSFER -> "передал ресурс конструкции";
+            case CART_ROLLBACK -> "откатил конструкцию";
 
             case ITEM_PICKUP -> "подобрал";
             case ITEM_DROP -> "выбросил";
@@ -303,6 +355,22 @@ public final class LogText {
             case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE ->
                     Component.literal(e.extra != null ? e.extra : "устройство МЭ");
 
+            case BACKPACK_PUT,BACKPACK_TAKE -> {
+                MutableComponent item=itemNameComponent(level,e.itemStackNbt);
+                yield Component.literal(backpackLabel(e)).append(" · ").append(item==null?Component.literal("предмет"):item);
+            }
+            case BACKPACK_CREATE,BACKPACK_DISCOVER,BACKPACK_EQUIP,BACKPACK_UNEQUIP,BACKPACK_OPEN,BACKPACK_CLOSE,BACKPACK_CONTENT_CHANGE,BACKPACK_PLACE,BACKPACK_REMOVE,BACKPACK_DROP,BACKPACK_PICKUP,BACKPACK_DESTROY,BACKPACK_LOAD,BACKPACK_UNLOAD,BACKPACK_TRANSFER,BACKPACK_UPGRADE_CHANGE,BACKPACK_UPGRADE_USE,BACKPACK_STATE,BACKPACK_RECOVER,BACKPACK_RETURN -> Component.literal(backpackLabel(e));
+
+            case CREATE_DEPLOYER_ACTION -> Component.literal(CreateDeployerDetails.resultLabel(e));
+            case CART_STRUCTURE_CHANGE -> {
+                var tag=e.beAfter==null||e.beAfter.length()>1_048_576?null:NbtSerde.fromSnbt(e.beAfter);
+                var state=tag==null?null:tag.getCompound("State");
+                var block=state==null||state.isEmpty()?null:blockNameComponent(level,state.toString());
+                var label=Component.literal(java.util.Objects.toString(CreateContraptionKind.id(e.source),"конструкция Create"));
+                yield block==null?label:label.append(" · ").append(block);
+            }
+            case CART_ASSEMBLE,CART_DISASSEMBLE,CART_PACK,CART_PLACE,CART_REMOVE,CART_LOAD,CART_UNLOAD,CART_MOVE,CART_STATUS,CART_CONTENT_CHANGE,CART_TRANSFER,CART_ROLLBACK ->
+                    Component.literal(java.util.Objects.toString(CreateContraptionKind.id(e.source),"конструкция Create"));
             // schedule: и забрал, и поставил показываем предметом
             case TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT ->
                     itemNameComponent(level, e.itemStackNbt);
@@ -319,13 +387,13 @@ public final class LogText {
                 MutableComponent src = itemNameComponent(level, e.itemStackNbt);
                 yield src != null ? src : Component.literal(e.entityType != null ? e.entityType : "projectile");
             }
-            case PROJECTILE_HIT -> Component.literal(e.entityType != null ? e.entityType : "projectile");
+            case PROJECTILE_HIT -> EntityLogIdentity.label(e);
 
             // entities / planes / etc (оставь как у тебя было — ниже максимально безопасный вариант)
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN, ENTITY_INTERACT, ENTITY_ATTACK,
                  PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT, ENTITY_OWNER_SET -> {
                 // если у тебя уже есть логика для самолётов/энтити — можно вернуть её обратно.
-                yield Component.literal(e.entityType != null ? e.entityType : "entity");
+                yield EntityLogIdentity.label(e);
             }
 
             // player events / chat / gui
@@ -336,6 +404,12 @@ public final class LogText {
             // ВАЖНО: чтобы компилилось при добавлении новых ActionType в будущем
             default -> null;
         };
+    }
+
+    private static String backpackLabel(LogEntry e) {
+        String id = java.util.Objects.toString(BackpackIds.fromSource(e.source), "рюкзак");
+        try { String shortId = extractJsonString(e.extra, "shortId"); if (shortId != null && !shortId.isBlank()) return shortId; } catch (RuntimeException ignored) {}
+        return id;
     }
 
     private static MutableComponent coordComponent(LogEntry e) {

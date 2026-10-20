@@ -28,78 +28,21 @@ import java.util.UUID;
 @Mixin(targets = "immersive_aircraft.entity.VehicleEntity")
 public class VehicleEntityMixin {
 
-    @Unique private Player avilixlogger$lastPlayer;
     @Unique private String avilixlogger$owner;
     @Unique private String avilixlogger$ownerName;
-    @Unique private boolean avilixlogger$removalLogged;
 
-    @Inject(method = "hurt", at = @At(value = "HEAD"), require = 0)
-    private void avilixlogger$captureActor(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
-        if (!LoggerConfig.isEnabled()) return;
-        try {
-            if (source == null) return;
-
-            // 1) Capture a generic cause string (for crashes / mob damage / etc.)
-            try {
-                String msg = null;
-                try { msg = source.getMsgId(); } catch (Throwable ignored2) {}
-                if (msg == null) {
-                    try {
-                        Object t = source.type();
-                        msg = (String) t.getClass().getMethod("msgId").invoke(t);
-                    } catch (Throwable ignored2) {}
-                }
-                if (source.getEntity() != null) {
-                    try {
-                        msg = (msg == null ? "" : (msg + ":")) + source.getEntity().getType().toString();
-                    } catch (Throwable ignored2) {}
-                }
-                if (msg != null && !msg.isBlank()) {
-                    CauseTracker.note(((Entity)(Object)this).getUUID(), msg);
-                }
-            } catch (Throwable ignored2) {}
-
-            // 2) Player actor attribution
-            if (source.getEntity() instanceof Player p) {
-                this.avilixlogger$lastPlayer = p;
-                ActorTracker.note(((Entity)(Object)this).getUUID(), p.getUUID(), p.getName().getString());
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    @Inject(method = "hurt", at = @At("RETURN"), require = 0)
-    private void avilixlogger$afterHurt(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
-        String reason = this.avilixlogger$lastPlayer != null
-                && this.avilixlogger$lastPlayer.getAbilities().instabuild ? "creative" : "damage";
-        avilixlogger$logRemovalIfNeeded(reason);
-    }
-
-    // Immersive Aircraft 1.4.6: private void applyDamage(float amount, boolean force).
-    // A RETURN injection avoids the invalid @Redirect receiver signature that prevented the
-    // complete VehicleEntity mixin from loading on the dedicated server.
-    @Inject(method = "applyDamage(FZ)V", at = @At("RETURN"), require = 0)
-    private void avilixlogger$afterApplyDamage(float amount, boolean force, CallbackInfo ci) {
-        avilixlogger$logRemovalIfNeeded("damage");
-    }
-
-    @Unique
-    private void avilixlogger$logRemovalIfNeeded(String reason) {
-        try {
-            if (this.avilixlogger$removalLogged || !LoggerConfig.isEnabled()
-                    || this.avilixlogger$lastPlayer == null) return;
-
-            Entity vehicle = (Entity) (Object) this;
-            if (!vehicle.isRemoved()) return;
-
-            this.avilixlogger$removalLogged = true;
-            ActorTracker.note(vehicle.getUUID(), this.avilixlogger$lastPlayer.getUUID(),
-                    this.avilixlogger$lastPlayer.getName().getString());
-            if (!vehicle.level().isClientSide
-                    && vehicle.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-                AirplanesCompatHooks.logRemoval(serverLevel, this.avilixlogger$lastPlayer,
-                        vehicle, reason == null ? "damage" : reason);
-            }
-        } catch (Throwable ignored) {}
+    /** The damage source, not the owner or any previous visitor, owns this damage call. */
+    @com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod(method = "hurt", require = 0)
+    private boolean avilixlogger$damage(DamageSource source, float amount,
+                                       com.llamalad7.mixinextras.injector.wrapoperation.Operation<Boolean> original) {
+        Player actor = source != null && source.getEntity() instanceof Player p ? p : null;
+        Entity vehicle = (Entity) (Object) this;
+        if (LoggerConfig.isEnabled() && source != null) CauseTracker.note(vehicle.getUUID(), source.getMsgId());
+        try (var scope = com.roften.avilixlogger.core.CauseContext.push(actor,
+                com.roften.avilixlogger.core.CauseContext.Kind.ATTACK_ENTITY,
+                vehicle.blockPosition(), actor == null ? ItemStack.EMPTY : actor.getMainHandItem())) {
+            return original.call(source, amount);
+        }
     }
 
     @Redirect(method = "interact", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;startRiding(Lnet/minecraft/world/entity/Entity;)Z"), require = 0)

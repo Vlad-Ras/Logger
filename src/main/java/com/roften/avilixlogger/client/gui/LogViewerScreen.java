@@ -182,7 +182,7 @@ public final class LogViewerScreen extends Screen {
     ) {}
 
     private List<DisplayLine> displayLines() {
-        String filter = this.searchBox == null ? "" : this.searchBox.getValue().trim().toLowerCase(java.util.Locale.ROOT);
+        String filter = ""; // All search predicates are applied by the database before LIMIT.
         int width = listWidth();
         if (cachedRowsVersion == rowsVersion
                 && cachedListWidth == width
@@ -196,7 +196,6 @@ public final class LogViewerScreen extends Screen {
         for (int i = 0; i < rows.size(); i++) {
             LogRow row = rows.get(i);
             Component line = row.line() == null ? Component.empty() : row.line();
-            if (!filter.isEmpty() && !line.getString().toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
             boolean expandable = row.aggregated() && row.groupedLines() != null && !row.groupedLines().isEmpty();
             appendWrappedDisplayLines(out, i, line, expandable, false);
             if (expandable && expandedRows.contains(row.id())) {
@@ -383,6 +382,8 @@ public final class LogViewerScreen extends Screen {
                 leftX, y, btnW, leftRowH);
         this.timeBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.time"));
         this.timeBox.setHint(Component.translatable("gui.avilixlogger.hint.time"));
+        this.timeBox.setMaxLength(96);
+        this.timeBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("От даты/времени: 13.10.2026 03:00, 13.10.2026, 03:00; диапазон: начало..конец; период: 30m / 2h. Часовой пояс журнала: " + logTimeZone)));
         this.timeBox.setValue(savedTimeInput);
         this.addRenderableWidget(this.timeBox);
         y += leftRowH + leftGap;
@@ -445,6 +446,8 @@ public final class LogViewerScreen extends Screen {
         btnSearch.active = false;
         this.searchBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.search"));
         this.searchBox.setHint(Component.translatable("gui.avilixlogger.hint.search"));
+        this.searchBox.setMaxLength(128);
+        this.searchBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Поиск в журнале: имя игрока, ID блока/предмета/сущности, источник, текст и название действия. Применить или Enter.")));
         this.searchBox.setValue(savedSearchInput);
         this.addRenderableWidget(this.searchBox);
         y += leftRowH + leftGap;
@@ -496,6 +499,11 @@ public final class LogViewerScreen extends Screen {
         y2 += btnH + gap;
         this.btnShowRaw = addButton(sideLabel("gui.avilixlogger.show_raw", "RAW"), b -> requestRawIfNeeded(),
                 rightX, y2, rightW, btnH);
+
+        y2 += btnH + gap;
+        addButton(Component.literal("Вагонеточные штуковины"), b -> {
+            var screen=new CartHistoryScreen(this, "");Minecraft.getInstance().setScreen(screen);screen.load();
+        }, rightX, y2, rightW, btnH);
 
         // Details panel must start BELOW the right-side controls to avoid overlap.
         this.detailsPanelTop = y2 + btnH + gap + 2;
@@ -650,20 +658,27 @@ public final class LogViewerScreen extends Screen {
         return compactControlLabels() ? Component.literal(compact) : Component.translatable(translationKey);
     }
 
+    private static java.time.ZoneId logTimeZone = java.time.ZoneId.of("UTC");
+    public static void setLogTimeZone(String value) {
+        try { logTimeZone = java.time.ZoneId.of(value); } catch (RuntimeException ignored) { logTimeZone = java.time.ZoneId.of("UTC"); }
+    }
     private GuiFilters currentFilters() {
-        int customTime = parseTimeMinutes(timeBox != null ? timeBox.getValue() : "");
+        var time = com.roften.avilixlogger.net.GuiTimeFilter.parse(timeBox != null ? timeBox.getValue() : "", java.time.ZonedDateTime.now(logTimeZone));
+        int customTime = time.minutes();
         int customRadius = parseRadius(radiusBox != null ? radiusBox.getValue() : "");
         String actor = (actorBox != null && !actorBox.getValue().isBlank()) ? actorBox.getValue().trim() : (actorFilter == null ? "" : actorFilter);
         String train = (trainBox != null && !trainBox.getValue().isBlank()) ? trainBox.getValue().trim() : (trainFilter == null ? "" : trainFilter);
         String planeName = (planeNameBox != null && !planeNameBox.getValue().isBlank()) ? planeNameBox.getValue().trim() : (planeNameFilter == null ? "" : planeNameFilter);
         String blockId = (blockIdBox != null && !blockIdBox.getValue().isBlank()) ? blockIdBox.getValue().trim() : (blockIdFilter == null ? "" : blockIdFilter);
-        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName, blockId);
+        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName, blockId, time.since(), time.until(), searchBox == null ? "" : searchBox.getValue().trim());
     }
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
         saveGuiStateFromInstance();
-        PacketDistributor.sendToServer(new C2SRequestPagePayload(
-                nav, aggregatedMode, currentFilters(), savedPageSize));
+        try { PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, currentFilters(), savedPageSize)); }
+        catch (IllegalArgumentException failure) {
+            if (Minecraft.getInstance().player != null) Minecraft.getInstance().player.displayClientMessage(Component.literal(failure.getMessage()).withStyle(ChatFormatting.RED), false);
+        }
     }
 
     /** Called once after Minecraft has initialized all widgets for this screen. */
@@ -854,7 +869,7 @@ public final class LogViewerScreen extends Screen {
         if (typeDropdownOpen) {
             DropdownLayout layout = typeDropdownLayout();
             if (layout != null) {
-                int maxScroll = Math.max(0, TYPE_COUNT - layout.visibleCount());
+                int maxScroll = Math.max(0, typeOptions.length - layout.visibleCount());
                 int step = (int) Math.signum(deltaY);
                 this.typeDropdownScroll = clampInt(this.typeDropdownScroll - step, 0, maxScroll);
             }
@@ -1202,6 +1217,7 @@ public final class LogViewerScreen extends Screen {
     private void cycleTime() {
         int[] mins = new int[] { 5, 30, 120, 1440, 10080 };
         timePresetIdx = (timePresetIdx + 1) % mins.length;
+        if (timeBox != null) timeBox.setValue("");
         refreshFilterButtonLabels();
         sendPage(C2SRequestPagePayload.Nav.FIRST);
     }
@@ -1214,8 +1230,8 @@ public final class LogViewerScreen extends Screen {
     }
 
     private void cycleType() {
-        // 0: ALL, 1: BLOCKS, 2: CONTAINERS, 3: ENTITIES, 4: ITEMS, 5: TRAINS, 6: CANNON, 7: CHAT, 8: PLANES
-        typePresetIdx = (typePresetIdx + 1) % TYPE_COUNT;
+        // Preset IDs remain stable when optional entries are hidden.
+        typePresetIdx = typeOptions[(typeOptionIndex(typePresetIdx) + 1) % typeOptions.length];
         refreshFilterButtonLabels();
         sendPage(C2SRequestPagePayload.Nav.FIRST);
     }
@@ -1226,17 +1242,25 @@ public final class LogViewerScreen extends Screen {
             this.typeDropdownScroll = 0;
             DropdownLayout layout = typeDropdownLayout();
             if (layout != null) {
-                if (typePresetIdx >= layout.visibleCount()) {
+                int option = typeOptionIndex(typePresetIdx);
+                if (option >= layout.visibleCount()) {
                     this.typeDropdownScroll = clampInt(
-                            typePresetIdx - layout.visibleCount() + 1,
+                            option - layout.visibleCount() + 1,
                             0,
-                            TYPE_COUNT - layout.visibleCount());
+                            typeOptions.length - layout.visibleCount());
                 }
             }
         }
     }
 
-    private static final int TYPE_COUNT = 9;
+    private final int[] typeOptions = java.util.stream.IntStream.range(0, 13)
+            .filter(i -> LogViewerClientHooks.createAvailable() || i != 5 && i != 6 && i != 9 && i != 11 && i != 12)
+            .toArray();
+
+    private int typeOptionIndex(int preset) {
+        for (int i = 0; i < typeOptions.length; i++) if (typeOptions[i] == preset) return i;
+        return 0;
+    }
 
     private record DropdownLayout(int x, int y, int width, int itemHeight, int firstIndex, int visibleCount) {}
 
@@ -1247,9 +1271,9 @@ public final class LogViewerScreen extends Screen {
 
         float preferredTextScale = clampFloat(controlScale(), 0.45f, 1.0f);
         int maxTextW = 1;
-        for (int i = 0; i < TYPE_COUNT; i++) {
+        for (int i = 0; i < typeOptions.length; i++) {
             maxTextW = Math.max(maxTextW,
-                    this.font.width(Component.translatable("gui.avilixlogger.type." + typeKey(i))));
+                    this.font.width(Component.translatable("gui.avilixlogger.type." + typeKey(typeOptions[i]))));
         }
         int availableW = Math.max(20, this.width - margin * 2);
         int desiredW = Math.max(btnType.getWidth(), Math.round(maxTextW * preferredTextScale) + 14);
@@ -1259,15 +1283,15 @@ public final class LogViewerScreen extends Screen {
         int belowY = btnType.getY() + btnType.getHeight();
         int spaceBelow = Math.max(0, this.height - margin - belowY);
         int spaceAbove = Math.max(0, btnType.getY() - margin);
-        int fullHeight = TYPE_COUNT * itemH;
+        int fullHeight = typeOptions.length * itemH;
         boolean openDown = spaceBelow >= fullHeight || spaceBelow >= spaceAbove;
         int availableH = openDown ? spaceBelow : spaceAbove;
 
         // At extreme resolutions keep every pixel inside the screen and expose remaining options
         // through wheel scrolling instead of letting the popup leave the viewport.
         if (availableH < itemH) itemH = Math.max(1, availableH);
-        int visible = Math.max(1, Math.min(TYPE_COUNT, availableH / Math.max(1, itemH)));
-        int maxScroll = Math.max(0, TYPE_COUNT - visible);
+        int visible = Math.max(1, Math.min(typeOptions.length, availableH / Math.max(1, itemH)));
+        int maxScroll = Math.max(0, typeOptions.length - visible);
         this.typeDropdownScroll = clampInt(this.typeDropdownScroll, 0, maxScroll);
         int popupH = visible * itemH;
         int y = openDown ? belowY : btnType.getY() - popupH;
@@ -1282,8 +1306,8 @@ public final class LogViewerScreen extends Screen {
         if (mouseX < layout.x() || mouseX > layout.x() + layout.width()
                 || mouseY < layout.y() || mouseY > layout.y() + h) return false;
         int idx = layout.firstIndex() + (int) ((mouseY - layout.y()) / layout.itemHeight());
-        if (idx < 0 || idx >= TYPE_COUNT) return false;
-        this.typePresetIdx = idx;
+        if (idx < 0 || idx >= typeOptions.length) return false;
+        this.typePresetIdx = typeOptions[idx];
         this.typeDropdownOpen = false;
         refreshFilterButtonLabels();
         sendPage(C2SRequestPagePayload.Nav.FIRST);
@@ -1297,7 +1321,7 @@ public final class LogViewerScreen extends Screen {
         int h = layout.visibleCount() * layout.itemHeight();
         g.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + h, 0xFF0A0A0A);
         for (int slot = 0; slot < layout.visibleCount(); slot++) {
-            int i = layout.firstIndex() + slot;
+            int i = typeOptions[layout.firstIndex() + slot];
             int yy = layout.y() + slot * layout.itemHeight();
             boolean hover = mouseX >= layout.x() && mouseX <= layout.x() + layout.width()
                     && mouseY >= yy && mouseY <= yy + layout.itemHeight();
@@ -1312,7 +1336,7 @@ public final class LogViewerScreen extends Screen {
 
         // Thin edge markers indicate that more choices are available with the mouse wheel.
         if (layout.firstIndex() > 0) g.fill(layout.x(), layout.y(), layout.x() + layout.width(), layout.y() + 1, 0xFFFFAA00);
-        if (layout.firstIndex() + layout.visibleCount() < TYPE_COUNT) {
+        if (layout.firstIndex() + layout.visibleCount() < typeOptions.length) {
             g.fill(layout.x(), layout.y() + h - 1, layout.x() + layout.width(), layout.y() + h, 0xFFFFAA00);
         }
     }
@@ -1341,6 +1365,10 @@ public final class LogViewerScreen extends Screen {
             case 6 -> "cannon";
             case 7 -> "chat";
             case 8 -> "plane";
+            case 9 -> "cart";
+            case 10 -> "backpack";
+            case 11 -> "bearing";
+            case 12 -> "contraption";
             default -> "all";
         };
     }
@@ -1476,12 +1504,12 @@ public final class LogViewerScreen extends Screen {
         // - Type=PLANES: owner name/needle
         boolean planes = typePresetIdx == 8;
         if (trainBox != null) {
-            trainBox.setHint(Component.translatable(planes ? "gui.avilixlogger.hint.owner" : "gui.avilixlogger.hint.train"));
+            trainBox.setHint(Component.translatable(typePresetIdx == 9 || typePresetIdx == 10 || typePresetIdx >= 11 ? "gui.avilixlogger.hint.audit_id" : planes ? "gui.avilixlogger.hint.owner" : "gui.avilixlogger.hint.train"));
         }
         if (btnTrain != null) {
-            String key = planes ? "gui.avilixlogger.filter.owner.v" : "gui.avilixlogger.filter.train.v";
+            String key = typePresetIdx == 9 || typePresetIdx == 10 || typePresetIdx >= 11 ? "gui.avilixlogger.filter.audit_id.v" : planes ? "gui.avilixlogger.filter.owner.v" : "gui.avilixlogger.filter.train.v";
             Component trainValue = train.isBlank() ? Component.translatable("gui.avilixlogger.value.any") : Component.literal(trimLabel(train, compact ? 8 : 16));
-            btnTrain.setMessage(compact ? Component.literal(planes ? "Вл: " : "По: ").append(trainValue) : Component.translatable(key, trainValue));
+            btnTrain.setMessage(compact ? Component.literal(typePresetIdx == 9 || typePresetIdx == 10 || typePresetIdx >= 11 ? "ID: " : planes ? "Вл: " : "По: ").append(trainValue) : Component.translatable(key, trainValue));
         }
 
         // Plane name filter widgets are only meaningful in planes preset.
@@ -1493,6 +1521,8 @@ public final class LogViewerScreen extends Screen {
     }
 
     private String timeLabel() {
+        String entered = timeBox == null ? "" : timeBox.getValue().trim();
+        if (!entered.isEmpty() && !entered.matches("[0-9]+[mMhHdD]?")) return "от даты";
         int custom = parseTimeMinutes(timeBox != null ? timeBox.getValue() : "");
         if (custom >= 0) {
             if (custom % 1440 == 0 && custom >= 1440) return (custom / 1440) + "d";
@@ -1578,7 +1608,7 @@ public final class LogViewerScreen extends Screen {
 
         // Enter applies custom inputs.
         if (keyCode == 257 /* GLFW_KEY_ENTER */ || keyCode == 335 /* GLFW_KEY_KP_ENTER */) {
-            if ((timeBox != null && timeBox.isFocused())
+            if ((searchBox != null && searchBox.isFocused()) || (timeBox != null && timeBox.isFocused())
                     || (radiusBox != null && radiusBox.isFocused())
                     || (actorBox != null && actorBox.isFocused())
                     || (trainBox != null && trainBox.isFocused())
@@ -1664,7 +1694,7 @@ public final class LogViewerScreen extends Screen {
     private void restoreSavedStateToFields() {
         this.timePresetIdx = savedTimePresetIdx;
         this.radiusPresetIdx = savedRadiusPresetIdx;
-        this.typePresetIdx = savedTypePresetIdx;
+        this.typePresetIdx = typeOptions[typeOptionIndex(savedTypePresetIdx)];
         this.aggregatedMode = savedAggregatedMode;
         this.actorFilter = savedActorFilter == null ? "" : savedActorFilter;
         this.trainFilter = savedTrainFilter == null ? "" : savedTrainFilter;

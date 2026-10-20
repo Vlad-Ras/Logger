@@ -20,6 +20,57 @@ import java.util.UUID;
 @Mixin(targets = "com.simibubi.create.content.contraptions.AbstractContraptionEntity")
 public class AbstractContraptionEntityMixin {
 
+    @org.spongepowered.asm.mixin.Unique private Object avilixlogger$sourceContraption;
+    @org.spongepowered.asm.mixin.Unique private UUID avilixlogger$sourceId;
+    @org.spongepowered.asm.mixin.Unique private String avilixlogger$typedSource;
+
+    @com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation(method = {"tickActors", "refreshPSIs"}, at = @At(value = "INVOKE", target = "Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;visitNewPosition(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;)V"), require = 1, remap = false)
+    private void avilixlogger$actorVisit(com.simibubi.create.api.behaviour.movement.MovementBehaviour actor,
+            com.simibubi.create.content.contraptions.behaviour.MovementContext context, BlockPos pos,
+            com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
+        try { original.call(actor, context, pos); }
+        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous); }
+    }
+
+    @com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation(method = "tickActors", at = @At(value = "INVOKE", target = "Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;tick(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;)V"), require = 1, remap = false)
+    private void avilixlogger$actorTick(com.simibubi.create.api.behaviour.movement.MovementBehaviour actor,
+            com.simibubi.create.content.contraptions.behaviour.MovementContext context,
+            com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
+        try { original.call(actor, context); }
+        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous); }
+    }
+
+    @com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation(method = "tickActors", at = @At(value = "INVOKE", target = "Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;onSpeedChanged(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;)V"), require = 1, remap = false)
+    private void avilixlogger$actorSpeed(com.simibubi.create.api.behaviour.movement.MovementBehaviour actor,
+            com.simibubi.create.content.contraptions.behaviour.MovementContext context,
+            net.minecraft.world.phys.Vec3 oldMotion, net.minecraft.world.phys.Vec3 motion,
+            com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
+        try { original.call(actor, context, oldMotion, motion); }
+        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous); }
+    }
+
+    @com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod(method = "tick")
+    private void avilixlogger$typedTick(com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var self = (com.simibubi.create.content.contraptions.AbstractContraptionEntity)(Object)this;
+        if (self.level().isClientSide || !com.roften.avilixlogger.compat.create.CreateCartAudit.enabled()
+                || self instanceof com.roften.avilixlogger.compat.create.CartEntityAccess access && access.avilixlogger$mountedState() != null) {
+            original.call(); return;
+        }
+        var id = com.roften.avilixlogger.compat.create.CreateContraptionSources.id(self);
+        if (avilixlogger$sourceContraption != self.getContraption() || !id.equals(avilixlogger$sourceId)) {
+            avilixlogger$sourceContraption = self.getContraption();
+            avilixlogger$sourceId = id;
+            var kind = com.roften.avilixlogger.compat.create.CreateContraptionSources.kind(self);
+            avilixlogger$typedSource = kind == com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN ? null : kind.source(id, "work");
+        }
+        if (avilixlogger$typedSource == null) { original.call(); return; }
+        var previous = com.roften.avilixlogger.core.MutationSourceResolver.enter(avilixlogger$typedSource);
+        try { original.call(); } finally { com.roften.avilixlogger.core.MutationSourceResolver.restore(previous); }
+    }
+
 
     @Inject(method = "disassemble", at = @At("HEAD"), require = 0)
     private void avilixlogger$captureBeforeDisassemble(CallbackInfo ci) {
