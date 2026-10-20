@@ -10,17 +10,21 @@ import com.simibubi.create.api.contraption.storage.fluid.WrapperMountedFluidStor
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Final;
 
 /** Capture changed tanks only at real transfers, never on simulation or idle ticks. */
 @Mixin(value=WrapperMountedFluidStorage.class,remap=false)
 public abstract class MountedFluidStorageAuditMixin {
+    @Shadow @Final protected IFluidHandler wrapped;
     @WrapMethod(method="fill")
     private int avilixlogger$fill(FluidStack stack,IFluidHandler.FluidAction action,Operation<Integer> original){
         var ref=action.simulate()?null:CartStorageAudit.ref(this);
         if(CartStorageAudit.locked(ref))return 0;
         if(ref==null)return original.call(stack,action);
         var handler=(IFluidHandler)this;var before=CartStorageAudit.fluids(handler);
-        int result;var transfer=CartAutomationAudit.enterMounted();try{result=original.call(stack,action);}finally{CartAutomationAudit.leaveMounted(transfer);}
+        var creative=(Object)this instanceof CreativeFluidTankMountedStorage?wrapped:null;
+        int result;var transfer=CartAutomationAudit.enterMounted(creative);try{result=original.call(stack,action);}finally{CartAutomationAudit.leaveMounted(transfer,creative);}
         if((Object)this instanceof CreativeFluidTankMountedStorage)CreateInfiniteStorageAudit.fluid(ref,before[0],stack.copyWithAmount(result),true);
         else CartStorageAudit.changedFluids(ref,before,handler);return result;
     }
@@ -30,7 +34,8 @@ public abstract class MountedFluidStorageAuditMixin {
         if(CartStorageAudit.locked(ref))return FluidStack.EMPTY;
         if(ref==null)return original.call(stack,action);
         var handler=(IFluidHandler)this;var before=CartStorageAudit.fluids(handler);
-        FluidStack result;var transfer=CartAutomationAudit.enterMounted();try{result=original.call(stack,action);}finally{CartAutomationAudit.leaveMounted(transfer);}
+        var creative=(Object)this instanceof CreativeFluidTankMountedStorage?wrapped:null;
+        FluidStack result;var transfer=CartAutomationAudit.enterMounted(creative);try{result=original.call(stack,action);}finally{CartAutomationAudit.leaveMounted(transfer,creative);}
         if((Object)this instanceof CreativeFluidTankMountedStorage)CreateInfiniteStorageAudit.fluid(ref,before[0],result,false);
         else CartStorageAudit.changedFluids(ref,before,handler);return result;
     }
@@ -40,7 +45,8 @@ public abstract class MountedFluidStorageAuditMixin {
         if(CartStorageAudit.locked(ref))return FluidStack.EMPTY;
         if(ref==null)return original.call(amount,action);
         var handler=(IFluidHandler)this;var before=CartStorageAudit.fluids(handler);
-        FluidStack result;var transfer=CartAutomationAudit.enterMounted();try{result=original.call(amount,action);}finally{CartAutomationAudit.leaveMounted(transfer);}
+        var creative=(Object)this instanceof CreativeFluidTankMountedStorage?wrapped:null;
+        FluidStack result;var transfer=CartAutomationAudit.enterMounted(creative);try{result=original.call(amount,action);}finally{CartAutomationAudit.leaveMounted(transfer,creative);}
         if((Object)this instanceof CreativeFluidTankMountedStorage)CreateInfiniteStorageAudit.fluid(ref,before[0],result,false);
         else CartStorageAudit.changedFluids(ref,before,handler);return result;
     }

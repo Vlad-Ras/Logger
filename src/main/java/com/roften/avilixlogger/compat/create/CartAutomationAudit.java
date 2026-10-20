@@ -193,6 +193,9 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         }catch(RuntimeException error){unknownCreative(scope,"fluid",inbound?"in":"out",null,"serialization failure");CreateCartAudit.failed("world creative fluid snapshot",error);}
     }
     public static boolean worldCreativeActive(){return serverThread()&&current!=null;}
+    public static boolean worldCreativeActive(Object handler){
+        return worldCreativeActive()&&(current.mountedCreative==null||!current.mountedCreative.containsKey(handler));
+    }
     public static void worldCreativeUnverified(){if(serverThread()&&current!=null)unknownCreative(current,"unknown","unknown",null,"unverified native result");}
     private static void unknownCreative(Scope scope,String kind,String direction,Object payload,String reason){
         scope.complete=false;
@@ -246,6 +249,18 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     private static boolean serverThread(){var server=activeServer;return server!=null&&server.isSameThread();}
     public static Scope enterMounted(){Scope scope=serverThread()?current:null;if(scope!=null)scope.mountedDepth++;return scope;}
     public static void leaveMounted(Scope scope){if(scope!=null)scope.mountedDepth--;}
+    public static Scope enterMounted(Object creativeHandler){
+        var scope=enterMounted();if(scope!=null&&creativeHandler!=null){
+            if(scope.mountedCreative==null)scope.mountedCreative=new IdentityHashMap<>();
+            scope.mountedCreative.merge(creativeHandler,1,Integer::sum);
+        }return scope;
+    }
+    public static void leaveMounted(Scope scope,Object creativeHandler){
+        if(scope!=null&&creativeHandler!=null&&scope.mountedCreative!=null){
+            int count=scope.mountedCreative.getOrDefault(creativeHandler,0);
+            if(count<=1)scope.mountedCreative.remove(creativeHandler);else scope.mountedCreative.put(creativeHandler,count-1);
+        }leaveMounted(scope);
+    }
     public static void worldItems(List<net.minecraft.world.entity.Entity> items) {
         var scope=serverThread()?current:null;if(scope==null||!scope.mounted)return;
         for(var item:items) {
@@ -282,6 +297,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         private final ListTag worldCreative=new ListTag();
         private final ListTag unverifiedCreative=new ListTag();
         private boolean complete,publish;private int mountedDepth,handlerDepth;
+        private Map<Object,Integer> mountedCreative;
         private Scope(){}
         private void reset(BlockEntity source){
             if(CreateDeployerAudit.capturing())CreateDeployerTransaction.unsupported("Вложенная автоматика активатора требует общего снимка всех внешних участников");
