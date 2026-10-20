@@ -12,6 +12,8 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
       # check/build depend on release obfuscation. Preparation deliberately runs only these tasks.
       - name: Compile and verify detached pipelines and Create preflight
         run: ./gradlew compileJava compileCreateSmokeJava testAsyncPipeline testCreatePreflight verifyMixinSafety --console=plain --no-daemon

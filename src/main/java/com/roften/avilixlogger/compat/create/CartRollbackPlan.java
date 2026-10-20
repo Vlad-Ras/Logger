@@ -155,8 +155,8 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                 effects.add(new SpawnUndo(drop.dimension,drop.id,drop.type,drop.nbt,remaining));
                 continue;
             }
-            for(var world:worldItems)if(world.entity().equals(drop.id)){
-                var before=world.before().getCompound("Item");var after=world.after().getCompound("Item");
+            for(var endpoint:worldItems)if(endpoint.entity().equals(drop.id)){
+                var before=endpoint.before().getCompound("Item");var after=endpoint.after().getCompound("Item");
                 var component=before.copy();component.remove("count");var expected=remaining.copy();expected.remove("count");
                 if(!component.equals(expected))throw new IllegalStateException("Дроп изменил компоненты перед всасыванием");
                 int absorbed=itemCount(before)-itemCount(after),left=itemCount(remaining)-absorbed;
@@ -165,7 +165,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
             }
             effects.add(new SpawnUndo(drop.dimension,drop.id,drop.type,drop.nbt,remaining));
         }
-        worldItems.removeIf(world->spawned.containsKey(world.entity())&&!mixed.entities().contains(world.entity()));
+        worldItems.removeIf(endpoint->spawned.containsKey(endpoint.entity())&&!mixed.entities().contains(endpoint.entity()));
         return new CartRollbackPlan(id, checkpointId, cutoff, checkpoint.ts, target, latest, List.copyOf(blocks.values()), List.copyOf(locations),List.copyOf(effects),recipients,slots,List.copyOf(worldItems),worldCreative,mixed.entities(),bytes);
     }
     private static void validateEntity(CompoundTag entity) {
