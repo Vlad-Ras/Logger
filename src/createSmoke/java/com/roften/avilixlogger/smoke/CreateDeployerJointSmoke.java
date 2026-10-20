@@ -142,7 +142,8 @@ public final class CreateDeployerJointSmoke {
         fake.setItemInHand(InteractionHand.MAIN_HAND,fake.getMainHandItem().finishUsingItem(world,fake));fake.getFoodData().setFoodLevel(11);fake.experienceLevel=5;
         fake.getCooldowns().tick();fake.getCooldowns().addCooldown(Items.SHIELD,20);check(!fake.hasEffect(MobEffects.POISON),"native milk did not clear effect fixture");
         bindings.run(()->access.avilixlogger$deployerRuntime(before));
-        check(access.avilixlogger$deployerRuntime().equals(before),"runtime round trip lost effects, food, XP, inventory or cooldown phase");
+        var restoredRuntime=access.avilixlogger$deployerRuntime();
+        check(restoredRuntime.equals(before),"runtime round trip: "+differences("",before,restoredRuntime));
         var sheep=EntityType.SHEEP.create(world);var health=sheep.getAttribute(Attributes.MAX_HEALTH);
         health.addTransientModifier(new AttributeModifier(ResourceLocation.fromNamespaceAndPath("avilixlogger","smoke_health"),32,AttributeModifier.Operation.ADD_VALUE));sheep.setHealth(35);
         var healthy=CreateLivingRuntime.capture(sheep,fake);health.removeModifiers();sheep.setHealth(4);
@@ -165,6 +166,12 @@ public final class CreateDeployerJointSmoke {
                 "expanded active item, armor or offhand was not restored exactly");
     }
     private static Method method(Class<?> type,String name,Class<?>...args)throws Exception{var m=type.getDeclaredMethod(name,args);m.setAccessible(true);return m;}
+    private static String differences(String path,CompoundTag expected,CompoundTag actual){
+        var keys=new TreeSet<>(expected.getAllKeys());keys.addAll(actual.getAllKeys());var out=new ArrayList<String>();
+        for(String key:keys){var before=expected.get(key);var after=actual.get(key);if(Objects.equals(before,after))continue;
+            out.add(before instanceof CompoundTag b&&after instanceof CompoundTag a?differences(path+key+".",b,a):path+key+": "+before+" -> "+after);}
+        return String.join("; ",out);
+    }
     private static Field field(Class<?> type,String name)throws Exception{var f=type.getDeclaredField(name);f.setAccessible(true);return f;}
     private static void reject(Runnable action,String message){try{action.run();}catch(RuntimeException expected){return;}throw new AssertionError(message);}
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
