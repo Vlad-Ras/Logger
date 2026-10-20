@@ -34,6 +34,8 @@ jobs:
         if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         timeout-minutes: 10
         run: |
+          mkdir -p run-create-absent
+          printf 'eula=true\n' > run-create-absent/eula.txt
           timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PcreateAbsent --console=plain --no-daemon > create-absent-smoke.log 2>&1 || status=$?
           tail -n 80 create-absent-smoke.log
           if ! grep -q 'CREATE_ABSENT_NATIVE_OK' create-absent-smoke.log || grep -qE '(Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-absent-smoke.log; then
