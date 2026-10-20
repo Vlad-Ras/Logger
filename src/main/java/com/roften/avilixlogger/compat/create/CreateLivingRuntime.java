@@ -93,7 +93,7 @@ public final class CreateLivingRuntime {
         }
         // Materialize supported attributes before saving native data so capture itself cannot
         // make the next snapshot appear to contain a new attribute definition.
-        var persistent=new CompoundTag();entity.addAdditionalSaveData(persistent);tag.put("Persistent",persistent);
+        var persistent=new CompoundTag();if(entity instanceof net.minecraft.server.level.ServerPlayer&&!(entity instanceof FakePlayer)){persistent=((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving();tag.putBoolean("PlayerBase",true);}else entity.addAdditionalSaveData(persistent);tag.put("Persistent",persistent);
         tag.put("Attributes",attributes);if(entity instanceof Player player){var food=new CompoundTag();player.getFoodData().addAdditionalSaveData(food);tag.put("Food",food);}
         if(entity instanceof Mob mob){tag.put("MobTarget",reference(mob.getTarget(),actor));tag.putBoolean("Aggressive",mob.isAggressive());}
         if(tag.sizeInBytes()>2*1024*1024)throw new IllegalStateException("Runtime активатора превышает 2 MiB");return tag;
@@ -126,7 +126,7 @@ public final class CreateLivingRuntime {
         tag=project(tag,entity.tickCount);
         var states=decode(entity,actor,tag);
         ((CreateLivingRuntimeAccess)entity).avilixlogger$clearEffectsForRestore();
-        entity.readAdditionalSaveData(tag.getCompound("Persistent").copy());
+        if(tag.getBoolean("PlayerBase")){if(!(entity instanceof net.minecraft.server.level.ServerPlayer)||entity instanceof FakePlayer)throw new IllegalStateException("Получатель заменён техническим игроком");((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving(tag.getCompound("Persistent").copy());}else entity.readAdditionalSaveData(tag.getCompound("Persistent").copy());
         for(var state:states){state.instance.removeModifiers();state.instance.setBaseValue(state.base);for(var modifier:state.permanent)state.instance.addPermanentModifier(modifier);for(var modifier:state.temporary)state.instance.addTransientModifier(modifier);}
         // Native loading clamps health before transient max-health modifiers are back.
         // Reapply these values only after restoring the complete attribute set.

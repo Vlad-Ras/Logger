@@ -72,15 +72,11 @@ public abstract class DeployerResultAuditMixin {
         boolean self = recipient instanceof Player player && com.roften.avilixlogger.core.CreateActorContext.isTechnicalPlayer(player);
         if(!self){
             com.roften.avilixlogger.compat.create.CreateDeployerTransaction.entityBefore(recipient);
-            // A real player's inventory, statistics and advancements are not part of
-            // the entity rollback endpoint. Mark the barrier before native use: a
-            // modded item may mutate the recipient and then throw.
-            com.roften.avilixlogger.compat.create.CreateDeployerTransaction.unsupported(
-                    "Кормление настоящего игрока: нужен отдельный откат инвентаря, статистики и достижений");
+            if(!(recipient instanceof ServerPlayer)||recipient instanceof net.neoforged.neoforge.common.util.FakePlayer)
+                com.roften.avilixlogger.compat.create.CreateDeployerTransaction.unsupported("Неизвестный получатель пищи");
         }
         var result = original.call(stack, level, recipient);
-        CreateDeployerAudit.used(self ? "item_use" : recipient instanceof Player ? "player_feed" : "entity_use",
-                true, self ? null : recipient);
+        CreateDeployerAudit.used(self ? "item_use" : recipient instanceof Player ? "player_feed" : "entity_use",true,self ? null : recipient);
         return result;
     }
 

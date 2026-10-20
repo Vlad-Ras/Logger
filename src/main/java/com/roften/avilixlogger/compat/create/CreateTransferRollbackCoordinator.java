@@ -13,6 +13,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.*;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -95,6 +96,7 @@ public final class CreateTransferRollbackCoordinator {
     public static void invalidated(net.minecraft.world.entity.Entity entity){
         if(active!=null&&!CartAuditContext.restoring()&&CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID()))active.cancel("Связанная сущность удалена или перемещена");
     }
+    public static void playerLeaving(ServerPlayer p){var job=active;if(job==null)return;boolean old=CartAuditContext.restoring(true);try{job.leaving(p);}finally{CartAuditContext.restoring(old);}}
     public static void stop(){
         generation++;PREVIEWS.clear();REQUESTS.clear();var job=active;
         if(job!=null){boolean previous=CartAuditContext.restoring(true);try{job.cancel("Сервер остановлен");while(!job.step(job.source.getServer())){}}
@@ -109,6 +111,7 @@ public final class CreateTransferRollbackCoordinator {
         final LogStorage history;final List<Endpoint> endpoints=new ArrayList<>();int phase,index,applied,verify;String failure;boolean committed;
         Job(CommandSourceStack source,CreateTransferRollbackPlan plan,long entry){this(source,plan,entry,null);}
         private Job(CommandSourceStack source,CreateTransferRollbackPlan plan,long entry,LogStorage history){this.source=source;this.plan=plan;this.entry=entry;this.history=history;}
+        void leaving(ServerPlayer p){for(int i=0;i<endpoints.size();i++)endpoints.get(i).leaving(p,i<applied);cancel("Участник вышел");}
         void cancel(String reason){if(!committed&&phase!=4){failure=reason;phase=4;}}
         boolean step(MinecraftServer server){
             if(phase==0){
@@ -175,20 +178,13 @@ public final class CreateTransferRollbackCoordinator {
             }catch(Exception failure){CreateCartAudit.failed("committed joint transfer receipt",failure);}finally{CartAuditContext.restoring(previous);}
         }
     }
-    interface Endpoint {void verifyAfter();void apply();void verifyBefore();void compensate();}
+    interface Endpoint {void verifyAfter();void apply();void verifyBefore();void compensate();default void leaving(ServerPlayer p,boolean applied){}}
     private static final class CargoEndpoint implements Endpoint {
-        final CreateTransferRollbackPlan.CargoUndo undo;final AbstractContraptionEntity entity;final Object handler;final BlockPos local;final int slot;final boolean base,item;
+        final CreateTransferRollbackPlan.CargoUndo undo;final AbstractContraptionEntity entity;final CreateCargoLocation location;final Object handler;final BlockPos local;final int slot;final boolean base,item;
         final Object before,after;boolean applied;
         CargoEndpoint(MinecraftServer server,CreateTransferRollbackPlan.CargoUndo undo){
             this.undo=undo;var address=undo.address();
-            ServerLevel level=server.getLevel(ResourceKey.create(Registries.DIMENSION,ResourceLocation.parse(address.getString("Dimension"))));
-            if(level==null||!(level.getEntity(address.getUUID("StorageEntity")) instanceof AbstractContraptionEntity ce)||ce.isRemoved()||ce.getContraption()==null)throw new IllegalStateException("Конструкция выгружена или удалена");
-            entity=ce;local=BlockPos.of(address.getLong("LocalPos"));base=address.getBoolean("BaseCart");item=address.getString("Kind").equals("item");slot=address.getInt(item?"Slot":"Tank");
-            if(!CreateContraptionSources.id(ce).equals(address.getUUID("Construction"))||!CreateContraptionSources.kind(ce).name().equals(address.getString("ConstructionKind")))throw new IllegalStateException("ID или вид конструкции изменён");
-            if(ce instanceof CarriageContraptionEntity carriage){
-                if(carriage.getCarriage()==null||carriage.getCarriage().presentInMultipleDimensions()||!address.hasUUID("Carriage")
-                        ||!address.getUUID("Carriage").equals(((ContraptionIdentity)carriage.getCarriage()).avilixlogger$identity()))throw new IllegalStateException("Вагон отсутствует, заменён или находится в портале");
-            }
+            location=new CreateCargoLocation(server,address);entity=location.entity;local=BlockPos.of(address.getLong("LocalPos"));base=address.getBoolean("BaseCart");item=address.getString("Kind").equals("item");slot=address.getInt(item?"Slot":"Tank");
             handler=resolve();
             if(item){
                 if(!(handler instanceof IItemHandlerModifiable writable))throw new IllegalStateException("Нет обратимого предметного хранилища");
@@ -200,9 +196,8 @@ public final class CreateTransferRollbackCoordinator {
                 before=CartRollbackCoordinator.readAutomationFluid(undo.before(),server.registryAccess());after=CartRollbackCoordinator.readAutomationFluid(undo.after(),server.registryAccess());
                 if(((FluidStack)before).getAmount()>((FluidTankMountedStorage)handler).getCapacity()||((FluidStack)after).getAmount()>((FluidTankMountedStorage)handler).getCapacity())throw new IllegalStateException("Ёмкость бака изменена");
             }
-            verifyAfter();CartRestoreLocks.keepLoaded(level,ce.blockPosition());CartAuditContext.LOCKED_ENTITIES.add(ce.getUUID());CartRestoreLocks.construction(address.getUUID("Construction"));
-            if(ce.getVehicle()!=null){CartAuditContext.LOCKED_ENTITIES.add(ce.getVehicle().getUUID());if(ce.getVehicle() instanceof net.minecraft.world.Container container)CartRestoreLocks.container(container);}
-            CartRestoreLocks.handler(handler);CartStorageAudit.lockMenus(address.getUUID("Construction"),server);
+            verifyAfter();location.reserve(server);CartRestoreLocks.handler(handler);
+
         }
         private static boolean supportedItem(Object handler){
             String type=handler.getClass().getName();
@@ -214,10 +209,9 @@ public final class CreateTransferRollbackCoordinator {
                     "com.simibubi.create.impl.contraption.storage.FallbackMountedStorage",
                     "net.neoforged.neoforge.items.wrapper.InvWrapper").contains(type);
         }
-        private Object resolve(){return base&&entity.getVehicle() instanceof net.minecraft.world.Container container?new net.neoforged.neoforge.items.wrapper.InvWrapper(container)
-                :item?entity.getContraption().getStorage().getAllItemStorages().get(local):entity.getContraption().getStorage().getFluids().storages.get(local);}
+        private Object resolve(){return location.resolve(local,item,base);}
         private void verify(Object expected){
-            if(entity.isRemoved()||entity.getContraption()==null||!CreateContraptionSources.id(entity).equals(undo.address().getUUID("Construction")))throw new IllegalStateException("Конструкция изменена во время передачи");
+            location.verify();
             Object current=resolve();if(!base&&current!=handler||current==null)throw new IllegalStateException("Хранилище заменено");
             if(base&&(!(current instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper)||((net.neoforged.neoforge.items.wrapper.InvWrapper)handler).getInv()!=wrapper.getInv()))throw new IllegalStateException("Базовая вагонетка заменена");
             if(item?!ItemStack.matches((ItemStack)expected,((IItemHandlerModifiable)current).getStackInSlot(slot)):!FluidStack.matches((FluidStack)expected,((FluidTankMountedStorage)current).getFluid()))throw new IllegalStateException("Содержимое участника передачи изменено");

@@ -45,10 +45,11 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
     public static CompoundTag entity(Entity entity,boolean exists,net.minecraft.world.entity.LivingEntity actor){
         var tag=new CompoundTag();tag.putUUID("Entity",entity.getUUID());tag.putString("Dimension",entity.level().dimension().location().toString());tag.putString("Type",net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());tag.putLong("Pos",entity.blockPosition().asLong());tag.putBoolean("Exists",exists);
         if(exists){if(entity instanceof net.minecraft.world.entity.LivingEntity living){if(actor==null)throw new IllegalStateException("Нет технического игрока снимка цели");tag.put("LivingRuntime",CreateLivingRuntime.capture(living,actor));}
+            if(entity instanceof net.minecraft.server.level.ServerPlayer human&&!(entity instanceof net.neoforged.neoforge.common.util.FakePlayer))tag.put("PlayerState",CreatePlayerConsumption.capture(human));
             var nbt=NbtSerde.snapshotEntity((ServerLevel)entity.level(),entity);if(nbt==null)throw new IllegalStateException("Нет снимка цели активатора");tag.put("NBT",nbt);}
         return tag;
     }
-    public static boolean supportedEntity(String type){return Set.of("minecraft:item","minecraft:experience_orb","minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken","minecraft:armor_stand","minecraft:item_frame","minecraft:glow_item_frame").contains(type);}
+    public static boolean supportedEntity(String type){return Set.of("minecraft:item","minecraft:experience_orb","minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken","minecraft:armor_stand","minecraft:item_frame","minecraft:glow_item_frame","minecraft:player").contains(type);}
     public static final class Capture implements AutoCloseable {
         final MovementContext context;final DeployerFakePlayer player;final Capture previous;final CompoundTag beforeHand;final CreateCargoAudit.Capture cargo;final boolean nestedAutomation;
         final LinkedHashMap<Address,CompoundTag> blocks=new LinkedHashMap<>();final LinkedHashMap<Entity,CompoundTag> targets=new LinkedHashMap<>();
@@ -63,6 +64,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             if(targets.containsKey(entity))return;
             if(targets.size()>=32||entity.level()!=context.world){complete=false;return;}
             String type=net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
+            if(entity instanceof net.neoforged.neoforge.common.util.FakePlayer){complete=false;reason="Чужой технический игрок";return;}
             if(!supportedEntity(type)||entity.isPassenger()||!entity.getPassengers().isEmpty()){complete=false;return;}
             try{var tag=entity(entity,!created);charge(tag);targets.put(entity,tag);}catch(RuntimeException failure){complete=false;}
         }
@@ -75,7 +77,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             for(var entry:blocks.entrySet())try{var old=entry.getValue();var now=CreateStructuralAudit.world(entry.getKey().level,entry.getKey().pos);charge(now);if(!old.equals(now)){oldWorld.add(old.copy());newWorld.add(now);}}catch(RuntimeException failure){complete=false;}
             for(var entry:targets.entrySet())try{var old=entry.getValue();
                 if(entry.getKey() instanceof net.minecraft.world.entity.LivingEntity&&!entry.getKey().isAlive()&&old.getBoolean("Exists")){complete=false;reason="Смерть живой цели требует отдельного полного контракта";}
-                var now=entity(entry.getKey(),!entry.getKey().isRemoved());charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
+                var now=entity(entry.getKey(),!entry.getKey().isRemoved());if(old.contains("PlayerState",10)&&!CreatePlayerConsumption.rewardsUnchanged(old.getCompound("PlayerState"),now.getCompound("PlayerState"))){complete=false;reason="Достижение могло выполнить внешнюю команду награды";}charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
             var oldCargo=new ListTag();var newCargo=new ListTag();int creativeIO=0;
             if(!cargo.complete())complete=false;
             for(var row:cargo.rows()){
@@ -91,7 +93,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             }
             if(!player.isAlive()){complete=false;reason="Технический игрок умер во время действия";}
             var afterHand=hand(context,player);charge(afterHand);var transfer=UUID.randomUUID();
-            for(var tag:List.of(b,a)){tag.putUUID("Transfer",transfer);tag.putInt("JointFormat",3);if(creativeIO>0)tag.putInt("CreativeIO",creativeIO);tag.putBoolean("Complete",completed&&complete);if(reason!=null)tag.putString("JointFailure",reason);}
+            for(var tag:List.of(b,a)){tag.putUUID("Transfer",transfer);tag.putInt("JointFormat",4);if(creativeIO>0)tag.putInt("CreativeIO",creativeIO);tag.putBoolean("Complete",completed&&complete);if(reason!=null)tag.putString("JointFailure",reason);}
             b.put("Cargo",oldCargo);a.put("Cargo",newCargo);b.put("Hand",beforeHand.copy());a.put("Hand",afterHand);b.put("World",oldWorld);a.put("World",newWorld);b.put("Targets",oldEntities);a.put("Targets",newEntities);
             before=b.copy();after=a.copy();reading=false;
         }

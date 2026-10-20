@@ -102,7 +102,15 @@
     "CreativeCrateStorageAuditMixin",
     "WorldCreativeCrateAuditMixin",
     "WorldCreativeTankAuditMixin",
-    "DeployerDamageReservationMixin"
+    "DeployerDamageReservationMixin",
+    "CarriageRepresentationAuditMixin",
+    "PlayerLivingRuntimeMixin",
+    "ConsumptionStatsAccessor",
+    "ConsumptionAdvancementsAccessor",
+    "ConsumptionScoreboardLockMixin",
+    "ConsumptionScoreLockMixin",
+    "ConsumptionStatLockMixin",
+    "ConsumptionProgressLockMixin"
   ],
   "client": [],
   "injectors": {

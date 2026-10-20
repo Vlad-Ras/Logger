@@ -11,6 +11,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class CartRecipientLogoutMixin {
     @Inject(method="remove",at=@At("HEAD"),require=1)
     private void avilixlogger$beforeSave(ServerPlayer player,CallbackInfo ci){
-        if(CartRestoreLocks.playerLocked(player))com.roften.avilixlogger.compat.create.CartRollbackCoordinator.playerLeaving(player);
+        if(CartRestoreLocks.playerLocked(player)){com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.playerLeaving(player);com.roften.avilixlogger.compat.create.CartRollbackCoordinator.playerLeaving(player);}
     }
 }

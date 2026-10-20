@@ -55,6 +55,6 @@ public final class CartHistoryNetwork {
         source.sendFailure(Component.literal(message));var p=source.getPlayer();if(p!=null&&LoggerNetwork.isClientPresent(p))PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.ERROR,0,"",0,false,clip(message,4000),"",List.of()));
     }
     private static String clip(String s,int max){return s==null?"":s.substring(0,Math.min(s.length(),max));}
-    public static void logout(UUID id){LAST_REQUEST.remove(id);if(com.roften.avilixlogger.core.CreateSupport.available())CartItemRecovery.logout(id);}
+    public static void logout(UUID id){LAST_REQUEST.remove(id);if(com.roften.avilixlogger.core.CreateSupport.available()){CartItemRecovery.logout(id);CreateTrainRecovery.logout(id);}}
     public static void stop(){LAST_REQUEST.clear();}
 }

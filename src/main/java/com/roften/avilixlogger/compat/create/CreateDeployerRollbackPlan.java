@@ -7,7 +7,7 @@ public final class CreateDeployerRollbackPlan {
     public record Undo(CompoundTag before,CompoundTag after){}
     private CreateDeployerRollbackPlan(){}
     public static CreateTransferRollbackPlan prepare(CompoundTag before,CompoundTag after){
-        if(before==null||after==null||before.sizeInBytes()+after.sizeInBytes()>8L*1024*1024||!before.getBoolean("Complete")||!after.getBoolean("Complete")||!Set.of(1,2,3).contains(before.getInt("JointFormat"))||before.getInt("JointFormat")!=after.getInt("JointFormat")||!before.hasUUID("Transfer")||!before.getUUID("Transfer").equals(after.getUUID("Transfer"))||!before.getString("Kind").equals("deployer_action")||!after.getString("Kind").equals("deployer_action"))throw new IllegalStateException("Нет полного совместного снимка активатора");
+        if(before==null||after==null||before.sizeInBytes()+after.sizeInBytes()>8L*1024*1024||!before.getBoolean("Complete")||!after.getBoolean("Complete")||!Set.of(1,2,3,4).contains(before.getInt("JointFormat"))||before.getInt("JointFormat")!=after.getInt("JointFormat")||!before.hasUUID("Transfer")||!before.getUUID("Transfer").equals(after.getUUID("Transfer"))||!before.getString("Kind").equals("deployer_action")||!after.getString("Kind").equals("deployer_action"))throw new IllegalStateException("Нет полного совместного снимка активатора");
         var b=before.getCompound("Hand");var a=after.getCompound("Hand");
         if(!b.hasUUID("Construction")||!a.hasUUID("Construction")||!b.getUUID("Construction").equals(a.getUUID("Construction"))||!b.hasUUID("StorageEntity")||!b.getUUID("StorageEntity").equals(a.getUUID("StorageEntity"))||!b.getString("Dimension").equals(a.getString("Dimension"))||a.getString("Dimension").isBlank()||!b.contains("LocalPos",4)||b.getLong("LocalPos")!=a.getLong("LocalPos")||!b.getString("ConstructionKind").equals(a.getString("ConstructionKind"))||CreateContraptionKind.valueOf(a.getString("ConstructionKind"))==CreateContraptionKind.UNKNOWN||!b.getCompound("State").equals(a.getCompound("State"))||!b.getCompound("State").getString("Name").equals("create:deployer")||!b.getCompound("Settings").equals(a.getCompound("Settings")))throw new IllegalStateException("Идентичность или настройки активатора изменены");
         for(var hand:List.of(b,a)){
@@ -15,7 +15,7 @@ public final class CreateDeployerRollbackPlan {
             var runtime=hand.getCompound("Runtime");
             if(!runtime.contains("PlacedTracks",1)||runtime.contains("BreakingPos")!=runtime.contains("BreakingProgress")||runtime.contains("BreakingProgress")&&(!Float.isFinite(runtime.getFloat("BreakingProgress"))||runtime.getFloat("BreakingProgress")<0)||runtime.contains("Timer")&&(runtime.getInt("Timer")<0||runtime.getInt("Timer")>20))throw new IllegalStateException("Некорректное состояние активатора");
             if(runtime.contains("Effects")&&(runtime.getCompound("Effects").getString("id").isBlank()||runtime.getCompound("Effects").getInt("count")<=0))throw new IllegalStateException("Неполный предмет эффекта активатора");
-            if(after.getInt("JointFormat")==3){
+            if(after.getInt("JointFormat")>=3){
                 CreateLivingRuntime.validate(runtime.getCompound("Living"));
                 CreateCooldownRuntimeAccess.validate(runtime.getCompound("Cooldowns"));
             }
@@ -29,15 +29,19 @@ public final class CreateDeployerRollbackPlan {
         for(var undo:targets){var old=undo.before;var now=undo.after;
             if(!old.hasUUID("Entity")||!old.getUUID("Entity").equals(now.getUUID("Entity"))||!old.getString("Dimension").equals(now.getString("Dimension"))||old.getString("Dimension").isBlank()||!old.getString("Type").equals(now.getString("Type"))||!CreateDeployerTransaction.supportedEntity(old.getString("Type"))||!ids.add(now.getUUID("Entity")))throw new IllegalStateException("Некорректный адрес сущности цели");
             for(var tag:List.of(old,now))if(tag.getBoolean("Exists")&&(!tag.contains("NBT",10)||!tag.getCompound("NBT").hasUUID("UUID")||!tag.getUUID("Entity").equals(tag.getCompound("NBT").getUUID("UUID"))||!tag.getString("Type").equals(tag.getCompound("NBT").getString("id"))||!tag.getCompound("NBT").getList("Passengers",10).isEmpty()))throw new IllegalStateException("Неполный снимок сущности цели");
-            // Formats 1/2 predate health/effect/attribute/combat snapshots. Replaying a
-            // living entity from NBT alone can silently leave its transient state behind.
+            // Formats 1/2 have no transient living state; newer formats require it.
             if(after.getInt("JointFormat")<3&&Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken","minecraft:armor_stand").contains(now.getString("Type")))
                 throw new IllegalStateException("У старой записи нет состояния живой цели; откат запрещён");
-            if(after.getInt("JointFormat")==3&&Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken","minecraft:armor_stand").contains(now.getString("Type")))
+            if(after.getInt("JointFormat")>=3&&Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken","minecraft:armor_stand").contains(now.getString("Type")))
                 for(var tag:List.of(old,now))if(tag.getBoolean("Exists"))CreateLivingRuntime.validate(tag.getCompound("LivingRuntime"));
         }
+        for(var undo:targets)if(undo.after().getString("Type").equals("minecraft:player")){
+            if(after.getInt("JointFormat")<4||!undo.before().getBoolean("Exists")||!undo.after().getBoolean("Exists"))throw new IllegalStateException("Нет полного снимка получателя пищи");
+            for(var tag:List.of(undo.before(),undo.after())){CreateLivingRuntime.validate(tag.getCompound("LivingRuntime"));CreatePlayerConsumption.validate(tag.getCompound("PlayerState"));if(!tag.getCompound("LivingRuntime").getBoolean("PlayerBase")||tag.getCompound("LivingRuntime").getBoolean("Dead"))throw new IllegalStateException("Получатель пищи умер или отсутствует");}
+            if(!CreatePlayerConsumption.rewardsUnchanged(undo.before().getCompound("PlayerState"),undo.after().getCompound("PlayerState")))throw new IllegalStateException("Внешняя награда достижения");
+        }
         var creative=new ArrayList<CreateCreativeTransferPlan.IO>();var cargo=cargo(before,after,a,creative);
-        if(after.getInt("JointFormat")==2||after.getInt("JointFormat")==3&&after.contains("CreativeIO")){
+        if(after.getInt("JointFormat")==2||after.getInt("JointFormat")>=3&&after.contains("CreativeIO")){
             if(!before.contains("CreativeIO",3)||!after.contains("CreativeIO",3)||creative.isEmpty()||before.getInt("CreativeIO")!=after.getInt("CreativeIO")||after.getInt("CreativeIO")!=creative.size())throw new IllegalStateException("Отсутствует часть creative обмена активатора");
         }else if(!creative.isEmpty()||before.contains("CreativeIO")||after.contains("CreativeIO"))throw new IllegalStateException("Creative обмену активатора требуется новый полный формат");
         if(!creative.isEmpty()){

@@ -79,7 +79,7 @@ public final class CreateDeployerJointSmoke {
                 check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"deployer blamed its owner");check(CreateContraptionKind.id(row.source).equals(CreateContraptionSources.id(body)),"deployer root ID lost");
                 if(mode.equals("failure")||mode.equals("combat")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
                 var plan=CreateTransferRollbackPlan.prepare(b,a);
-                if(mode.startsWith("combat-live"))check(target.isAlive()&&((LivingEntity)target).getHealth()<8&&a.getInt("JointFormat")==3,"nonlethal combat runtime was not captured");
+                if(mode.startsWith("combat-live"))check(target.isAlive()&&((LivingEntity)target).getHealth()<8&&a.getInt("JointFormat")>=3,"nonlethal combat runtime was not captured");
                 if(mode.startsWith("consume-polish"))check(fake.getOffhandItem().getCount()==1&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==1,"native sandpaper consumption did not finish");
                 var noRuntime=a.copy();noRuntime.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateTransferRollbackPlan.prepare(b,noRuntime),"new-format action lost its living runtime");
                 var invalid=a.copy();invalid.getCompound("Hand").putUUID("StorageEntity",UUID.randomUUID());reject(()->CreateTransferRollbackPlan.prepare(b,invalid),"wrong hand identity accepted");

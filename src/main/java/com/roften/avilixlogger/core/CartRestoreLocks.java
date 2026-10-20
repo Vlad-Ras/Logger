@@ -43,6 +43,7 @@ public final class CartRestoreLocks {
     public static boolean menuLocked(AbstractContainerMenu menu){return CartAuditContext.rollbackActive&&MENUS.contains(menu);}
     public static void player(net.minecraft.world.entity.player.Player player){PLAYERS.add(player);menu(player.containerMenu);}
     public static boolean playerLocked(net.minecraft.world.entity.player.Player player){return CartAuditContext.rollbackActive&&!CartAuditContext.restoring()&&PLAYERS.contains(player);}
+    public static boolean scoreHolderLocked(String name){if(!CartAuditContext.rollbackActive||CartAuditContext.restoring())return false;for(var p:PLAYERS)if(p.getScoreboardName().equals(name))return true;return false;}
     public static void clear(){
         CHUNKS.forEach((level,positions)->{for(long key:positions)level.getChunkSource().removeRegionTicket(TICKET,new net.minecraft.world.level.ChunkPos(key),0,key);});CHUNKS.clear();
         RESOURCES.clear();CONSTRUCTIONS.clear();BLOCKS.clear();HANDLERS.clear();CONTAINERS.clear();MENUS.clear();PLAYERS.clear();}

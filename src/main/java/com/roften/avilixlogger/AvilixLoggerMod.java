@@ -67,6 +67,10 @@ public final class AvilixLoggerMod {
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator::onTick);
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator::onTick);
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator::onTick);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateTrainLifecycleAudit::onTick);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateTrainRecovery::onTick);
+            NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.compat.create.CreateTrainRecovery::joined);
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CreateTrainRecovery::left);
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartItemTracker::join);
             NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.compat.create.CreateLifecycleAudit::join);
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartItemTracker::leave);
@@ -116,7 +120,7 @@ public final class AvilixLoggerMod {
         ChatLogPager.shutdown();
         LoggerNetwork.shutdown();
         RollbackCoordinator.shutdown();
-        if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();}
+        if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateTrainRecovery.stop();com.roften.avilixlogger.compat.create.CreateTrainLifecycleAudit.clear();com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();}
         LoggerRuntime.shutdown();
         if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available()) {
             com.roften.avilixlogger.compat.backpacked.BackpackRecovery.stop();

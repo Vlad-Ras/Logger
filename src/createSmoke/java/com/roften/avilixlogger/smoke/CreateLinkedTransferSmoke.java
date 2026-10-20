@@ -32,7 +32,13 @@ public final class CreateLinkedTransferSmoke {
                 var source=(AbstractContraptionEntity)factory.invoke(null,world,sourceKind);var target=(AbstractContraptionEntity)factory.invoke(null,world,targetKind);
                 source.setPos(pos.getX(),pos.getY()+3,pos.getZ());target.setPos(pos.getX()+3,pos.getY()+3,pos.getZ());
                 attachCarriage(source);attachCarriage(target);
-                if(mode.equals("same-train"))((CarriageContraptionEntity)target).trainId=((CarriageContraptionEntity)source).trainId;
+                if(mode.equals("same-train")){
+                    var joined=((CarriageContraptionEntity)source).getCarriage().train;
+                    var moved=((CarriageContraptionEntity)target).getCarriage();
+                    ((CreateRailwayAccess)com.simibubi.create.Create.RAILWAYS).avilixlogger$remove(moved.train.id);
+                    joined.carriages.add(moved);joined.carriageSpacing.add(0);moved.setTrain(joined);
+                    ((CreateCarriageEntityAccess)target).avilixlogger$bind(moved);
+                }
                 check(world.addFreshEntity(source)&&world.addFreshEntity(target),"linked fixture entities spawn");
                 try{
                     CartStorageAudit.bind(source);CartStorageAudit.bind(target);
@@ -125,7 +131,13 @@ public final class CreateLinkedTransferSmoke {
     private static void attachCarriage(AbstractContraptionEntity entity)throws Exception{
         if(entity instanceof CarriageContraptionEntity train){
             var carriage=new Carriage(new CarriageBogey(AllBlocks.SMALL_BOGEY.get(),false,new CompoundTag()),null,0);
-            var field=CarriageContraptionEntity.class.getDeclaredField("carriage");field.setAccessible(true);field.set(train,carriage);
+            var payload=new CompoundTag();entity.getContraption().getStorage().write(payload,entity.registryAccess(),false);
+            carriage.storage.read(payload,entity.registryAccess(),false,entity.getContraption());
+            var owner=new Train(train.trainId,UUID.randomUUID(),null,new ArrayList<>(List.of(carriage)),new ArrayList<>(),false,0);
+            ((CreateCarriageEntityAccess)train).avilixlogger$bind(carriage);
+            var dimensional=carriage.getDimensional(entity.level());dimensional.entity=new java.lang.ref.WeakReference<>(train);
+            dimensional.positionAnchor=entity.position();dimensional.rotationAnchors=net.createmod.catnip.data.Couple.create(entity.position(),entity.position());
+            com.simibubi.create.Create.RAILWAYS.addTrain(owner);
         }
     }
     private static void reject(Runnable action,String message){try{action.run();}catch(IllegalArgumentException|IllegalStateException expected){return;}throw new AssertionError(message);}

@@ -23,7 +23,7 @@ public final class CreateDeployerRestore {
         var actor=body.getContraption().getActors().stream().map(pair->pair.getRight()).filter(Objects::nonNull)
                 .filter(context->context.localPos.asLong()==hand.getLong("LocalPos")).map(context->context.temporaryData)
                 .filter(value->value instanceof DeployerFakePlayer).map(value->(DeployerFakePlayer)value).findFirst().orElseThrow(()->new IllegalStateException("Технический игрок боя заменён"));
-        return new Target(server,undo,actor);
+        return undo.after().getString("Type").equals("minecraft:player")?new CreateDeployerPlayerRestore(server,undo,actor):new Target(server,undo,actor);
     }
     private static final class Hand implements CreateTransferRollbackCoordinator.Endpoint {
         final AbstractContraptionEntity entity;final MovementContext context;final DeployerFakePlayer player;final CreateDeployerRollbackPlan.Undo undo;final CreateLivingRuntime.Bindings bindings;
