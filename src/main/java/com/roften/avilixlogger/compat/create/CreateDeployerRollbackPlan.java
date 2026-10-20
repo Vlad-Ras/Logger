@@ -17,6 +17,10 @@ public final class CreateDeployerRollbackPlan {
             if(runtime.contains("Effects")&&(runtime.getCompound("Effects").getString("id").isBlank()||runtime.getCompound("Effects").getInt("count")<=0))throw new IllegalStateException("Неполный предмет эффекта активатора");
             if(after.getInt("JointFormat")>=3){
                 CreateLivingRuntime.validate(runtime.getCompound("Living"));
+                var living=runtime.getCompound("Living");if(living.getBoolean("PlayerBase")){
+                    var actor=living.getCompound("ActorState");CreateDeployerActorState.validate(actor);
+                    if(actor.getInt("Selected")!=hand.getInt("Selected")||!actor.getList("Inventory",10).equals(hand.getList("Inventory",10)))throw new IllegalStateException("Снимки руки и технического игрока противоречат друг другу");
+                }
                 CreateCooldownRuntimeAccess.validate(runtime.getCompound("Cooldowns"));
             }
             var slots=new HashSet<Integer>();for(var raw:hand.getList("Inventory",10)){var slot=(CompoundTag)raw;if(!slot.contains("Slot",3)||slot.getInt("Slot")<0||slot.getInt("Slot")>=41||!slots.add(slot.getInt("Slot"))||!slot.contains("id",8)||slot.getInt("count")<=0)throw new IllegalStateException("Некорректный или повторный слот руки");}

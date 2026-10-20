@@ -20,6 +20,7 @@ import java.util.*;
 
 /** Real mounted storage mutations plus the production multi-endpoint Job; no auth override. */
 public final class CreateLinkedTransferSmoke {
+    private static final Set<UUID> FIXTURE_TRAINS=new HashSet<>();
     private static final BlockPos TANK=new BlockPos(1,0,1);
     public static void run(ServerLevel world)throws Exception{
         var factory=CreateCargoSmoke.class.getDeclaredMethod("entity",ServerLevel.class,CreateContraptionKind.class);factory.setAccessible(true);
@@ -27,7 +28,8 @@ public final class CreateLinkedTransferSmoke {
         int tested=0;
         var kinds=new CreateContraptionKind[]{CreateContraptionKind.MINECART,CreateContraptionKind.TRAIN,CreateContraptionKind.BEARING,CreateContraptionKind.OTHER};
         try{
-            for(var sourceKind:kinds)for(var targetKind:kinds)for(String mode:List.of("item","fluid","cancel-item","cancel-fluid","conflict","incomplete","locks","same-train")){
+            for(var sourceKind:kinds)for(var targetKind:kinds)for(String mode:List.of("item","fluid","cancel-item","cancel-fluid","conflict","incomplete","locks","same-train","unloaded-item","unloaded-fluid","unloaded-cancel-item","unloaded-conflict","portal-item","portal-fluid")){
+                if((mode.startsWith("unloaded")||mode.startsWith("portal"))&&sourceKind!=CreateContraptionKind.TRAIN)continue;
                 if(mode.equals("same-train")&&(sourceKind!=CreateContraptionKind.TRAIN||targetKind!=CreateContraptionKind.TRAIN))continue;
                 var source=(AbstractContraptionEntity)factory.invoke(null,world,sourceKind);var target=(AbstractContraptionEntity)factory.invoke(null,world,targetKind);
                 source.setPos(pos.getX(),pos.getY()+3,pos.getZ());target.setPos(pos.getX()+3,pos.getY()+3,pos.getZ());
@@ -69,7 +71,12 @@ public final class CreateLinkedTransferSmoke {
                     var unbalanced=after.copy();unbalanced.getList("Cargo",10).getCompound(1).getCompound(fluid?"Fluid":"Item").putInt(fluid?"amount":"count",99);reject(()->CreateTransferRollbackPlan.prepare(before,unbalanced),"unbalanced paired transfer accepted");
                     var partial=new CartAutomationTransferPlan();partial.manifest(before,after);partial.cargo(before.getList("Cargo",10).getCompound(0),after.getList("Cargo",10).getCompound(0));
                     reject(()->partial.finish(CreateContraptionSources.id(source)),"single construction rollback accepted linked exchange");
-                    if(mode.equals("conflict"))targetItems.setStackInSlot(2,new ItemStack(Items.EMERALD,5));
+                    if(mode.startsWith("unloaded")||mode.startsWith("portal")){
+                        migrate((CarriageContraptionEntity)source,mode.startsWith("portal"));
+                        var cargo=((CarriageContraptionEntity)source).getCarriage().storage;
+                        sourceItems=cargo.getAllItemStorages().get(BlockPos.ZERO);sourceTank=cargo.getFluids().storages.get(TANK);
+                    }
+                    if(mode.contains("conflict"))targetItems.setStackInSlot(2,new ItemStack(Items.EMERALD,5));
                     boolean old=CartAuditContext.restoring(true);CartAuditContext.rollbackActive=true;
                     try{
                         Class<?> type=Class.forName("com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator$Job");var ctor=type.getDeclaredConstructor(net.minecraft.commands.CommandSourceStack.class,CreateTransferRollbackPlan.class,long.class);ctor.setAccessible(true);
@@ -81,7 +88,7 @@ public final class CreateLinkedTransferSmoke {
                         while(true){
                             boolean done;
                             try{done=(Boolean)step.invoke(job,world.getServer());}
-                            catch(InvocationTargetException error){if(!mode.equals("conflict"))throw error;check(applied.getInt(job)==0,"preflight conflict mutated first participant");rejected=true;break;}
+                            catch(InvocationTargetException error){if(!mode.contains("conflict"))throw error;check(applied.getInt(job)==0,"preflight conflict mutated first participant");rejected=true;break;}
                             if(mode.equals("locks")&&!canceled&&applied.getInt(job)==0&&CartAuditContext.LOCKED_ENTITIES.contains(target.getUUID())){
                                 CartAuditContext.restoring(false);
                                 try{check(targetItems.insertItem(3,new ItemStack(Items.GOLD_INGOT),false).getCount()==1,"reserved peer accepts cargo");check(targetItems.extractItem(2,1,false).isEmpty(),"reserved peer gives cargo");
@@ -93,14 +100,14 @@ public final class CreateLinkedTransferSmoke {
                                     target.disassemble();check(!target.isRemoved(),"reserved peer disassembled");}
                                 finally{CartAuditContext.restoring(true);}canceled=true;
                             }
-                            if(mode.startsWith("cancel")&&!canceled&&applied.getInt(job)>0){cancel.invoke(job,"native fixture cancellation");canceled=true;}
+                            if(mode.contains("cancel")&&!canceled&&applied.getInt(job)>0){cancel.invoke(job,"native fixture cancellation");canceled=true;}
                             if(done)break;check(++calls<100,"linked Job did not terminate");
                         }
-                        if(mode.equals("conflict")){check(rejected&&sourceItems.getStackInSlot(0).getCount()==3,"conflict changed source");}
-                        else if(mode.startsWith("cancel")){
+                        if(mode.contains("conflict")){check(rejected&&sourceItems.getStackInSlot(0).getCount()==3,"conflict changed source");}
+                        else if(mode.contains("cancel")){
                             check(fluid?sourceTank.getFluidInTank(0).getAmount()==500&&targetTank.getFluidInTank(0).getAmount()==700:sourceItems.getStackInSlot(0).getCount()==3&&targetItems.getStackInSlot(2).getCount()==5,"compensation lost one endpoint");
                         }else{
-                            check(fluid?sourceTank.getFluidInTank(0).getAmount()==1200&&targetTank.getFluidInTank(0).isEmpty():ItemStack.matches(diamond,sourceItems.getStackInSlot(0))&&targetItems.getStackInSlot(2).isEmpty(),"joint undo lost resources/components");
+                            check(fluid?sourceTank.getFluidInTank(0).getAmount()==1200&&targetTank.getFluidInTank(0).isEmpty():ItemStack.matches(diamond,sourceItems.getStackInSlot(0))&&targetItems.getStackInSlot(2).isEmpty(),"joint undo lost resources/components: "+sourceKind+"/"+targetKind+"/"+mode);
                         }
                     }finally{CartAuditContext.restoring(old);CartAuditContext.rollbackActive=false;CartAuditContext.LOCKED_ENTITIES.clear();CartRestoreLocks.clear();}
                     tested++;
@@ -137,8 +144,26 @@ public final class CreateLinkedTransferSmoke {
             ((CreateCarriageEntityAccess)train).avilixlogger$bind(carriage);
             var dimensional=carriage.getDimensional(entity.level());dimensional.entity=new java.lang.ref.WeakReference<>(train);
             dimensional.positionAnchor=entity.position();dimensional.rotationAnchors=net.createmod.catnip.data.Couple.create(entity.position(),entity.position());
-            com.simibubi.create.Create.RAILWAYS.addTrain(owner);
+            com.simibubi.create.Create.RAILWAYS.addTrain(owner);FIXTURE_TRAINS.add(owner.id);
         }
+    }
+    private static void migrate(CarriageContraptionEntity entity,boolean portal)throws Exception{
+        var carriage=entity.getCarriage();var original=carriage.getDimensional(entity.level());
+        var remove=original.getClass().getDeclaredMethod("removeAndSaveEntity",CarriageContraptionEntity.class,boolean.class);remove.setAccessible(true);remove.invoke(original,entity,portal);
+        check(entity.isRemoved()&&carriage.anyAvailableEntity()==null,"native unload retained old representation");
+        if(portal){
+            var other=((ServerLevel)entity.level()).getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+            check(other!=null,"portal target missing");var second=carriage.getDimensional(other);second.read(original.write(entity.registryAccess()),entity.registryAccess());
+            var visible=CreateFunnelSmoke.class.getDeclaredMethod("visible",ServerLevel.class,BlockPos.class);visible.setAccessible(true);visible.invoke(null,other,BlockPos.containing(second.positionAnchor));
+            var create=second.getClass().getDeclaredMethod("createEntity",net.minecraft.world.level.Level.class,boolean.class);create.setAccessible(true);create.invoke(second,other,false);
+            var replacement=second.entity.get();check(replacement!=null&&replacement.level()==other&&replacement!=entity,"native portal projection was not replaced");
+            check(replacement.getContraption().getStorage()==carriage.storage,"portal projection detached shared cargo");
+        }
+    }
+    public static void cleanupFixtures(){
+        boolean old=CartAuditContext.restoring(true);
+        try{for(var id:FIXTURE_TRAINS){var train=com.simibubi.create.Create.RAILWAYS.trains.get(id);if(train!=null){for(var car:train.carriages)car.forEachPresentEntity(e->{if(!e.isRemoved())((CartEntityAccess)e).avilixlogger$discardForRollback();});((CreateRailwayAccess)com.simibubi.create.Create.RAILWAYS).avilixlogger$remove(id);}}}
+        finally{FIXTURE_TRAINS.clear();CartAuditContext.restoring(old);}
     }
     private static void reject(Runnable action,String message){try{action.run();}catch(IllegalArgumentException|IllegalStateException expected){return;}throw new AssertionError(message);}
     private static void check(boolean condition,String message){if(!condition)throw new AssertionError(message);}

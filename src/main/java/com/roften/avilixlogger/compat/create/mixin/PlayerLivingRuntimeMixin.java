@@ -9,6 +9,8 @@ import org.spongepowered.asm.mixin.Mixin;
 @Mixin(Player.class)
 public abstract class PlayerLivingRuntimeMixin extends LivingEntity implements CreatePlayerLivingAccess {
     protected PlayerLivingRuntimeMixin(EntityType<? extends LivingEntity> type,Level level){super(type,level);}
+    @org.spongepowered.asm.mixin.Shadow protected int enchantmentSeed;
+    public void avilixlogger$enchantmentSeed(int value){enchantmentSeed=value;}
     public CompoundTag avilixlogger$baseLiving(){var tag=new CompoundTag();super.addAdditionalSaveData(tag);return tag;}
     public void avilixlogger$baseLiving(CompoundTag tag){super.readAdditionalSaveData(tag);}
 }

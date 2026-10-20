@@ -41,6 +41,7 @@ public final class CreateDeployerRestore {
             verifyAfter();CartAuditContext.LOCKED_ENTITIES.add(body.getUUID());if(body.getVehicle()!=null)CartAuditContext.LOCKED_ENTITIES.add(body.getVehicle().getUUID());CartRestoreLocks.construction(a.getUUID("Construction"));CartRestoreLocks.player(fake);CartRestoreLocks.keepLoaded(world,body.blockPosition());CartStorageAudit.lockMenus(a.getUUID("Construction"),server);
         }
         void verify(CompoundTag expected){var actual=CreateDeployerTransaction.hand(context,player);
+            if(expected.getCompound("Runtime").contains("Living",10))CreateLivingRuntime.matchHistorySchema(player,actual.getCompound("Runtime").getCompound("Living"),expected.getCompound("Runtime").getCompound("Living"));
             if(!expected.getCompound("Runtime").contains("Living")){actual.getCompound("Runtime").remove("Living");actual.getCompound("Runtime").remove("Cooldowns");}
             if(entity.isRemoved()||!entity.level().hasChunkAt(entity.blockPosition())||context.contraption!=entity.getContraption()||context.temporaryData!=player||entity.getContraption().getActors().stream().noneMatch(p->p.getRight()==context)||!actual.equals(expected))throw new IllegalStateException("Рука или настройки активатора изменились");}
         void set(CompoundTag tag){bindings.run(()->((CreateDeployerRuntimeAccess)player).avilixlogger$deployerRuntime(tag.getCompound("Runtime")));

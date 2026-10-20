@@ -106,6 +106,7 @@
     "CarriageRepresentationAuditMixin",
     "PlayerLivingRuntimeMixin",
     "ConsumptionStatsAccessor",
+    "ConsumptionPlayerRuntimeAccessor",
     "ConsumptionAdvancementsAccessor",
     "ConsumptionScoreboardLockMixin",
     "ConsumptionScoreLockMixin",

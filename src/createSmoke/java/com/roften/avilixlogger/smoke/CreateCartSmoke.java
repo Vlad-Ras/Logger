@@ -72,7 +72,7 @@ public final class CreateCartSmoke {
         }catch(Throwable failure){
             failure.printStackTrace();System.out.println("AVILIX_CREATE_SMOKE_FAILED");
             event.getServer().halt(false);
-        }
+        }finally{CreateLinkedTransferSmoke.cleanupFixtures();}
     }
     private static void exerciseLoot(ServerStartedEvent event,net.minecraft.nbt.CompoundTag checkpoint,String mode) throws Exception {
         var server=event.getServer();var world=server.overworld();var pos=world.getSharedSpawnPos().above(11);

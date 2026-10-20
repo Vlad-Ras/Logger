@@ -53,7 +53,7 @@ public final class CreateDeployerJointSmoke {
                 }
                 if(mode.equals("place-oversized")){held.setCount(1024);held.set(DataComponents.CUSTOM_NAME,Component.literal("large hand component"));}
                 if(held.is(Items.NAME_TAG))held.set(DataComponents.CUSTOM_NAME,Component.literal("deployer named target"));fake.setItemInHand(InteractionHand.MAIN_HAND,held);fake.getInventory().setItem(37,new ItemStack(Items.IRON_CHESTPLATE));
-                if(mode.startsWith("name")||mode.startsWith("shear")||mode.equals("entity-conflict")||mode.startsWith("combat")){var sheep=EntityType.SHEEP.create(world);sheep.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);check(world.addFreshEntity(sheep),"target sheep spawn");target=sheep;}
+                if(mode.startsWith("name")||mode.startsWith("shear")||mode.equals("entity-conflict")||mode.startsWith("combat")){var sheep=EntityType.SHEEP.create(world);sheep.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);if(mode.equals("combat"))sheep.setHealth(1);check(world.addFreshEntity(sheep),"target sheep spawn");target=sheep;}
                 if(mode.startsWith("frame")){world.setBlock(pos.west(),Blocks.STONE.defaultBlockState(),3);var frame=new ItemFrame(world,pos,Direction.EAST);check(world.addFreshEntity(frame),"target frame spawn");target=frame;}
                 var items=body.getContraption().getStorage().getAllItemStorages().get(BlockPos.ZERO);
                 items.setStackInSlot(0,new ItemStack(Items.DIAMOND,7));
@@ -77,11 +77,13 @@ public final class CreateDeployerJointSmoke {
                 if(mode.equals("noop")){check(row==null,"idle/no-op activation invented a row");tested++;continue;}
                 check(row!=null,"native deployer action not captured: "+kind+"/"+mode);row.materializeSnapshots();var b=NbtSerde.fromSnbt(row.beBefore);var a=NbtSerde.fromSnbt(row.beAfter);
                 check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"deployer blamed its owner");check(CreateContraptionKind.id(row.source).equals(CreateContraptionSources.id(body)),"deployer root ID lost");
+                if(mode.equals("combat"))check(!target.isAlive(),"lethal fixture did not kill its target");
                 if(mode.equals("failure")||mode.equals("combat")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
                 var plan=CreateTransferRollbackPlan.prepare(b,a);
                 if(mode.startsWith("combat-live"))check(target.isAlive()&&((LivingEntity)target).getHealth()<8&&a.getInt("JointFormat")>=3,"nonlethal combat runtime was not captured");
                 if(mode.startsWith("consume-polish"))check(fake.getOffhandItem().getCount()==1&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==1,"native sandpaper consumption did not finish");
                 var noRuntime=a.copy();noRuntime.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateTransferRollbackPlan.prepare(b,noRuntime),"new-format action lost its living runtime");
+                var mixed=a.copy();mixed.getCompound("Hand").getCompound("Runtime").getCompound("Living").getCompound("ActorState").putInt("Selected",8);reject(()->CreateTransferRollbackPlan.prepare(b,mixed),"contradictory actor/hand state accepted");
                 var invalid=a.copy();invalid.getCompound("Hand").putUUID("StorageEntity",UUID.randomUUID());reject(()->CreateTransferRollbackPlan.prepare(b,invalid),"wrong hand identity accepted");
                 var missing=a.copy();missing.remove("Targets");reject(()->CreateTransferRollbackPlan.prepare(b,missing),"missing target list accepted");
                 check(plan.hands().size()==1,"joint plan omitted hand");check(CartLogDetails.describe(world,row).stream().anyMatch(c->c.getString().contains("рука и цели")),"GUI omitted joint operation");
@@ -142,7 +144,9 @@ public final class CreateDeployerJointSmoke {
         fake.setItemInHand(InteractionHand.MAIN_HAND,fake.getMainHandItem().finishUsingItem(world,fake));fake.getFoodData().setFoodLevel(11);fake.experienceLevel=5;
         fake.getCooldowns().tick();fake.getCooldowns().addCooldown(Items.SHIELD,20);check(!fake.hasEffect(MobEffects.POISON),"native milk did not clear effect fixture");
         bindings.run(()->access.avilixlogger$deployerRuntime(before));
-        check(access.avilixlogger$deployerRuntime().equals(before),"runtime round trip lost effects, food, XP, inventory or cooldown phase");
+        check(access.avilixlogger$deployerRuntime().equals(before),"runtime round trip lost effects, food, XP, inventory or cooldown phase: "+difference(before,access.avilixlogger$deployerRuntime(),""));
+        var legacy=before.getCompound("Living").copy();legacy.remove("PlayerBase");legacy.remove("ActorState");var nativePlayer=new CompoundTag();fake.addAdditionalSaveData(nativePlayer);legacy.put("Persistent",nativePlayer);
+        fake.experienceLevel=12;CreateLivingRuntime.bind(fake,List.of(legacy)).run(()->CreateLivingRuntime.restore(fake,fake,legacy));check(CreateLivingRuntime.matches(fake,fake,legacy),"legacy JointFormat=3 player runtime rejected");
         var sheep=EntityType.SHEEP.create(world);var health=sheep.getAttribute(Attributes.MAX_HEALTH);
         health.addTransientModifier(new AttributeModifier(ResourceLocation.fromNamespaceAndPath("avilixlogger","smoke_health"),32,AttributeModifier.Operation.ADD_VALUE));sheep.setHealth(35);
         var healthy=CreateLivingRuntime.capture(sheep,fake);health.removeModifiers();sheep.setHealth(4);
@@ -156,6 +160,13 @@ public final class CreateDeployerJointSmoke {
         CreateLivingRuntime.bind(fake,List.of(using)).run(()->CreateLivingRuntime.restore(fake,fake,using));
         check(fake.getUseItem().getCount()==1024&&CreateLivingRuntime.matches(fake,fake,using),
                 "expanded active item was not restored exactly");
+    }
+    private static String difference(net.minecraft.nbt.CompoundTag expected,net.minecraft.nbt.CompoundTag actual,String path){
+        var keys=new java.util.TreeSet<>(expected.getAllKeys());keys.addAll(actual.getAllKeys());var out=new StringBuilder();
+        for(var key:keys){var a=expected.get(key);var b=actual.get(key);if(java.util.Objects.equals(a,b))continue;
+            if(a instanceof net.minecraft.nbt.CompoundTag x&&b instanceof net.minecraft.nbt.CompoundTag y)out.append(difference(x,y,path+key+"."));
+            else out.append(path).append(key).append(": ").append(a).append(" => ").append(b).append("; ");}
+        return out.toString();
     }
     private static Method method(Class<?> type,String name,Class<?>...args)throws Exception{var m=type.getDeclaredMethod(name,args);m.setAccessible(true);return m;}
     private static Field field(Class<?> type,String name)throws Exception{var f=type.getDeclaredField(name);f.setAccessible(true);return f;}

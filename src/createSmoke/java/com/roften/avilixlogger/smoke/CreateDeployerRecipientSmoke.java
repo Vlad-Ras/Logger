@@ -28,7 +28,7 @@ public final class CreateDeployerRecipientSmoke {
         var factory=method(CreateCargoSmoke.class,"entity",ServerLevel.class,CreateContraptionKind.class);var attach=method(CreateLinkedTransferSmoke.class,"attachCarriage",AbstractContraptionEntity.class);
         int tested=0;
         for(var kind:List.of(CreateContraptionKind.MINECART,CreateContraptionKind.TRAIN))
-        for(String mode:List.of("food","drink","drink-full","cancel-first","cancel-all","food-conflict","inventory-conflict","locks","logout","reward")){
+        for(String mode:List.of("food","drink","drink-full","milk","milk-cancel","cancel-first","cancel-all","food-conflict","inventory-conflict","locks","logout","reward")){
             var body=(AbstractContraptionEntity)factory.invoke(null,world,kind);attach.invoke(null,body);body.setPos(Vec3.atCenterOf(pos.above(5)));check(world.addFreshEntity(body),"recipient body spawn");
             var profile=new com.mojang.authlib.GameProfile(UUID.randomUUID(),"feed_fixture");var player=new ServerPlayer(world.getServer(),world,profile,ClientInformation.createDefault());
             var dummy=net.neoforged.neoforge.common.util.FakePlayerFactory.get(world,new com.mojang.authlib.GameProfile(UUID.randomUUID(),"feed_transport"));player.connection=dummy.connection;
@@ -36,8 +36,9 @@ public final class CreateDeployerRecipientSmoke {
             player.setPos(Vec3.atCenterOf(pos));world.addNewPlayer(player);player.getFoodData().setFoodLevel(7);player.getFoodData().setSaturation(1);
             var settings=new CompoundTag();settings.putString("Mode","USE");var info=new StructureBlockInfo(new BlockPos(7,0,0),AllBlocks.DEPLOYER.getDefaultState().setValue(DeployerBlock.FACING,Direction.EAST),settings);
             var context=new MovementContext(world,info,body.getContraption());context.position=Vec3.atCenterOf(pos);body.getContraption().getActors().add(MutablePair.of(info,context));
-            var actor=new DeployerFakePlayer(world,UUID.randomUUID());context.temporaryData=actor;boolean drink=mode.startsWith("drink");var food=drink?Items.HONEY_BOTTLE:Items.APPLE;
-            actor.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(food,2));player.getActiveEffectsMap().put(MobEffects.POISON,new MobEffectInstance(MobEffects.POISON,200));
+            var actor=new DeployerFakePlayer(world,UUID.randomUUID());context.temporaryData=actor;boolean milk=mode.startsWith("milk"),drink=mode.startsWith("drink")||milk;var food=milk?Items.MILK_BUCKET:drink?Items.HONEY_BOTTLE:Items.APPLE;
+            actor.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(food,milk?1:2));player.getActiveEffectsMap().put(MobEffects.POISON,new MobEffectInstance(MobEffects.POISON,200));
+            if(milk)player.addEffect(new MobEffectInstance(MobEffects.LEVITATION,200));
             if(mode.equals("drink-full"))for(int slot=0;slot<41;slot++)player.getInventory().setItem(slot,new ItemStack(Items.STONE,64));
             var scoreboard=world.getScoreboard();String objectiveName="feed_"+tested;
             var objective=scoreboard.addObjective(objectiveName,Stats.ITEM_USED.get(food),Component.literal("native food counter"),ObjectiveCriteria.RenderType.INTEGER,false,null);
@@ -54,10 +55,10 @@ public final class CreateDeployerRecipientSmoke {
                     catch(Throwable failure){throw new IllegalStateException("native feeding",failure);}row=session.finish(true);
                 }
                 check(row!=null,"native feeding did not produce a row");row.materializeSnapshots();var b=NbtSerde.fromSnbt(row.beBefore);var a=NbtSerde.fromSnbt(row.beAfter);
-                check(player.getFoodData().getFoodLevel()>7,"real recipient was not fed");check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"feeding blamed owner/player");
+                check(milk?!player.hasEffect(MobEffects.LEVITATION):player.getFoodData().getFoodLevel()>7,"real recipient was not fed/drink effect was not applied");check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"feeding blamed owner/player");
                 if(mode.equals("reward")){check(!a.getBoolean("Complete"),"reward function effects allowed partial undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"reward action accepted");tested++;continue;}
                 check(a.getBoolean("Complete"),"food capture incomplete: "+a.getString("JointFailure"));var after=CreatePlayerConsumption.capture(player);var livingAfter=CreateLivingRuntime.capture(player,actor);
-                check(cachedScore.get()==11,"native stat objective not incremented");if(drink)check(!player.hasEffect(MobEffects.POISON),"native honey did not clear poison");
+                check(cachedScore.get()==(food==Items.HONEY_BOTTLE?12:11),"native stat objective mismatch: "+mode+"="+cachedScore.get());if(drink)check(!player.hasEffect(MobEffects.POISON),"native honey did not clear poison");
                 var plan=CreateTransferRollbackPlan.prepare(b,a);check(plan.targets().stream().anyMatch(u->u.after().getString("Type").equals("minecraft:player")),"recipient not in shared plan");
                 if(mode.equals("food-conflict"))player.getFoodData().setFoodLevel(2);
                 if(mode.equals("inventory-conflict"))player.getInventory().setItem(3,new ItemStack(Items.EMERALD));
@@ -68,7 +69,7 @@ public final class CreateDeployerRecipientSmoke {
                     for(int calls=0;;calls++){check(calls<1000,"feeding transaction did not terminate");boolean done;
                         try{done=(Boolean)step.invoke(job,world.getServer());}catch(InvocationTargetException failure){if(!mode.endsWith("conflict"))throw new IllegalStateException(kind+"/"+mode,failure.getCause());check(applied.getInt(job)==0,"preflight conflict wrote hand");rejected=true;break;}
                         int total=plan.cargo().size()+plan.hands().size()+plan.blocks().size()+plan.targets().size();
-                        if(mode.startsWith("cancel")&&!canceled&&applied.getInt(job)>=(mode.equals("cancel-all")?total:1)){cancel.invoke(job,"native cancellation");canceled=true;}
+                        if(mode.contains("cancel")&&!canceled&&applied.getInt(job)>=(mode.equals("cancel-all")?total:1)){cancel.invoke(job,"native cancellation");canceled=true;}
                         if(mode.equals("logout")&&!departed&&applied.getInt(job)>=total){leaving.invoke(job,player);players.remove(player.getUUID());departed=true;canceled=true;check(CreatePlayerConsumption.capture(player).equals(after),"logout saved partially restored recipient");}
                         if(mode.equals("locks")&&!locked&&applied.getInt(job)>0){var saved=CreatePlayerConsumption.capture(player);CartAuditContext.restoring(false);
                             try{cachedScore.set(1000);scoreboard.getOrCreatePlayerScore(player,objective,true).set(1001);scoreboard.resetSinglePlayerScore(player,objective);scoreboard.removeObjective(objective);

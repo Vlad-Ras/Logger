@@ -93,7 +93,8 @@ public final class CreateLivingRuntime {
         }
         // Materialize supported attributes before saving native data so capture itself cannot
         // make the next snapshot appear to contain a new attribute definition.
-        var persistent=new CompoundTag();if(entity instanceof net.minecraft.server.level.ServerPlayer&&!(entity instanceof FakePlayer)){persistent=((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving();tag.putBoolean("PlayerBase",true);}else entity.addAdditionalSaveData(persistent);tag.put("Persistent",persistent);
+        var persistent=new CompoundTag();if(entity instanceof net.minecraft.server.level.ServerPlayer){persistent=((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving();tag.putBoolean("PlayerBase",true);}else entity.addAdditionalSaveData(persistent);tag.put("Persistent",persistent);
+        if(entity instanceof com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer technical)tag.put("ActorState",CreateDeployerActorState.capture(technical));
         tag.put("Attributes",attributes);if(entity instanceof Player player){var food=new CompoundTag();player.getFoodData().addAdditionalSaveData(food);tag.put("Food",food);}
         if(entity instanceof Mob mob){tag.put("MobTarget",reference(mob.getTarget(),actor));tag.putBoolean("Aggressive",mob.isAggressive());}
         if(tag.sizeInBytes()>2*1024*1024)throw new IllegalStateException("Runtime активатора превышает 2 MiB");return tag;
@@ -105,6 +106,8 @@ public final class CreateLivingRuntime {
             if(!tag.contains("Food",10))throw new IllegalStateException("Нет снимка питания активатора");
         }
         if(entity instanceof Mob&&(!tag.contains("MobTarget",10)||!tag.contains("Aggressive",1)))throw new IllegalStateException("Нет состояния цели моба");
+        if(entity instanceof FakePlayer&&tag.getBoolean("PlayerBase")&&!tag.contains("ActorState",10))throw new IllegalStateException("Нет данных технического игрока");
+        if(tag.contains("ActorState",10)){if(!(entity instanceof com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer technical))throw new IllegalStateException("Технический игрок заменён");CreateDeployerActorState.preflight(technical,tag.getCompound("ActorState"));}
         var ops=entity.registryAccess().createSerializationContext(NbtOps.INSTANCE);
         var persistent=tag.getCompound("Persistent");
         if(persistent.contains("active_effects"))for(var raw:list(persistent,"active_effects"))
@@ -125,8 +128,12 @@ public final class CreateLivingRuntime {
     public static void restore(LivingEntity entity,LivingEntity actor,CompoundTag tag){
         tag=project(tag,entity.tickCount);
         var states=decode(entity,actor,tag);
+        var previousEffects=new HashSet<>(entity.getActiveEffectsMap().keySet());
         ((CreateLivingRuntimeAccess)entity).avilixlogger$clearEffectsForRestore();
-        if(tag.getBoolean("PlayerBase")){if(!(entity instanceof net.minecraft.server.level.ServerPlayer)||entity instanceof FakePlayer)throw new IllegalStateException("Получатель заменён техническим игроком");((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving(tag.getCompound("Persistent").copy());}else entity.readAdditionalSaveData(tag.getCompound("Persistent").copy());
+        if(tag.getBoolean("PlayerBase")){if(!(entity instanceof net.minecraft.server.level.ServerPlayer))throw new IllegalStateException("Получатель заменён техническим игроком");((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving(tag.getCompound("Persistent").copy());}else entity.readAdditionalSaveData(tag.getCompound("Persistent").copy());
+        // Native Player loading replaces a valid zero seed with a random value.
+        if(entity instanceof Player&&tag.getCompound("Persistent").contains("XpSeed",3))((CreatePlayerLivingAccess)entity).avilixlogger$enchantmentSeed(tag.getCompound("Persistent").getInt("XpSeed"));
+        if(tag.contains("ActorState",10))CreateDeployerActorState.restore((net.minecraft.server.level.ServerPlayer)entity,tag.getCompound("ActorState"));
         for(var state:states){state.instance.removeModifiers();state.instance.setBaseValue(state.base);for(var modifier:state.permanent)state.instance.addPermanentModifier(modifier);for(var modifier:state.temporary)state.instance.addTransientModifier(modifier);}
         // Native loading clamps health before transient max-health modifiers are back.
         // Reapply these values only after restoring the complete attribute set.
@@ -136,6 +143,11 @@ public final class CreateLivingRuntime {
         ((CreateLivingRuntimeAccess)entity).avilixlogger$livingRuntime(tag,actor);
         if(entity instanceof Mob mob){var target=reference(tag.getCompound("MobTarget"),actor);if(target!=null&&!(target instanceof LivingEntity))throw new IllegalStateException("Цель моба сменила тип");
             ((MobTargetRuntimeAccessor)mob).avilixlogger$target((LivingEntity)target);mob.setAggressive(tag.getBoolean("Aggressive"));}
+        // Direct packets avoid awarding effect advancements again during restoration.
+        if(entity instanceof net.minecraft.server.level.ServerPlayer player&&!(player instanceof FakePlayer)&&player.connection!=null){
+            for(var effect:previousEffects)if(!entity.hasEffect(effect))player.connection.send(new net.minecraft.network.protocol.game.ClientboundRemoveMobEffectPacket(player.getId(),effect));
+            for(var effect:entity.getActiveEffects())player.connection.send(new net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket(player.getId(),effect,false));
+        }
     }
     public static void validateReferences(CompoundTag tag,LivingEntity actor){
         for(String field:List.of("LastMob","LastVictim","LastPlayer","MobTarget")){
@@ -145,8 +157,14 @@ public final class CreateLivingRuntime {
         damage(tag.getCompound("LastSource"),actor);item(tag.getCompound("UseItem"),actor);
         for(var raw:tag.getCompound("Tracker").getList("Entries",10))damage(((CompoundTag)raw).getCompound("Source"),actor);
     }
+    public static void matchHistorySchema(LivingEntity entity,CompoundTag actual,CompoundTag expected){
+        if(actual.getBoolean("PlayerBase")&&!expected.getBoolean("PlayerBase")){
+            if(!(entity instanceof FakePlayer))throw new IllegalStateException("Старый снимок реального игрока не поддержан");
+            var persistent=new CompoundTag();entity.addAdditionalSaveData(persistent);actual.put("Persistent",persistent);actual.remove("PlayerBase");actual.remove("ActorState");
+        }
+    }
     public static boolean matches(LivingEntity entity,LivingEntity actor,CompoundTag expected){
-        return capture(entity,actor).equals(project(expected,entity.tickCount));
+        var actual=capture(entity,actor);matchHistorySchema(entity,actual,expected);return actual.equals(project(expected,entity.tickCount));
     }
     /** Only deterministic native counters are aged; health, inventory, effects, AI and
      * combat entries still have to match. An intervening action is a conflict. */
@@ -181,6 +199,7 @@ public final class CreateLivingRuntime {
                 if(!Double.isFinite(decoded.amount())||!modifierIds.add(decoded.id()))throw new IllegalStateException("Повторный или некорректный модификатор runtime");
             }
         }
+        if(tag.contains("ActorState")){if(!tag.contains("ActorState",10)||!tag.getBoolean("PlayerBase"))throw new IllegalStateException("Неполные данные технического игрока");CreateDeployerActorState.validate(tag.getCompound("ActorState"));}
         var persistent=tag.getCompound("Persistent");
         if(!persistent.contains("Health",5)||!Float.isFinite(persistent.getFloat("Health"))||persistent.getFloat("Health")<0
                 ||!persistent.contains("AbsorptionAmount",5)||!Float.isFinite(persistent.getFloat("AbsorptionAmount"))||persistent.getFloat("AbsorptionAmount")<0
