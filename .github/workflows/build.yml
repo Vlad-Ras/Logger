@@ -16,7 +16,10 @@ jobs:
           cache-read-only: false
       # check/build depend on release obfuscation. Preparation deliberately runs only these tasks.
       - name: Compile and verify detached pipelines and Create preflight
-        run: ./gradlew compileJava compileCreateSmokeJava testAsyncPipeline testCreatePreflight verifyMixinSafety --console=plain --no-daemon
+        id: compile
+        run: |
+          set -o pipefail
+          ./gradlew compileJava compileCreateSmokeJava testAsyncPipeline testCreatePreflight verifyMixinSafety --console=plain --no-daemon 2>&1 | tee compile.log
       - name: Native Create regression
         timeout-minutes: 10
         run: |
@@ -28,6 +31,7 @@ jobs:
             exit 1
           fi
       - name: Native regression without Create
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' }}
         timeout-minutes: 10
         run: |
           timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PcreateAbsent --console=plain --no-daemon > create-absent-smoke.log 2>&1 || status=$?
@@ -40,5 +44,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: verification-logs
-          path: '*smoke.log'
+          path: |
+            compile.log
+            *smoke.log
           if-no-files-found: ignore

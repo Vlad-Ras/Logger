@@ -26,7 +26,7 @@ public final class CreateDeployerRuntimeTest {
         largeUse.getCompound("UseItem").putInt("count",0);
         reject(()->CreateLivingRuntime.validate(largeUse),"empty active stack accepted");
         var inventory=saved.copy();var persistent=inventory.getCompound("Persistent");
-        persistent.putInt("SelectedItemSlot",0);var items=new ListTag();var offhand=new CompoundTag();
+        persistent.putInt("SelectedItemSlot",0);persistent.putInt("XpSeed",0);var items=new ListTag();var offhand=new CompoundTag();
         offhand.putByte("Slot",(byte)150);offhand.putString("id","minecraft:apple");offhand.putInt("count",2048);
         items.add(offhand);persistent.put("Inventory",items);CreateLivingRuntime.validate(inventory);
         items.add(offhand.copy());reject(()->CreateLivingRuntime.validate(inventory),"duplicate runtime inventory slot accepted");

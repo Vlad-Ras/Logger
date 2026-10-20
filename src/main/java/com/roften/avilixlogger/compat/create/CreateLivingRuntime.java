@@ -97,7 +97,7 @@ public final class CreateLivingRuntime {
     }
     private static void validateInventory(CompoundTag persistent){
         var inventory=list(persistent,"Inventory");var slots=new HashSet<Integer>();
-        if(inventory.size()>41||!persistent.contains("SelectedItemSlot",3)||persistent.getInt("SelectedItemSlot")<0||persistent.getInt("SelectedItemSlot")>=9)
+        if(inventory.size()>41||!persistent.contains("XpSeed",3)||!persistent.contains("SelectedItemSlot",3)||persistent.getInt("SelectedItemSlot")<0||persistent.getInt("SelectedItemSlot")>=9)
             throw new IllegalStateException("Неполный инвентарь runtime");
         for(var raw:inventory){var value=(CompoundTag)raw;int slot=inventorySlot(value);
             if(!value.contains("Slot",1)||slot<0||!slots.add(slot)||!value.contains("id",8)||!value.contains("count",3)||value.getInt("count")<=0)
@@ -168,6 +168,7 @@ public final class CreateLivingRuntime {
         entity.setAbsorptionAmount(tag.getCompound("Persistent").getFloat("AbsorptionAmount"));
         if(entity instanceof Player player){
             player.getFoodData().readAdditionalSaveData(tag.getCompound("Food"));
+            ((CreatePlayerRuntimeAccess)player).avilixlogger$enchantmentSeed(tag.getCompound("Persistent").getInt("XpSeed"));
             var inventory=player.getInventory();inventory.clearContent();
             for(var raw:tag.getCompound("Persistent").getList("Inventory",10)){var value=(CompoundTag)raw;inventory.setItem(inventorySlot(value),item(value,player));}
         }
