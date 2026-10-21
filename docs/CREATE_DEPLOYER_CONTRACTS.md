@@ -46,3 +46,9 @@
 - [NourishmentEffect](https://github.com/vectorwing/FarmersDelight/blob/1.21/src/main/java/vectorwing/farmersdelight/common/effect/NourishmentEffect.java)
 
 FD подключается только к нативному стенду через `localRuntime`; обязательной зависимости или встроенных классов FD в выпускном JAR нет. Версия логгера и состояние релиза 2.2.0 этим документом не меняются.
+
+## Подтверждённая регрессия
+
+Ревизия `96c0bab86606214bea6f775f314b717817fc0a39`: [GitHub Actions 39594140086](https://github.com/Vlad-Ras/Logger/actions/runs/39594140086). Оба отдельных сервера FD 1.3.2 и 1.3.4 с Backpacked 3.0.5 / Framework 0.13.10 выдали `AVILIX_CREATE_SMOKE_OK`: по 756 совместных сценариев и 364 creative-сценария активатора, включая MINECART, TRAIN, BEARING и OTHER. Компиляция, отделённые pipeline/preflight проверки и verifyMixinSafety также прошли; самостоятельный сервер без Create/Ponder/Flywheel выдал `CREATE_ABSENT_NATIVE_OK`.
+
+Матрица включает нативное кормление зарегистрированной поддерживаемой еды FD, напитки и посуду, отмену/компенсацию, конфликт состояния и два metadata-only барьера Backpacked. Прямой finish-callback фруктового льда и real-level sandpaper остаются отдельно обозначенными проверками контрактов, а не новыми возможностями штатного Create.
