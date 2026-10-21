@@ -32,7 +32,7 @@ public final class CreateCreativeTransferPlan {
     }
     public static boolean observed(CompoundTag before,CompoundTag after){try{validate(before,after);return true;}catch(RuntimeException rejected){return false;}}
 
-    /** Pure native take/return only. Item use, block conversion and fluid/bucket conversion need other contracts. */
+    /** Native take/return balance. The overload also accounts for bounded native item-use receipts. */
     public static void validateHand(CompoundTag before,CompoundTag after,List<CreateTransferRollbackPlan.CargoUndo> cargo,List<IO> creative){
         validateHand(before,after,cargo,creative,new net.minecraft.nbt.ListTag());
     }

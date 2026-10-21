@@ -113,7 +113,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             for(var entry:targets.entrySet())try{var old=entry.getValue();
                 boolean terminal=entry.getKey() instanceof net.minecraft.world.entity.LivingEntity&&!entry.getKey().isAlive()&&old.getBoolean("Exists");
                 if(terminal&&!Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken").contains(old.getString("Type"))){complete=false;reason="У смерти этой цели нет полного контракта";}
-                var now=entity(entry.getKey(),!entry.getKey().isRemoved()&&!terminal);if(terminal){now.putUUID("Retained",retain(entry.getKey()));now.putBoolean("Terminal",true);now.put("Death",entity(entry.getKey(),true));}charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
+                var now=entity(entry.getKey(),!entry.getKey().isRemoved()&&!terminal);if(now.contains("Human",10)&&!Objects.equals(old.getCompound("NBT").get("neoforge:attachments"),now.getCompound("NBT").get("neoforge:attachments"))){complete=false;reason="Потребление изменило внешние attachments игрока; нужен контракт мода";}if(terminal){if(Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken").contains(old.getString("Type")))now.putUUID("Retained",retain(entry.getKey()));now.putBoolean("Terminal",true);now.put("Death",entity(entry.getKey(),true));}charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
             var oldCargo=new ListTag();var newCargo=new ListTag();int creativeIO=0;
             if(!cargo.complete())complete=false;
             for(var row:cargo.rows()){

@@ -28,7 +28,7 @@ public final class CreateHumanRestore implements CreateTransferRollbackCoordinat
             ((CreateCooldownRuntimeAccess)player.getCooldowns()).avilixlogger$validateCooldownRuntime(tag.getCompound("Cooldowns"));
             if(!tag.getCompound("Cursor").isEmpty())CreateLivingRuntime.item(tag.getCompound("Cursor"),player);
         }
-        for(String key:List.of("Pos","Motion","Rotation","FallDistance","Fire","Air","OnGround","PortalCooldown","TicksFrozen","warden_spawn_tracker"))if(Objects.equals(undo.before().getCompound("NBT").get(key),undo.after().getCompound("NBT").get(key)))ticking.add(key);
+        for(String key:List.of("Pos","Motion","Rotation","FallDistance","Fire","Air","OnGround","PortalCooldown","TicksFrozen","warden_spawn_tracker","NeoForgeData","neoforge:attachments"))if(Objects.equals(undo.before().getCompound("NBT").get(key),undo.after().getCompound("NBT").get(key)))ticking.add(key);
         ticking.add("HurtTime");ticking.add("recipeBook");
         verifyAfter();CartRestoreLocks.player(player);CartRestoreLocks.handler(player.getStats());CartRestoreLocks.handler(player.getAdvancements());CartRestoreLocks.keepLoaded(level,player.blockPosition());CartAuditContext.LOCKED_ENTITIES.add(player.getUUID());CreateScoreRuntime.reserve(player);
     }
@@ -62,7 +62,7 @@ public final class CreateHumanRestore implements CreateTransferRollbackCoordinat
     private void set(CompoundTag state,boolean compensating){
         var current=capture(player);var merged=progressTarget(current,state,true,compensating);
         var nbt=state.getCompound("NBT");
-        ((com.roften.avilixlogger.compat.create.mixin.CreateOriginDataAccessor)player).avilixlogger$originData(nbt.contains("NeoForgeData",10)?nbt.getCompound("NeoForgeData").copy():null);
+        if(!ticking.contains("NeoForgeData"))((com.roften.avilixlogger.compat.create.mixin.CreateOriginDataAccessor)player).avilixlogger$originData(nbt.contains("NeoForgeData",10)?nbt.getCompound("NeoForgeData").copy():null);
         if(!ticking.contains("Pos")||!ticking.contains("Rotation")){var pos=nbt.getList("Pos",6);var rot=nbt.getList("Rotation",5);player.teleportTo(level,ticking.contains("Pos")?player.getX():pos.getDouble(0),ticking.contains("Pos")?player.getY():pos.getDouble(1),ticking.contains("Pos")?player.getZ():pos.getDouble(2),ticking.contains("Rotation")?player.getYRot():rot.getFloat(0),ticking.contains("Rotation")?player.getXRot():rot.getFloat(1));}
         if(!ticking.contains("Motion")){var motion=nbt.getList("Motion",6);player.setDeltaMovement(motion.getDouble(0),motion.getDouble(1),motion.getDouble(2));}
         if(!ticking.contains("FallDistance"))player.fallDistance=nbt.getFloat("FallDistance");
