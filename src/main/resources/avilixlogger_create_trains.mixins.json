@@ -98,6 +98,7 @@
     "ScoreRuntimeReservationMixin",
     "ScoreboardRuntimeReservationMixin",
     "ObjectiveRuntimeReservationMixin",
+    "TeamRuntimeReservationMixin",
     "DeployerRuntimeReservationMixin",
     "CombatRuntimeMixin",
     "AttributePermanentAccessor",

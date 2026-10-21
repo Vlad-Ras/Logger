@@ -25,4 +25,13 @@ public abstract class ScoreboardRuntimeReservationMixin {
     private void avilixlogger$remove(Objective objective,CallbackInfo ci){if(CartRestoreLocks.resourceLocked(CreateScoreRuntime.LOCK))ci.cancel();}
     @Inject(method="addObjective",at=@At("HEAD"),cancellable=true,require=1)
     private void avilixlogger$add(CallbackInfoReturnable<Objective> ci){if(CartRestoreLocks.resourceLocked(CreateScoreRuntime.LOCK))throw new IllegalStateException("Scoreboard зарезервирован откатом активатора");}
+    @Inject(method="addPlayerToTeam",at=@At("HEAD"),cancellable=true,require=1)
+    private void avilixlogger$joinTeam(String holder,PlayerTeam team,CallbackInfoReturnable<Boolean> ci){if(CartRestoreLocks.resourceLocked("create-score:"+holder))ci.setReturnValue(false);}
+    @Inject(method="removePlayerFromTeam(Ljava/lang/String;)Z",at=@At("HEAD"),cancellable=true,require=1)
+    private void avilixlogger$leaveTeam(String holder,CallbackInfoReturnable<Boolean> ci){if(CartRestoreLocks.resourceLocked("create-score:"+holder))ci.setReturnValue(false);}
+    @Inject(method="removePlayerFromTeam(Ljava/lang/String;Lnet/minecraft/world/scores/PlayerTeam;)V",at=@At("HEAD"),cancellable=true,require=1)
+    private void avilixlogger$leaveTeam(String holder,PlayerTeam team,CallbackInfo ci){if(CartRestoreLocks.resourceLocked("create-score:"+holder))ci.cancel();}
+    @Inject(method="removePlayerTeam",at=@At("HEAD"),cancellable=true,require=1)
+    private void avilixlogger$removeTeam(PlayerTeam team,CallbackInfo ci){if(CartRestoreLocks.resourceLocked(CreateScoreRuntime.LOCK))ci.cancel();}
+
 }

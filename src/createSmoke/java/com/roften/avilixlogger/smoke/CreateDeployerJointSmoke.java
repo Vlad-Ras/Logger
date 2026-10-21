@@ -31,6 +31,10 @@ public final class CreateDeployerJointSmoke {
         @net.neoforged.bus.api.SubscribeEvent public static void start(net.neoforged.neoforge.event.server.ServerStartedEvent e){if(!Boolean.getBoolean("avilixlogger.deployerJointSmoke"))return;try{run(e.getServer().overworld());}catch(Throwable failure){failure.printStackTrace();System.out.println("CREATE_DEPLOYER_JOINT_FAILED");}finally{e.getServer().halt(false);}}
     }
     public static void run(ServerLevel world)throws Exception {
+        var board=world.getScoreboard();
+        for(var entry:Map.of("avilix_kills",net.minecraft.world.scores.criteria.ObjectiveCriteria.KILL_COUNT_ALL,"avilix_apple",net.minecraft.stats.Stats.ITEM_USED.get(Items.APPLE),"avilix_team_kill",net.minecraft.world.scores.criteria.ObjectiveCriteria.TEAM_KILL[net.minecraft.ChatFormatting.RED.getId()],"avilix_team_death",net.minecraft.world.scores.criteria.ObjectiveCriteria.KILLED_BY_TEAM[net.minecraft.ChatFormatting.BLUE.getId()]).entrySet())if(board.getObjective(entry.getKey())==null)board.addObjective(entry.getKey(),entry.getValue(),Component.literal(entry.getKey()),net.minecraft.world.scores.criteria.ObjectiveCriteria.RenderType.INTEGER,false,null);
+        var blue=board.getPlayerTeam("avilix_blue");if(blue==null)blue=board.addPlayerTeam("avilix_blue");blue.setColor(net.minecraft.ChatFormatting.BLUE);
+        var red=board.getPlayerTeam("avilix_red");if(red==null)red=board.addPlayerTeam("avilix_red");red.setColor(net.minecraft.ChatFormatting.RED);
         runtimeRoundTrip(world);
         var factory=method(CreateCargoSmoke.class,"entity",ServerLevel.class,CreateContraptionKind.class);var attach=method(CreateLinkedTransferSmoke.class,"attachCarriage",AbstractContraptionEntity.class);
         var pos=world.getSharedSpawnPos().offset(40,40,40);method(CreateFunnelSmoke.class,"visible",ServerLevel.class,BlockPos.class).invoke(null,world,pos);
@@ -43,7 +47,7 @@ public final class CreateDeployerJointSmoke {
                 boolean punch=mode.startsWith("combat")||mode.startsWith("frame-break");
                 var actorPos=new BlockPos(7,0,0);var settings=new CompoundTag();settings.putUUID("Owner",UUID.randomUUID());settings.putString("Mode",punch?"PUNCH":"USE");
                 var info=new StructureBlockInfo(actorPos,AllBlocks.DEPLOYER.getDefaultState().setValue(DeployerBlock.FACING,Direction.EAST),settings);var context=new MovementContext(world,info,body.getContraption());context.position=Vec3.atCenterOf(pos);body.getContraption().getActors().add(MutablePair.of(info,context));
-                var fake=new DeployerFakePlayer(world,settings.getUUID("Owner"));context.temporaryData=fake;fake.getInventory().selected=1;
+                var fake=new DeployerFakePlayer(world,settings.getUUID("Owner"));context.temporaryData=fake;fake.getInventory().selected=1;board.addPlayerToTeam(fake.getScoreboardName(),blue);
                 ItemStack held=new ItemStack(mode.equals("water")?Items.WATER_BUCKET:mode.startsWith("name")||mode.equals("entity-conflict")?Items.NAME_TAG:mode.startsWith("shear")?Items.SHEARS:mode.startsWith("frame")?Items.DIAMOND:mode.startsWith("combat")&&!mode.startsWith("combat-live")?Items.DIAMOND_SWORD:mode.equals("lever")||mode.equals("noop")?Items.AIR:Items.STONE);
                 if(mode.startsWith("combat-live"))held=new ItemStack(Items.WOODEN_SWORD);
                 if(mode.startsWith("feed"))held=new ItemStack(Items.APPLE,2);
@@ -61,8 +65,9 @@ public final class CreateDeployerJointSmoke {
                     human.connection=new net.minecraft.server.network.ServerGamePacketListenerImpl(world.getServer(),new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND),human,net.minecraft.server.network.CommonListenerCookie.createInitial(profile,false));
                     human.setPos(Vec3.atCenterOf(pos));human.getFoodData().setFoodLevel(7);human.getFoodData().setSaturation(2);human.getInventory().setItem(8,new ItemStack(Items.EMERALD,1024));world.addNewPlayer(human);target=human;
                 }
-                if(mode.startsWith("consume-loose")){var loose=new net.minecraft.world.entity.item.ItemEntity(world,pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5,new ItemStack(AllItems.ROSE_QUARTZ.get(),2));loose.setNoGravity(true);check(world.addFreshEntity(loose),"loose polish input spawn");target=loose;}
+                if(mode.startsWith("consume-loose")){world.setBlock(pos.east(),Blocks.STONE.defaultBlockState(),3);var loose=new net.minecraft.world.entity.item.ItemEntity(world,pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5,new ItemStack(AllItems.ROSE_QUARTZ.get(),2));loose.setNoGravity(true);check(world.addFreshEntity(loose),"loose polish input spawn");target=loose;}
                 if(mode.startsWith("frame")){world.setBlock(pos.west(),Blocks.STONE.defaultBlockState(),3);var frame=new ItemFrame(world,pos,Direction.EAST);check(world.addFreshEntity(frame),"target frame spawn");target=frame;}
+                if(target instanceof LivingEntity){board.addPlayerToTeam(target.getScoreboardName(),red);if(mode.startsWith("combat")&&!mode.startsWith("combat-live"))board.getOrCreatePlayerScore(target,board.getObjective("avilix_team_death"),true).set(7);}
                 var items=body.getContraption().getStorage().getAllItemStorages().get(BlockPos.ZERO);
                 items.setStackInSlot(0,new ItemStack(Items.DIAMOND,7));
                 if(mode.equals("cargo-grab")||mode.equals("cargo-conflict"))fake.setItemInHand(InteractionHand.MAIN_HAND,ItemStack.EMPTY);
@@ -70,7 +75,14 @@ public final class CreateDeployerJointSmoke {
                 var before=CreateDeployerTransaction.hand(context,fake);
                 var humanBefore=target instanceof net.minecraft.server.level.ServerPlayer human?CreateHumanRestore.capture(human):null;
                 try(var session=CreateDeployerAudit.capture(context,pos,fake,punch?"PUNCH":"USE")){
-                    if(mode.startsWith("cargo")){
+                    if(mode.startsWith("consume-loose")){
+                        // Create's ItemUseWorld has a private empty entity getter. Exercise
+                        // the real-level sandpaper endpoint without changing Create's rules.
+                        fake.setPos(pos.getX()-.5,pos.getY()+.5,pos.getZ()+.5);fake.setYRot(-90);fake.setXRot(0);
+                        try(var use=CreateDeployerTransaction.using("item_use")){var result=fake.getMainHandItem().getItem().use(world,fake,InteractionHand.MAIN_HAND);check(result.getResult().consumesAction(),"native loose use did not select input");fake.setItemInHand(InteractionHand.MAIN_HAND,result.getObject());}
+                        try(var use=CreateDeployerTransaction.using("item_finish")){var result=fake.getMainHandItem().finishUsingItem(world,fake);use.returned(result);fake.setItemInHand(InteractionHand.MAIN_HAND,result);}
+                        CreateDeployerAudit.used("item_use",true,target);
+                    }else if(mode.startsWith("cargo")){
                         String name=mode.equals("cargo-grab")||mode.equals("cargo-conflict")?"tryGrabbingItem":"tryDisposeOfExcess";
                         try { java.lang.invoke.MethodHandles.privateLookupIn(DeployerMovementBehaviour.class,java.lang.invoke.MethodHandles.lookup())
                             .findVirtual(DeployerMovementBehaviour.class,name,java.lang.invoke.MethodType.methodType(void.class,MovementContext.class)).invokeWithArguments(new DeployerMovementBehaviour(),context); }
@@ -154,7 +166,7 @@ public final class CreateDeployerJointSmoke {
                         for(int slot=0;slot<items.getSlots();slot++)check(ItemStack.matches(cargoBefore.get(slot),items.getStackInSlot(slot)),"deployer undo lost mounted cargo");}
                 }finally{CartAuditContext.restoring(prior);CartAuditContext.rollbackActive=false;CartRestoreLocks.clear();CartAuditContext.LOCKED_ENTITIES.clear();}
                 tested++;
-            }finally{boolean prior=CartAuditContext.restoring(true);try{if(row!=null){var a=NbtSerde.fromSnbt(row.beAfter);if(a!=null)for(var raw:a.getList("Targets",10)){var t=(CompoundTag)raw;var e=world.getEntity(t.getUUID("Entity"));if(e!=null&&!e.isRemoved())e.discard();}}if(target!=null&&!target.isRemoved())target.discard();((CartEntityAccess)body).avilixlogger$discardForRollback();for(var p:List.of(pos,pos.below(),pos.west()))world.setBlock(p,Blocks.AIR.defaultBlockState(),3);}finally{CartAuditContext.restoring(prior);CartRestoreLocks.clear();CartAuditContext.LOCKED_ENTITIES.clear();}}
+            }finally{boolean prior=CartAuditContext.restoring(true);try{if(row!=null){var a=NbtSerde.fromSnbt(row.beAfter);if(a!=null)for(var raw:a.getList("Targets",10)){var t=(CompoundTag)raw;var e=world.getEntity(t.getUUID("Entity"));if(e!=null&&!e.isRemoved())e.discard();}}if(target!=null&&!target.isRemoved())target.discard();((CartEntityAccess)body).avilixlogger$discardForRollback();for(var p:List.of(pos,pos.below(),pos.west(),pos.east()))world.setBlock(p,Blocks.AIR.defaultBlockState(),3);}finally{CartAuditContext.restoring(prior);CartRestoreLocks.clear();CartAuditContext.LOCKED_ENTITIES.clear();}}
         }
         System.out.println("CREATE_DEPLOYER_JOINT_NATIVE_OK: "+tested+" scenarios; four construction kinds, native block/bucket/lever/name/frame, nonlethal combat and sandpaper consumption, runtime restoration/compensation, early conflicts, locks, no-op, failure and lethal combat rejection");
     }

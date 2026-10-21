@@ -22,7 +22,7 @@ public final class CreateDeployerRestore {
         for(var undo:targets){var tag=undo.after();var world=level(server,tag);var id=tag.getUUID("Entity");var entity=world.getEntity(id);
             if(tag.getBoolean("Terminal")&&(entity==null||entity.isRemoved())){
                 if(!world.hasChunkAt(BlockPos.of(tag.getLong("Pos"))))throw new IllegalStateException("Чанк умершей цели выгружен");
-                entity=EntityType.loadEntityRecursive(undo.before().getCompound("NBT").copy(),world,e->e);
+                var data=undo.before().getCompound("NBT").copy();data.remove("Team");entity=EntityType.loadEntityRecursive(data,world,e->e);
                 if(!(entity instanceof LivingEntity)||!id.equals(entity.getUUID()))throw new IllegalStateException("Нет кандидата возврата умершей цели");
                 entity.tickCount=Math.max(undo.before().getCompound("LivingRuntime").getInt("Tick"),tag.getCompound("Death").getCompound("LivingRuntime").getInt("Tick"));
             }
@@ -107,7 +107,7 @@ public final class CreateDeployerRestore {
             CartRestoreLocks.keepLoaded(level,current.blockPosition());}
         void verifyTerminal(CompoundTag tag){
             if(current==null||current.isRemoved()){
-                if(candidate!=null&&tag.getCompound("Death").contains("Scores",10)){var scores=CreateScoreRuntime.capture(candidate);var expected=tag.getCompound("Death").getCompound("Scores").copy();for(var row:expected.getList("Objectives",10))((CompoundTag)row).remove("Score");if(!scores.equals(expected))throw new IllegalStateException("Scoreboard удалённой цели изменился");}
+                if(candidate!=null&&tag.getCompound("Death").contains("Scores",10)){var scores=CreateScoreRuntime.capture(candidate);var expected=tag.getCompound("Death").getCompound("Scores").copy();expected.remove("Team");for(var row:expected.getList("Objectives",10))((CompoundTag)row).remove("Score");if(!scores.equals(expected))throw new IllegalStateException("Scoreboard удалённой цели изменился");}
                 return;
             }
             if(!(current instanceof LivingEntity living)||living.isAlive()||current.isPassenger()||!current.getPassengers().isEmpty()||!level.hasChunkAt(current.blockPosition()))throw new IllegalStateException("Умершая цель заменена или ожила");
@@ -122,7 +122,7 @@ public final class CreateDeployerRestore {
         static Set<String> differences(CompoundTag actual,CompoundTag expected){var keys=new TreeSet<>(actual.getAllKeys());keys.addAll(expected.getAllKeys());keys.removeIf(k->Objects.equals(actual.get(k),expected.get(k)));return keys;}
         void set(CompoundTag tag){var existing=level.getEntity(id);
             if(tag.getBoolean("Terminal")){
-                if(!corpse){if(existing!=null&&!existing.isRemoved())existing.discard();if(candidate!=null&&tag.getCompound("Death").contains("Scores",10)){var empty=tag.getCompound("Death").getCompound("Scores").copy();for(var row:empty.getList("Objectives",10))((CompoundTag)row).remove("Score");CreateScoreRuntime.restore(candidate,empty);}verify(tag);return;}
+                if(!corpse){if(existing!=null&&!existing.isRemoved())existing.discard();if(candidate!=null&&tag.getCompound("Death").contains("Scores",10)){var empty=tag.getCompound("Death").getCompound("Scores").copy();empty.remove("Team");for(var row:empty.getList("Objectives",10))((CompoundTag)row).remove("Score");CreateScoreRuntime.restore(candidate,empty);}verify(tag);return;}
                 var dead=tag.getCompound("Death").copy();if(liveAfter!=null)dead.put("NBT",liveAfter.copy());if(deathRuntime!=null)dead.put("LivingRuntime",deathRuntime.copy());set(dead);verify(tag);return;
             }
             if(!tag.getBoolean("Exists")){if(existing!=null&&!existing.isRemoved())existing.discard();verify(tag);return;}

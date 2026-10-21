@@ -91,6 +91,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             if(targets.size()>=32||entity.level()!=context.world){complete=false;return;}
             String type=net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString();
             if(!supportedEntity(type)||entity.isPassenger()||!entity.getPassengers().isEmpty()){complete=false;return;}
+            if(entity instanceof net.minecraft.world.entity.Mob mob&&mob.isLeashed()){complete=false;reason="Связь поводком требует отдельного контракта";return;}
             try{var tag=entity(entity,!created);charge(tag);targets.put(entity,tag);}catch(RuntimeException failure){complete=false;reason="Снимок цели: "+failure.getMessage();}
         }
         private void charge(CompoundTag tag){bytes+=tag.sizeInBytes();if(bytes>4L*1024*1024)throw new IllegalStateException("Снимок активатора превышает 4 MiB");}
