@@ -105,7 +105,7 @@ public final class CreateTrainRepresentationRecovery {
             for(var body:missing){var dimensional=carriage.getDimensionalIfPresent(body.dimension());var entity=dimensional==null?null:dimensional.entity.get();
                 if(dimensional==null||entity!=null&&!entity.isRemoved()&&entity!=body.staged().entity)throw new IllegalStateException("Представление заменено во время восстановления");
             }
-            for(var entry:existing.entrySet())if(entry.getValue().isRemoved()||server.getLevel(entry.getKey())==null||server.getLevel(entry.getKey()).getEntity(entry.getValue().getUUID())!=entry.getValue()||carriage.getDimensionalIfPresent(entry.getKey())==null||carriage.getDimensionalIfPresent(entry.getKey()).entity.get()!=entry.getValue())throw new IllegalStateException("Существующее представление заменено или выгружено");
+            for(var entry:existing.entrySet())if(entry.getValue().getCarriage()!=carriage||!entry.getValue().trainId.equals(train.id)||entry.getValue().carriageIndex!=prepared.index||entry.getValue().isRemoved()||server.getLevel(entry.getKey())==null||server.getLevel(entry.getKey()).getEntity(entry.getValue().getUUID())!=entry.getValue()||carriage.getDimensionalIfPresent(entry.getKey())==null||carriage.getDimensionalIfPresent(entry.getKey()).entity.get()!=entry.getValue())throw new IllegalStateException("Существующее представление заменено или выгружено");
         }
         private void verifyPayload(){
             var actual=CreateTrainRepresentationState.prepare(CreateTrainRepresentationState.capture(carriage,server.overworld(),prepared.index));
@@ -135,7 +135,7 @@ public final class CreateTrainRepresentationRecovery {
                 if(dimensional==null||found!=null&&!found.isRemoved())throw new IllegalStateException("Представление уже появилось во время публикации");
                 spawned++;dimensional.entity=new WeakReference<>(entity);
                 if(!level.addFreshEntity(entity))throw new IllegalStateException("Мир отклонил представление вагона");
-                carriage.getDimensionalIfPresent(body.dimension()).updateRenderedCutoff();entity.syncCarriage();return false;
+                carriage.getDimensionalIfPresent(body.dimension()).alignEntity(entity);carriage.getDimensionalIfPresent(body.dimension()).updateRenderedCutoff();entity.syncCarriage();return false;
             }
             for(var body:missing){var entity=body.staged().entity;if(entity.isRemoved()||level(body).getEntity(entity.getUUID())!=entity||carriage.getDimensionalIfPresent(body.dimension()).entity.get()!=entity||entity.getContraption().getStorage()!=carriage.storage)throw new IllegalStateException("Представление не закрепилось в мире");}
             verifyPayload();committed=true;return true;

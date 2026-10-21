@@ -53,7 +53,7 @@ public final class CreateLifecycleAudit {
             else tag.putString("TrainRepresentationsFailure","У представления нет активного payload или связи с составом");
         }
         if(tag.sizeInBytes()>128L*1024*1024)throw new IllegalStateException("Снимок конструкции превышает 128 MiB");
-        return tag.copy(); // Native serializers can retain live actor data; history must own a deep copy.
+        return tag.copy(); // Native serializers can retain live block NBT; history must own a deep copy.
     }
     public static ListTag links(AbstractContraptionEntity entity){
         var links=new ListTag();
