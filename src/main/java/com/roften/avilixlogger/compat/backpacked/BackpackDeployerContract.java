@@ -51,7 +51,10 @@ public final class BackpackDeployerContract {
     private static boolean supportedTracker(String type){return type.startsWith("com.mrcrayfish.backpacked.common.tracker.impl.")&&TRACKERS.contains(type.substring(type.lastIndexOf('.')+1))||CHALLENGES.stream().anyMatch(name->type.equals("com.mrcrayfish.backpacked.common.challenge.impl."+name+"$Tracker"));}
     private static <T> Tag write(Player player,SyncedDataKey<Player,T> key,T value){return key.serializer().getTagWriter().apply(value,player.registryAccess()).copy();}
     private static <T> T read(Player player,SyncedDataKey<Player,T> key,Tag value){return key.serializer().getTagReader().apply(value.copy(),player.registryAccess());}
-    private static CompoundTag item(Player player,ItemStack stack){return Objects.requireNonNullElseGet(NbtSerde.snapshotItemStack(stack,player.registryAccess()),CompoundTag::new);}
+    private static CompoundTag item(Player player,ItemStack stack){
+        if(stack.isEmpty())return new CompoundTag();var tag=NbtSerde.snapshotItemStack(stack,player.registryAccess());
+        if(tag==null||tag.isEmpty())throw new IllegalStateException("Нет полного снимка предмета Backpacked");return tag;
+    }
     private static ItemStack item(Player player,CompoundTag tag){
         if(tag.isEmpty())return ItemStack.EMPTY;
         var stack=NbtSerde.readItemStack(tag,player.registryAccess());
@@ -67,7 +70,7 @@ public final class BackpackDeployerContract {
                 tracker.getProgressTrackerMap().forEach((id,progress)->{
                     String type=progress.getClass().getName();
                     if(!supportedTracker(type))throw new IllegalStateException("Неизвестный tracker Backpacked: "+type);
-                    var data=new CompoundTag();progress.write(data);out.put("tracker:"+id,data);out.putString("type:"+id,type);
+                    var data=new CompoundTag();progress.write(data);out.put("tracker:"+id,CreateExternalPlayerState.trackerData(data));out.putString("type:"+id,type);
                 });
             }else if(key==ModSyncedDataKeys.BACKPACK)out.put("Backpack",item(player,(ItemStack)value));
             else if(key==ModSyncedDataKeys.BACKPACKS){

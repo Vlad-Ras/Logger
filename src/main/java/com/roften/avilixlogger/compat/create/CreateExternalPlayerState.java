@@ -26,9 +26,18 @@ public final class CreateExternalPlayerState {
             if(!state.contains("BagSize",3)||state.getInt("BagSize")<0||state.getInt("BagSize")>64||!state.contains("Backpack",10))throw new IllegalStateException("Потеряны слоты Backpacked");
             for(int slot=0;slot<state.getInt("BagSize");slot++)if(!state.contains("bag:"+slot,10))throw new IllegalStateException("Потерян рюкзак");
             for(String key:List.of("selected_backpack","immortal_cooldown","backpack_scale","cosmetic_backpack","unlockable_backpack_slots"))if(!state.contains("backpacked:"+key))throw new IllegalStateException("Потерян ключ Backpacked");
-            int trackers=0;for(String key:state.getAllKeys())if(key.startsWith("tracker:")){trackers++;if(!state.contains(key,10)||!state.contains("type:"+key.substring(8),8))throw new IllegalStateException("Потерян тип tracker");}
+            int trackers=0;for(String key:state.getAllKeys())if(key.startsWith("tracker:")){trackers++;if(!state.contains(key,10)||!state.contains("type:"+key.substring(8),8))throw new IllegalStateException("Потерян тип tracker");if(!trackerData(state.getCompound(key)).equals(state.getCompound(key)))throw new IllegalStateException("Неканоничный tracker");}
             if(trackers!=bp.getInt("TrackerCount")||state.getAllKeys().stream().filter(k->k.startsWith("type:")).count()!=trackers)throw new IllegalStateException("Потерян tracker Backpacked");
         }
+    }
+    public static CompoundTag trackerData(CompoundTag data){
+        if(!Set.of("Count","CraftedItems","ExploredBiomes").containsAll(data.getAllKeys())||data.contains("Count")&&(!data.contains("Count",3)||data.getInt("Count")<0))throw new IllegalStateException("Повреждён прогресс Backpacked");
+        var out=data.copy();
+        for(String key:List.of("CraftedItems","ExploredBiomes"))if(data.contains(key)){
+            if(!(data.get(key) instanceof ListTag list)||!list.isEmpty()&&list.getElementType()!=Tag.TAG_STRING||list.size()>8192)throw new IllegalStateException("Повреждён набор прогресса Backpacked");
+            var ids=new TreeSet<String>();for(var raw:list)if(net.minecraft.resources.ResourceLocation.tryParse(raw.getAsString())==null||!ids.add(raw.getAsString()))throw new IllegalStateException("Повторный/неизвестный ID прогресса");
+            var sorted=new ListTag();ids.forEach(id->sorted.add(StringTag.valueOf(id)));out.put(key,sorted);
+        }return out;
     }
     public static void validatePair(CompoundTag before,CompoundTag after) {
         validate(before);validate(after);

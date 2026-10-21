@@ -60,6 +60,10 @@ public final class CreateDeployerRuntimeTest {
         var external=new CompoundTag();external.putInt("Format",1);external.put("Unknown",new CompoundTag());
         CreateExternalPlayerState.validatePair(external,external.copy());
         var changed=external.copy();changed.getCompound("Unknown").putInt("other:mod",1);reject(()->CreateExternalPlayerState.validatePair(external,changed),"unknown attachment mutation accepted");
+        var tracker=new CompoundTag();tracker.putInt("Count",-1);reject(()->CreateExternalPlayerState.trackerData(tracker),"negative external progress accepted");
+        tracker.putInt("Count",1);var set=new ListTag();set.add(StringTag.valueOf("minecraft:plains"));set.add(StringTag.valueOf("minecraft:desert"));tracker.put("ExploredBiomes",set);
+        check(CreateExternalPlayerState.trackerData(tracker).getList("ExploredBiomes",8).getString(0).equals("minecraft:desert"),"external set is not canonical");
+        set.add(StringTag.valueOf("minecraft:plains"));reject(()->CreateExternalPlayerState.trackerData(tracker),"duplicate external progress accepted");
         var broken=external.copy();broken.remove("Unknown");reject(()->CreateExternalPlayerState.validate(broken),"truncated external state accepted");
     }
     private static CompoundTag stat(String value,int count){var row=new CompoundTag();row.putString("Type","minecraft:custom");row.putString("Value",value);row.putInt("Count",count);return row;}
