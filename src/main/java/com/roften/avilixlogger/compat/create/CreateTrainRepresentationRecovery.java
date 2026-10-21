@@ -9,7 +9,6 @@ import net.minecraft.nbt.*;
 import net.minecraft.resources.*;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import java.lang.ref.WeakReference;
 import java.util.*;
@@ -57,9 +56,15 @@ public final class CreateTrainRepresentationRecovery {
     }
     private static byte[] fingerprint(CreateTrainRepresentationState.Prepared state) {
         try{var digest=java.security.MessageDigest.getInstance("SHA-256");
-            try(var out=new java.io.DataOutputStream(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(),digest))){NbtIo.write(canonical(state),out);}
+            try(var out=new java.io.DataOutputStream(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(),digest))){writeCanonical(canonical(state),out);}
             return digest.digest();
         }catch(java.io.IOException|java.security.NoSuchAlgorithmException failure){throw new IllegalStateException("Не удалось проверить payload вагона",failure);}
+    }
+    private static void writeCanonical(Tag tag,java.io.DataOutput out)throws java.io.IOException {
+        out.writeByte(tag.getId());
+        if(tag instanceof CompoundTag compound){var keys=new TreeSet<>(compound.getAllKeys());out.writeInt(keys.size());for(var key:keys){out.writeUTF(key);writeCanonical(compound.get(key),out);}}
+        else if(tag instanceof ListTag list){out.writeByte(list.getElementType());out.writeInt(list.size());for(var child:list)writeCanonical(child,out);}
+        else tag.write(out);
     }
     public static final class Job {
         final MinecraftServer server;final Prepared prepared;final Train train;final Carriage carriage;final int version;

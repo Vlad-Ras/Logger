@@ -132,6 +132,12 @@ public final class CreateTrainRollbackSmoke {
             manager.updateChunkStatus(new net.minecraft.world.level.ChunkPos(BlockPos.containing(other.positionAnchor)),net.minecraft.world.level.entity.Visibility.TRACKED);
         }
         var snapshot=CreateTrainRepresentationState.capture(first);var cargo=carriage.storage;int version=cargo.getVersion();
+        if(mode.endsWith("missing-anchor")){
+            var left=snapshot.copy();var right=snapshot.copy();var forward=new CompoundTag();forward.putInt("Aa",1);forward.putInt("BB",2);var reverse=new CompoundTag();reverse.putInt("BB",2);reverse.putInt("Aa",1);
+            left.getCompound("Native").getCompound("Entity").getCompound("Contraption").put("HashCollisionFixture",forward);right.getCompound("Native").getCompound("Entity").getCompound("Contraption").put("HashCollisionFixture",reverse);
+            var fingerprint=CreateTrainRepresentationRecovery.class.getDeclaredMethod("fingerprint",CreateTrainRepresentationState.Prepared.class);fingerprint.setAccessible(true);
+            check(java.util.Arrays.equals((byte[])fingerprint.invoke(null,CreateTrainRepresentationState.prepare(left)),(byte[])fingerprint.invoke(null,CreateTrainRepresentationState.prepare(right))),"NBT key insertion order changed conflict witness");
+        }
         if(mode.endsWith("missing-anchor")){var broken=snapshot.copy();broken.getCompound("Native").getList("EntityPositioning",10).getCompound(0).remove("PositionAnchor");reject(()->new CreateTrainRepresentationRecovery.Prepared(broken),"missing anchor accepted");return;}
         if(mode.endsWith("links-refusal")){var broken=snapshot.copy();broken.getCompound("Native").getCompound("Passengers").put("Seat0",new CompoundTag());reject(()->new CreateTrainRepresentationRecovery.Prepared(broken),"passenger contract bypassed");return;}
         var prepared=new CreateTrainRepresentationRecovery.Prepared(snapshot);

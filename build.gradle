@@ -162,13 +162,15 @@ dependencies {
         localRuntime "maven.modrinth:farmers-delight:${foodVersions[foodVersion]}"
     }
     // Optional integration: never ship AE2 classes inside the logger JAR.
-    compileOnly 'org.appliedenergistics:appliedenergistics2:19.2.12'
-    localRuntime 'org.appliedenergistics:appliedenergistics2:19.2.12'
+    def compatAe2Version = project.findProperty('compatAe2Version') ?: '19.2.12'
+    compileOnly "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
+    localRuntime "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
     // Optional Create integration. Never embed Create or its libraries in the logger.
-    compileOnly 'com.simibubi.create:create-1.21.1:6.0.11-313'
-    if (!project.hasProperty('createAbsent')) localRuntime 'com.simibubi.create:create-1.21.1:6.0.11-313'
+    def compatCreateVersion = project.findProperty('compatCreateVersion') ?: '6.0.11-313'
+    compileOnly "com.simibubi.create:create-1.21.1:${compatCreateVersion}"
+    if (!project.hasProperty('createAbsent')) localRuntime "com.simibubi.create:create-1.21.1:${compatCreateVersion}"
     // Official release artifacts, compile-only. Neither mod is bundled or required in production.
-    [Backpacked: ['backpacked-neoforge', '1.21.1-3.0.5'], Framework: ['framework-neoforge', '1.21.1-0.13.10']].each { module, spec ->
+    [Backpacked: ['backpacked-neoforge', '1.21.1-3.0.5'], Framework: ['framework-neoforge', project.findProperty('compatFrameworkVersion') ?: '1.21.1-0.13.10']].each { module, spec ->
         def external = { artifact { name = spec[0]; type = 'jar' }; transitive = false }
         compileOnly("com.mrcrayfish.release:${module}:${spec[1]}", external)
         if ((project.hasProperty('backpackSmoke') || project.hasProperty('createSmoke') || project.hasProperty('guiSmoke')) && !project.hasProperty('backpackAbsent') && !project.hasProperty('createAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
