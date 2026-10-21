@@ -37,7 +37,7 @@ jobs:
               jars.update(pathlib.Path(p) for p in re.findall(r'/[^\s:\";]+\.jar', args.read_text()))
           jars.update(p for p in (pathlib.Path.home()/'.gradle/caches').rglob('*.jar') if 'devlaunch' in p.name.lower())
           with tarfile.open('deployer-toolchain.tar.gz', 'w:gz', compresslevel=1) as archive:
-              for source in list(jars) + [pathlib.Path(os.environ['JAVA_HOME']), project/'build/classes', project/'build/resources', project/'build/moddev']:
+              for source in list(jars) + [pathlib.Path(os.environ['JAVA_HOME']).resolve(), project/'build/classes', project/'build/resources', project/'build/moddev']:
                   if source.exists(): archive.add(source, arcname=str(source).lstrip('/'))
               archive.add(project/'build/deployer-classpath.txt', arcname='classpath.txt')
           print('Packed jars:', len(jars))
