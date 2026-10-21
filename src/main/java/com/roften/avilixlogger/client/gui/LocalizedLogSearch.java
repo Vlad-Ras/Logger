@@ -12,7 +12,7 @@ final class LocalizedLogSearch {
     private LocalizedLogSearch(){}
     private static void refresh(){
         var current=Language.getInstance();if(current==language)return;
-        var blockNames=new ArrayList<LocalizedSearchTerms.Name>();var all=new ArrayList<LocalizedSearchTerms.Name>();
+        var blockNames=new ArrayList<LocalizedSearchTerms.Name>();var all=new LinkedHashSet<LocalizedSearchTerms.Name>();
         for(var block:BuiltInRegistries.BLOCK)blockNames.add(new LocalizedSearchTerms.Name(BuiltInRegistries.BLOCK.getKey(block).toString(),block.getName().getString()));
         all.addAll(blockNames);
         for(var item:BuiltInRegistries.ITEM)all.add(new LocalizedSearchTerms.Name(BuiltInRegistries.ITEM.getKey(item).toString(),item.getDescription().getString()));
@@ -21,4 +21,5 @@ final class LocalizedLogSearch {
     }
     static List<String> search(String text){if(text==null||text.isBlank())return List.of();refresh();return LocalizedSearchTerms.resolve(text,names);}
     static List<String> blocks(String text){if(text==null||text.isBlank())return List.of();refresh();return LocalizedSearchTerms.resolve(text,blocks);}
+    static void clear(){language=null;names=List.of();blocks=List.of();}
 }

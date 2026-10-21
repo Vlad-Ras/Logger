@@ -19,6 +19,8 @@ jobs:
           MESA_GL_VERSION_OVERRIDE: '4.5'
           ALSOFT_DRIVERS: 'null'
         run: |
+          mkdir -p run
+          printf 'onboardAccessibility:false\nlang:ru_ru\n' > run/options.txt
           timeout --signal=INT --kill-after=15s 600s xvfb-run -a ./gradlew runClient -PguiSmoke --console=plain --no-daemon > gui-smoke.log 2>&1 || status=$?
           tail -n 80 gui-smoke.log
           if ! grep -q 'CART_GUI_CLIENT_OK' gui-smoke.log || grep -qE 'CART_GUI_CLIENT_FAILED|MixinApplyError|MixinTransformerError' gui-smoke.log; then exit 1; fi

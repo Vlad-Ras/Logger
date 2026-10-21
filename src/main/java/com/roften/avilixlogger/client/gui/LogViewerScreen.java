@@ -1879,4 +1879,6 @@ public final class LogViewerScreen extends Screen {
     public boolean isPauseScreen() {
         return false;
     }
+
+    @Override public void onClose(){LocalizedLogSearch.clear();super.onClose();}
 }

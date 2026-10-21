@@ -15,6 +15,13 @@ import java.util.*;
 /** Native sign editing and DamageSource identity; publication still requires production AuthCore. */
 final class AuditDetailsSmoke {
     static void run(ServerLevel level){
+        var config=com.roften.avilixlogger.LoggerConfig.VALUES;
+        int cpu=config.asyncMaxQueuedPayloadMiB.get(),journal=config.clickHouseMaxQueuedPayloadMiB.get();
+        try{
+            config.asyncMaxQueuedPayloadMiB.set(128);config.clickHouseMaxQueuedPayloadMiB.set(256);
+            check(com.roften.avilixlogger.LoggerConfig.captureQueueBytes()<=16L*1024*1024&&com.roften.avilixlogger.LoggerConfig.journalQueueBytes()<=32L*1024*1024,"old config bypassed new memory ceilings");
+        }finally{config.asyncMaxQueuedPayloadMiB.set(cpu);config.clickHouseMaxQueuedPayloadMiB.set(journal);}
+        System.out.println("MEMORY_UPGRADE_NATIVE_OK: previous 128/256 MiB values respect new per-queue ceilings");
         var editor=new ServerPlayer(level.getServer(),level,new com.mojang.authlib.GameProfile(UUID.randomUUID(),"SignEditor"),net.minecraft.server.level.ClientInformation.createDefault());
         BlockPos pos=level.getSharedSpawnPos().offset(300,90,280);
         level.setBlock(pos,Blocks.OAK_SIGN.defaultBlockState(),3);var sign=(SignBlockEntity)level.getBlockEntity(pos);

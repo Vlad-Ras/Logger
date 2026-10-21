@@ -223,7 +223,7 @@ public final class LoggerCommands {
     }
 
     private static boolean hasAnyPlanePermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+        return net.neoforged.fml.ModList.get().isLoaded("immersive_aircraft") && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.plane",
                 "avilixlogger.command.plane.find",
                 "avilixlogger.command.plane.find.offline",
@@ -234,7 +234,7 @@ public final class LoggerCommands {
     }
 
     private static boolean hasAnyPlaneOwnerPermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
+        return net.neoforged.fml.ModList.get().isLoaded("immersive_aircraft") && com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
                 && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.plane",
                 "avilixlogger.command.plane.owner.info",

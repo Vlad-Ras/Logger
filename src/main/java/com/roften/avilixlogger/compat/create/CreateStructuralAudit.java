@@ -70,11 +70,18 @@ public final class CreateStructuralAudit implements CreateStructuralHooks.Observ
     @Override public CreateStructuralHooks.Capture removal(Level world,BlockPos pos,net.minecraft.world.level.block.state.BlockState replacement){
         if(CURRENT.get()!=null||CartAuditContext.restoring()||!(world instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
         if(!CreateCartAudit.enabled())return null;
-        var state=level.getBlockState(pos);
-        if(!state.hasBlockEntity()||state.getBlock()==replacement.getBlock())return null;
-        var controller=level.getBlockEntity(pos);
-        if(!(controller instanceof CreateControllerAccess access)||access.avilixlogger$controlled().stream().noneMatch(Entity::isAlive))return null;
+        var controller=removalController(level,pos,replacement);if(controller==null)return null;
         var scope=begin(controller);if(scope!=null)scope.externalRemoval=true;return scope;
+    }
+    private static BlockEntity removalController(ServerLevel level,BlockPos pos,net.minecraft.world.level.block.state.BlockState replacement){
+        // An active native controller holds live entity references and therefore is
+        // already instantiated in its loaded chunk. Ordinary blocks need no state /
+        // hasBlockEntity / getBlock probes, nor lazy block-entity creation here.
+        if(!level.hasChunkAt(pos))return null;
+        var controller=level.getChunkAt(pos).getBlockEntities().get(pos);
+        if(!(controller instanceof CreateControllerAccess access)||access.avilixlogger$controlled().stream().noneMatch(Entity::isAlive))return null;
+        if(controller.getBlockState().getBlock()==replacement.getBlock())return null;
+        return controller;
     }
     private static Scope capture(BlockEntity controller,boolean publish){
         if(CURRENT.get()!=null||!(controller.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread()||!(controller instanceof CreateControllerAccess access))throw new IllegalStateException("Нет серверного scope контроллера");

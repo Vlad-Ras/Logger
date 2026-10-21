@@ -28,15 +28,18 @@ public final class LogViewerClientHooks {
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
         OPEN_SCREEN.clear();
         LoggerActionsScreen.clear();
+        LocalizedLogSearch.clear();
         serverCreateAvailable = false;
         RollbackPreviewRenderer.clear();
         // Inform server that this player supports the GUI payloads.
-        PacketDistributor.sendToServer(new C2SHelloPayload());
+        var connection=Minecraft.getInstance().getConnection();
+        if(connection!=null&&connection.hasChannel(C2SHelloPayload.TYPE))PacketDistributor.sendToServer(new C2SHelloPayload());
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
         OPEN_SCREEN.clear();
         LoggerActionsScreen.clear();
+        LocalizedLogSearch.clear();
         serverCreateAvailable = false;
         RollbackPreviewRenderer.clear();
     }

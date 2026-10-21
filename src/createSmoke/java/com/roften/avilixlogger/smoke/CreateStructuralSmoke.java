@@ -34,6 +34,11 @@ public final class CreateStructuralSmoke {
             var controller=(MechanicalBearingBlockEntity)world.getBlockEntity(pos);controller.assemble();
             var bodies=((CreateControllerAccess)controller).avilixlogger$controlled();
             check(bodies.size()==1,"native bearing assembly failed: "+controller.getLastAssemblyException());
+            var finder=CreateStructuralAudit.class.getDeclaredMethod("removalController",ServerLevel.class,BlockPos.class,net.minecraft.world.level.block.state.BlockState.class);finder.setAccessible(true);
+            check(finder.invoke(null,world,pos,Blocks.AIR.defaultBlockState())==controller,"loaded active controller skipped by allocation-free lookup");
+            check(finder.invoke(null,world,pos,controller.getBlockState())==null,"same-block update treated as controller removal");
+            int existing=world.getChunkAt(target).getBlockEntities().size();
+            check(finder.invoke(null,world,target,Blocks.AIR.defaultBlockState())==null&&world.getChunkAt(target).getBlockEntities().size()==existing,"ordinary block lookup created a lazy block entity");
             var original=bodies.getFirst();var uuid=original.getUUID();var logical=CreateContraptionSources.id(original);
             field(MechanicalBearingBlockEntity.class,"angle").setFloat(controller,37);original.setAngle(37);
             check(world.getBlockState(target).isAir(),"assembled chest remains in world");

@@ -47,6 +47,20 @@ jobs:
           if ! grep -q 'CREATE_ABSENT_NATIVE_OK' create-absent-smoke.log || grep -qE '(Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-absent-smoke.log; then
             exit 1
           fi
+      - name: Native Backpacked regression
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.fd == '1.3.4' }}
+        timeout-minutes: 5
+        run: |
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PbackpackSmoke --console=plain --no-daemon > backpack-smoke.log 2>&1 || status=$?
+          tail -n 50 backpack-smoke.log
+          if ! grep -q 'BACKPACK_NATIVE_SMOKE_OK' backpack-smoke.log || grep -qE 'Backpack smoke failed|MixinApplyError|MixinTransformerError' backpack-smoke.log; then exit 1; fi
+      - name: Native actor and aircraft regression
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.fd == '1.3.4' }}
+        timeout-minutes: 5
+        run: |
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PactorSmoke --console=plain --no-daemon > actor-smoke.log 2>&1 || status=$?
+          tail -n 50 actor-smoke.log
+          if ! grep -q 'ACTOR_ATTRIBUTION_NATIVE_OK' actor-smoke.log || grep -qE 'ACTOR_ATTRIBUTION_NATIVE_FAILED|MixinApplyError|MixinTransformerError' actor-smoke.log; then exit 1; fi
       - name: Verification logs
         if: always()
         uses: actions/upload-artifact@v4

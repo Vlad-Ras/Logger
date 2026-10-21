@@ -278,7 +278,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "7");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "8");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 

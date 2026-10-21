@@ -13,6 +13,7 @@ public final class AsyncPipelineTest {
         oversizedPayload();
         concurrentProducers();
         dropAggregation();
+        dropVisibility();
         OptimizationIntegrityTest.run();
         sourceScopeRestoration();
         capturedDeployerAttribution();
@@ -117,6 +118,18 @@ public final class AsyncPipelineTest {
         LogEntry next = row("drop"); next.actorUuid = player; next.dim = "nether"; next.itemStackNbt = "stone"; next.count = 3;
         drops.add(next, 500); drops.flush(500, true);
         check(rows.size() == 2 && rows.get(1).count == 3, "shutdown lost an active drop");
+    }
+
+    private static void dropVisibility() throws Exception {
+        var rows=new java.util.concurrent.CopyOnWriteArrayList<LogEntry>();
+        var sink=new LogStorage(){public void append(LogEntry row){rows.add(row);}public List<LogEntry> query(LogQuery query){return List.copyOf(rows);}public List<LogEntry> queryReverse(LogQuery query){return List.copyOf(rows);}public void shutdown(){}};
+        var storage=new AsyncLogStorage(sink,16,1024*1024);
+        try{
+            var drop=row("pending burst");drop.type=ActionType.ITEM_DROP;drop.count=3;drop.itemStackNbt="stone";drop.aggregateDrop=true;
+            storage.append(drop);
+            check(storage.awaitVisible(System.nanoTime()+TimeUnit.SECONDS.toNanos(5)),"drop visibility did not drain");
+            check(rows.size()==1&&rows.getFirst().count==3,"visibility returned before the aggregated drop reached storage");
+        }finally{storage.shutdown();}
     }
 
     private static void tickDeadlines() {

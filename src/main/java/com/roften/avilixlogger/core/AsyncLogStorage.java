@@ -8,6 +8,7 @@ public final class AsyncLogStorage implements LogStorage {
     private final LogStorage delegate;
     private final WeightedQueue<QueuedLogEvent> queue;
     private final Thread worker;
+    private volatile int pendingDrops;
 
     public AsyncLogStorage(LogStorage delegate, int capacity, long maxBytes) {
         this.delegate = delegate;
@@ -57,6 +58,7 @@ public final class AsyncLogStorage implements LogStorage {
                 var work = queue.poll(250);
                 long now = System.currentTimeMillis();
                 drops.flush(now, false);
+                pendingDrops=drops.pendingCount();
                 if (now >= nextMaintenance) {
                     LoggerEventHandlers.cleanupBackground(now);
                     nextMaintenance = now + 1000;
@@ -69,18 +71,28 @@ public final class AsyncLogStorage implements LogStorage {
                     else delegate.append(row);
                 } catch (Throwable error) {
                     AvilixLoggerMod.LOGGER.error("[AvilixLogger] Event processing failed", error);
-                } finally { queue.complete(work); }
+                } finally { pendingDrops=drops.pendingCount();queue.complete(work); }
             } catch (InterruptedException ignored) {
                 // Closing the queue wakes this worker; accepted events are always drained.
             }
         }
         drops.flush(System.currentTimeMillis(), true);
+        pendingDrops=0;
     }
 
     @Override public List<LogEntry> query(LogQuery query) { return delegate.query(query); }
     @Override public List<LogEntry> queryReverse(LogQuery query) { return delegate.queryReverse(query); }
 
-    @Override public boolean awaitVisible(long deadline) throws InterruptedException { return queue.awaitEmpty(deadline) && delegate.awaitVisible(deadline); }
+    @Override public boolean awaitVisible(long deadline) throws InterruptedException {
+        while(queue.awaitEmpty(deadline)){
+            // Queue completion alone does not publish an active aggregation burst.
+            // The worker's normal 250 ms flush handles it; callers wait off-thread.
+            if(pendingDrops==0)return delegate.awaitVisible(deadline);
+            long remaining=deadline-System.nanoTime();if(remaining<=0)return false;
+            java.util.concurrent.TimeUnit.NANOSECONDS.sleep(Math.min(remaining,10_000_000L));
+        }
+        return false;
+    }
 
     @Override public void shutdown() {
         queue.close();
