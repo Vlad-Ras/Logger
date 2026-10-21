@@ -1,0 +1,68 @@
+package com.roften.avilixlogger.compat.create;
+import com.roften.avilixlogger.compat.create.mixin.*;
+import net.minecraft.advancements.*;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.*;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.stats.*;
+import java.util.*;
+/** Exact criteria timestamps and raw counters. Restoring never grants a reward. */
+public final class CreatePlayerProgress {
+    private CreatePlayerProgress(){}
+    @SuppressWarnings({"rawtypes","unchecked"}) private static String value(Stat<?> stat){return ((net.minecraft.core.Registry)stat.getType().getRegistry()).getKey(stat.getValue()).toString();}
+    public static CompoundTag capture(ServerPlayer player){
+        var out=new CompoundTag();out.putInt("Format",1);var stats=new ListTag();
+        var entries=((PlayerStatsAccessor)player.getStats()).avilixlogger$stats().object2IntEntrySet().stream().sorted(Comparator.comparing(e->e.getKey().toString())).toList();
+        for(var entry:entries){var row=new CompoundTag();var stat=entry.getKey();row.putString("Type",BuiltInRegistries.STAT_TYPE.getKey(stat.getType()).toString());row.putString("Value",value(stat));row.putInt("Count",entry.getIntValue());stats.add(row);}
+        out.put("Stats",stats);var advancements=new ListTag();
+        var progress=((PlayerProgressAccessor)player.getAdvancements()).avilixlogger$progress();
+        for(var holder:progress.keySet().stream().sorted(Comparator.comparing(h->h.id().toString())).toList()){
+            var state=progress.get(holder);if(!state.hasProgress())continue;var row=new CompoundTag();row.putString("Id",holder.id().toString());
+            row.put("Definition",Advancement.CODEC.encodeStart(player.registryAccess().createSerializationContext(NbtOps.INSTANCE),holder.value()).getOrThrow());
+            var criteria=new ListTag();
+            for(String key:holder.value().criteria().keySet().stream().sorted().toList()){
+                var criterion=state.getCriterion(key);if(criterion==null||!criterion.isDone())continue;var time=criterion.getObtained();var c=new CompoundTag();c.putString("Key",key);c.putLong("Second",time.getEpochSecond());c.putInt("Nano",time.getNano());criteria.add(c);
+            }
+            row.put("Criteria",criteria);advancements.add(row);
+        }
+        out.put("Advancements",advancements);out.put("Recipes",player.getRecipeBook().toNbt());validate(out);return out;
+    }
+    public static ListTag rows(CompoundTag tag,String key,int max){
+        if(!(tag.get(key) instanceof ListTag list)||!list.isEmpty()&&list.getElementType()!=10||list.size()>max)throw new IllegalStateException("Некорректный список снимка: "+key);return list;
+    }
+    public static void validate(CompoundTag tag){
+        if(tag.getInt("Format")!=1||!tag.contains("Stats",9)||!tag.contains("Advancements",9)||!tag.contains("Recipes",10)||tag.sizeInBytes()>2*1024*1024||tag.getList("Stats",10).size()>8192||tag.getList("Advancements",10).size()>2048)throw new IllegalStateException("Неполная статистика или достижения получателя");
+        rows(tag,"Stats",8192);rows(tag,"Advancements",2048);
+        var keys=new HashSet<String>();for(var raw:tag.getList("Stats",10)){var row=(CompoundTag)raw;if(ResourceLocation.tryParse(row.getString("Type"))==null||ResourceLocation.tryParse(row.getString("Value"))==null||!row.contains("Count",3)||row.getInt("Count")<0||!keys.add(row.getString("Type")+"/"+row.getString("Value")))throw new IllegalStateException("Некорректный счётчик получателя");}
+        keys.clear();for(var raw:tag.getList("Advancements",10)){var row=(CompoundTag)raw;if(ResourceLocation.tryParse(row.getString("Id"))==null||!keys.add(row.getString("Id"))||!row.contains("Definition",10)||!row.contains("Criteria",9)||row.getList("Criteria",10).isEmpty())throw new IllegalStateException("Некорректное достижение получателя");
+            var criteria=new HashSet<String>();for(var item:rows(row,"Criteria",2048)){var c=(CompoundTag)item;if(c.getString("Key").isBlank()||!criteria.add(c.getString("Key"))||!c.contains("Second",4)||!c.contains("Nano",3)||c.getInt("Nano")<0||c.getInt("Nano")>=1000000000)throw new IllegalStateException("Некорректный критерий получателя");}}
+    }
+    @SuppressWarnings({"rawtypes","unchecked"}) private static Stat<?> stat(CompoundTag row){
+        var type=BuiltInRegistries.STAT_TYPE.getOptional(ResourceLocation.parse(row.getString("Type"))).orElseThrow(()->new IllegalStateException("Тип статистики удалён"));
+        var value=type.getRegistry().getOptional(ResourceLocation.parse(row.getString("Value"))).orElseThrow(()->new IllegalStateException("Значение статистики удалено"));return ((StatType)type).get(value);
+    }
+    private static Map<AdvancementHolder,AdvancementProgress> decode(ServerPlayer player,CompoundTag tag){
+        validate(tag);for(var raw:tag.getList("Stats",10))stat((CompoundTag)raw);
+        var result=new LinkedHashMap<AdvancementHolder,AdvancementProgress>();
+        for(var raw:tag.getList("Advancements",10)){var row=(CompoundTag)raw;var holder=player.server.getAdvancements().get(ResourceLocation.parse(row.getString("Id")));
+            if(holder==null||!row.getCompound("Definition").equals(Advancement.CODEC.encodeStart(player.registryAccess().createSerializationContext(NbtOps.INSTANCE),holder.value()).getOrThrow()))throw new IllegalStateException("Определение достижения изменилось");
+            var progress=new AdvancementProgress();progress.update(holder.value().requirements());
+            for(var item:row.getList("Criteria",10)){var c=(CompoundTag)item;var criterion=progress.getCriterion(c.getString("Key"));if(criterion==null)throw new IllegalStateException("Критерий достижения удалён");
+                ((CriterionTimeAccessor)criterion).avilixlogger$obtained(java.time.Instant.ofEpochSecond(c.getLong("Second"),c.getInt("Nano")));}
+            result.put(holder,progress);
+        }
+        var recipes=new ServerRecipeBook();recipes.fromNbt(tag.getCompound("Recipes"),player.server.getRecipeManager());if(!recipes.toNbt().equals(tag.getCompound("Recipes")))throw new IllegalStateException("Рецепты получателя не прочитаны полностью");return result;
+    }
+    public static void preflight(ServerPlayer player,CompoundTag tag){decode(player,tag);}
+    public static void restore(ServerPlayer player,CompoundTag tag){
+        var decoded=decode(player,tag);var counter=player.getStats();var stats=((PlayerStatsAccessor)counter).avilixlogger$stats();var old=new HashSet<>(stats.keySet());stats.clear();
+        for(var raw:tag.getList("Stats",10)){var row=(CompoundTag)raw;stats.put(stat(row),row.getInt("Count"));}old.addAll(stats.keySet());
+        // Include removed counters as explicit zero updates, then retain their original absence.
+        for(var stat:old)counter.setValue(player,stat,stats.getInt(stat));counter.sendStats(player);stats.keySet().removeIf(s->tag.getList("Stats",10).stream().noneMatch(t->stat((CompoundTag)t).equals(s)));
+        var advancements=player.getAdvancements();var access=(PlayerProgressAccessor)advancements;var changed=new HashSet<>(access.avilixlogger$progress().keySet());changed.addAll(decoded.keySet());
+        advancements.stopListening();access.avilixlogger$progress().clear();access.avilixlogger$progress().putAll(decoded);
+        access.avilixlogger$changed().addAll(changed);changed.forEach(access::avilixlogger$visibility);access.avilixlogger$listen(player.server.getAdvancements());advancements.flushDirty(player);
+        var recipes=new ServerRecipeBook();recipes.fromNbt(tag.getCompound("Recipes"),player.server.getRecipeManager());player.getRecipeBook().copyOverData(recipes);player.getRecipeBook().sendInitialRecipeBook(player);
+    }
+}

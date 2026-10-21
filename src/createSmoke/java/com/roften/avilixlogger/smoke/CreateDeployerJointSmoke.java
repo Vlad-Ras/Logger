@@ -36,7 +36,7 @@ public final class CreateDeployerJointSmoke {
         var pos=world.getSharedSpawnPos().offset(40,40,40);method(CreateFunnelSmoke.class,"visible",ServerLevel.class,BlockPos.class).invoke(null,world,pos);
         int tested=0;
         for(var kind:List.of(CreateContraptionKind.MINECART,CreateContraptionKind.TRAIN,CreateContraptionKind.BEARING,CreateContraptionKind.OTHER))
-        for(String mode:List.of("place","place-cancel-first","place-cancel-all","water","lever","name","name-cancel-all","frame","frame-cancel-all","hand-conflict","world-conflict","entity-conflict","locks","failure","noop","combat","combat-live","combat-live-cancel-first","combat-live-cancel-all","combat-live-conflict","consume-polish","consume-polish-cancel-all","consume-polish-conflict","name-move","name-locks","shear","shear-cancel-all","frame-break","frame-break-cancel-all","cargo-grab","cargo-return","cargo-conflict","cargo-cancel-all","place-oversized")){
+        for(String mode:List.of("place","place-cancel-first","place-cancel-all","water","lever","name","name-cancel-all","frame","frame-cancel-all","hand-conflict","world-conflict","entity-conflict","locks","failure","noop","combat","combat-cancel-first","combat-cancel-all","combat-removed","combat-removed-cancel-all","combat-dead-conflict","feed","feed-cancel-first","feed-cancel-all","feed-stat-conflict","feed-adv-conflict","feed-inventory-conflict","feed-locks","consume-loose","consume-loose-cancel-all","consume-loose-conflict","combat-live","combat-live-cancel-first","combat-live-cancel-all","combat-live-conflict","consume-polish","consume-polish-cancel-all","consume-polish-conflict","name-move","name-locks","shear","shear-cancel-all","frame-break","frame-break-cancel-all","cargo-grab","cargo-return","cargo-conflict","cargo-cancel-all","place-oversized")){
             var body=(AbstractContraptionEntity)factory.invoke(null,world,kind);attach.invoke(null,body);body.setPos(pos.above(5).getX(),pos.above(5).getY(),pos.above(5).getZ());check(world.addFreshEntity(body),"deployer construction spawn");Entity target=null;LogEntry row=null;
             try{
                 world.setBlock(pos.below(),Blocks.STONE.defaultBlockState(),3);world.setBlock(pos,mode.equals("lever")?Blocks.LEVER.defaultBlockState().setValue(LeverBlock.FACE,net.minecraft.world.level.block.state.properties.AttachFace.FLOOR):Blocks.AIR.defaultBlockState(),3);
@@ -44,8 +44,10 @@ public final class CreateDeployerJointSmoke {
                 var actorPos=new BlockPos(7,0,0);var settings=new CompoundTag();settings.putUUID("Owner",UUID.randomUUID());settings.putString("Mode",punch?"PUNCH":"USE");
                 var info=new StructureBlockInfo(actorPos,AllBlocks.DEPLOYER.getDefaultState().setValue(DeployerBlock.FACING,Direction.EAST),settings);var context=new MovementContext(world,info,body.getContraption());context.position=Vec3.atCenterOf(pos);body.getContraption().getActors().add(MutablePair.of(info,context));
                 var fake=new DeployerFakePlayer(world,settings.getUUID("Owner"));context.temporaryData=fake;fake.getInventory().selected=1;
-                ItemStack held=new ItemStack(mode.equals("water")?Items.WATER_BUCKET:mode.startsWith("name")||mode.equals("entity-conflict")?Items.NAME_TAG:mode.startsWith("shear")?Items.SHEARS:mode.startsWith("frame")?Items.DIAMOND:mode.equals("combat")?Items.DIAMOND_SWORD:mode.equals("lever")||mode.equals("noop")?Items.AIR:Items.STONE);
+                ItemStack held=new ItemStack(mode.equals("water")?Items.WATER_BUCKET:mode.startsWith("name")||mode.equals("entity-conflict")?Items.NAME_TAG:mode.startsWith("shear")?Items.SHEARS:mode.startsWith("frame")?Items.DIAMOND:mode.startsWith("combat")&&!mode.startsWith("combat-live")?Items.DIAMOND_SWORD:mode.equals("lever")||mode.equals("noop")?Items.AIR:Items.STONE);
                 if(mode.startsWith("combat-live"))held=new ItemStack(Items.WOODEN_SWORD);
+                if(mode.startsWith("feed"))held=new ItemStack(Items.APPLE,2);
+                if(mode.startsWith("consume-loose"))held=AllItems.SAND_PAPER.asStack();
                 if(mode.startsWith("consume-polish")){
                     held=new ItemStack(AllItems.SAND_PAPER.get());fake.setItemInHand(InteractionHand.OFF_HAND,new ItemStack(AllItems.ROSE_QUARTZ.get(),2));
                     fake.getFoodData().setFoodLevel(7);fake.getFoodData().setSaturation(2);
@@ -53,13 +55,20 @@ public final class CreateDeployerJointSmoke {
                 }
                 if(mode.equals("place-oversized")){held.setCount(1024);held.set(DataComponents.CUSTOM_NAME,Component.literal("large hand component"));}
                 if(held.is(Items.NAME_TAG))held.set(DataComponents.CUSTOM_NAME,Component.literal("deployer named target"));fake.setItemInHand(InteractionHand.MAIN_HAND,held);fake.getInventory().setItem(37,new ItemStack(Items.IRON_CHESTPLATE));
-                if(mode.startsWith("name")||mode.startsWith("shear")||mode.equals("entity-conflict")||mode.startsWith("combat")){var sheep=EntityType.SHEEP.create(world);if(mode.equals("combat"))sheep.setHealth(1);sheep.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);check(world.addFreshEntity(sheep),"target sheep spawn");target=sheep;}
+                if(mode.startsWith("name")||mode.startsWith("shear")||mode.equals("entity-conflict")||mode.startsWith("combat")){var sheep=EntityType.SHEEP.create(world);if(!mode.startsWith("combat-live")&&mode.startsWith("combat"))sheep.setHealth(1);sheep.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);check(world.addFreshEntity(sheep),"target sheep spawn");target=sheep;}
+                if(mode.startsWith("feed")){
+                    var profile=new com.mojang.authlib.GameProfile(UUID.randomUUID(),"FeedRecipient");var human=new net.minecraft.server.level.ServerPlayer(world.getServer(),world,profile,net.minecraft.server.level.ClientInformation.createDefault());
+                    human.connection=new net.minecraft.server.network.ServerGamePacketListenerImpl(world.getServer(),new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND),human,net.minecraft.server.network.CommonListenerCookie.createInitial(profile,false));
+                    human.setPos(Vec3.atCenterOf(pos));human.getFoodData().setFoodLevel(7);human.getFoodData().setSaturation(2);human.getInventory().setItem(8,new ItemStack(Items.EMERALD,1024));world.addNewPlayer(human);target=human;
+                }
+                if(mode.startsWith("consume-loose")){var loose=new net.minecraft.world.entity.item.ItemEntity(world,pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5,new ItemStack(AllItems.ROSE_QUARTZ.get(),2));loose.setNoGravity(true);check(world.addFreshEntity(loose),"loose polish input spawn");target=loose;}
                 if(mode.startsWith("frame")){world.setBlock(pos.west(),Blocks.STONE.defaultBlockState(),3);var frame=new ItemFrame(world,pos,Direction.EAST);check(world.addFreshEntity(frame),"target frame spawn");target=frame;}
                 var items=body.getContraption().getStorage().getAllItemStorages().get(BlockPos.ZERO);
                 items.setStackInSlot(0,new ItemStack(Items.DIAMOND,7));
                 if(mode.equals("cargo-grab")||mode.equals("cargo-conflict"))fake.setItemInHand(InteractionHand.MAIN_HAND,ItemStack.EMPTY);
                 var cargoBefore=new ArrayList<ItemStack>();for(int slot=0;slot<items.getSlots();slot++)cargoBefore.add(items.getStackInSlot(slot).copy());
                 var before=CreateDeployerTransaction.hand(context,fake);
+                var humanBefore=target instanceof net.minecraft.server.level.ServerPlayer human?CreateHumanRestore.capture(human):null;
                 try(var session=CreateDeployerAudit.capture(context,pos,fake,punch?"PUNCH":"USE")){
                     if(mode.startsWith("cargo")){
                         String name=mode.equals("cargo-grab")||mode.equals("cargo-conflict")?"tryGrabbingItem":"tryDisposeOfExcess";
@@ -77,9 +86,13 @@ public final class CreateDeployerJointSmoke {
                 if(mode.equals("noop")){check(row==null,"idle/no-op activation invented a row");tested++;continue;}
                 check(row!=null,"native deployer action not captured: "+kind+"/"+mode);row.materializeSnapshots();var b=NbtSerde.fromSnbt(row.beBefore);var a=NbtSerde.fromSnbt(row.beAfter);
                 check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"deployer blamed its owner");check(CreateContraptionKind.id(row.source).equals(CreateContraptionSources.id(body)),"deployer root ID lost");
-                if(mode.equals("failure")||mode.equals("combat")){if(mode.equals("combat"))check(!target.isAlive(),"lethal attack fixture did not kill its target");check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
+                if(mode.equals("failure")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
+                check(a.getBoolean("Complete"),"capture incomplete: "+kind+"/"+mode+" reason="+a.getString("JointFailure"));
                 var plan=CreateTransferRollbackPlan.prepare(b,a);
-                if(mode.startsWith("combat-live"))check(target.isAlive()&&((LivingEntity)target).getHealth()<8&&a.getInt("JointFormat")==3,"nonlethal combat runtime was not captured");
+                if(mode.startsWith("combat")&&!mode.startsWith("combat-live")){check(!target.isAlive()&&a.getList("Targets",10).stream().anyMatch(t->((CompoundTag)t).getBoolean("Terminal")),"lethal activation was not captured");if(mode.contains("removed"))target.discard();}
+                if(mode.startsWith("feed")){var human=(net.minecraft.server.level.ServerPlayer)target;check(human.getFoodData().getFoodLevel()==11&&human.getStats().getValue(net.minecraft.stats.Stats.ITEM_USED.get(Items.APPLE))==1&&fake.getMainHandItem().getCount()==1,"native feed did not change recipient/counter/hand");}
+                if(mode.startsWith("consume-loose"))check(((net.minecraft.world.entity.item.ItemEntity)target).getItem().getCount()==1&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==1,"native loose polishing did not finish");
+                if(mode.startsWith("combat-live"))check(target.isAlive()&&((LivingEntity)target).getHealth()<8&&a.getInt("JointFormat")>=3,"nonlethal combat runtime was not captured");
                 if(mode.startsWith("consume-polish"))check(fake.getOffhandItem().getCount()==1&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==1,"native sandpaper consumption did not finish");
                 var noRuntime=a.copy();noRuntime.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateTransferRollbackPlan.prepare(b,noRuntime),"new-format action lost its living runtime");
                 var invalid=a.copy();invalid.getCompound("Hand").putUUID("StorageEntity",UUID.randomUUID());reject(()->CreateTransferRollbackPlan.prepare(b,invalid),"wrong hand identity accepted");
@@ -96,6 +109,11 @@ public final class CreateDeployerJointSmoke {
                 if(mode.startsWith("cargo"))check(!plan.cargo().isEmpty(),"hand/cargo exchange omitted mounted storage");
                 if(mode.equals("cargo-conflict"))items.setStackInSlot(0,new ItemStack(Items.EMERALD));
                 if(mode.equals("hand-conflict"))fake.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(Items.EMERALD));
+                if(mode.equals("combat-dead-conflict"))((LivingEntity)target).setHealth(2);
+                if(mode.equals("feed-stat-conflict"))((net.minecraft.server.level.ServerPlayer)target).awardStat(net.minecraft.stats.Stats.ITEM_USED.get(Items.APPLE));
+                if(mode.equals("feed-adv-conflict")){var human=(net.minecraft.server.level.ServerPlayer)target;var holder=world.getServer().getAdvancements().get(ResourceLocation.parse("minecraft:husbandry/plant_seed"));human.getAdvancements().award(holder,holder.value().criteria().keySet().iterator().next());}
+                if(mode.equals("feed-inventory-conflict"))((net.minecraft.server.level.ServerPlayer)target).getInventory().setItem(8,new ItemStack(Items.BARRIER));
+                if(mode.equals("consume-loose-conflict"))((net.minecraft.world.entity.item.ItemEntity)target).setItem(new ItemStack(Items.BARRIER));
                 if(mode.equals("combat-live-conflict"))((LivingEntity)target).setHealth(1);
                 if(mode.equals("consume-polish-conflict"))fake.getFoodData().setFoodLevel(9);
                 if(mode.equals("world-conflict"))world.setBlock(pos,Blocks.GOLD_BLOCK.defaultBlockState(),3);
@@ -108,7 +126,12 @@ public final class CreateDeployerJointSmoke {
                         try{done=(Boolean)step.invoke(job,world.getServer());}catch(InvocationTargetException e){if(!mode.endsWith("conflict"))throw new IllegalStateException(kind+"/"+mode,e.getCause());check(applied.getInt(job)==0,"deployer preflight conflict wrote hand");rejected=true;break;}
                         int total=plan.cargo().size()+plan.hands().size()+plan.blocks().size()+plan.targets().size();
                         if(mode.contains("cancel")&&!canceled&&applied.getInt(job)>=(mode.endsWith("all")?total:1)){cancel.invoke(job,"deployer partial cancellation");canceled=true;}
-                        if((mode.equals("locks")||mode.equals("name-locks"))&&!locked&&applied.getInt(job)>0){CartAuditContext.restoring(false);try{fake.getInventory().setItem(1,new ItemStack(Items.EMERALD));check(!fake.getMainHandItem().is(Items.EMERALD),"reserved fake inventory changed");if(mode.equals("locks"))check(!world.setBlock(pos,Blocks.GOLD_BLOCK.defaultBlockState(),3),"reserved deployer target changed");
+                        if((mode.equals("locks")||mode.equals("name-locks")||mode.equals("feed-locks"))&&!locked&&applied.getInt(job)>0){CartAuditContext.restoring(false);try{fake.getInventory().setItem(1,new ItemStack(Items.EMERALD));check(!fake.getMainHandItem().is(Items.EMERALD),"reserved fake inventory changed");if(mode.equals("locks"))check(!world.setBlock(pos,Blocks.GOLD_BLOCK.defaultBlockState(),3),"reserved deployer target changed");
+                            if(target instanceof net.minecraft.server.level.ServerPlayer human){
+                                var stats=CreateHumanRestore.capture(human);human.awardStat(net.minecraft.stats.Stats.ITEM_USED.get(Items.APPLE));
+                                var holder=world.getServer().getAdvancements().get(ResourceLocation.parse("minecraft:husbandry/plant_seed"));human.getAdvancements().award(holder,holder.value().criteria().keySet().iterator().next());
+                                check(CreateHumanRestore.capture(human).equals(stats),"reserved recipient statistics/advancement changed");
+                            }
                             if(target!=null){target.discard();check(!target.isRemoved(),"reserved entity removed");
                             int tickBefore=target.tickCount;world.tickNonPassenger(target);check(target.tickCount==tickBefore,"reserved entity tick advanced between restore steps");
                             check(!target.hurt(world.damageSources().generic(),100),"reserved entity accepted environmental damage");
@@ -117,11 +140,14 @@ public final class CreateDeployerJointSmoke {
                     }
                     if(mode.endsWith("conflict"))check(rejected,"deployer conflict accepted");
                     else if(canceled){check(CreateDeployerTransaction.hand(context,fake).equals(a.getCompound("Hand")),"deployer compensation lost hand");for(var u:plan.blocks())check(CreateStructuralAudit.world(world,BlockPos.of(u.after().getLong("Pos"))).equals(u.after()),"deployer compensation lost world");
-                        for(var u:plan.targets()){var expected=u.after();var live=world.getEntity(expected.getUUID("Entity"));check(expected.getBoolean("Exists")?live!=null&&!live.isRemoved()&&NbtSerde.snapshotEntity(world,live).equals(expected.getCompound("NBT")):live==null||live.isRemoved(),"deployer compensation lost entity/drop");
+                        for(var u:plan.targets()){var expected=u.after();var live=world.getEntity(expected.getUUID("Entity"));check(expected.getBoolean("Terminal")?mode.contains("removed")?live==null||live.isRemoved():live instanceof LivingEntity&&!live.isAlive():expected.getBoolean("Exists")?live!=null&&!live.isRemoved()&&CreateLivingRuntime.entitySnapshot(world,live).equals(expected.getCompound("NBT")):live==null||live.isRemoved(),"deployer compensation lost entity/drop");
                             if(expected.contains("LivingRuntime",10))check(live instanceof LivingEntity living&&CreateLivingRuntime.matches(living,fake,expected.getCompound("LivingRuntime")),"deployer compensation lost combat runtime");}}
-                    else{check(field(type,"committed").getBoolean(job),"deployer transaction not committed");check(CreateDeployerTransaction.hand(context,fake).equals(before),"deployer undo lost hand/components");for(var u:plan.blocks())check(CreateStructuralAudit.world(world,BlockPos.of(u.before().getLong("Pos"))).equals(u.before()),"deployer undo lost world");if(mode.startsWith("name"))check(!target.hasCustomName(),"name target not undone");if(mode.startsWith("frame")&&!mode.startsWith("frame-break"))check(((ItemFrame)target).getItem().isEmpty(),"frame target not undone");if(mode.equals("locks")||mode.equals("name-locks"))check(locked,"deployer locks not tested");
+                    else{check(field(type,"committed").getBoolean(job),"deployer transaction not committed");check(CreateDeployerTransaction.hand(context,fake).equals(before),"deployer undo lost hand/components");for(var u:plan.blocks())check(CreateStructuralAudit.world(world,BlockPos.of(u.before().getLong("Pos"))).equals(u.before()),"deployer undo lost world");if(mode.startsWith("name"))check(!target.hasCustomName(),"name target not undone");if(mode.startsWith("frame")&&!mode.startsWith("frame-break"))check(((ItemFrame)target).getItem().isEmpty(),"frame target not undone");if(mode.equals("locks")||mode.equals("name-locks")||mode.equals("feed-locks"))check(locked,"deployer locks not tested");
                         if(mode.equals("name-move"))check(target.position().equals(pose),"data-only undo teleported moving target");
                         if(mode.startsWith("shear"))check(!((Sheep)target).isSheared(),"native shear not undone");
+                        if(mode.startsWith("feed"))check(CreateHumanRestore.capture((net.minecraft.server.level.ServerPlayer)target).equals(humanBefore)&&((net.minecraft.server.level.ServerPlayer)target).getFoodData().getFoodLevel()==7,"recipient feed was not undone");
+                        if(mode.startsWith("combat")&&!mode.startsWith("combat-live"))check(world.getEntity(target.getUUID()) instanceof LivingEntity living&&living.isAlive()&&living.getHealth()==1,"lethal target was not revived");
+                        if(mode.startsWith("consume-loose"))check(world.getEntity(target.getUUID()) instanceof net.minecraft.world.entity.item.ItemEntity item&&item.getItem().getCount()==2&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==0,"loose world input was not returned");
                         if(mode.startsWith("combat-live"))check(((LivingEntity)target).getHealth()==8&&((LivingEntity)target).getLastHurtByMob()==null&&((LivingEntity)target).getLastHurtMob()==null,"combat health/references were not undone");
                         if(mode.startsWith("consume-polish"))check(fake.getOffhandItem().getCount()==2&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==0&&fake.getFoodData().getFoodLevel()==7&&fake.getCooldowns().isOnCooldown(Items.ENDER_PEARL),"consumption runtime was not undone");
                         if(mode.startsWith("frame-break"))check(world.getEntity(target.getUUID()) instanceof ItemFrame,"removed frame UUID not restored");

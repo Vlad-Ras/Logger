@@ -34,11 +34,15 @@ public final class CreateCreativeTransferPlan {
 
     /** Pure native take/return only. Item use, block conversion and fluid/bucket conversion need other contracts. */
     public static void validateHand(CompoundTag before,CompoundTag after,List<CreateTransferRollbackPlan.CargoUndo> cargo,List<IO> creative){
+        validateHand(before,after,cargo,creative,new net.minecraft.nbt.ListTag());
+    }
+    public static void validateHand(CompoundTag before,CompoundTag after,List<CreateTransferRollbackPlan.CargoUndo> cargo,List<IO> creative,net.minecraft.nbt.ListTag uses){
         String operation=creative.getFirst().address().getString("Operation");
         if(!Set.of("deployer_take","deployer_return").contains(operation))throw new IllegalStateException("Нет отдельного native take/return контракта creative IO");
         var balance=new HashMap<CompoundTag,Long>();
         for(var raw:before.getList("Inventory",10))addItem(balance,(CompoundTag)raw,-1);
         for(var raw:after.getList("Inventory",10))addItem(balance,(CompoundTag)raw,1);
+        for(var raw:uses){var use=(CompoundTag)raw;for(var item:use.getList("Before",10))addItem(balance,(CompoundTag)item,1);for(var item:use.getList("After",10))addItem(balance,(CompoundTag)item,-1);}
         for(var cell:cargo){
             if(!cell.address().getString("Kind").equals("item")||!cell.address().getString("Operation").equals(operation))throw new IllegalStateException("В creative обмене руки обнаружен другой путь груза");
             addItem(balance,cell.before(),-1);addItem(balance,cell.after(),1);

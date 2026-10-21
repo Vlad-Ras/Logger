@@ -15,6 +15,7 @@ import org.spongepowered.asm.mixin.injection.Coerce;
 public abstract class DeployerMovementAuditMixin {
     @WrapOperation(method = {"visitNewPosition", "tick"}, at = @At(value = "INVOKE", target = "Lcom/simibubi/create/content/kinetics/deployer/DeployerMovementBehaviour;activate(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/core/BlockPos;Lcom/simibubi/create/content/kinetics/deployer/DeployerFakePlayer;Lcom/simibubi/create/content/kinetics/deployer/DeployerBlockEntity$Mode;)V"), require = 1)
     private void avilixlogger$activate(DeployerMovementBehaviour actor, MovementContext context, BlockPos pos, DeployerFakePlayer player, @Coerce Object mode, Operation<Void> original) {
+        if(com.roften.avilixlogger.core.CartRestoreLocks.handlerLocked(player.getAdvancements())||com.roften.avilixlogger.core.CartRestoreLocks.handlerLocked(player.getStats())||com.roften.avilixlogger.core.CartRestoreLocks.resourceLocked("create-score:"+player.getScoreboardName()))return;
         CreateDeployerAudit.Session session;
         try { session = CreateDeployerAudit.begin(context, pos, player, ((Enum<?>)mode).name()); }
         catch (Throwable failure) {

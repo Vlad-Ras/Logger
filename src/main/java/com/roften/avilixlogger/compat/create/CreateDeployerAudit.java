@@ -40,7 +40,6 @@ public final class CreateDeployerAudit {
         }
     }
     public static void attacked(Entity entity, float healthBefore, float absorptionBefore, Vec3 motionBefore, boolean aliveBefore) {
-        if(entity instanceof LivingEntity&&!entity.isAlive())CreateDeployerTransaction.unsupported("Смерть живой цели требует отдельного возврата трупа, AI и внешних эффектов смерти");
         boolean changed = entity.isRemoved() || entity.isAlive() != aliveBefore || !entity.getDeltaMovement().equals(motionBefore);
         float damage = 0;
         if (entity instanceof LivingEntity living) {

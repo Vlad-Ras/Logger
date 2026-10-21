@@ -28,13 +28,21 @@ public final class CreateLivingRuntime {
         public void run(Runnable action){var previous=BOUND.get();BOUND.set(this);try{action.run();}finally{if(previous==null)BOUND.remove();else BOUND.set(previous);}}
     }
     public static Bindings bind(LivingEntity actor,Collection<CompoundTag> states){
+        return bind(actor,states,Map.of());
+    }
+    public static Bindings bind(LivingEntity actor,Collection<CompoundTag> states,Map<UUID,Entity> candidates){
         var bindings=new Bindings(actor);
         for(var state:states){if(state.isEmpty())continue;var refs=new ArrayList<CompoundTag>();
             for(String key:List.of("LastMob","LastVictim","LastPlayer","MobTarget"))refs.add(state.getCompound(key));
             var sources=new ArrayList<CompoundTag>();sources.add(state.getCompound("LastSource"));
             for(var raw:state.getCompound("Tracker").getList("Entries",10))sources.add(((CompoundTag)raw).getCompound("Source"));
             for(var source:sources){refs.add(source.getCompound("Direct"));refs.add(source.getCompound("Causing"));}
-            for(var ref:refs)if(!ref.isEmpty())bindings.values.put(ref.copy(),reference(ref,actor));
+            for(var ref:refs)if(!ref.isEmpty()){
+                Entity entity=candidates.get(ref.hasUUID("UUID")?ref.getUUID("UUID"):null);
+                if(ref.getBoolean("Actor")||entity==null)entity=reference(ref,actor);
+                if(!entity.level().dimension().location().toString().equals(ref.getString("Dimension"))||!BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString().equals(ref.getString("Type")))throw new IllegalStateException("Кандидат цели сменил тип или измерение");
+                bindings.values.put(ref.copy(),entity);
+            }
         }
         return bindings;
     }
@@ -77,6 +85,10 @@ public final class CreateLivingRuntime {
         if(stack.isEmpty()||stack.getCount()!=tag.getInt("count"))
             throw new IllegalStateException("Предмет runtime не прочитан полностью");
         return stack;
+    }
+    public static CompoundTag entitySnapshot(ServerLevel level,Entity entity){
+        var previous=SAVING.get();if(entity instanceof LivingEntity living)SAVING.set(living);
+        try{return NbtSerde.snapshotEntity(level,entity);}finally{if(previous==null)SAVING.remove();else SAVING.set(previous);}
     }
     public static boolean savingInventory(Player player){return SAVING.get()==player;}
     /** Same slot addresses as Inventory.save, with expanded counts preserved. */
@@ -121,10 +133,18 @@ public final class CreateLivingRuntime {
         // make the next snapshot appear to contain a new attribute definition.
         var persistent=new CompoundTag();var previous=SAVING.get();SAVING.set(entity);
         try{entity.addAdditionalSaveData(persistent);}finally{if(previous==null)SAVING.remove();else SAVING.set(previous);}
-        tag.put("Persistent",persistent);
+        normalize(persistent);tag.put("Persistent",persistent);
         tag.put("Attributes",attributes);if(entity instanceof Player player){var food=new CompoundTag();player.getFoodData().addAdditionalSaveData(food);tag.put("Food",food);}
         if(entity instanceof Mob mob){tag.put("MobTarget",reference(mob.getTarget(),actor));tag.putBoolean("Aggressive",mob.isAggressive());}
         if(tag.sizeInBytes()>2*1024*1024)throw new IllegalStateException("Runtime активатора превышает 2 MiB");return tag;
+    }
+    /** Native attribute maps do not promise iteration order after an entity is recreated. */
+    public static void normalize(CompoundTag persistent){
+        if(!persistent.contains("attributes",9))return;var sorted=new ListTag();
+        for(var raw:persistent.getList("attributes",10).stream().sorted(Comparator.comparing(t->((CompoundTag)t).getString("id"))).toList()){
+            var row=((CompoundTag)raw).copy();if(row.contains("modifiers",9)){var modifiers=new ListTag();row.getList("modifiers",10).stream().sorted(Comparator.comparing(t->((CompoundTag)t).getString("id"))).forEach(t->modifiers.add(t.copy()));row.put("modifiers",modifiers);}sorted.add(row);
+        }
+        persistent.put("attributes",sorted);
     }
     private record AttributeState(AttributeInstance instance,double base,List<AttributeModifier> permanent,List<AttributeModifier> temporary){}
     private static List<AttributeState> decode(LivingEntity entity,LivingEntity actor,CompoundTag tag){
@@ -160,7 +180,8 @@ public final class CreateLivingRuntime {
         // Inventory.load uses the vanilla count-limited codec. Decode these stacks
         // separately, after native data is loaded, without changing the saved snapshot.
         if(entity instanceof Player)nativeData.put("Inventory",new ListTag());
-        entity.readAdditionalSaveData(nativeData);
+        if(entity instanceof net.minecraft.server.level.ServerPlayer&&!(entity instanceof FakePlayer))((CreateHumanRuntimeAccess)entity).avilixlogger$loadPlayerRuntime(nativeData);
+        else entity.readAdditionalSaveData(nativeData);
         for(var state:states){state.instance.removeModifiers();state.instance.setBaseValue(state.base);for(var modifier:state.permanent)state.instance.addPermanentModifier(modifier);for(var modifier:state.temporary)state.instance.addTransientModifier(modifier);}
         // Native loading clamps health before transient max-health modifiers are back.
         // Reapply these values only after restoring the complete attribute set.
@@ -191,7 +212,7 @@ public final class CreateLivingRuntime {
      * combat entries still have to match. An intervening action is a conflict. */
     public static CompoundTag project(CompoundTag original,int tick){
         if(!original.contains("Tick",3)||tick<original.getInt("Tick"))throw new IllegalStateException("Цель была перезагружена после действия активатора");
-        var tag=original.copy();long elapsed=(long)tick-original.getInt("Tick");tag.putInt("Tick",tick);
+        var tag=original.copy();normalize(tag.getCompound("Persistent"));long elapsed=(long)tick-original.getInt("Tick");tag.putInt("Tick",tick);
         for(String field:List.of("AttackStrength","NoAction"))tag.putInt(field,(int)Math.min(Integer.MAX_VALUE,(long)original.getInt(field)+elapsed));
         for(String field:List.of("HurtTime","Invulnerable","LastPlayerTime"))tag.putInt(field,(int)Math.max(0,(long)original.getInt(field)-elapsed));
         if(elapsed>original.getInt("LastPlayerTime"))tag.put("LastPlayer",new CompoundTag());

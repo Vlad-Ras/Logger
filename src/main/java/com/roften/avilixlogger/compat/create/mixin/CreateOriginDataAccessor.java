@@ -7,4 +7,5 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 @Mixin(Entity.class)
 public interface CreateOriginDataAccessor extends CreateOriginDataAccess {
     @Accessor("persistentData") CompoundTag avilixlogger$originData();
+    @Accessor("persistentData") void avilixlogger$originData(CompoundTag data);
 }

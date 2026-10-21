@@ -106,7 +106,7 @@ public final class CreateTransferRollbackCoordinator {
     /** Package-visible so the dev server can exercise the same transaction without AuthCore bypass. */
     static final class Job {
         final CommandSourceStack source;final CreateTransferRollbackPlan plan;final long entry;
-        final LogStorage history;final List<Endpoint> endpoints=new ArrayList<>();int phase,index,applied,verify;String failure;boolean committed;
+        Map<UUID,net.minecraft.world.entity.Entity> deployerCandidates;final LogStorage history;final List<Endpoint> endpoints=new ArrayList<>();int phase,index,applied,verify;String failure;boolean committed;
         Job(CommandSourceStack source,CreateTransferRollbackPlan plan,long entry){this(source,plan,entry,null);}
         private Job(CommandSourceStack source,CreateTransferRollbackPlan plan,long entry,LogStorage history){this.source=source;this.plan=plan;this.entry=entry;this.history=history;}
         void cancel(String reason){if(!committed&&phase!=4){failure=reason;phase=4;}}
@@ -127,11 +127,11 @@ public final class CreateTransferRollbackCoordinator {
                     endpoints.add(new Endpoint(){public void verifyAfter(){restore.verifyAfter();}public void apply(){restore.apply();}public void verifyBefore(){restore.verifyBefore();}public void compensate(){restore.compensate();}});index++;return false;
                 }
                 int hands=world-plan.world().size();
-                if(hands<plan.hands().size()){endpoints.add(CreateDeployerRestore.hand(server,plan.hands().get(hands)));index++;return false;}
+                if(hands<plan.hands().size()){if(deployerCandidates==null)deployerCandidates=CreateDeployerRestore.prepareTargets(server,plan.targets());endpoints.add(CreateDeployerRestore.hand(server,plan.hands().get(hands),deployerCandidates));index++;return false;}
                 int blocks=hands-plan.hands().size();
                 if(blocks<plan.blocks().size()){endpoints.add(CreateDeployerRestore.block(server,plan.blocks().get(blocks)));index++;return false;}
                 int targets=blocks-plan.blocks().size();
-                if(targets<plan.targets().size()){endpoints.add(CreateDeployerRestore.target(server,plan.targets().get(targets),plan.hands().getFirst().after()));index++;return false;}
+                if(targets<plan.targets().size()){endpoints.add(CreateDeployerRestore.target(server,plan.targets().get(targets),plan.hands().getFirst().after(),deployerCandidates));index++;return false;}
                 int creative=targets-plan.targets().size();
                 if(creative<plan.creative().size()){endpoints.add(new CreateCreativeRestore(server,plan.creative().get(creative)));index++;return false;}
                 int worldCreative=creative-plan.creative().size();

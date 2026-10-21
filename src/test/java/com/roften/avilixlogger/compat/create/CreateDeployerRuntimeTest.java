@@ -69,6 +69,18 @@ public final class CreateDeployerRuntimeTest {
             var cooldowns=new CompoundTag();cooldowns.putInt("Tick",0);cooldowns.put("Entries",new ListTag());rt.put("Cooldowns",cooldowns);
         }
         check(CreateDeployerRollbackPlan.prepare(before,after).hands().size()==1,"complete runtime hand rejected");
+        var old4=before.copy();var now4=after.copy();
+        for(var tag:List.of(old4,now4)){
+            tag.putInt("JointFormat",4);for(String key:List.of("WorldCount","TargetCount","CargoCount","UseCount"))tag.putInt(key,0);tag.put("Uses",new ListTag());
+            var progress=new CompoundTag();progress.putInt("Format",1);progress.put("Stats",new ListTag());progress.put("Advancements",new ListTag());progress.put("Recipes",new CompoundTag());
+            var scores=new CompoundTag();scores.putString("Holder","[Deployer]");scores.put("Objectives",new ListTag());
+            tag.getCompound("Hand").getCompound("Runtime").put("Progress",progress);tag.getCompound("Hand").getCompound("Runtime").put("Scores",scores);
+        }
+        check(CreateDeployerRollbackPlan.prepare(old4,now4).hands().size()==1,"new complete manifest rejected");
+        for(String key:List.of("WorldCount","TargetCount","CargoCount","UseCount","Uses")){var broken=now4.copy();broken.remove(key);reject(()->CreateDeployerRollbackPlan.prepare(old4,broken),"missing manifest marker accepted: "+key);}
+        var wrongCount=now4.copy();wrongCount.putInt("TargetCount",1);reject(()->CreateDeployerRollbackPlan.prepare(old4,wrongCount),"lost target accepted");
+        for(String key:List.of("Progress","Scores")){var broken=now4.copy();broken.getCompound("Hand").getCompound("Runtime").remove(key);reject(()->CreateDeployerRollbackPlan.prepare(old4,broken),"missing progression accepted: "+key);}
+        var wrongStats=now4.getCompound("Hand").getCompound("Runtime").getCompound("Progress").copy();var text=new ListTag();text.add(StringTag.valueOf("bad"));wrongStats.put("Stats",text);reject(()->CreatePlayerProgress.validate(wrongStats),"invalid stats list silently became empty");
         after.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateDeployerRollbackPlan.prepare(before,after),"new format accepted legacy partial runtime");
     }
     private static CompoundTag manifest(){

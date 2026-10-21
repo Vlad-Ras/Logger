@@ -19,12 +19,16 @@ public abstract class DeployerRuntimeMixin implements CreateDeployerRuntimeAcces
         if(spawnedItemEffects!=null&&!spawnedItemEffects.isEmpty())tag.put("Effects",com.roften.avilixlogger.core.NbtSerde.snapshotItemStack(spawnedItemEffects,((DeployerFakePlayer)(Object)this).registryAccess()));
         var self=(DeployerFakePlayer)(Object)this;tag.put("Living",CreateLivingRuntime.capture(self,self));
         tag.put("Cooldowns",((CreateCooldownRuntimeAccess)self.getCooldowns()).avilixlogger$cooldownRuntime());
+        tag.put("Progress",com.roften.avilixlogger.compat.create.CreatePlayerProgress.capture(self));
+        tag.put("Scores",com.roften.avilixlogger.compat.create.CreateScoreRuntime.capture(self));
         return tag;
     }
     public void avilixlogger$deployerRuntime(CompoundTag tag){
         var self=(DeployerFakePlayer)(Object)this;
         if(tag.contains("Living",10))CreateLivingRuntime.restore(self,self,tag.getCompound("Living"));
         if(tag.contains("Cooldowns",10))((CreateCooldownRuntimeAccess)self.getCooldowns()).avilixlogger$cooldownRuntime(tag.getCompound("Cooldowns"));
+        if(tag.contains("Progress",10))com.roften.avilixlogger.compat.create.CreatePlayerProgress.restore(self,tag.getCompound("Progress"));
+        if(tag.contains("Scores",10))com.roften.avilixlogger.compat.create.CreateScoreRuntime.restore(self,tag.getCompound("Scores"));
         placedTracks=tag.getBoolean("PlacedTracks");
         blockBreakingProgress=tag.contains("BreakingPos",4)?Pair.of(BlockPos.of(tag.getLong("BreakingPos")),tag.getFloat("BreakingProgress")):null;
         spawnedItemEffects=com.roften.avilixlogger.core.NbtSerde.readItemStack(tag.getCompound("Effects"),((DeployerFakePlayer)(Object)this).registryAccess());
