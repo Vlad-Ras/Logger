@@ -26,10 +26,11 @@ public final class CreateTrainRepresentationState {
         try{tag.put("Native",carriage.write(palette,level.registryAccess()));}finally{angles.forEach(CreateOrientationAccess::avilixlogger$forceAngle);}
         palette.write(tag);tag.putInt("Format",1);tag.putUUID("Train",carriage.train.id);tag.putUUID("Carriage",((ContraptionIdentity)carriage).avilixlogger$identity());tag.putInt("Index",index);
         tag.putInt("CargoVersion",carriage.storage.getVersion());
-        prepare(tag);return tag;
+        prepare(tag,false);return tag;
     }
     /** Pure preparation for a future reserved representation restore, also accepts unloaded dimensions. */
-    public static Prepared prepare(CompoundTag tag) {
+    public static Prepared prepare(CompoundTag tag) {return prepare(tag,true);}
+    private static Prepared prepare(CompoundTag tag,boolean detach) {
         if(tag.getInt("Format")!=1||!tag.hasUUID("Train")||!tag.hasUUID("Carriage")||!tag.contains("Index",3)||tag.getInt("Index")<0||tag.getInt("Index")>=64||!tag.contains("CargoVersion",3)||!tag.contains("Native",10)||tag.sizeInBytes()>128L*1024*1024)
             throw new IllegalStateException("Неполный снимок представлений поезда");
         var nativeData=tag.getCompound("Native");
@@ -40,7 +41,7 @@ public final class CreateTrainRepresentationState {
         var seen=new HashSet<Integer>();for(var raw:positions){var position=(CompoundTag)raw;int dim=position.getInt("Dim");
             if(!position.contains("Dim",3)||dim<0||dim>=palette.size()||!seen.add(dim))throw new IllegalStateException("Повреждён адрес представления вагона");
         }
-        var dimensionsTag=new CompoundTag();dimensionsTag.put("DimensionPalette",palette.copy());
-        return new Prepared(tag.getUUID("Train"),tag.getUUID("Carriage"),tag.getInt("Index"),nativeData.copy(),dimensionsTag);
+        var dimensionsTag=new CompoundTag();dimensionsTag.put("DimensionPalette",detach?palette.copy():palette);
+        return new Prepared(tag.getUUID("Train"),tag.getUUID("Carriage"),tag.getInt("Index"),detach?nativeData.copy():nativeData,dimensionsTag);
     }
 }

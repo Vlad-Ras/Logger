@@ -53,7 +53,7 @@ public final class CreateLifecycleAudit {
             else tag.putString("TrainRepresentationsFailure","У представления нет активного payload или связи с составом");
         }
         if(tag.sizeInBytes()>128L*1024*1024)throw new IllegalStateException("Снимок конструкции превышает 128 MiB");
-        return tag.copy();
+        return tag; // Every child was captured into fresh NBT above; do not duplicate the full carriage again.
     }
     public static ListTag links(AbstractContraptionEntity entity){
         var links=new ListTag();

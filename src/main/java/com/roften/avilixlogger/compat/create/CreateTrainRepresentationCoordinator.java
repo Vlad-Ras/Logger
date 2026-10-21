@@ -42,7 +42,7 @@ public final class CreateTrainRepresentationCoordinator {
                 if(request!=generation||!Objects.equals(REQUESTS.get(actor),token))return;REQUESTS.remove(actor);
                 if(!CreateCartAudit.enabled()||source.getServer().getPlayerList().getPlayer(actor)!=player)return;
                 PREVIEWS.put(actor,new Preview(train,entry,System.currentTimeMillis()+120000));
-                source.sendSystemMessage(Component.literal("Вагон "+prepared.state.carriage()+": проверено измерений "+prepared.bodies.size()+". Восстановятся отсутствующие представления при неизменных позициях и грузе. Загрузите целевые чанки. Подтвердить: /log cart confirm-representations (2 минуты)."));
+                source.sendSystemMessage(Component.literal("Вагон "+prepared.carriage+": проверено измерений "+prepared.bodies.size()+". Восстановятся отсутствующие представления при неизменных позициях и грузе. Загрузите целевые чанки. Подтвердить: /log cart confirm-representations (2 минуты)."));
             });}catch(Exception failure){source.getServer().execute(()->{if(!Objects.equals(REQUESTS.get(actor),token))return;REQUESTS.remove(actor);error(source,failure);});}
         });
     }

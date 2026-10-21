@@ -34,7 +34,7 @@ public final class CreateTrainRollbackSmoke {
         @SuppressWarnings("unchecked")var manager=(net.minecraft.world.level.entity.PersistentEntitySectionManager<net.minecraft.world.entity.Entity>)managerField.get(world);
         for(int x=0;x<3;x++)manager.updateChunkStatus(new net.minecraft.world.level.ChunkPos(pos.east(x*8)),net.minecraft.world.level.entity.Visibility.TRACKED);
         int tested=0;
-        for(String mode:List.of("commit","cancel-world","cancel-spawn","cancel-registry","world-conflict","graph-conflict","graph-late","registry-conflict","apply-failure","locks","backwards","two-carriages","portal-refusal","unloaded-refusal","station-conflict","signal-busy","fluid-cargo","fluid-conflict","waiting-queue","schedule","signal-reserve","body-conflict","two-bogeys","representation-unloaded","representation-portal","representation-cancel","representation-cancel-portal","representation-cargo-conflict","representation-position-conflict","representation-graph-late","representation-uuid-conflict","representation-links-refusal","representation-missing-anchor","representation-locks")){
+        for(String mode:List.of("commit","cancel-world","cancel-spawn","cancel-registry","world-conflict","graph-conflict","graph-late","registry-conflict","apply-failure","locks","backwards","two-carriages","portal-refusal","unloaded-refusal","station-conflict","signal-busy","fluid-cargo","fluid-conflict","waiting-queue","schedule","signal-reserve","body-conflict","two-bogeys","representation-unloaded","representation-portal","representation-cancel","representation-cancel-portal","representation-cargo-conflict","representation-position-conflict","representation-graph-late","representation-uuid-conflict","representation-links-refusal","representation-missing-anchor","representation-locks","representation-spawn-reject","representation-spawn-throw")){
             var graph=new TrackGraph();var a=new TrackNode(new TrackNodeLocation(Vec3.atLowerCornerOf(pos.west(8)).add(.5,0,.5)).in(world),TrackGraph.nextNodeId(),new Vec3(0,1,0));var b=new TrackNode(new TrackNodeLocation(Vec3.atLowerCornerOf(pos.east(32)).add(.5,0,.5)).in(world),TrackGraph.nextNodeId(),new Vec3(0,1,0));graph.addNode(a);graph.addNode(b);var edge=new TrackEdge(a,b,null,TrackMaterial.ANDESITE);graph.putConnection(a,b,edge);graph.putConnection(b,a,new TrackEdge(b,a,null,TrackMaterial.ANDESITE));Create.RAILWAYS.putGraphWithDefaultGroup(graph);
             var carriages=new ArrayList<Carriage>();var constructions=new ArrayList<CarriageContraption>();var originals=new ArrayList<CarriageContraptionEntity>();var glues=new ArrayList<SuperGlueEntity>();var stationPos=pos.north(3);CreateStructuralAudit.Scope capture=null;Train train=null;Train competingTrain=null;
             try{
@@ -137,6 +137,12 @@ public final class CreateTrainRollbackSmoke {
         var prepared=new CreateTrainRepresentationRecovery.Prepared(snapshot);
         boolean old=CartAuditContext.restoring(true);CartAuditContext.rollbackActive=true;CreateTrainRepresentationRecovery.Job job=null;
         var original=carriage.getDimensional(world);boolean removeFirst=!portal||mode.contains("cancel-portal");
+        java.util.function.Consumer<net.neoforged.neoforge.event.entity.EntityJoinLevelEvent> listener=event->{
+            if(event.getEntity() instanceof CarriageContraptionEntity ce&&ce.getCarriage()==carriage){
+                if(mode.endsWith("spawn-reject"))event.setCanceled(true);
+                if(mode.endsWith("spawn-throw"))throw new IllegalStateException("injected representation join failure");
+            }
+        };
         try{
             if(removeFirst){((CartEntityAccess)first).avilixlogger$discardForRollback();original.entity=new java.lang.ref.WeakReference<>(null);}
             if(mode.endsWith("cargo-conflict"))snapshot.getCompound("Native").getList("EntityPositioning",10).getCompound(0).putInt("RoundTripConflict",1);
@@ -145,10 +151,11 @@ public final class CreateTrainRollbackSmoke {
             if(mode.endsWith("uuid-conflict")){var impostor=(CarriageContraptionEntity)net.minecraft.world.entity.EntityType.loadEntityRecursive(snapshot.getCompound("Native").getCompound("Entity"),world,e->e);check(impostor!=null&&world.addFreshEntity(impostor),"UUID conflict setup failed");originals.add(impostor);}
             try{job=new CreateTrainRepresentationRecovery.Job(world.getServer(),prepared);}catch(IllegalStateException failure){if(mode.endsWith("cargo-conflict")||mode.endsWith("position-conflict")||mode.endsWith("uuid-conflict"))return;throw failure;}
             check(!mode.endsWith("cargo-conflict")&&!mode.endsWith("position-conflict")&&!mode.endsWith("uuid-conflict"),"representation conflict accepted");
+            if(mode.contains("spawn-"))net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(listener);
             var spawned=CreateTrainRepresentationRecovery.Job.class.getDeclaredField("spawned");spawned.setAccessible(true);boolean canceled=false,late=false,locked=false;int calls=0;
             while(true){
                 boolean done;
-                try{done=job.step();}catch(IllegalStateException failure){if(mode.endsWith("graph-late")&&!late){late=true;canceled=true;job.cancel();continue;}throw failure;}
+                try{done=job.step();}catch(IllegalStateException failure){if((mode.endsWith("graph-late")||mode.contains("spawn-"))&&!late){late=true;canceled=true;job.cancel();continue;}throw failure;}
                 if(mode.endsWith("graph-late")&&!late&&spawned.getInt(job)>0)graph.disconnectNodes(a,b);
                 if(mode.contains("cancel")&&!canceled&&spawned.getInt(job)>0){job.cancel();canceled=true;}
                 if(mode.endsWith("locks")&&!locked){var before=CreateTrainRegistry.snapshot(train,world);CartAuditContext.restoring(false);try{train.tick(world);train.earlyTick(world);Create.RAILWAYS.removeTrain(train.id);check(Create.RAILWAYS.trains.get(train.id)==train&&CreateTrainRegistry.snapshot(train,world).equals(before),"representation train lock failed");check(CreateCargoAudit.restoreLocked(first),"existing portal representation not locked");}finally{CartAuditContext.restoring(true);}locked=true;}
@@ -157,8 +164,10 @@ public final class CreateTrainRollbackSmoke {
             check(job.committed()!=canceled,"representation commit/compensation mismatch");check(carriage.storage==cargo&&cargo.getVersion()==version,"representation replaced/reset cargo");
             for(var dimension:carriage.getPresentDimensions()){var entity=carriage.getDimensionalIfPresent(dimension).entity.get();if(canceled&&(removeFirst||!dimension.equals(world.dimension())))check(entity==null||entity.isRemoved(),"compensation retained a new representation");else check(entity!=null&&!entity.isRemoved()&&entity.getCarriage()==carriage&&entity.getContraption().getStorage()==cargo,"representation not bound to common cargo");}
             if(portal&&!removeFirst)check(world.getEntity(first.getUUID())==first&&original.entity.get()==first,"existing representation was replaced");
+            if(mode.contains("spawn-"))check(late,"spawn rejection/exception not exercised");
             if(mode.endsWith("graph-late"))check(late,"late graph conflict was not exercised");if(mode.endsWith("locks"))check(locked,"representation locks not exercised");
         }finally{
+            if(mode.contains("spawn-"))net.neoforged.neoforge.common.NeoForge.EVENT_BUS.unregister(listener);
             if(job!=null&&!job.committed()){job.cancel();int calls=0;while(!job.step())check(++calls<100,"cleanup compensation did not terminate");}
             for(var dimension:carriage.getPresentDimensions()){var entity=carriage.getDimensionalIfPresent(dimension).entity.get();if(entity!=null&&!entity.isRemoved()&&!originals.contains(entity))((CartEntityAccess)entity).avilixlogger$discardForRollback();}
             CartAuditContext.restoring(old);CartAuditContext.rollbackActive=false;CartRestoreLocks.clear();CartAuditContext.LOCKED_ENTITIES.clear();

@@ -20,11 +20,11 @@ public final class CreateTrainRepresentationRecovery {
     private record Body(ResourceKey<Level> dimension,CompoundTag nbt,StagedContraptionRestore staged) {}
     /** Detached preparation. No train, level, registry or chunk is consulted on this worker. */
     public static final class Prepared {
-        final CreateTrainRepresentationState.Prepared state;
-        final CompoundTag witness;
+        final UUID train,carriage;final int index;
+        final byte[] witness;
         final List<Body> bodies=new ArrayList<>();
         public Prepared(CompoundTag snapshot) {
-            state=CreateTrainRepresentationState.prepare(snapshot);witness=canonical(state);
+            var state=CreateTrainRepresentationState.prepare(snapshot);train=state.train();carriage=state.carriage();index=state.index();witness=fingerprint(state);
             var nativeData=state.nativeCarriage();var entity=nativeData.getCompound("Entity");
             if(!entity.getString("id").equals("create:carriage_contraption")||!entity.hasUUID("UUID")||!entity.hasUUID("TrainId")||!entity.getUUID("TrainId").equals(state.train())||!entity.contains("CarriageIndex",3)||entity.getInt("CarriageIndex")!=state.index())throw new IllegalStateException("Payload не принадлежит вагону");
             if(!nativeData.getCompound("Passengers").isEmpty()||!entity.getList("Passengers",10).isEmpty()||!entity.getCompound("Contraption").getList("SubContraptions",10).isEmpty())throw new IllegalStateException("Пассажиры и вложенные конструкции требуют совместного восстановления");
@@ -38,7 +38,8 @@ public final class CreateTrainRepresentationRecovery {
                 // Native Carriage owns the cargo. These stale entity copies must not be decoded into it.
                 body.getCompound("Contraption").remove("items");body.getCompound("Contraption").remove("fluids");
                 bytes+=body.sizeInBytes();if(bytes>128L*1024*1024)throw new IllegalStateException("Подготовка представлений превышает 128 MiB");
-                bodies.add(new Body(dimension,body,new StagedContraptionRestore(body)));
+                var address=new CompoundTag();address.putUUID("UUID",body.getUUID("UUID"));address.put("Pos",anchor.copy());
+                bodies.add(new Body(dimension,address,new StagedContraptionRestore(body)));
             }
         }
     }
@@ -54,16 +55,22 @@ public final class CreateTrainRepresentationRecovery {
         }
         var dimensions=new CompoundTag();positions.forEach(dimensions::put);tag.put("EntityPositioning",dimensions);return tag;
     }
+    private static byte[] fingerprint(CreateTrainRepresentationState.Prepared state) {
+        try{var digest=java.security.MessageDigest.getInstance("SHA-256");
+            try(var out=new java.io.DataOutputStream(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(),digest))){NbtIo.write(canonical(state),out);}
+            return digest.digest();
+        }catch(java.io.IOException|java.security.NoSuchAlgorithmException failure){throw new IllegalStateException("Не удалось проверить payload вагона",failure);}
+    }
     public static final class Job {
         final MinecraftServer server;final Prepared prepared;final Train train;final Carriage carriage;final int version;
         final Object graph;final long epoch;final Map<ResourceKey<Level>,CarriageContraptionEntity> existing=new HashMap<>();
         final List<Body> missing=new ArrayList<>();int index,spawned;boolean checked,committed,compensating;
         public Job(MinecraftServer server,Prepared prepared) {
             if(!server.isSameThread())throw new IllegalStateException("Job требует серверный поток");
-            this.server=server;this.prepared=prepared;var state=prepared.state;train=Create.RAILWAYS.trains.get(state.train());
-            if(train==null||state.index()>=train.carriages.size())throw new IllegalStateException("Состав отсутствует или изменён");
-            carriage=train.carriages.get(state.index());
-            if(!((ContraptionIdentity)carriage).avilixlogger$identity().equals(state.carriage()))throw new IllegalStateException("Вагон заменён");
+            this.server=server;this.prepared=prepared;train=Create.RAILWAYS.trains.get(prepared.train);
+            if(train==null||prepared.index>=train.carriages.size())throw new IllegalStateException("Состав отсутствует или изменён");
+            carriage=train.carriages.get(prepared.index);
+            if(!((ContraptionIdentity)carriage).avilixlogger$identity().equals(prepared.carriage))throw new IllegalStateException("Вагон заменён");
             graph=train.graph;epoch=graph instanceof CreateTrackEpoch access?access.avilixlogger$epoch():0;version=carriage.storage.getVersion();
             verifyPayload();
             for(var body:prepared.bodies) {
@@ -88,13 +95,16 @@ public final class CreateTrainRepresentationRecovery {
         }
         private ServerLevel level(Body body){var level=server.getLevel(body.dimension());if(level==null)throw new IllegalStateException("Измерение недоступно");return level;}
         private void unchanged() {
-            if(Create.RAILWAYS.trains.get(train.id)!=train||train.carriages.size()<=prepared.state.index()||train.carriages.get(prepared.state.index())!=carriage||carriage.train!=train||carriage.storage.getVersion()!=version)throw new IllegalStateException("Состав или груз изменён во время восстановления");
+            if(Create.RAILWAYS.trains.get(train.id)!=train||train.carriages.size()<=prepared.index||train.carriages.get(prepared.index)!=carriage||carriage.train!=train||carriage.storage.getVersion()!=version)throw new IllegalStateException("Состав или груз изменён во время восстановления");
             if(train.graph!=graph||graph instanceof com.simibubi.create.content.trains.graph.TrackGraph g&&(Create.RAILWAYS.trackNetworks.get(g.id)!=g||((CreateTrackEpoch)g).avilixlogger$epoch()!=epoch))throw new IllegalStateException("Путевой граф изменён во время восстановления");
+            for(var body:missing){var dimensional=carriage.getDimensionalIfPresent(body.dimension());var entity=dimensional==null?null:dimensional.entity.get();
+                if(dimensional==null||entity!=null&&!entity.isRemoved()&&entity!=body.staged().entity)throw new IllegalStateException("Представление заменено во время восстановления");
+            }
             for(var entry:existing.entrySet())if(entry.getValue().isRemoved()||server.getLevel(entry.getKey())==null||server.getLevel(entry.getKey()).getEntity(entry.getValue().getUUID())!=entry.getValue()||carriage.getDimensionalIfPresent(entry.getKey())==null||carriage.getDimensionalIfPresent(entry.getKey()).entity.get()!=entry.getValue())throw new IllegalStateException("Существующее представление заменено или выгружено");
         }
         private void verifyPayload(){
-            var actual=CreateTrainRepresentationState.prepare(CreateTrainRepresentationState.capture(carriage,server.overworld(),prepared.state.index()));
-            if(!canonical(actual).equals(prepared.witness))throw new IllegalStateException("Позиции, конструкция или груз вагона изменились после снимка");
+            var actual=CreateTrainRepresentationState.prepare(CreateTrainRepresentationState.capture(carriage,server.overworld(),prepared.index));
+            if(!java.security.MessageDigest.isEqual(fingerprint(actual),prepared.witness))throw new IllegalStateException("Позиции, конструкция или груз вагона изменились после снимка");
         }
         /** One bounded construction or publication step; caller retains reservations through compensation. */
         public boolean step() {
@@ -116,7 +126,9 @@ public final class CreateTrainRepresentationRecovery {
                 var body=missing.get(spawned);var entity=(CarriageContraptionEntity)body.staged().entity;var level=level(body);
                 if(level.getEntity(entity.getUUID())!=null)throw new IllegalStateException("UUID представления занят во время публикации");
                 // Count before calling mods: even an add callback that throws must be compensated.
-                spawned++;carriage.getDimensionalIfPresent(body.dimension()).entity=new WeakReference<>(entity);
+                var dimensional=carriage.getDimensionalIfPresent(body.dimension());var found=dimensional==null?null:dimensional.entity.get();
+                if(dimensional==null||found!=null&&!found.isRemoved())throw new IllegalStateException("Представление уже появилось во время публикации");
+                spawned++;dimensional.entity=new WeakReference<>(entity);
                 if(!level.addFreshEntity(entity))throw new IllegalStateException("Мир отклонил представление вагона");
                 carriage.getDimensionalIfPresent(body.dimension()).updateRenderedCutoff();entity.syncCarriage();return false;
             }
