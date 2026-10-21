@@ -28,6 +28,7 @@ public final class BackpackRecovery {
     private static final Map<String,Preview> PREVIEWS=new HashMap<>();
     private static final Set<UUID> BUSY=new HashSet<>();
     private static final ThreadPoolExecutor IO=new ThreadPoolExecutor(1,1,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(16),r->{Thread t=new Thread(r,"avilixlogger-backpack-recovery");t.setDaemon(true);return t;},new ThreadPoolExecutor.AbortPolicy());
+    static { IO.allowCoreThreadTimeOut(true); }
     private static String key(CommandSourceStack source){return source.getEntity()==null?"console":source.getEntity().getUUID().toString();}
     public static boolean query(CommandSourceStack source,Runnable action){
         try{IO.execute(action);return true;}catch(RejectedExecutionException e){source.sendFailure(Component.literal("Очередь запросов занята. Повторите позже."));return false;}

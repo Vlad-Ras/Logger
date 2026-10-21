@@ -22,7 +22,7 @@ public final class PendingLogStorage implements LogStorage {
 
     public PendingLogStorage() {
         this(configuredDirectory(), LoggerConfig.VALUES.clickHouseQueueCapacity.get(),
-                LoggerConfig.VALUES.clickHouseMaxQueuedPayloadMiB.get() * 1024L * 1024L,
+                LoggerConfig.journalQueueBytes(),
                 LoggerConfig.VALUES.clickHouseBatchSize.get(), LoggerConfig.VALUES.clickHouseFlushIntervalMs.get());
     }
 
@@ -100,7 +100,7 @@ public final class PendingLogStorage implements LogStorage {
             BatchLogStorage current = delegate;
             if (!initialized || current == null) { pause(250); continue; }
             try {
-                List<Path> pending = journal.pending();
+                List<Path> pending = journal.pending(64);
                 if (pending.isEmpty()) { pause(250); continue; }
                 for (Path file : pending) {
                     if (!sending) break;
@@ -141,7 +141,7 @@ public final class PendingLogStorage implements LogStorage {
     @Override public boolean awaitVisible(long deadline) throws InterruptedException {
         if (!queue.awaitEmpty(deadline)) return false;
         while (System.nanoTime() < deadline) {
-            try { if (initialized && delegate != null && journal.pending().isEmpty()) return true; }
+            try { if (initialized && delegate != null && journal.pending(1).isEmpty()) return true; }
             catch (java.io.IOException e) { throw new IllegalStateException("Журнал недоступен",e); }
             Thread.sleep(25);
         }

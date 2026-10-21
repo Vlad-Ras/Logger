@@ -54,6 +54,13 @@ public final class BackpackNativeSmoke {
 
                 var before=Augments.get(bag);var upgraded=before.setAugment(Augments.Position.FIRST,FunnellingAugment.TYPE.defaultSupplier().get()).setState(Augments.Position.FIRST,false);Augments.set(bag,upgraded);
                 index.snapshot(record,bag,world.registryAccess());
+                var firstSnapshot=record.snapshot.copy();
+                for(int i=0;i<100;i++){
+                    var extra=new ItemStack(ModItems.BACKPACK.get());extra.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,net.minecraft.network.chat.Component.literal("cached "+i));
+                    var entry=index.identify(extra,player.getUUID(),"cache_owner");index.snapshot(entry,extra,world.registryAccess());
+                }
+                check(!index.snapshot(record,bag,world.registryAccess())&&record.snapshot.equals(firstSnapshot),"comparison cache eviction invented a backpack change");
+                var cache=BackpackIndex.class.getDeclaredField("compared");cache.setAccessible(true);check(((Map<?,?>)cache.get(index)).size()<=64,"comparison cache retained every known backpack");
                 var decoded=BackpackRecovery.decode(world,record.snapshot);
                 check(id.equals(BackpackIds.id(decoded))&&shortId.equals(BackpackIds.shortId(decoded)),"snapshot identity");
                 check(Augments.get(decoded).equals(upgraded),"augment settings/state round trip");

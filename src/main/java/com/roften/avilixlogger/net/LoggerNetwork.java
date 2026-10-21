@@ -58,23 +58,32 @@ public final class LoggerNetwork {
         };
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 threads, threads,
-                0L, TimeUnit.MILLISECONDS,
+                30L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(queueSize),
                 tf,
                 new ThreadPoolExecutor.AbortPolicy()
         );
-        executor.prestartAllCoreThreads();
+        // Client registration must not allocate server query threads. Idle server workers
+        // also release their stacks; the same pool can serve a later integrated world.
+        executor.allowCoreThreadTimeOut(true);
         return executor;
     }
 
     private static final ThreadPoolExecutor PAGE_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-PAGE-", 2, 256);
     private static final ThreadPoolExecutor DETAILS_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-DETAILS-", 2, 128);
-    private static final ScheduledExecutorService GUI_WATCHDOG_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+    private static final java.util.concurrent.ScheduledThreadPoolExecutor GUI_WATCHDOG_EXECUTOR = createWatchdog();
+    private static java.util.concurrent.ScheduledThreadPoolExecutor createWatchdog() {
+        var executor = new java.util.concurrent.ScheduledThreadPoolExecutor(1, r -> {
         Thread t = new Thread(r, "AvilixLogger-GUI-WATCHDOG");
         t.setDaemon(true);
         t.setPriority(Thread.NORM_PRIORITY - 1);
         return t;
-    });
+        });
+        executor.setRemoveOnCancelPolicy(true);
+        executor.setKeepAliveTime(30, TimeUnit.SECONDS);
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
+    }
 
     private static final long GUI_PAGE_LONG_QUERY_WARNING_MS = 6_500L;
     private static final long GUI_DETAILS_LONG_QUERY_WARNING_MS = 4_500L;
@@ -135,9 +144,14 @@ public final class LoggerNetwork {
     }
 
     public static void shutdown() {
-        PAGE_EXECUTOR.shutdownNow();
-        DETAILS_EXECUTOR.shutdownNow();
-        GUI_WATCHDOG_EXECUTOR.shutdownNow();
+        // Static registration survives an integrated-server restart. Invalidate requests
+        // below, drop queued captures, and let idle workers time out instead of poisoning
+        // the pools permanently for the next world.
+        PAGE_EXECUTOR.getQueue().clear();
+        DETAILS_EXECUTOR.getQueue().clear();
+        for (Runnable task : GUI_WATCHDOG_EXECUTOR.getQueue()) {
+            if (task instanceof java.util.concurrent.Future<?> future) future.cancel(false);
+        }
         LAST_GUI_PAGE_REQUEST_AT.clear();
         LAST_GUI_PAGE_REQUEST_SIG.clear();
         LAST_GUI_DETAILS_REQUEST_AT.clear();
@@ -264,7 +278,7 @@ public final class LoggerNetwork {
 
         // Try to set network version if API supports it
         try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "5");
+            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "7");
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
@@ -274,6 +288,9 @@ public final class LoggerNetwork {
             if (rr instanceof PayloadRegistrar pr) r = pr;
         } catch (Throwable ignored) {}
 
+        r.playToServer(C2SLoggerActionPayload.TYPE,C2SLoggerActionPayload.STREAM_CODEC,LoggerActionNetwork::handle);
+        r.playToClient(S2CLoggerActionResultPayload.TYPE,S2CLoggerActionResultPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptActionResult",new Class<?>[]{S2CLoggerActionResultPayload.class},new Object[]{payload})));
+        r.playToServer(C2SCartActionPayload.TYPE,C2SCartActionPayload.STREAM_CODEC,CartHistoryNetwork::handleAction);
         r.playToServer(C2SCartHistoryPayload.TYPE, C2SCartHistoryPayload.STREAM_CODEC, CartHistoryNetwork::handle);
         r.playToClient(S2CCartHistoryPayload.TYPE, S2CCartHistoryPayload.STREAM_CODEC, (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptCart", new Class<?>[]{S2CCartHistoryPayload.class}, new Object[]{payload})));
 
@@ -455,6 +472,9 @@ public final class LoggerNetwork {
                     ServerPlayer livePlayer = playerRef.get();
                     if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
 
+                    if(!hasGuiPermission(livePlayer)&&!CartHistoryNetwork.detailsAllowed(livePlayer)){
+                        PacketDistributor.sendToPlayer(livePlayer,new S2CLogDetailsPayload(payload.entryId(),payload.mode(),List.of(Component.literal("Авторизация или права изменились"))));return;
+                    }
                     PacketDistributor.sendToPlayer(livePlayer,
                             new S2CLogDetailsPayload(payload.entryId(), payload.mode(), linesToSend));
                 });
@@ -626,7 +646,9 @@ public final class LoggerNetwork {
     private static void handleRequestDetails(C2SRequestDetailsPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> {
             if (!(ctx.player() instanceof ServerPlayer sp)) return;
-            if (!hasGuiPermission(sp)) return;
+            if (!hasGuiPermission(sp)&&!CartHistoryNetwork.detailsAllowed(sp)) {
+                PacketDistributor.sendToPlayer(sp,new S2CLogDetailsPayload(payload.entryId(),payload.mode(),List.of(Component.literal("Нет доступа к подробностям записи"))));return;
+            }
 
             long now = System.currentTimeMillis();
             String requestSig = payload.mode().name() + "|" + payload.entryId() + "|" + payload.dimHint() + "|" + (payload.rawIds() == null ? 0 : java.util.Arrays.hashCode(payload.rawIds()));
@@ -734,6 +756,7 @@ public final class LoggerNetwork {
 
         if (gf != null) {
             q.textFilter = gf.search() == null ? "" : gf.search().trim();
+            q.textAliases=gf.searchIds();q.blockAliases=gf.blockIds();
             q.planeOnly = gf.typePresetIdx() == 8;
             var constructionKind = com.roften.avilixlogger.core.CreateContraptionKind.forGuiPreset(gf.typePresetIdx());
             if ((gf.typePresetIdx() != 8 && gf.typePresetIdx() != 10 && constructionKind == com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN)
@@ -1062,7 +1085,9 @@ public final class LoggerNetwork {
         // If a single entry with BE snapshots, compute NBT diff.
         LogEntry first = es.get(0);
         List<Component> out = new ArrayList<>();
-        out.add(Component.literal("Details").withStyle(net.minecraft.ChatFormatting.GOLD));
+        out.add(Component.literal("Подробности").withStyle(net.minecraft.ChatFormatting.GOLD));
+        out.addAll(com.roften.avilixlogger.core.DeathLogDetails.describe(first));
+        out.addAll(com.roften.avilixlogger.core.SignLogDetails.describe(level,first));
 
         if (chronological != null) {
             out.add(Component.literal("Timeline:").withStyle(net.minecraft.ChatFormatting.YELLOW));
@@ -1173,9 +1198,9 @@ public final class LoggerNetwork {
     private static List<Component> buildJsonLines(ServerLevel level, long entryId) {
         if (level == null) return List.of(Component.literal("{}").withStyle(net.minecraft.ChatFormatting.GRAY));
         LogQuery q = new LogQuery();
-        q.dim = level.dimension().location().toString();
-        q.beforeId = entryId + 1;
-        q.limit = 64;
+        q.dim = "*";q.untilTs=Long.MAX_VALUE;
+        q.beforeId = entryId==Long.MAX_VALUE?0:entryId+1;
+        q.limit = 1;
         q.requireDetails = true;
         List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
         if (got == null || got.isEmpty()) {
@@ -1185,7 +1210,6 @@ public final class LoggerNetwork {
         if (got == null) got = List.of();
         LogEntry target = null;
         for (LogEntry e : got) if (e.id == entryId) { target = e; break; }
-        if (target == null) target = got.isEmpty() ? null : got.get(0);
         if (target == null) return List.of(Component.literal("{}").withStyle(net.minecraft.ChatFormatting.GRAY));
 
         java.util.LinkedHashMap<String, Object> m = new java.util.LinkedHashMap<>();
@@ -1211,8 +1235,11 @@ public final class LoggerNetwork {
         m.put("beAfter", target.beAfter);
 
         String json = com.roften.avilixlogger.core.GzipJson.GSON.toJson(m);
-        // Return as a single line component (clipboard-friendly). GUI will copy it.
-        return List.of(Component.literal(json).withStyle(net.minecraft.ChatFormatting.GRAY));
+        // One bounded component; never disconnect the player with an oversized JSON export.
+        Component result=Component.literal(json).withStyle(net.minecraft.ChatFormatting.GRAY);
+        if(Component.Serializer.toJson(result,level.registryAccess()).length()>S2CLogDetailsPayload.JSON_MAX_CHARS)
+            return List.of(Component.literal("JSON этой записи превышает размер экспорта. Восстановление штуковины из серверного снимка доступно отдельно.").withStyle(net.minecraft.ChatFormatting.RED));
+        return List.of(result);
     }
 
     private static void appendSignedList(List<Component> out, String prefix, java.util.LinkedHashMap<String, ItemAgg> map, net.minecraft.ChatFormatting color) {

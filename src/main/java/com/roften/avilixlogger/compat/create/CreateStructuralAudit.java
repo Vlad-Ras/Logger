@@ -69,6 +69,7 @@ public final class CreateStructuralAudit implements CreateStructuralHooks.Observ
     public static Scope captureRemoval(BlockEntity controller){var scope=capture(controller,false);scope.externalRemoval=true;return scope;}
     @Override public CreateStructuralHooks.Capture removal(Level world,BlockPos pos,net.minecraft.world.level.block.state.BlockState replacement){
         if(CURRENT.get()!=null||CartAuditContext.restoring()||!(world instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
+        if(!CreateCartAudit.enabled())return null;
         var state=level.getBlockState(pos);
         if(!state.hasBlockEntity()||state.getBlock()==replacement.getBlock())return null;
         var controller=level.getBlockEntity(pos);

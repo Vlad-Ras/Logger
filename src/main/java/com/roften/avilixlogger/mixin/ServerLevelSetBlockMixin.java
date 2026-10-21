@@ -38,7 +38,7 @@ public abstract class ServerLevelSetBlockMixin {
             at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/chunk/LevelChunk;setBlockState(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Z)Lnet/minecraft/world/level/block/state/BlockState;"), require = 1)
     private BlockState avilixlogger$blockCallbacks(LevelChunk chunk, BlockPos pos, BlockState state, boolean moving,
                                                     Operation<BlockState> original) {
-        if (CauseContext.peek() == null || avilixlogger$explicitMechanism()) return original.call(chunk, pos, state, moving);
+        if (!((Object)this instanceof ServerLevel) || CartAuditContext.restoring() || CauseContext.peek() == null || avilixlogger$explicitMechanism()) return original.call(chunk, pos, state, moving);
         try (var scope = CauseContext.unattributed()) { return original.call(chunk, pos, state, moving); }
     }
 
@@ -47,7 +47,7 @@ public abstract class ServerLevelSetBlockMixin {
             at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;markAndNotifyBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/chunk/LevelChunk;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/block/state/BlockState;II)V"), require = 1)
     private void avilixlogger$neighborCallbacks(Level level, BlockPos pos, LevelChunk chunk, BlockState before,
                                                   BlockState after, int flags, int recursionLeft, Operation<Void> original) {
-        if (CauseContext.peek() == null || avilixlogger$explicitMechanism()) { original.call(level, pos, chunk, before, after, flags, recursionLeft); return; }
+        if (!(level instanceof ServerLevel) || CartAuditContext.restoring() || CauseContext.peek() == null || avilixlogger$explicitMechanism()) { original.call(level, pos, chunk, before, after, flags, recursionLeft); return; }
         try (var scope = CauseContext.unattributed()) { original.call(level, pos, chunk, before, after, flags, recursionLeft); }
     }
 
@@ -62,6 +62,7 @@ public abstract class ServerLevelSetBlockMixin {
     @WrapMethod(method = "destroyBlock(Lnet/minecraft/core/BlockPos;ZLnet/minecraft/world/entity/Entity;I)Z")
     private boolean avilixlogger$destroyController(BlockPos pos, boolean drops, net.minecraft.world.entity.Entity entity,
                                                     int recursionLeft, Operation<Boolean> original) {
+        if (!((Object)this instanceof ServerLevel) || CartAuditContext.restoring()) return original.call(pos,drops,entity,recursionLeft);
         if(CartRestoreLocks.blockLocked((Level)(Object)this,pos))return false;
         try(var removal=CreateStructuralHooks.removal((Level)(Object)this,pos,net.minecraft.world.level.block.Blocks.AIR.defaultBlockState())){
             boolean changed=original.call(pos,drops,entity,recursionLeft);
@@ -77,6 +78,7 @@ public abstract class ServerLevelSetBlockMixin {
     @WrapMethod(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z")
     private boolean avilixlogger$setBlock(BlockPos pos, BlockState newState, int flags, int recursionLeft,
                                          Operation<Boolean> original) {
+        if (!((Object)this instanceof ServerLevel) || CartAuditContext.restoring()) return original.call(pos,newState,flags,recursionLeft);
         if (CartRestoreLocks.blockLocked((Level)(Object)this,pos)) return false;
         try(var removal=CreateStructuralHooks.removal((Level)(Object)this,pos,newState)){
             boolean structural=CreateStructuralHooks.before((Level)(Object)this,pos);

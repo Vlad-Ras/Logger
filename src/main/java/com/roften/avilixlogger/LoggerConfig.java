@@ -51,6 +51,8 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue asyncWorkerThreads;
         public final ModConfigSpec.IntValue asyncQueueCapacity;
         public final ModConfigSpec.IntValue asyncMaxQueuedPayloadMiB;
+        public final ModConfigSpec.IntValue captureQueueCeilingMiB;
+        public final ModConfigSpec.IntValue journalQueueCeilingMiB;
 
         public final ModConfigSpec.IntValue rollbackOperationsPerTick;
         public final ModConfigSpec.IntValue rollbackBlockBatchSize;
@@ -132,9 +134,9 @@ public final class LoggerConfig {
             clickHouseFlushIntervalMs = b.comment("Force flush interval for ClickHouse writer thread (ms).")
                     .defineInRange("flushIntervalMs", 1000, 100, 10000);
             clickHouseQueueCapacity = b.comment("In-memory journal queue capacity. Overflow waits for the background disk writer; rows are never dropped.")
-                    .defineInRange("queueCapacity", 500000, 10000, 2000000);
+                    .defineInRange("queueCapacity", 8192, 1024, 2000000);
             clickHouseMaxQueuedPayloadMiB = b.comment("Maximum estimated SNBT/text payload retained by the ClickHouse queue. Protects the JVM from large modded NBT bursts even when row capacity is not reached.")
-                    .defineInRange("maxQueuedPayloadMiB", 256, 16, 8192);
+                    .defineInRange("maxQueuedPayloadMiB", 32, 16, 8192);
             clickHouseSelectQueryTimeoutSec = b.comment("Statement timeout for ClickHouse SELECT queries used by lookup / GUI.")
                     .defineInRange("selectQueryTimeoutSec", 15, 1, 600);
             clickHouseWorldQueryTimeoutSec = b.comment("Timeout for whole-world, all-dimension and 30+ day queries. They run outside the server tick.")
@@ -151,9 +153,16 @@ public final class LoggerConfig {
             asyncWorkerThreads = b.comment("Worker threads for expensive log post-processing: container diffs, BE diffs and GUI-safe aggregation. Does not disable any logging.")
                     .defineInRange("workerThreads", 2, 1, 16);
             asyncQueueCapacity = b.comment("Queue capacity for expensive CPU post-processing tasks. If this is full, increase workerThreads or investigate spammy mods.")
-                    .defineInRange("queueCapacity", 100000, 10000, 1000000);
+                    .defineInRange("queueCapacity", 4096, 1024, 1000000);
             asyncMaxQueuedPayloadMiB = b.comment("Maximum estimated snapshot payload retained by CPU tasks. Saturation applies backpressure. One oversized snapshot is processed alone.")
-                    .defineInRange("maxQueuedPayloadMiB", 128, 16, 4096);
+                    .defineInRange("maxQueuedPayloadMiB", 16, 16, 4096);
+            b.pop();
+
+            b.push("memory");
+            captureQueueCeilingMiB = b.comment("Additional memory ceiling for EACH CPU/event queue, including upgraded configurations. Effective limit is min(async.maxQueuedPayloadMiB, this value). Saturation waits without discarding events; one oversized snapshot runs alone.")
+                    .defineInRange("captureQueueCeilingMiB",16,16,4096);
+            journalQueueCeilingMiB = b.comment("Additional memory ceiling for the in-memory disk-journal handoff, including upgraded configurations. Effective limit is min(clickhouse.maxQueuedPayloadMiB, this value). Raise deliberately only when more buffering is needed.")
+                    .defineInRange("journalQueueCeilingMiB",32,16,8192);
             b.pop();
 
             b.push("rollbackPerformance");
@@ -229,6 +238,14 @@ public final class LoggerConfig {
         } catch (Throwable t) {
             return "minecraft:stick";
         }
+    }
+
+    /** Master runtime gate: local config cannot bypass a rejected AvilixAuthCore authorization. */
+    public static long captureQueueBytes() {
+        return (long)Math.min(VALUES.asyncMaxQueuedPayloadMiB.get(),VALUES.captureQueueCeilingMiB.get())*1024*1024;
+    }
+    public static long journalQueueBytes() {
+        return (long)Math.min(VALUES.clickHouseMaxQueuedPayloadMiB.get(),VALUES.journalQueueCeilingMiB.get())*1024*1024;
     }
 
     /** Master runtime gate: local config cannot bypass a rejected AvilixAuthCore authorization. */

@@ -25,7 +25,8 @@
     "CartCombinedInventoryAccessor",
     "CartBlockCapabilityAuditMixin",
     "CartCapabilityCacheAuditMixin",
-    "PlayerEntityActionCauseMixin"
+    "PlayerEntityActionCauseMixin",
+    "SignTextAuditMixin"
   ],
   "injectors": {
     "defaultRequire": 0

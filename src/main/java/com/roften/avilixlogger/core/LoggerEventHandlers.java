@@ -1139,7 +1139,7 @@ public final class LoggerEventHandlers {
     public void onEntityDeath(LivingDeathEvent event) {
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
-        Entity victim = event.getEntity();
+        net.minecraft.world.entity.LivingEntity victim = event.getEntity();
         boolean playerDeath = victim instanceof ServerPlayer;
 
         // Player deaths belong to the player-lifecycle stream. Keep accepting logEntities as a
@@ -1202,6 +1202,8 @@ public final class LoggerEventHandlers {
         } else {
             e.extra = "kill " + e.entityType;
         }
+        String message=playerDeath?e.extra.substring("death_message:".length()):event.getSource().getLocalizedDeathMessage(victim).getString();
+        e.extra=DeathLogDetails.capture(victim,event.getSource(),message);
         LoggerRuntime.storage(level).append(e);
     }
 

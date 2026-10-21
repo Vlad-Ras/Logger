@@ -22,10 +22,26 @@ public final class CartRecoveryPlanTest {
         var gone=new CompoundTag();gone.putInt("Format",1);gone.putString("Form","removed");
         var remove=row(20,ActionType.CART_REMOVE,envelope,gone);var move=row(21,ActionType.CART_MOVE,null,gone);
         var history=new Memory(List.of(row(7,ActionType.CART_ASSEMBLE,null,envelope),remove,move));
-        var latest=CartRecoveryPlan.prepare(history,ID,0);check(latest.entry()==20&&latest.side().equals("before"),"latest recovery did not use last full state before deletion");
+        var latest=CartRecoveryPlan.prepare(history,ID,0);check(latest.entry()==21&&latest.snapshotEntry()==20&&latest.side().equals("before"),"latest recovery did not use last full state before deletion");
         check(CartRecoveryPlan.prepare(history,ID,7).entry()==7,"explicit entry was replaced with latest");
-        reject(()->CartRecoveryPlan.prepare(history,ID,21),"pose-only row fabricated a construction");
+        check(CartRecoveryPlan.prepare(history,ID,21).snapshotEntry()==20,"pose did not use prior full snapshot");
         reject(()->CartRecoveryPlan.prepare(history,ID,19),"missing entry selected neighbour");
+        // Forward state reconstruction crosses a complete cursor page, bounded by capture IDs.
+        var stateHistory=new ArrayList<LogEntry>();stateHistory.add(row(1,ActionType.CART_ASSEMBLE,null,envelope));
+        for(int i=2;i<310;i++)stateHistory.add(row(i,ActionType.CART_MOVE,null,null));
+        var before=new CompoundTag();before.putLong("LocalPos",0);before.put("State",envelope.getCompound("Entity").getCompound("Contraption").getCompound("Blocks").getList("Palette",10).getCompound(0).copy());
+        var after=before.copy();var config=new CompoundTag();config.putString("Mode","saved-settings");after.put("Data",config);
+        stateHistory.add(row(310,ActionType.CART_STRUCTURE_CHANGE,before,after));
+        var nextBefore=after.copy();var nextAfter=after.copy();nextAfter.getCompound("Data").putString("Mode","later-settings");
+        stateHistory.add(row(311,ActionType.CART_STRUCTURE_CHANGE,nextBefore,nextAfter));
+        var store=new Memory(stateHistory);var selected=CartRecoveryPlan.prepare(store,ID,310);
+        check(selected.snapshotEntry()==1&&selected.changes()==1&&selected.item().getCompound("components").getCompound("create:minecart_contraption_data").getCompound("Blocks").getList("BlockList",10).getCompound(0).getCompound("Data").getString("Mode").equals("saved-settings"),"selected state used future changes or lost block settings");
+        check(CartRecoveryPlan.prepare(store,ID,0).changes()==2,"latest omitted final change");
+        check(envelope.equals(original),"replay mutated stored NBT");
+        var broken=new ArrayList<>(stateHistory);broken.set(broken.size()-1,row(311,ActionType.CART_STRUCTURE_CHANGE,before,nextAfter));reject(()->CartRecoveryPlan.prepare(new Memory(broken),ID,0),"broken state chain issued stale construction");
+        var missing=new ArrayList<>(stateHistory);missing.add(row(312,ActionType.CART_PLACE,null,null));reject(()->CartRecoveryPlan.prepare(new Memory(missing),ID,0),"missing lifecycle checkpoint reused older state");
+        var duplicate=envelope.copy();duplicate.getCompound("Entity").getCompound("Contraption").getCompound("Blocks").getList("BlockList",10).add(duplicate.getCompound("Entity").getCompound("Contraption").getCompound("Blocks").getList("BlockList",10).getCompound(0).copy());reject(()->CartRecoveryPlan.fromSnapshot(ID,1,1,"after",duplicate),"duplicate block positions accepted");
+        System.out.println("CART_STATE_REPLAY_OK: selected/latest, 2-page history, block settings, source immutability, chain gaps, checkpoint and duplicate-position guards");
         System.out.println("CART_RECOVERY_PLAN_OK: exact/latest/before loss, source immutability, payload retention, ID/type/empty/nested guards; no period replay");
     }
     private static LogEntry row(long id,ActionType type,CompoundTag before,CompoundTag after){var row=new LogEntry();row.id=id;row.ts=id*100;row.type=type;row.source=CartAuditContext.prefix(ID)+"test:0";row.beBefore=before==null?null:before.toString();row.beAfter=after==null?null:after.toString();return row;}

@@ -72,6 +72,7 @@ neoForge {
     runs {
         client {
             client()
+            if (project.hasProperty('guiSmoke')) systemProperty 'avilixlogger.guiSmoke', 'true'
 
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
@@ -131,7 +132,7 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
-            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke')) sourceSet(sourceSets.createSmoke)
+            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke')) sourceSet(sourceSets.createSmoke)
         }
     }
 }
@@ -170,7 +171,7 @@ dependencies {
     [Backpacked: ['backpacked-neoforge', '1.21.1-3.0.5'], Framework: ['framework-neoforge', '1.21.1-0.13.10']].each { module, spec ->
         def external = { artifact { name = spec[0]; type = 'jar' }; transitive = false }
         compileOnly("com.mrcrayfish.release:${module}:${spec[1]}", external)
-        if ((project.hasProperty('backpackSmoke') || project.hasProperty('createSmoke')) && !project.hasProperty('backpackAbsent') && !project.hasProperty('createAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
+        if ((project.hasProperty('backpackSmoke') || project.hasProperty('createSmoke') || project.hasProperty('guiSmoke')) && !project.hasProperty('backpackAbsent') && !project.hasProperty('createAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
     }
     // --- ClickHouse backend ---
     // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.

@@ -49,6 +49,7 @@ public final class CauseContext {
 
     public static Scope push(Player player, Kind kind, BlockPos pos, ItemStack used) {
         boolean real = player != null && !(player instanceof net.neoforged.neoforge.common.util.FakePlayer);
+        if (!real) return unattributed();
         UUID u = real ? player.getUUID() : null;
         String n = real ? player.getName().getString() : null;
         String itemKey = null;
@@ -70,7 +71,10 @@ public final class CauseContext {
 
     /** Isolates unrelated simulation from an outer player action. */
     public static Scope unattributed() {
-        return STACK.get().isEmpty() ? EMPTY_SCOPE : push((Cause) null);
+        Deque<Scope> stack = STACK.get();
+        // A nested anonymous tick already hides the outer actor. Reusing the immutable
+        // no-op token preserves that boundary without allocating one scope per callback.
+        return stack.isEmpty() || stack.peek().cause == null ? EMPTY_SCOPE : push((Cause) null);
     }
 
     public static Cause peek() {

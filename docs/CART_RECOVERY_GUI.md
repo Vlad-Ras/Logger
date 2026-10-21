@@ -1,3 +1,5 @@
+> **2.1.21 update:** recovery now reconstructs the recorded construction state from the newest full snapshot plus subsequent cargo, fluid, same-type block/settings and control changes. Any history row can be selected as the cutoff. See [RELEASE_2.1.21.md](RELEASE_2.1.21.md) for verified build, exact boundaries and the updated GUI search. The snapshot-only behavior described below refers to 2.1.20.
+
 # Восстановление вагонеточной штуковины и отдельная GUI
 
 Статус: 2.1.20 собрана и обфусцирована через GitHub Actions на Java 21. Автоматические тесты и нативный серверный стенд Create пройдены. JAR выдан отдельным файлом; установка на сервер пользователя не выполнялась. Визуальная проверка нового экрана в настоящем Minecraft-клиенте не выполнялась.

@@ -16,6 +16,12 @@ public final class BackpackIndex extends SavedData {
     private final Map<UUID,Record> records=new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String,UUID> shortIds=new java.util.concurrent.ConcurrentHashMap<>();
     private final Map<String,Set<UUID>> owners=new HashMap<>();
+    // Full recovery NBT remains durable. Duplicate decoded stacks are only a small,
+    // disposable comparison cache, rather than one permanent copy for every known bag.
+    private record Compared(ItemStack stack,CompoundTag snapshot,long bytes){}
+    private final LinkedHashMap<UUID,Compared> compared=new LinkedHashMap<>(64,0.75f,true);
+    private long comparedBytes;
+    private static final long MAX_COMPARED_BYTES=4L*1024*1024;
     private long next=1;
     public static final class Record {
         public UUID id, owner, holder;
@@ -24,7 +30,6 @@ public final class BackpackIndex extends SavedData {
         public UUID entity;
         public long updated, lossId, lastEventId;
         public CompoundTag snapshot;
-        transient ItemStack lastStack;
         public boolean lost(){return state.equals("destroyed");}
     }
     public static void start(MinecraftServer value) {
@@ -76,8 +81,20 @@ public final class BackpackIndex extends SavedData {
     }
     public boolean snapshot(Record r,ItemStack value,HolderLookup.Provider registries) {
         if(value.isEmpty())return false;
-        if(r.lastStack!=null&&ItemStack.matches(r.lastStack,value))return false;
-        r.snapshot=(CompoundTag)value.save(registries);r.lastStack=value.copy();setDirty();return true;
+        var previous=compared.get(r.id);
+        if(previous!=null&&previous.snapshot==r.snapshot&&ItemStack.matches(previous.stack,value))return false;
+        var encoded=(CompoundTag)value.save(registries);
+        boolean changed=!encoded.equals(r.snapshot);
+        if(changed){r.snapshot=encoded;setDirty();}
+        previous=compared.remove(r.id);if(previous!=null)comparedBytes-=previous.bytes;
+        long weight=256L+4L*r.snapshot.sizeInBytes();
+        if(weight<=MAX_COMPARED_BYTES){
+            while(!compared.isEmpty()&&(compared.size()>=64||comparedBytes+weight>MAX_COMPARED_BYTES)){
+                var oldest=compared.pollFirstEntry();comparedBytes-=oldest.getValue().bytes;
+            }
+            compared.put(r.id,new Compared(value.copy(),r.snapshot,weight));comparedBytes+=weight;
+        }
+        return changed;
     }
     public void touched(Record r){r.updated=System.currentTimeMillis();setDirty();}
     @Override public CompoundTag save(CompoundTag n,HolderLookup.Provider registries) {

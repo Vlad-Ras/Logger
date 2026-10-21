@@ -45,7 +45,7 @@ public final class LoggerRuntime {
                 FRONT = new DeduplicatingLogStorage(PENDING);
                 ASYNC = new AsyncLogStorage(FRONT,
                     LoggerConfig.VALUES.asyncQueueCapacity.get(),
-                    (long) LoggerConfig.VALUES.asyncMaxQueuedPayloadMiB.get() * 1024L * 1024L);
+                    LoggerConfig.captureQueueBytes());
             }
             return ASYNC;
         }

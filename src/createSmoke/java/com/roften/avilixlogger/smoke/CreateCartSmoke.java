@@ -23,6 +23,7 @@ public final class CreateCartSmoke {
         if(!Boolean.getBoolean("avilixlogger.createSmoke"))return;
         try {
             var world=event.getServer().overworld();
+            AuditDetailsSmoke.run(world);
             CreateContraptionKindsSmoke.run(world);
             CreateCompletionSmoke.run(world);
             CreateMechanismActionsSmoke.run(world);
@@ -51,6 +52,7 @@ public final class CreateCartSmoke {
             check(recovered.getBlocks().size()==1&&recovered.getBlocks().get(BlockPos.ZERO).state().is(Blocks.STONE),"recovery lost blocks");
             check(recovered.getStorage().getAllItemStorages().get(BlockPos.ZERO).getStackInSlot(3).getCount()==12,"recovery lost item storage");
             check(recovered.getStorage().getFluids().storages.get(BlockPos.ZERO).getFluidInTank(0).getAmount()==1250,"recovery lost fluid storage");
+            exerciseStateRecovery(world,snapshot);
             var staged=new StagedCartRestore(snapshot);int steps=0;
             while(!staged.step(world))check(++steps<100,"restore did not terminate");
             check(staged.entity.getContraption().getBlocks().size()==1,"restored block count");
@@ -67,6 +69,9 @@ public final class CreateCartSmoke {
             exerciseNativeMenu(event,snapshot);
             for(String mode:new String[]{"full","partial","blocked","delay","cancel","conflict","reappear"})exerciseLoot(event,snapshot,mode);
             CreateAutomationSmoke.run(event.getServer(),snapshot);
+            CreateCartGuiSmoke.run(event.getServer());
+            CartGuiWorkflowSmoke.run();
+            LoggerActionCatalogSmoke.run();
             System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental+cargo+fluid world=commit+cancel+32-drops recipients=commit+cancel+logout+conflict+strict-codec menu=native-in-place loot=full+partial+blocked+delay+cancel+conflict+reappear");
             event.getServer().halt(false);
         }catch(Throwable failure){
@@ -74,6 +79,45 @@ public final class CreateCartSmoke {
             event.getServer().halt(false);
         }
     }
+    private static void exerciseStateRecovery(net.minecraft.server.level.ServerLevel world,net.minecraft.nbt.CompoundTag snapshot){
+        var id=snapshot.getCompound("Entity").getCompound("Contraption").getCompound(CartAuditState.KEY).getUUID("Id");
+        var rows=new java.util.ArrayList<com.roften.avilixlogger.core.LogEntry>();var checkpoint=smokeRow(id,1,com.roften.avilixlogger.core.ActionType.CART_PLACE);checkpoint.beAfter=snapshot.toString();rows.add(checkpoint);
+        var registries=world.registryAccess();var source=snapshot.copy();
+        var before=new net.minecraft.nbt.CompoundTag();before.putString("Kind","item");before.putLong("LocalPos",0);before.putInt("Slot",3);before.put("Item",com.roften.avilixlogger.core.NbtSerde.snapshotItemStack(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,12),registries));
+        var after=before.copy();var named=new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,5);named.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,net.minecraft.network.chat.Component.literal("Сохранённый предмет"));after.put("Item",com.roften.avilixlogger.core.NbtSerde.snapshotItemStack(named,registries));
+        var change=smokeRow(id,2,com.roften.avilixlogger.core.ActionType.CART_CONTENT_CHANGE);change.beBefore=before.toString();change.beAfter=after.toString();rows.add(change);
+        var fluidBefore=new net.minecraft.nbt.CompoundTag();fluidBefore.putString("Kind","fluid");fluidBefore.putLong("LocalPos",0);fluidBefore.putInt("Tank",0);fluidBefore.put("Fluid",new net.neoforged.neoforge.fluids.FluidStack(net.minecraft.world.level.material.Fluids.WATER,1250).save(registries));
+        var fluidAfter=fluidBefore.copy();fluidAfter.put("Fluid",new net.neoforged.neoforge.fluids.FluidStack(net.minecraft.world.level.material.Fluids.LAVA,3000).save(registries));
+        change=smokeRow(id,3,com.roften.avilixlogger.core.ActionType.CART_CONTENT_CHANGE);change.beBefore=fluidBefore.toString();change.beAfter=fluidAfter.toString();rows.add(change);
+        var controls=new net.minecraft.nbt.CompoundTag();var disabled=new net.minecraft.nbt.ListTag();disabled.add(new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.REDSTONE).save(registries));controls.put("DisabledActors",disabled);
+        change=smokeRow(id,4,com.roften.avilixlogger.core.ActionType.CART_STATUS);change.beAfter=controls.toString();rows.add(change);
+        var plan=java.util.concurrent.CompletableFuture.supplyAsync(()->{
+            check(!com.roften.avilixlogger.core.CartAuditContext.restoring(),"worker started in restore scope");
+            var prepared=CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries);
+            check(!com.roften.avilixlogger.core.CartAuditContext.restoring(),"replay leaked restore scope");return prepared;
+        }).join();check(plan.entry()==4&&plan.snapshotEntry()==1&&plan.changes()==3,"latest state omitted cargo/controls");
+        var summary=CartRecoveryContents.validate(plan.item(),registries);check(!com.roften.avilixlogger.core.CartAuditContext.restoring(),"validation leaked restore scope");check(summary.items()==5&&summary.fluidAmount()==3000&&summary.itemStorages()==1&&summary.fluidStorages()==1,"recovery contents summary wrong");
+        var item=net.minecraft.world.item.ItemStack.CODEC.parse(registries.createSerializationContext(net.minecraft.nbt.NbtOps.INSTANCE),plan.item()).getOrThrow();
+        var restored=Contraption.fromNBT(world,item.get(com.simibubi.create.AllDataComponents.MINECRAFT_CONTRAPTION_DATA),false);
+        check(net.minecraft.world.item.ItemStack.matches(restored.getStorage().getAllItemStorages().get(BlockPos.ZERO).getStackInSlot(3),named),"replayed item lost components/count");
+        check(net.neoforged.neoforge.fluids.FluidStack.matches(restored.getStorage().getFluids().storages.get(BlockPos.ZERO).getFluidInTank(0),new net.neoforged.neoforge.fluids.FluidStack(net.minecraft.world.level.material.Fluids.LAVA,3000)),"replayed fluid type/amount lost");
+        check(restored.getDisabledActors().size()==1&&restored.getDisabledActors().getFirst().is(net.minecraft.world.item.Items.REDSTONE),"controls not restored");
+        var historical=CartRecoveryPlan.prepare(new SmokeHistory(rows),id,2,registries);check(CartRecoveryContents.validate(historical.item(),registries).fluidAmount()==1250,"selected state included future fluid change");
+        check(snapshot.equals(source),"forward replay mutated source snapshot");
+        var bad=after.copy();bad.getCompound("Item").getCompound("components").putString("missing_mod:component","lost");
+        change=smokeRow(id,5,com.roften.avilixlogger.core.ActionType.CART_CONTENT_CHANGE);change.beBefore=after.toString();change.beAfter=bad.toString();rows.add(change);
+        recoveryReject(()->CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries),"unknown component accepted");rows.removeLast();
+        var broken=after.copy();broken.getCompound("Item").putInt("count",8);
+        change=smokeRow(id,5,com.roften.avilixlogger.core.ActionType.CART_CONTENT_CHANGE);change.beBefore=broken.toString();change.beAfter=after.toString();rows.add(change);
+        recoveryReject(()->CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries),"broken cargo chain accepted");rows.removeLast();
+        var overflow=fluidAfter.copy();overflow.put("Fluid",new net.neoforged.neoforge.fluids.FluidStack(net.minecraft.world.level.material.Fluids.LAVA,5000).save(registries));
+        change=smokeRow(id,5,com.roften.avilixlogger.core.ActionType.CART_CONTENT_CHANGE);change.beBefore=fluidAfter.toString();change.beAfter=overflow.toString();rows.add(change);
+        recoveryReject(()->CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries),"over-capacity fluid accepted");rows.removeLast();
+        var malformed=plan.item().copy();malformed.getCompound("components").getCompound("create:minecart_contraption_data").getList("items",10).getCompound(0).getCompound("storage").putString("type","missing_mod:storage");
+        recoveryReject(()->CartRecoveryContents.validate(malformed,registries),"missing storage silently erased inventory");
+        System.out.println("CART_STATE_RECOVERY_NATIVE_OK: latest+selected+item-components+fluid-type+controls+contents-summary+chain-conflict+unknown-codec+capacity; world_changes=0");
+    }
+    private static void recoveryReject(Runnable task,String message){boolean refused=false;try{task.run();}catch(RuntimeException expected){refused=true;}check(refused,message);}
     private static void exerciseLoot(ServerStartedEvent event,net.minecraft.nbt.CompoundTag checkpoint,String mode) throws Exception {
         var server=event.getServer();var world=server.overworld();var pos=world.getSharedSpawnPos().above(11);
         var built=new StagedCartRestore(checkpoint);while(!built.step(world)){}var current=built.entity;var cart=built.cart;
@@ -125,7 +169,7 @@ public final class CreateCartSmoke {
     private record SmokeHistory(java.util.List<com.roften.avilixlogger.core.LogEntry> rows) implements com.roften.avilixlogger.core.LogStorage {
         public void append(com.roften.avilixlogger.core.LogEntry row){rows.add(row);}
         public java.util.List<com.roften.avilixlogger.core.LogEntry> query(com.roften.avilixlogger.core.LogQuery q){return rows.stream().filter(e->e.id>q.afterId).sorted(java.util.Comparator.comparingLong(e->e.id)).limit(q.limit).toList();}
-        public java.util.List<com.roften.avilixlogger.core.LogEntry> queryReverse(com.roften.avilixlogger.core.LogQuery q){return rows.stream().filter(e->e.id<q.beforeId).sorted(java.util.Comparator.<com.roften.avilixlogger.core.LogEntry>comparingLong(e->e.id).reversed()).limit(q.limit).toList();}
+        public java.util.List<com.roften.avilixlogger.core.LogEntry> queryReverse(com.roften.avilixlogger.core.LogQuery q){return rows.stream().filter(e->q.beforeId<=0||e.id<q.beforeId).sorted(java.util.Comparator.<com.roften.avilixlogger.core.LogEntry>comparingLong(e->e.id).reversed()).limit(q.limit).toList();}
         public void shutdown(){}
     }
     private static void exerciseRecipientCodec(ServerStartedEvent event) throws Exception {

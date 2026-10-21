@@ -40,9 +40,9 @@ public final class ChatLogPager {
             thread.setPriority(Thread.NORM_PRIORITY - 1);
             return thread;
         };
-        ThreadPoolExecutor result = new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS,
+        ThreadPoolExecutor result = new ThreadPoolExecutor(2, 2, 30L, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(128), factory, new ThreadPoolExecutor.AbortPolicy());
-        result.prestartAllCoreThreads();
+        result.allowCoreThreadTimeOut(true);
         return result;
     }
 

@@ -183,9 +183,9 @@ public final class RollbackCoordinator {
                 thread.setPriority(Math.max(Thread.MIN_PRIORITY, Thread.NORM_PRIORITY - 1));
                 return thread;
             };
-            current = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            current = new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
                     new ArrayBlockingQueue<>(4), factory, new ThreadPoolExecutor.AbortPolicy());
-            current.prestartAllCoreThreads();
+            current.allowCoreThreadTimeOut(true);
             executor = current;
             return current;
         }

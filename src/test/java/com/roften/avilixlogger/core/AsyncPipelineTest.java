@@ -19,6 +19,7 @@ public final class AsyncPipelineTest {
         typedCargoAttribution();
         tickDeadlines();
         TickHotPathTest.run();
+        CauseContextHotPathTest.run();
         JournalPipelineTest.run();
         preparedSnapshots();
         CartAuditTest.run();
