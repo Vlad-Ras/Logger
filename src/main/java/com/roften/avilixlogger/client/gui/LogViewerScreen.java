@@ -817,6 +817,7 @@ public final class LogViewerScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        LoggerGuiWidgets.beginFrame(g,width,height);
         // Do NOT call Screen#renderBackground or Screen#render here.
         // On 1.21.x some Screen render paths apply the vanilla blurred/dimmed background.
         // This GUI draws logs/details before widgets, so a late vanilla background pass makes

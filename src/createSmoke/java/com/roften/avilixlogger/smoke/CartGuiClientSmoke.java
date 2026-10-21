@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-guide.png","logger-main.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -53,13 +53,25 @@ public final class CartGuiClientSmoke {
                 else if(stage==4){
                     var screen=new com.roften.avilixlogger.client.gui.LoggerActionsScreen(root);
                     var actions=screen.getClass().getDeclaredField("actions");actions.setAccessible(true);actions.set(screen,com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS);
+                    var allActions=screen.getClass().getDeclaredField("allActions");allActions.setAccessible(true);allActions.set(screen,com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS);
+                    var groups=screen.getClass().getDeclaredField("groups");groups.setAccessible(true);var categories=new ArrayList<String>();categories.add("Все");categories.addAll(com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS.stream().map(com.roften.avilixlogger.core.LoggerActionCatalog.Action::group).distinct().toList());groups.set(screen,List.copyOf(categories));
                     var selected=screen.getClass().getDeclaredField("selected");selected.setAccessible(true);selected.setInt(screen,11);
                     mc.setScreen(screen);
                 }
                 else if(stage==5){
+                    var screen=(com.roften.avilixlogger.client.gui.LoggerActionsScreen)mc.screen;
+                    var request=screen.getClass().getDeclaredField("lastRequest");request.setAccessible(true);request.setLong(screen,1);
+                    com.roften.avilixlogger.client.gui.LoggerActionsScreen.accept(new com.roften.avilixlogger.net.S2CLoggerActionResultPayload(1,"Подтвердить откат выбранной конструкции","SUGGEST_COMMAND","/log cart confirm "+ID+" 100"));
+                    var results=screen.getClass().getDeclaredField("results");results.setAccessible(true);results.setBoolean(screen,true);
+                    var refresh=screen.getClass().getDeclaredMethod("refresh");refresh.setAccessible(true);refresh.invoke(screen);
+                }
+                else if(stage==6){
+                    var screen=(com.roften.avilixlogger.client.gui.LoggerActionsScreen)mc.screen;
+                    check(screen.mouseClicked(15,65,0),"result link did not open a GUI form");
+                    var values=screen.getClass().getDeclaredField("values");values.setAccessible(true);check(values.get(screen).equals(List.of(ID,"100")),"confirmation link lost ID/entry");
                     var guide=Class.forName("com.roften.avilixlogger.client.gui.LoggerGuideScreen").getDeclaredConstructor(Screen.class);guide.setAccessible(true);mc.setScreen((Screen)guide.newInstance(root));
                 }
-                else if(stage==6)mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
+                else if(stage==7)mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
                 if(stage<FILES.size())layout(mc.screen,mc);
             }else{
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);

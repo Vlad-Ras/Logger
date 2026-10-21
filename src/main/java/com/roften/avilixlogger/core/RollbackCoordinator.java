@@ -163,6 +163,7 @@ public final class RollbackCoordinator {
     }
 
     public static void shutdown() {
+        RollbackPlanManager.clearAll();
         for (Preparation preparation : PREPARATIONS.values()) preparation.cancelled = true;
         PREPARATIONS.clear();
         active = null;

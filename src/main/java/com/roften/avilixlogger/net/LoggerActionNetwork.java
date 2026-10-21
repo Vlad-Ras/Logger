@@ -15,12 +15,10 @@ final class LoggerActionNetwork {
         if(!(context.player() instanceof ServerPlayer player)||!LoggerNetwork.isClientPresent(player))return;
         var source=player.createCommandSourceStack().withSource(new CommandSource(){
             public void sendSystemMessage(Component text){
-                String value=text.getString();
-                if(value.length()>7900)value=value.substring(0,7900)+"… (сообщение сокращено)";
-                String message=value;
+                var result=S2CLoggerActionResultPayload.from(payload.request(),text);
                 player.getServer().execute(()->{
                     if(player.getServer().getPlayerList().getPlayer(player.getUUID())==player&&AuthCoreBridge.isAuthorized(player.getServer()))
-                        PacketDistributor.sendToPlayer(player,new S2CLoggerActionResultPayload(payload.request(),message));
+                        PacketDistributor.sendToPlayer(player,result);
                 });
             }
             public boolean acceptsSuccess(){return true;}

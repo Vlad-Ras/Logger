@@ -70,6 +70,7 @@ public final class CreateCartSmoke {
             for(String mode:new String[]{"full","partial","blocked","delay","cancel","conflict","reappear"})exerciseLoot(event,snapshot,mode);
             CreateAutomationSmoke.run(event.getServer(),snapshot);
             CreateCartGuiSmoke.run(event.getServer());
+            PreviewMaintenanceSmoke.run();
             CartGuiWorkflowSmoke.run();
             LoggerActionCatalogSmoke.run();
             System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental+cargo+fluid world=commit+cancel+32-drops recipients=commit+cancel+logout+conflict+strict-codec menu=native-in-place loot=full+partial+blocked+delay+cancel+conflict+reappear");

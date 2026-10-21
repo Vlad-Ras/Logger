@@ -10,6 +10,9 @@ import net.minecraft.network.chat.Component;
 /** Shared journal controls: identical font scaling, clipping, input borders and Minecraft buttons. */
 final class LoggerGuiWidgets {
     private LoggerGuiWidgets() {}
+    static void beginFrame(GuiGraphics g,int width,int height){
+        if(net.minecraft.client.Minecraft.getInstance().level==null)g.fill(0,0,width,height,0xFF101010);
+    }
     private static float clampFloat(float value,float min,float max){return Math.max(min,Math.min(max,value));}
     /**
      * Vanilla Button scales only the rectangle. The label is always drawn with the normal Minecraft font size.

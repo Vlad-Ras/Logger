@@ -13,6 +13,25 @@ import java.util.*;
 final class CartGuiWorkflowSmoke {
     static void run(){
         String id="51000000-0000-0000-0000-000000000001";
+        var form=new C2SLoggerActionPayload(17,"cart_confirm",List.of(id,"42"));
+        var formBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
+        try{C2SLoggerActionPayload.STREAM_CODEC.encode(formBuffer,form);check(C2SLoggerActionPayload.STREAM_CODEC.decode(formBuffer).equals(form),"action form changed on wire");}finally{formBuffer.release();}
+        var copy=net.minecraft.network.chat.Component.literal("[ID]").withStyle(st->st.withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.COPY_TO_CLIPBOARD,id)));
+        var history=net.minecraft.network.chat.Component.literal("История").withStyle(st->st.withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND,"/log cart history "+id)));
+        var mixed=S2CLoggerActionResultPayload.from(18,net.minecraft.network.chat.Component.empty().append(copy).append(" · ").append(history));
+        check(mixed.message().equals("[ID] · История")&&mixed.links().size()==2&&mixed.links().get(0).start()==0&&mixed.links().get(0).end()==4&&mixed.links().get(1).start()==7,"nested links flattened");
+        check(S2CLoggerActionResultPayload.from(18,mixed.component()).equals(mixed),"nested links changed after reconstruction");
+        var linkedBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
+        try{S2CLoggerActionResultPayload.STREAM_CODEC.encode(linkedBuffer,mixed);check(S2CLoggerActionResultPayload.STREAM_CODEC.decode(linkedBuffer).equals(mixed),"nested result links changed on wire");}finally{linkedBuffer.release();}
+        var inherited=S2CLoggerActionResultPayload.from(19,net.minecraft.network.chat.Component.literal("A").append("B").withStyle(st->st.withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.COPY_TO_CLIPBOARD,id))));
+        check(inherited.links().size()==1&&inherited.links().getFirst().end()==2,"inherited adjacent links not merged");
+        var truncated=S2CLoggerActionResultPayload.from(20,history.copy().append("x".repeat(10000)));
+        check(truncated.message().length()<=8000&&truncated.message().contains("сокращено")&&truncated.links().getFirst().end()<=7900,"truncation exceeded bound or became a command link");
+        var surrogate=S2CLoggerActionResultPayload.from(21,net.minecraft.network.chat.Component.literal("a".repeat(7899)+"😀"));
+        check(!Character.isHighSurrogate(surrogate.message().charAt(7899)),"truncation cut a Unicode surrogate pair");
+        reject(()->new S2CLoggerActionResultPayload(1,"ab",List.of(new S2CLoggerActionResultPayload.Link(0,3,"RUN_COMMAND","/log i"))),"outside link accepted");
+        reject(()->new S2CLoggerActionResultPayload(1,"ab",List.of(new S2CLoggerActionResultPayload.Link(0,2,"RUN_COMMAND","/log i"),new S2CLoggerActionResultPayload.Link(1,2,"RUN_COMMAND","/log i"))),"overlapping links accepted");
+        reject(()->new S2CLoggerActionResultPayload.Link(0,1,"OPEN_FILE","/tmp/file"),"unsupported click accepted");
         for(var action:C2SCartActionPayload.Action.values()){
             var value=new C2SCartActionPayload(action,action.needsId()?id:"",action.needsId()?42:0);
             var buffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);

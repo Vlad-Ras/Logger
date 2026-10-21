@@ -297,6 +297,20 @@ tasks.register('verifyObfuscatedJar') {
             throw new GradleException('ActionType is missing from the ProGuard mapping')
         }
 
+        // Network/client boundaries invoke these methods by literal names after obfuscation.
+        def hookClass = 'com.roften.avilixlogger.client.gui.LogViewerClientHooks'
+        def hookStart = mappingText.indexOf(hookClass + ' -> ')
+        if (hookStart < 0) throw new GradleException('Client hooks missing from ProGuard mapping')
+        def hookEnd = mappingText.indexOf('\ncom.', hookStart + 1)
+        def hookMapping = mappingText.substring(hookStart, hookEnd < 0 ? mappingText.length() : hookEnd)
+        def networkSource = file('src/main/java/com/roften/avilixlogger/net/LoggerNetwork.java').getText('UTF-8')
+        def hookCalls = networkSource =~ /invokeClientHook\("([^"\n]+)"/
+        hookCalls.each { call ->
+            def name = call[1]
+            if (!(hookMapping =~ /(?m)\b${name}\([^\n]* -> ${name}\s*$/).find())
+                throw new GradleException("Client hook renamed/missing after obfuscation: ${name}")
+        }
+
         def actionTypeName = actionTypeMapping.group(1)
         def jarUrl = releaseJar.get().asFile.toURI().toURL()
         def loader = new URLClassLoader(([jarUrl] + sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() }) as URL[], ClassLoader.getPlatformClassLoader())
@@ -328,6 +342,14 @@ tasks.register('verifyMixinSafety') {
         def unsafeFiles = fileTree('src/main/java') {
             include '**/*Mixin.java'
         }.findAll { unsafePattern.matcher(it.getText('UTF-8')).find() }
+
+        def networkSource = file('src/main/java/com/roften/avilixlogger/net/LoggerNetwork.java').getText('UTF-8')
+        def rules = file('proguard-rules.pro').getText('UTF-8')
+        def hooks = networkSource =~ /invokeClientHook\("([^"\n]+)"/
+        hooks.each { call ->
+            if (!rules.contains("public static void ${call[1]}(...);"))
+                throw new GradleException("Reflection client hook lacks keep rule: ${call[1]}")
+        }
 
         if (!unsafeFiles.isEmpty()) {
             throw new GradleException('Unsafe mixin instance collection initializer(s): '

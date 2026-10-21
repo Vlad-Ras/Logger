@@ -137,6 +137,7 @@ public final class CartHistoryScreen extends Screen {
         if(detailW>0&&x>=detailX&&x<detailX+detailW&&y>=detailY&&y<detailY+detailH){detailScroll=Math.max(0,detailScroll-(int)Math.signum(dy)*3);return true;}return super.mouseScrolled(x,y,dx,dy);
     }
     public void render(GuiGraphics g,int mx,int my,float dt){
+        LoggerGuiWidgets.beginFrame(g,width,height);
         g.drawCenteredString(font,title,width/2,9,0xFFFFFF);
         g.fill(listX,listY,listX+listW,listY+listH,0x44000000);g.enableScissor(listX,listY,listX+listW,listY+listH);
         if(rows.isEmpty())g.drawString(font,loading?"Загрузка…":"Нет записей. Измените фильтры или нажмите «Все записи».",listX+5,listY+8,0xAABBCD);
@@ -166,7 +167,7 @@ public final class CartHistoryScreen extends Screen {
         @Override public void render(GuiGraphics g,int x,int y,float dt){for(var widget:renderables)widget.render(g,x,y,dt);}
         public boolean isPauseScreen(){return false;}
         public void onClose(){Minecraft.getInstance().setScreen(parent);}
-        void background(GuiGraphics g){g.fill(8,34,width-8,height-40,0x44000000);g.drawCenteredString(font,title,width/2,12,0xFFFFFF);}
+        void background(GuiGraphics g){LoggerGuiWidgets.beginFrame(g,width,height);g.fill(8,34,width-8,height-40,0x44000000);g.drawCenteredString(font,title,width/2,12,0xFFFFFF);}
         void text(GuiGraphics g,String text,int top,int bottom){var lines=layout.get(font,text,Math.max(30,width-40));scroll=Math.min(scroll,Math.max(0,lines.size()-Math.max(1,(bottom-top)/12)));g.enableScissor(20,top,width-20,bottom);for(int i=scroll;i<lines.size();i++){int y=top+(i-scroll)*12;if(y>=bottom)break;g.drawString(font,lines.get(i),20,y,0xE4ECF4);}g.disableScissor();}
         public boolean mouseScrolled(double x,double y,double dx,double dy){scroll=Math.max(0,scroll-(int)Math.signum(dy)*3);return true;}
     }

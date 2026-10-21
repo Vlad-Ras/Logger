@@ -23,6 +23,8 @@ public final class CreateContraptionSnapshotStore {
 
     private CreateContraptionSnapshotStore() {}
 
+    public static void clear() { SNAPSHOTS.clear(); }
+
     public static void remember(ServerLevel level, Entity entity, String reason) {
         if (level == null || entity == null || !LoggerConfig.isEnabled() || !isCreateContraptionEntity(entity)) return;
         if(CreateSupport.available()&&com.roften.avilixlogger.compat.create.CreateLifecycleAudit.handles(entity))return;

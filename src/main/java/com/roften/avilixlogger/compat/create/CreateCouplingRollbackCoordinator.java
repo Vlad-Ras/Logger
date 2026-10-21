@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 public final class CreateCouplingRollbackCoordinator {
     private record Preview(UUID construction,long entry,long expires){}
     private static final Map<UUID,Preview> PREVIEWS=new HashMap<>();
+    public static void expirePreviews(long now){PreviewExpiry.prune(PREVIEWS,now,Preview::expires);}
     private static final Map<UUID,Long> REQUESTS=new HashMap<>();
     private static long sequence,generation;private static boolean preparing;private static UUID preparingActor;private static Job active;
     private CreateCouplingRollbackCoordinator(){}

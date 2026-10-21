@@ -18,6 +18,7 @@ import java.util.concurrent.*;
 public final class CartItemRecovery {
     private record Preview(CartRecoveryPlan plan,UUID recipient,long expires,ItemStack stack,CompoundTag receiptItem){}
     private static final Map<UUID,Preview> PREVIEWS=new HashMap<>();
+    public static void expirePreviews(long now){PreviewExpiry.prune(PREVIEWS,now,Preview::expires);}
     private static final Map<UUID,Long> REQUESTS=new HashMap<>();
     private static long nextRequest;
     private static final Map<UUID,UUID> ISSUING=new HashMap<>();

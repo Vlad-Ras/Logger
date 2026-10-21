@@ -274,19 +274,7 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
-        PayloadRegistrar r = event.registrar(AvilixLoggerMod.MOD_ID);
-
-        // Try to set network version if API supports it
-        try {
-            Object rr = r.getClass().getMethod("versioned", String.class).invoke(r, "8");
-            if (rr instanceof PayloadRegistrar pr) r = pr;
-        } catch (Throwable ignored) {}
-
-        // Mark as optional if API supports it
-        try {
-            Object rr = r.getClass().getMethod("optional").invoke(r);
-            if (rr instanceof PayloadRegistrar pr) r = pr;
-        } catch (Throwable ignored) {}
+        PayloadRegistrar r = event.registrar("9").optional();
 
         r.playToServer(C2SLoggerActionPayload.TYPE,C2SLoggerActionPayload.STREAM_CODEC,LoggerActionNetwork::handle);
         r.playToClient(S2CLoggerActionResultPayload.TYPE,S2CLoggerActionResultPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptActionResult",new Class<?>[]{S2CLoggerActionResultPayload.class},new Object[]{payload})));

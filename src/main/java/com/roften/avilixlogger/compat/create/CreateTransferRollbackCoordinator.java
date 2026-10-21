@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 public final class CreateTransferRollbackCoordinator {
     private record Preview(CreateTransferRollbackPlan plan,long expires,long entry) {}
     private static final Map<UUID,Preview> PREVIEWS=new HashMap<>();
+    public static void expirePreviews(long now){PreviewExpiry.prune(PREVIEWS,now,Preview::expires);}
     private static final Map<UUID,Long> REQUESTS=new HashMap<>();
     private static long requestSequence;
     private static Job active;

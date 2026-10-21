@@ -71,5 +71,27 @@ public final class LoggerActionCatalog {
         a("backpack_cancel","Рюкзаки","Отменить операцию с рюкзаком","Отменяет ваш запрос до применения.","log backpack cancel")
     );
     public static Action find(String id){return ACTIONS.stream().filter(a->a.id().equals(id)).findFirst().orElseThrow(()->new IllegalArgumentException("Неизвестное действие"));}
+    public record Selection(Action action,List<String> values){}
+    /** Prefer the most specific literal path, and keep optional final form fields empty. */
+    public static Selection linkedForm(List<Action> actions,String command){
+        String text=command.startsWith("/")?command.substring(1):command;
+        String[] words=text.trim().split("\\s+");if(words.length==0||!words[0].equals("log"))return null;
+        Selection best=null;int bestScore=-1;
+        for(var action:actions){
+            var parts=action.template().split(" ");var values=new java.util.ArrayList<String>(java.util.Collections.nCopies(action.fields().size(),""));
+            int cursor=0,score=0;boolean matches=true;
+            for(int i=0;i<parts.length;i++){
+                String part=parts[i];
+                if(part.startsWith("{")){
+                    int field=Integer.parseInt(part.substring(1,part.length()-1));
+                    if(i==parts.length-1){values.set(field,String.join(" ",java.util.Arrays.copyOfRange(words,cursor,words.length)));cursor=words.length;}
+                    else if(cursor<words.length)values.set(field,words[cursor++]);
+                    else{matches=false;break;}
+                }else if(cursor>=words.length||!part.equals(words[cursor++])){matches=false;break;}else score++;
+            }
+            if(matches&&cursor==words.length&&score>bestScore){bestScore=score;best=new Selection(action,List.copyOf(values));}
+        }
+        return best;
+    }
     private LoggerActionCatalog(){}
 }

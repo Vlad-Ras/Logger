@@ -26,6 +26,7 @@ import java.util.concurrent.*;
 /** At most one cart rollback. Queries/copies off-thread; preflight, construction and world edits in bounded steps. */
 public final class CartRollbackCoordinator {
     private static final Map<UUID, Preview> PREVIEWS = new HashMap<>();
+    public static void expirePreviews(long now){PreviewExpiry.prune(PREVIEWS,now,Preview::expires);}
     private static final Map<UUID,Long> PREVIEW_REQUESTS=new HashMap<>();
     private static long previewSequence;
     private static final Set<UUID> LOCKED = CartAuditContext.LOCKED_ENTITIES;

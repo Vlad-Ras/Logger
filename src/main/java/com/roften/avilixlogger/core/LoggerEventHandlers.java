@@ -103,6 +103,7 @@ public final class LoggerEventHandlers {
         PRE_DEATH.clear();
         RECENT_PICKUPS.clear(); RECENT_DROPS.clear(); RECENT_GENERIC_ACTIONS.clear();
         RecentPlayerActionTracker.clear();
+        CreateContraptionSnapshotStore.clear();
     }
 
     private static void runAfterTicks(ServerLevel level, int delayTicks, Runnable task) {

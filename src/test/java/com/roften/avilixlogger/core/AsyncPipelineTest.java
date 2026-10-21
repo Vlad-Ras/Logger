@@ -7,6 +7,8 @@ import java.util.concurrent.*;
 /** Deterministic concurrency checks, runnable without a world or a database. */
 public final class AsyncPipelineTest {
     public static void main(String[] args) throws Exception {
+        PreviewExpiryTest.run();
+        LoggerActionLinksTest.run();
         CreateContraptionKindTest.run();
         DetailFormattingTest.run();
         orderedHandoffAndBackpressure();

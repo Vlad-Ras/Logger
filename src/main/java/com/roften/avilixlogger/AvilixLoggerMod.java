@@ -57,6 +57,7 @@ public final class AvilixLoggerMod {
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(RollbackCoordinator::onServerTick);
+        NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.core.PreviewMaintenance::onTick);
         if (com.roften.avilixlogger.core.CreateSupport.available()) {
             com.roften.avilixlogger.core.CartAutomationHooks.install(new com.roften.avilixlogger.compat.create.CartAutomationAudit());
             com.roften.avilixlogger.compat.create.CreateStructuralAudit.install();
