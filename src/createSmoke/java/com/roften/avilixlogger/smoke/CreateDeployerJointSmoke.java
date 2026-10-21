@@ -211,6 +211,7 @@ public final class CreateDeployerJointSmoke {
                                 var external=CreateExternalPlayerState.capture(owner);
                                 com.mrcrayfish.backpacked.core.ModSyncedDataKeys.SELECTED_BACKPACK.setValue(owner,3);
                                 check(!com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(owner).unlockBackpack(ResourceLocation.parse("backpacked:cogwheel")),"reserved unlock was accepted");
+                                for(var progress:com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(owner).getProgressTrackerMap().values())if(progress instanceof com.mrcrayfish.backpacked.common.tracker.impl.CountProgressTracker count)count.increment(1,(net.minecraft.server.level.ServerPlayer)owner);
                                 check(CreateExternalPlayerState.capture(owner).equals(external),"reserved external state changed");
                             }
                             if(target instanceof net.minecraft.server.level.ServerPlayer human){

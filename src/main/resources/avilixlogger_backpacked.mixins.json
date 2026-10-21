@@ -7,6 +7,9 @@
   "mixins": [
     "BackpackSyncedKeyReservationMixin",
     "BackpackUnlockReservationMixin",
+    "BackpackCountReservationMixin",
+    "BackpackCraftingProgressReservationMixin",
+    "BackpackExploreReservationMixin",
     "BackpackInventoryAccessor",
     "BackpackShelfStackAccessor",
     "BackpackContentsMixin",

@@ -111,7 +111,7 @@ public final class BackpackDeployerContract {
         for(var key:keys())if(!((Object)key instanceof BackpackDeployerGuard))throw new IllegalStateException("Нет защиты записей Framework");
         var tracker=ModSyncedDataKeys.UNLOCK_TRACKER.getValue(player);
         if(!(tracker instanceof BackpackDeployerGuard))throw new IllegalStateException("Нет защиты прогресса Backpacked");
-        com.roften.avilixlogger.core.CartRestoreLocks.handler(tracker);
+        reserve(tracker);
         // Schema/configuration witnesses may never change inside a reversible action.
         var b=before.getCompound("State");var a=after.getCompound("State");
         if(player.containerMenu!=player.inventoryMenu&&(!stateForKey(b,ModSyncedDataKeys.BACKPACKS).equals(stateForKey(a,ModSyncedDataKeys.BACKPACKS))||!stateForKey(b,ModSyncedDataKeys.BACKPACK).equals(stateForKey(a,ModSyncedDataKeys.BACKPACK))))throw new IllegalStateException("Закройте меню перед возвратом экипировки Backpacked");
@@ -128,5 +128,12 @@ public final class BackpackDeployerContract {
     private static CompoundTag stateForKey(CompoundTag state,SyncedDataKey<Player,?> key){
         var out=new CompoundTag();for(String name:state.getAllKeys())if(key==ModSyncedDataKeys.UNLOCK_TRACKER?name.startsWith("unlock:")||name.startsWith("tracker:")||name.startsWith("type:"):key==ModSyncedDataKeys.BACKPACKS?name.equals("BagSize")||name.startsWith("bag:"):name.equals(key==ModSyncedDataKeys.BACKPACK?"Backpack":key.id().toString()))out.put(name,state.get(name).copy());return out;
     }
-    @SuppressWarnings({"unchecked","rawtypes"}) private static void set(Player player,SyncedDataKey key,Object value){key.setValue(player,value);if(key==ModSyncedDataKeys.UNLOCK_TRACKER)com.roften.avilixlogger.core.CartRestoreLocks.handler(value);}
+    private static void reserve(com.mrcrayfish.backpacked.data.unlock.UnlockTracker tracker){
+        com.roften.avilixlogger.core.CartRestoreLocks.handler(tracker);
+        for(var progress:tracker.getProgressTrackerMap().values()){
+            if(!(progress instanceof BackpackDeployerGuard))throw new IllegalStateException("Нет защиты tracker Backpacked");
+            com.roften.avilixlogger.core.CartRestoreLocks.handler(progress);
+        }
+    }
+    @SuppressWarnings({"unchecked","rawtypes"}) private static void set(Player player,SyncedDataKey key,Object value){key.setValue(player,value);if(key==ModSyncedDataKeys.UNLOCK_TRACKER)reserve((com.mrcrayfish.backpacked.data.unlock.UnlockTracker)value);}
 }
