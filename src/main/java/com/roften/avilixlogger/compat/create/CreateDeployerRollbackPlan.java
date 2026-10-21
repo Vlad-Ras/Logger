@@ -7,7 +7,7 @@ public final class CreateDeployerRollbackPlan {
     public record Undo(CompoundTag before,CompoundTag after){}
     private CreateDeployerRollbackPlan(){}
     public static CreateTransferRollbackPlan prepare(CompoundTag before,CompoundTag after){
-        if(before==null||after==null||before.sizeInBytes()+after.sizeInBytes()>8L*1024*1024||!before.getBoolean("Complete")||!after.getBoolean("Complete")||!Set.of(1,2,3,4,5).contains(before.getInt("JointFormat"))||before.getInt("JointFormat")!=after.getInt("JointFormat")||!before.hasUUID("Transfer")||!before.getUUID("Transfer").equals(after.getUUID("Transfer"))||!before.getString("Kind").equals("deployer_action")||!after.getString("Kind").equals("deployer_action"))throw new IllegalStateException("Нет полного совместного снимка активатора");
+        if(before==null||after==null||before.sizeInBytes()+after.sizeInBytes()>8L*1024*1024||!before.getBoolean("Complete")||!after.getBoolean("Complete")||!Set.of(1,2,3,4,5,6).contains(before.getInt("JointFormat"))||before.getInt("JointFormat")!=after.getInt("JointFormat")||!before.hasUUID("Transfer")||!before.getUUID("Transfer").equals(after.getUUID("Transfer"))||!before.getString("Kind").equals("deployer_action")||!after.getString("Kind").equals("deployer_action"))throw new IllegalStateException("Нет полного совместного снимка активатора");
         if(after.getInt("JointFormat")>=4){
             for(var tag:List.of(before,after))for(var pair:Map.of("World","WorldCount","Targets","TargetCount","Cargo","CargoCount","Uses","UseCount").entrySet())
                 if(!tag.contains(pair.getValue(),3)||!tag.contains(pair.getKey(),9)||tag.getInt(pair.getValue())!=CreatePlayerProgress.rows(tag,pair.getKey(),512).size()||tag.getInt(pair.getValue())!=after.getInt(pair.getValue()))throw new IllegalStateException("Манифест активатора потерял участника");
@@ -41,6 +41,8 @@ public final class CreateDeployerRollbackPlan {
             }
             var slots=new HashSet<Integer>();for(var raw:hand.getList("Inventory",10)){var slot=(CompoundTag)raw;if(!slot.contains("Slot",3)||slot.getInt("Slot")<0||slot.getInt("Slot")>=41||!slots.add(slot.getInt("Slot"))||!slot.contains("id",8)||slot.getInt("count")<=0)throw new IllegalStateException("Некорректный или повторный слот руки");}
         }
+        if(after.getInt("JointFormat")>=6)CreateExternalPlayerState.validatePair(b.getCompound("External"),a.getCompound("External"));
+        else if(b.contains("External")||a.contains("External"))throw new IllegalStateException("Внешние данные требуют нового формата");
         var world=pairs(before,after,"World",64);var targets=pairs(before,after,"Targets",32);var positions=new HashSet<String>();var ids=new HashSet<UUID>();
         for(var undo:world){var old=undo.before;var now=undo.after;
             if(!old.contains("Pos",4)||old.getLong("Pos")!=now.getLong("Pos")||!old.getString("Dimension").equals(now.getString("Dimension"))||old.getString("Dimension").isBlank()||!old.contains("State",10)||!now.contains("State",10)||!positions.add(now.getString("Dimension")+":"+now.getLong("Pos")))throw new IllegalStateException("Некорректный адрес цели блока");
@@ -49,7 +51,8 @@ public final class CreateDeployerRollbackPlan {
         for(var undo:targets){var old=undo.before;var now=undo.after;
             if(!old.hasUUID("Entity")||!old.getUUID("Entity").equals(now.getUUID("Entity"))||!old.getString("Dimension").equals(now.getString("Dimension"))||old.getString("Dimension").isBlank()||!old.getString("Type").equals(now.getString("Type"))||!CreateDeployerTransaction.supportedEntity(old.getString("Type"))||!ids.add(now.getUUID("Entity")))throw new IllegalStateException("Некорректный адрес сущности цели");
             for(var tag:List.of(old,now))if(tag.getBoolean("Exists")&&(!tag.contains("NBT",10)||!tag.getCompound("NBT").hasUUID("UUID")||!tag.getUUID("Entity").equals(tag.getCompound("NBT").getUUID("UUID"))||!tag.getString("Type").equals(tag.getCompound("NBT").getString("id"))||!tag.getCompound("NBT").getList("Passengers",10).isEmpty()))throw new IllegalStateException("Неполный снимок сущности цели");
-            if(now.getString("Type").equals("minecraft:player"))for(var tag:List.of(old,now)){if(!tag.getBoolean("Exists"))throw new IllegalStateException("Удалённый игрок не восстанавливается как сущность");CreateHumanRestore.validate(tag.getCompound("Human"));}
+            if(now.getString("Type").equals("minecraft:player"))for(var tag:List.of(old,now)){if(!tag.getBoolean("Exists"))throw new IllegalStateException("Удалённый игрок не восстанавливается как сущность");CreateHumanRestore.validate(tag.getCompound("Human"));if(after.getInt("JointFormat")>=6&&tag.getCompound("Human").getInt("Format")<2)throw new IllegalStateException("Потерян контракт внешних данных получателя");}
+            if(now.getString("Type").equals("minecraft:player")&&after.getInt("JointFormat")>=6)CreateExternalPlayerState.validatePair(old.getCompound("Human").getCompound("External"),now.getCompound("Human").getCompound("External"));
             if(old.contains("Terminal")||old.contains("Death"))throw new IllegalStateException("До действия уже записана терминальная цель");
             if(now.getBoolean("Terminal")){
                 if(!now.hasUUID("Retained")||after.getInt("JointFormat")<4||!old.getBoolean("Exists")||now.getBoolean("Exists")||!Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken").contains(now.getString("Type")))throw new IllegalStateException("Неполный терминальный снимок цели");

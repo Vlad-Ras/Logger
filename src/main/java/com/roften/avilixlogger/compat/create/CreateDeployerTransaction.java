@@ -61,9 +61,6 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
     private static void preparePlayer(net.minecraft.world.entity.player.Player player){
         if(net.neoforged.fml.ModList.get().isLoaded("backpacked"))com.roften.avilixlogger.compat.backpacked.BackpackDeployerContract.prepare(player);
     }
-    private static CompoundTag attachments(DeployerFakePlayer player){
-        var tag=player.serializeAttachments(player.registryAccess());return tag==null?new CompoundTag():tag.copy();
-    }
     private static ListTag inventory(DeployerFakePlayer player){
         var list=new ListTag();for(int slot=0;slot<41;slot++){var stack=player.getInventory().getItem(slot);if(stack.isEmpty())continue;var tag=NbtSerde.snapshotItemStack(stack,player.registryAccess());if(tag==null)throw new IllegalStateException("Нет снимка использования предмета");tag.putInt("Slot",slot);list.add(tag);}return list;
     }
@@ -75,7 +72,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
         tag.putInt("Size",inventory.getContainerSize());tag.putInt("Selected",inventory.selected);tag.put("Inventory",items);
         var runtime=((CreateDeployerRuntimeAccess)player).avilixlogger$deployerRuntime();
         if(context.data.contains("Timer",3))runtime.putInt("Timer",context.data.getInt("Timer"));
-        tag.put("Runtime",runtime);return tag;
+        tag.put("Runtime",runtime);tag.put("External",CreateExternalPlayerState.capture(player));return tag;
     }
     public static CompoundTag entity(Entity entity,boolean exists){
         var capture=CURRENT.get();return entity(entity,exists,capture==null?null:capture.player);
@@ -90,10 +87,10 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
     }
     public static boolean supportedEntity(String type){return Set.of("minecraft:player","minecraft:item","minecraft:experience_orb","minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken","minecraft:armor_stand","minecraft:item_frame","minecraft:glow_item_frame").contains(type);}
     public static final class Capture implements AutoCloseable {
-        final MovementContext context;final DeployerFakePlayer player;final CompoundTag attachments;final Capture previous;final CompoundTag beforeHand;final CreateCargoAudit.Capture cargo;final boolean nestedAutomation;
+        final MovementContext context;final DeployerFakePlayer player;final Capture previous;final CompoundTag beforeHand;final CreateCargoAudit.Capture cargo;final boolean nestedAutomation;
         final LinkedHashMap<Address,CompoundTag> blocks=new LinkedHashMap<>();final LinkedHashMap<Entity,CompoundTag> targets=new LinkedHashMap<>();
         final ListTag uses=new ListTag();final LinkedHashMap<String,CompoundTag> contracts=new LinkedHashMap<>();boolean complete=true,closed,reading;private long bytes;private CompoundTag before,after;private String reason;
-        Capture(MovementContext context,DeployerFakePlayer player,BlockPos target){this.context=context;this.player=player;preparePlayer(player);attachments=attachments(player);beforeHand=hand(context,player);previous=CURRENT.get();nestedAutomation=CartAutomationAudit.capturingChanges();CartStorageAudit.ensureBound(context.contraption.entity);cargo=CreateCargoAudit.captureChanges(context.contraption.entity);CURRENT.set(this);try{charge(beforeHand);charge(attachments);contract(player.getMainHandItem());block((ServerLevel)context.world,target);}catch(RuntimeException failure){close();throw failure;}}
+        Capture(MovementContext context,DeployerFakePlayer player,BlockPos target){this.context=context;this.player=player;preparePlayer(player);beforeHand=hand(context,player);previous=CURRENT.get();nestedAutomation=CartAutomationAudit.capturingChanges();CartStorageAudit.ensureBound(context.contraption.entity);cargo=CreateCargoAudit.captureChanges(context.contraption.entity);CURRENT.set(this);try{charge(beforeHand);contract(player.getMainHandItem());block((ServerLevel)context.world,target);}catch(RuntimeException failure){close();throw failure;}}
         void contract(ItemStack stack){
             try{var tag=CreateDeployerItemContracts.describe(stack);if(!tag.isEmpty()&&contracts.containsKey(tag.getString("Item"))&&!contracts.get(tag.getString("Item")).equals(tag))throw new IllegalStateException("Предмет сменил контракт внутри действия");if(!tag.isEmpty()&&!contracts.containsKey(tag.getString("Item"))){if(contracts.size()>=64)throw new IllegalStateException("Слишком много контрактов предметов");charge(tag);contracts.put(tag.getString("Item"),tag);}}
             catch(IllegalStateException failure){complete=false;reason=failure.getMessage();}
@@ -121,7 +118,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             for(var entry:targets.entrySet())try{var old=entry.getValue();
                 boolean terminal=entry.getKey() instanceof net.minecraft.world.entity.LivingEntity&&!entry.getKey().isAlive()&&old.getBoolean("Exists");
                 if(terminal&&!Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken").contains(old.getString("Type"))){complete=false;reason="У смерти этой цели нет полного контракта";}
-                var now=entity(entry.getKey(),!entry.getKey().isRemoved()&&!terminal);if(now.contains("Human",10)&&!Objects.equals(old.getCompound("NBT").get("neoforge:attachments"),now.getCompound("NBT").get("neoforge:attachments"))){complete=false;reason="Потребление изменило внешние attachments игрока; нужен контракт мода";}if(terminal){if(Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken").contains(old.getString("Type")))now.putUUID("Retained",retain(entry.getKey()));now.putBoolean("Terminal",true);now.put("Death",entity(entry.getKey(),true));}charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
+                var now=entity(entry.getKey(),!entry.getKey().isRemoved()&&!terminal);if(now.contains("Human",10))CreateExternalPlayerState.validatePair(old.getCompound("Human").getCompound("External"),now.getCompound("Human").getCompound("External"));if(terminal){if(Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken").contains(old.getString("Type")))now.putUUID("Retained",retain(entry.getKey()));now.putBoolean("Terminal",true);now.put("Death",entity(entry.getKey(),true));}charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
             var oldCargo=new ListTag();var newCargo=new ListTag();int creativeIO=0;
             if(!cargo.complete())complete=false;
             for(var row:cargo.rows()){
@@ -135,17 +132,16 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
                 }
                 try{charge(x);charge(y);oldCargo.add(x);newCargo.add(y);if(y.getString("Kind").equals("storage_io"))creativeIO++;}catch(RuntimeException failure){complete=false;}
             }
-            var afterAttachments=attachments(player);charge(afterAttachments);
-            if(!Objects.equals(attachments,afterAttachments)){complete=false;reason="Использование изменило внешние attachments технического игрока; нужен контракт мода";}
+
             if(!player.isAlive()){complete=false;reason="Технический игрок умер во время действия";}
-            var afterHand=hand(context,player);charge(afterHand);var transfer=UUID.randomUUID();
-            for(var tag:List.of(b,a)){tag.putUUID("Transfer",transfer);tag.putInt("JointFormat",5);if(creativeIO>0)tag.putInt("CreativeIO",creativeIO);tag.putBoolean("Complete",completed&&complete);if(reason!=null)tag.putString("JointFailure",reason);}
+            var afterHand=hand(context,player);charge(afterHand);try{CreateExternalPlayerState.validatePair(beforeHand.getCompound("External"),afterHand.getCompound("External"));}catch(IllegalStateException failure){complete=false;reason=failure.getMessage();}var transfer=UUID.randomUUID();
+            for(var tag:List.of(b,a)){tag.putUUID("Transfer",transfer);tag.putInt("JointFormat",6);if(creativeIO>0)tag.putInt("CreativeIO",creativeIO);tag.putBoolean("Complete",completed&&complete);if(reason!=null)tag.putString("JointFailure",reason);}
             var itemContracts=new ListTag();contracts.values().forEach(t->itemContracts.add(t.copy()));
             for(var tag:List.of(b,a)){tag.put("ItemContracts",itemContracts.copy());tag.putInt("ContractCount",itemContracts.size());tag.putInt("WorldCount",oldWorld.size());tag.putInt("TargetCount",oldEntities.size());tag.putInt("CargoCount",oldCargo.size());tag.putInt("UseCount",uses.size());tag.put("Uses",uses.copy());}
             b.put("Cargo",oldCargo);a.put("Cargo",newCargo);b.put("Hand",beforeHand.copy());a.put("Hand",afterHand);b.put("World",oldWorld);a.put("World",newWorld);b.put("Targets",oldEntities);a.put("Targets",newEntities);
             before=b.copy();after=a.copy();reading=false;
         }
-        public boolean changed(){reading=true;try{if(!cargo.rows().isEmpty()||!cargo.complete()||!beforeHand.equals(hand(context,player))||!Objects.equals(attachments,attachments(player)))return true;for(var entry:blocks.entrySet())if(!entry.getValue().equals(CreateStructuralAudit.world(entry.getKey().level,entry.getKey().pos)))return true;for(var entry:targets.entrySet())if(!entry.getValue().equals(entity(entry.getKey(),!entry.getKey().isRemoved())))return true;return !complete;}finally{reading=false;}}
+        public boolean changed(){reading=true;try{if(!cargo.rows().isEmpty()||!cargo.complete()||!beforeHand.equals(hand(context,player)))return true;for(var entry:blocks.entrySet())if(!entry.getValue().equals(CreateStructuralAudit.world(entry.getKey().level,entry.getKey().pos)))return true;for(var entry:targets.entrySet())if(!entry.getValue().equals(entity(entry.getKey(),!entry.getKey().isRemoved())))return true;return !complete;}finally{reading=false;}}
         public void close(){if(!closed){closed=true;cargo.close();if(previous==null)CURRENT.remove();else CURRENT.set(previous);}}
     }
 }

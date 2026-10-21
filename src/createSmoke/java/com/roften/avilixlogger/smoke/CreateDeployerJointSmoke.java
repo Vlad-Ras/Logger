@@ -48,7 +48,7 @@ public final class CreateDeployerJointSmoke {
             for(String food:List.of("beef_stew","apple_cider","milk_bottle","hot_cocoa","melon_juice","melon_popsicle"))for(String phase:List.of("native","stack","cancel-first","cancel-all","effect-conflict","full"))modes.add((food.equals("melon_popsicle")?"finish-fd/":List.of("milk_bottle","hot_cocoa","melon_juice").contains(food)?"consume-fd/":"feed-fd/")+food+"/"+phase);
             modes.add("self-noop-fd/melon_popsicle/native");
         }
-        if(net.neoforged.fml.ModList.get().isLoaded("backpacked")){modes.add("backpack-progress-barrier");modes.add("backpack-inventory-barrier");}
+        if(net.neoforged.fml.ModList.get().isLoaded("backpacked"))for(String participant:List.of("backpack-progress-","backpack-inventory-","feed-backpack-progress-"))for(String phase:List.of("native","cancel-first","cancel-all","conflict","unrelated","locks"))modes.add(participant+phase);
         int tested=0;
         for(var kind:List.of(CreateContraptionKind.MINECART,CreateContraptionKind.TRAIN,CreateContraptionKind.BEARING,CreateContraptionKind.OTHER))
         for(String mode:modes){
@@ -116,14 +116,14 @@ public final class CreateDeployerJointSmoke {
                         java.lang.invoke.MethodType.methodType(void.class,MovementContext.class,BlockPos.class,DeployerFakePlayer.class,modeClass))
                         .invokeWithArguments(new DeployerMovementBehaviour(),context,pos,fake,Enum.valueOf(modeClass,punch?"PUNCH":"USE")); } catch(Throwable failure) { throw new IllegalStateException("Native activate",failure); }
                     }
-                    if(mode.equals("backpack-progress-barrier"))check(com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(fake).unlockBackpack(ResourceLocation.parse("backpacked:cogwheel")),"backpack progress fixture did not unlock");
-                    if(mode.equals("backpack-inventory-barrier"))com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(fake).set(0,new ItemStack(Items.DIAMOND));
+                    if(mode.contains("backpack-progress-"))check(com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(mode.startsWith("feed-")?(net.minecraft.world.entity.player.Player)target:fake).unlockBackpack(ResourceLocation.parse("backpacked:cogwheel")),"backpack progress fixture did not unlock");
+                    if(mode.startsWith("backpack-inventory-"))com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(fake).set(0,new ItemStack(Items.DIAMOND));
                     row=session.finish(!mode.equals("failure"));
                 }
                 if(mode.equals("noop")||mode.startsWith("self-noop-fd/")){check(row==null,"idle/no-op activation invented a row");if(mode.startsWith("self-noop-fd/"))check(fake.getRemainingFireTicks()==100&&fake.getMainHandItem().is(held.getItem())&&fake.getMainHandItem().getCount()==heldCount,"native self-food refusal changed state");tested++;continue;}
                 check(row!=null,"native deployer action not captured: "+kind+"/"+mode);row.materializeSnapshots();var b=NbtSerde.fromSnbt(row.beBefore);var a=NbtSerde.fromSnbt(row.beAfter);
                 check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"deployer blamed its owner");check(CreateContraptionKind.id(row.source).equals(CreateContraptionSources.id(body)),"deployer root ID lost");
-                if(mode.equals("failure")||mode.endsWith("/barrier")||mode.startsWith("backpack-")&&mode.endsWith("-barrier")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
+                if(mode.equals("failure")||mode.endsWith("/barrier")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
                 check(a.getBoolean("Complete"),"capture incomplete: "+kind+"/"+mode+" reason="+a.getString("JointFailure"));
                 if(mode.equals("feed-natural-ticks")){var human=(net.minecraft.server.level.ServerPlayer)target;for(int t=0;t<20;t++){human.doTick();world.tickNonPassenger(human);}}
                 if(mode.equals("feed-unrelated-progress")||mode.equals("feed-natural-ticks")){
@@ -184,6 +184,17 @@ public final class CreateDeployerJointSmoke {
                 if(mode.equals("consume-polish-conflict"))fake.getFoodData().setFoodLevel(9);
                 if(mode.equals("world-conflict"))world.setBlock(pos,Blocks.GOLD_BLOCK.defaultBlockState(),3);
                 if(mode.equals("entity-conflict"))target.setCustomName(Component.literal("later target change"));
+                if(mode.contains("backpack-")&&mode.endsWith("conflict")){
+                    var owner=mode.startsWith("feed-")?(net.minecraft.world.entity.player.Player)target:fake;
+                    if(mode.contains("progress-"))com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.setValue(owner,new com.mrcrayfish.backpacked.data.unlock.UnlockTracker());
+                    else com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(owner).set(0,new ItemStack(Items.GOLD_INGOT));
+                }
+                if(mode.contains("backpack-")&&mode.endsWith("unrelated")){
+                    var owner=mode.startsWith("feed-")?(net.minecraft.world.entity.player.Player)target:fake;
+                    com.mrcrayfish.backpacked.core.ModSyncedDataKeys.SELECTED_BACKPACK.setValue(owner,2);
+                    var expected=mode.startsWith("feed-")?humanBefore:before;
+                    expected.getCompound("External").getCompound("Backpacked").getCompound("State").putInt(com.mrcrayfish.backpacked.core.ModSyncedDataKeys.SELECTED_BACKPACK.id().toString(),2);
+                }
                 var recipientLive=target instanceof net.minecraft.server.level.ServerPlayer?CreateLivingRuntime.entitySnapshot(world,target):null;
                 var type=Class.forName("com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator$Job");var ctor=type.getDeclaredConstructor(net.minecraft.commands.CommandSourceStack.class,CreateTransferRollbackPlan.class,long.class);ctor.setAccessible(true);var job=ctor.newInstance(world.getServer().createCommandSourceStack(),plan,1L);var step=method(type,"step",net.minecraft.server.MinecraftServer.class);var cancel=method(type,"cancel",String.class);var applied=field(type,"applied");
                 boolean canceled=false,rejected=false,locked=false;boolean prior=CartAuditContext.restoring(true);CartAuditContext.rollbackActive=true;
@@ -193,7 +204,14 @@ public final class CreateDeployerJointSmoke {
                         try{done=(Boolean)step.invoke(job,world.getServer());}catch(InvocationTargetException e){if(!mode.endsWith("conflict"))throw new IllegalStateException(kind+"/"+mode,e.getCause());check(applied.getInt(job)==0,"deployer preflight conflict wrote hand");rejected=true;break;}
                         int total=plan.cargo().size()+plan.hands().size()+plan.blocks().size()+plan.targets().size();
                         if(mode.contains("cancel")&&!canceled&&applied.getInt(job)>=(mode.endsWith("all")?total:1)){cancel.invoke(job,"deployer partial cancellation");canceled=true;}
-                        if((mode.equals("locks")||mode.equals("name-locks")||mode.equals("feed-locks"))&&!locked&&applied.getInt(job)>0){CartAuditContext.restoring(false);try{fake.getInventory().setItem(1,new ItemStack(Items.EMERALD));check(!fake.getMainHandItem().is(Items.EMERALD),"reserved fake inventory changed");if(mode.equals("locks"))check(!world.setBlock(pos,Blocks.GOLD_BLOCK.defaultBlockState(),3),"reserved deployer target changed");
+                        if((mode.equals("locks")||mode.equals("name-locks")||mode.equals("feed-locks")||mode.contains("backpack-")&&mode.endsWith("locks"))&&!locked&&applied.getInt(job)>0){CartAuditContext.restoring(false);try{fake.getInventory().setItem(1,new ItemStack(Items.EMERALD));check(!fake.getMainHandItem().is(Items.EMERALD),"reserved fake inventory changed");if(mode.equals("locks"))check(!world.setBlock(pos,Blocks.GOLD_BLOCK.defaultBlockState(),3),"reserved deployer target changed");
+                            if(mode.contains("backpack-")){
+                                var owner=mode.startsWith("feed-")?(net.minecraft.world.entity.player.Player)target:fake;
+                                var external=CreateExternalPlayerState.capture(owner);
+                                com.mrcrayfish.backpacked.core.ModSyncedDataKeys.SELECTED_BACKPACK.setValue(owner,3);
+                                check(!com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(owner).unlockBackpack(ResourceLocation.parse("backpacked:cogwheel")),"reserved unlock was accepted");
+                                check(CreateExternalPlayerState.capture(owner).equals(external),"reserved external state changed");
+                            }
                             if(target instanceof net.minecraft.server.level.ServerPlayer human){
                                 var stats=CreateHumanRestore.capture(human);human.awardStat(net.minecraft.stats.Stats.ITEM_USED.get(Items.APPLE));
                                 var holder=world.getServer().getAdvancements().get(ResourceLocation.parse("minecraft:husbandry/plant_seed"));human.getAdvancements().award(holder,holder.value().criteria().keySet().iterator().next());
@@ -216,6 +234,7 @@ public final class CreateDeployerJointSmoke {
                         if(mode.startsWith("consume-fd/")||mode.startsWith("finish-fd/"))check(fake.getHealth()==12&&fake.getRemainingFireTicks()==100&&(!(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))||fake.hasEffect(MobEffects.POISON)),"FD self consumption was not undone: "+mode+" health="+fake.getHealth()+" fire="+fake.getRemainingFireTicks()+" poison="+fake.hasEffect(MobEffects.POISON));
                         if(mode.startsWith("feed-fd/"))check(((LivingEntity)target).getHealth()==12&&target.getRemainingFireTicks()==100&&(!(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))||((LivingEntity)target).hasEffect(MobEffects.POISON)),"FD heal/fire/cure was not undone");
                         if(mode.startsWith("feed-drink"))check(((LivingEntity)target).hasEffect(MobEffects.POISON),"recipient drink did not restore previous effect");
+                        if(mode.contains("backpack-")&&mode.endsWith("locks"))check(locked,"external locks not tested");
                         if(mode.startsWith("feed"))check(CreateHumanRestore.capture((net.minecraft.server.level.ServerPlayer)target).equals(humanBefore)&&((net.minecraft.server.level.ServerPlayer)target).getFoodData().getFoodLevel()==7,"recipient feed was not undone");
                         if(mode.startsWith("combat")&&!nonlethal)check(world.getEntity(target.getUUID()) instanceof LivingEntity living&&living.isAlive()&&living.getHealth()==1&&living==target,"lethal target or its native AI identity was not restored");
                         if(mode.startsWith("combat-cardboard"))check(!((LivingEntity)target).hasEffect(MobEffects.MOVEMENT_SLOWDOWN)&&target.getDeltaMovement().equals(Vec3.ZERO),"cardboard motion/effect not undone");

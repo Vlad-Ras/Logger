@@ -60,7 +60,8 @@ public final class CreateTrainRollbackSmoke {
                 if(mode.equals("signal-reserve")){var boundary=EdgePointType.SIGNAL.create();boundary.id=UUID.randomUUID();boundary.setLocation(Couple.create(a.getLocation(),b.getLocation()),12);graph.addPoint(EdgePointType.SIGNAL,boundary);train.reservedSignalBlocks.add(graph.id);Create.RAILWAYS.signalEdgeGroups.get(graph.id).reserved=boundary;train.navigation.waitingForSignal=net.createmod.catnip.data.Pair.of(boundary.id,true);train.navigation.distanceToSignal=3.5;train.navigation.ticksWaitingForSignal=9;}
                 if(mode.equals("portal-refusal")){
                     carriages.getFirst().getDimensional(net.minecraft.world.level.Level.NETHER);capture=CreateStructuralAudit.captureTrain(train);
-                    var representations=CreateLifecycleAudit.snapshot(originals.getFirst(),"entity").getList("RepresentationStatus",10);
+                    var life=CreateLifecycleAudit.snapshot(originals.getFirst(),"entity");var representations=life.getList("RepresentationStatus",10);
+                    var prepared=CreateTrainRepresentationState.prepare(life.getCompound("TrainRepresentations"));check(prepared.nativeCarriage().getList("EntityPositioning",10).size()==2,"portal lost dimensional payload");
                     check(representations.size()==2&&representations.getCompound(0).getBoolean("Loaded")!=representations.getCompound(1).getBoolean("Loaded"),"portal representations did not distinguish unloaded dimension");
                     try{check(!train.disassemble(Direction.EAST,pos),"native portal disassembly unexpectedly succeeded");}finally{capture.close();}
                     check(!capture.after().getBoolean("Complete")&&Create.RAILWAYS.trains.get(train.id)==train&&!originals.getFirst().isRemoved(),"portal refusal modified train or claimed completion");var portalBefore=capture.before();var portalAfter=capture.after();reject(()->CreateStructuralRollbackPlan.prepare(portalBefore,portalAfter),"portal refusal accepted for structural undo");tested++;continue;
@@ -69,7 +70,8 @@ public final class CreateTrainRollbackSmoke {
                     var dimensional=carriages.getFirst().getDimensional(world);var original=dimensional.entity;
                     dimensional.entity=new java.lang.ref.WeakReference<>(null);
                     try{check(!train.canDisassemble()&&!train.disassemble(Direction.EAST,pos),"unloaded carriage unexpectedly disassembled");
-                        var status=CreateLifecycleAudit.snapshot(originals.getFirst(),"entity").getList("RepresentationStatus",10);
+                        var life=CreateLifecycleAudit.snapshot(originals.getFirst(),"entity");var status=life.getList("RepresentationStatus",10);
+                        var prepared=CreateTrainRepresentationState.prepare(life.getCompound("TrainRepresentations"));check(prepared.train().equals(train.id)&&!prepared.nativeCarriage().getCompound("Entity").isEmpty(),"unloaded train lost durable native payload");
                         check(status.size()==1&&!status.getCompound(0).getBoolean("Loaded"),"unloaded carriage logged as loaded");
                         var unloadedTrain=train;reject(()->CreateStructuralAudit.captureTrain(unloadedTrain),"unloaded carriage produced structural capture");
                         check(Create.RAILWAYS.trains.get(train.id)==train&&world.getEntity(originals.getFirst().getUUID())==originals.getFirst(),"unloaded refusal altered live representation");
@@ -78,7 +80,10 @@ public final class CreateTrainRollbackSmoke {
                 }
                 var orientation=((CreateOrientationAccess)originals.getFirst()).avilixlogger$orientation();CreateCartAudit.save(originals.getFirst());CreateTrainRegistry.snapshot(train,world);check(orientation.equals(((CreateOrientationAccess)originals.getFirst()).avilixlogger$orientation()),"observational snapshot consumed train ForceYaw");
                 if(mode.equals("commit")){
-                    var loaded=CreateLifecycleAudit.snapshot(originals.getFirst(),"entity").getList("RepresentationStatus",10);
+                    var life=CreateLifecycleAudit.snapshot(originals.getFirst(),"entity");
+                    var context=life.getCompound("TrainRepresentations");var prepared=CreateTrainRepresentationState.prepare(context);var nativeCopy=prepared.nativeCarriage().copy();context.getCompound("Native").putBoolean("MutationAfterPrepare",true);check(prepared.nativeCarriage().equals(nativeCopy),"train preparation shares mutable history");
+                    var broken=life.getCompound("TrainRepresentations").copy();broken.getCompound("Native").remove("EntityPositioning");reject(()->CreateTrainRepresentationState.prepare(broken),"missing dimensions accepted");
+                    var loaded=life.getList("RepresentationStatus",10);
                     var leaving=CreateLifecycleAudit.snapshot(originals.getFirst(),"unloaded").getList("RepresentationStatus",10);
                     check(loaded.size()==1&&loaded.getCompound(0).getBoolean("Loaded")&&loaded.getCompound(0).getUUID("Entity").equals(originals.getFirst().getUUID())&&leaving.size()==1&&!leaving.getCompound(0).getBoolean("Loaded"),"lifecycle representation transition incorrect");
                 }

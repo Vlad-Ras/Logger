@@ -42,13 +42,14 @@ public final class CreateDeployerRestore {
         return new Target(server,undo,actor,candidates);
     }
     private static final class Hand implements CreateTransferRollbackCoordinator.Endpoint {
-        final AbstractContraptionEntity entity;final MovementContext context;final DeployerFakePlayer player;final CreateDeployerRollbackPlan.Undo undo;final CreateLivingRuntime.Bindings bindings;
+        final AbstractContraptionEntity entity;final MovementContext context;final DeployerFakePlayer player;final CreateDeployerRollbackPlan.Undo undo;final CreateLivingRuntime.Bindings bindings;final CreateExternalPlayerState.Session external;
         Hand(MinecraftServer server,CreateDeployerRollbackPlan.Undo undo,Map<UUID,Entity> candidates){this.undo=undo;var a=undo.after();var world=level(server,a);var found=world.getEntity(a.getUUID("StorageEntity"));
             if(!(found instanceof AbstractContraptionEntity body)||body.isRemoved()||body.getContraption()==null||!CreateContraptionSources.id(body).equals(a.getUUID("Construction"))||!CreateContraptionSources.kind(body).name().equals(a.getString("ConstructionKind")))throw new IllegalStateException("Конструкция активатора недоступна");entity=body;
             if(body instanceof com.simibubi.create.content.trains.entity.CarriageContraptionEntity carriage
                     &&(carriage.getCarriage()==null||carriage.getCarriage().presentInMultipleDimensions()))throw new IllegalStateException("Вагон активатора находится в портале или выгружен");
             context=body.getContraption().getActors().stream().map(pair->pair.getRight()).filter(Objects::nonNull).filter(c->c.localPos.asLong()==a.getLong("LocalPos")).findFirst().orElseThrow(()->new IllegalStateException("Нет нативного контекста активатора"));
             if(!(context.temporaryData instanceof DeployerFakePlayer fake))throw new IllegalStateException("Активатор выгружен или сменил технического игрока");player=fake;
+            external=a.contains("External",10)?new CreateExternalPlayerState.Session(fake,undo.before().getCompound("External"),a.getCompound("External")):null;
             bindings=CreateLivingRuntime.bind(fake,List.of(undo.before().getCompound("Runtime").getCompound("Living"),undo.after().getCompound("Runtime").getCompound("Living")),candidates);
             for(var tag:List.of(undo.before(),undo.after())){var runtime=tag.getCompound("Runtime");
                 if(runtime.contains("Physical",10))CreateDeployerRuntimeAccess.validatePhysical(runtime.getCompound("Physical"));
@@ -59,12 +60,13 @@ public final class CreateDeployerRestore {
             for(var tag:List.of(undo.before(),undo.after()))for(var raw:tag.getList("Inventory",10)){var slot=(CompoundTag)raw;var decoded=NbtSerde.readItemStack(slot,world.registryAccess());if(decoded.isEmpty()||decoded.getCount()!=slot.getInt("count"))throw new IllegalStateException("Предмет активатора не прочитан полностью");}
             verifyAfter();CartAuditContext.LOCKED_ENTITIES.add(body.getUUID());if(body.getVehicle()!=null)CartAuditContext.LOCKED_ENTITIES.add(body.getVehicle().getUUID());CartRestoreLocks.construction(a.getUUID("Construction"));CartRestoreLocks.player(fake);CartRestoreLocks.handler(fake.getStats());CartRestoreLocks.handler(fake.getAdvancements());if(a.getCompound("Runtime").contains("Scores",10))CreateScoreRuntime.reserve(fake);CartRestoreLocks.keepLoaded(world,body.blockPosition());CartStorageAudit.lockMenus(a.getUUID("Construction"),server);
         }
-        void verify(CompoundTag expected){expected=expected.copy();CreateLivingRuntime.normalize(expected.getCompound("Runtime").getCompound("Living").getCompound("Persistent"));var actual=CreateDeployerTransaction.hand(context,player);
+        void verify(CompoundTag expected){boolean original=expected==undo.before();expected=expected.copy();CreateLivingRuntime.normalize(expected.getCompound("Runtime").getCompound("Living").getCompound("Persistent"));var actual=CreateDeployerTransaction.hand(context,player);
             if(!expected.getCompound("Runtime").contains("Progress")){actual.getCompound("Runtime").remove("Progress");actual.getCompound("Runtime").remove("Scores");}
             if(!expected.getCompound("Runtime").contains("Living")){actual.getCompound("Runtime").remove("Living");actual.getCompound("Runtime").remove("Cooldowns");}
             if(!expected.getCompound("Runtime").contains("Physical"))actual.getCompound("Runtime").remove("Physical");
+            if(external!=null)external.verify(original);expected.remove("External");actual.remove("External");
             if(entity.isRemoved()||!entity.level().hasChunkAt(entity.blockPosition())||context.contraption!=entity.getContraption()||context.temporaryData!=player||entity.getContraption().getActors().stream().noneMatch(p->p.getRight()==context)||!actual.equals(expected))throw new IllegalStateException("Рука или настройки активатора изменились");}
-        void set(CompoundTag tag){bindings.run(()->((CreateDeployerRuntimeAccess)player).avilixlogger$deployerRuntime(tag.getCompound("Runtime")));
+        void set(CompoundTag tag){if(external!=null)external.set(tag==undo.before());bindings.run(()->((CreateDeployerRuntimeAccess)player).avilixlogger$deployerRuntime(tag.getCompound("Runtime")));
             var inv=player.getInventory();inv.clearContent();inv.selected=tag.getInt("Selected");for(var raw:tag.getList("Inventory",10)){var slot=(CompoundTag)raw;inv.setItem(slot.getInt("Slot"),NbtSerde.readItemStack(slot,player.registryAccess()));}
             var runtime=tag.getCompound("Runtime");context.stall=runtime.contains("BreakingPos",4);context.data.remove("Timer");if(runtime.contains("Timer",3))context.data.putInt("Timer",runtime.getInt("Timer"));
             var held=NbtSerde.snapshotItemStack(player.getMainHandItem(),player.registryAccess());context.data.put("HeldItem",held==null?new CompoundTag():held);context.blockEntityData.remove("Inventory");verify(tag);}

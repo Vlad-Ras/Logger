@@ -14,7 +14,7 @@ public final class CartLogDetails {
         if(CreateContraptionKind.id(row.source)==null)return List.of();
         var before=NbtSerde.fromSnbt(row.beBefore);var after=NbtSerde.fromSnbt(row.beAfter);if(after==null)return List.of();if(before==null){if(!after.getString("Kind").equals("lifecycle"))return List.of();before=new CompoundTag();}
         List<Component> lines=new ArrayList<>();String kind=after.getString("Kind");
-        if(kind.equals("deployer_action")&&Set.of(1,2,3,4,5).contains(after.getInt("JointFormat"))){
+        if(kind.equals("deployer_action")&&Set.of(1,2,3,4,5,6).contains(after.getInt("JointFormat"))){
             lines.add(Component.literal("Активатор · операция "+after.getUUID("Transfer")+" · "+(after.getBoolean("Complete")?"рука и цели связаны":"неполный снимок — откат запрещён")));
             lines.add(Component.literal("Груз: изменённых ячеек "+after.getList("Cargo",10).stream().filter(t->!((CompoundTag)t).getString("Kind").equals("storage_io")).count()));
             for(var raw:after.getList("Cargo",10)){var io=(CompoundTag)raw;if(io.getString("Kind").equals("storage_io"))lines.add(Component.literal(io.getString("Direction").equals("in")?"Бесконечное хранилище · поглощено: ":"Бесконечное хранилище · выдано: ").append(resource(level,io.getString("ResourceKind"),io.getCompound("Payload"))));}

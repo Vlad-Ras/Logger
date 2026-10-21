@@ -46,6 +46,7 @@ public final class CreateLifecycleAudit {
             }
             tag.put("Representations",dimensions);tag.put("RepresentationStatus",status);
             tag.putBoolean("Portal",carriage.getCarriage().presentInMultipleDimensions());
+            tag.put("TrainRepresentations",CreateTrainRepresentationState.capture(carriage));
         }
         if(tag.sizeInBytes()>128L*1024*1024)throw new IllegalStateException("Снимок конструкции превышает 128 MiB");
         return tag.copy();

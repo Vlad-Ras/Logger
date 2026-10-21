@@ -46,8 +46,21 @@ public final class CreateDeployerRuntimeTest {
         values.add(modifier);attribute.put("Modifiers",values);modifiers.getList("Attributes",10).add(attribute);CreateLivingRuntime.validate(modifiers);
         values.add(modifier.copy());reject(()->CreateLivingRuntime.validate(modifiers),"duplicate modifier accepted");
         var player=saved.copy();player.put("Food",new CompoundTag());check(CreateLivingRuntime.project(player,112).getInt("NoAction")==0,"player inactivity counter must reset as native aiStep does");
-        progressDeltas();cooldowns();legacyAndCurrentPlan();
+        progressDeltas();cooldowns();legacyAndCurrentPlan();externalDeltas();
         System.out.println("CREATE_DEPLOYER_RUNTIME_DATA_OK: bounded complete schema, damaged history rejection, detached aging, cooldowns and legacy/current plans");
+    }
+    private static void externalDeltas(){
+        var before=new CompoundTag();before.putInt("tracker:a",1);
+        var after=before.copy();after.putInt("tracker:a",2);after.putBoolean("unlock:a",true);
+        var live=after.copy();live.putInt("tracker:unrelated",7);
+        var restored=CreateExternalPlayerState.merge(live,after,before);
+        check(restored.getInt("tracker:a")==1&&!restored.contains("unlock:a")&&restored.getInt("tracker:unrelated")==7,"external delta erased unrelated progress");
+        check(CreateExternalPlayerState.merge(restored,before,after).equals(live),"external compensation did not restore exact changed cells");
+        live.putInt("tracker:a",3);reject(()->CreateExternalPlayerState.merge(live,after,before),"external conflict overwritten");
+        var external=new CompoundTag();external.putInt("Format",1);external.put("Unknown",new CompoundTag());
+        CreateExternalPlayerState.validatePair(external,external.copy());
+        var changed=external.copy();changed.getCompound("Unknown").putInt("other:mod",1);reject(()->CreateExternalPlayerState.validatePair(external,changed),"unknown attachment mutation accepted");
+        var broken=external.copy();broken.remove("Unknown");reject(()->CreateExternalPlayerState.validate(broken),"truncated external state accepted");
     }
     private static CompoundTag stat(String value,int count){var row=new CompoundTag();row.putString("Type","minecraft:custom");row.putString("Value",value);row.putInt("Count",count);return row;}
     private static void progressDeltas(){
@@ -108,6 +121,12 @@ public final class CreateDeployerRuntimeTest {
         reject(()->CreateDeployerRollbackPlan.prepare(x,y),"used mod item lost its contract");
         for(var tag:List.of(x,y))tag.putInt("JointFormat",4);
         reject(()->CreateDeployerRollbackPlan.prepare(x,y),"new mod item silently downgraded to an older contract");
+        var old6=old5.copy();var now6=now5.copy();
+        for(var tag:List.of(old6,now6)){tag.putInt("JointFormat",6);var external=new CompoundTag();external.putInt("Format",1);external.put("Unknown",new CompoundTag());tag.getCompound("Hand").put("External",external);}
+        check(CreateDeployerRollbackPlan.prepare(old6,now6).hands().size()==1,"complete external manifest rejected");
+        var missingExternal=now6.copy();missingExternal.getCompound("Hand").remove("External");reject(()->CreateDeployerRollbackPlan.prepare(old6,missingExternal),"lost external participant accepted");
+        for(var tag:List.of(old6,now6))tag.putInt("JointFormat",5);
+        reject(()->CreateDeployerRollbackPlan.prepare(old6,now6),"external action downgraded to old format");
         after.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateDeployerRollbackPlan.prepare(before,after),"new format accepted legacy partial runtime");
     }
     private static CompoundTag manifest(){

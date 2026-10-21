@@ -7,20 +7,23 @@ import java.util.*;
 /** A connected recipient is restored in place; Entity.load is never used for a human. */
 public final class CreateHumanRestore implements CreateTransferRollbackCoordinator.Endpoint {
     private final ServerPlayer player;private final ServerLevel level;private final DeployerFakePlayer actor;
+    private final CreateExternalPlayerState.Session external;
     private final Set<String> ticking=new HashSet<>();
     private final CreateDeployerRollbackPlan.Undo undo;private final CreateLivingRuntime.Bindings bindings;
     public static CompoundTag capture(ServerPlayer player){
-        var tag=new CompoundTag();tag.putInt("Format",1);tag.putInt("Menu",player.containerMenu.containerId);
+        var tag=new CompoundTag();tag.putInt("Format",2);tag.put("External",CreateExternalPlayerState.capture(player));tag.putInt("Menu",player.containerMenu.containerId);
         tag.put("Cursor",Objects.requireNonNullElseGet(NbtSerde.snapshotItemStack(player.containerMenu.getCarried(),player.registryAccess()),CompoundTag::new));
         tag.put("Progress",CreatePlayerProgress.capture(player));tag.put("Scores",CreateScoreRuntime.capture(player));tag.put("Cooldowns",((CreateCooldownRuntimeAccess)player.getCooldowns()).avilixlogger$cooldownRuntime());return tag;
     }
     public static void validate(CompoundTag tag){
-        if(tag.getInt("Format")!=1||!tag.contains("Menu",3)||!tag.contains("Cursor",10))throw new IllegalStateException("Нет полного снимка получателя");
+        if(!Set.of(1,2).contains(tag.getInt("Format"))||!tag.contains("Menu",3)||!tag.contains("Cursor",10))throw new IllegalStateException("Нет полного снимка получателя");
+        if(tag.getInt("Format")>=2)CreateExternalPlayerState.validate(tag.getCompound("External"));
         CreatePlayerProgress.validate(tag.getCompound("Progress"));CreateScoreRuntime.validate(tag.getCompound("Scores"));CreateCooldownRuntimeAccess.validate(tag.getCompound("Cooldowns"));
     }
     public CreateHumanRestore(ServerLevel level,CreateDeployerRollbackPlan.Undo undo,DeployerFakePlayer actor){
         this.level=level;this.undo=undo;this.actor=actor;
         if(!(level.getEntity(undo.after().getUUID("Entity")) instanceof ServerPlayer human)||human instanceof net.neoforged.neoforge.common.util.FakePlayer||human.hasDisconnected())throw new IllegalStateException("Получатель вышел или заменён");player=human;
+        external=undo.after().getCompound("Human").getInt("Format")>=2?new CreateExternalPlayerState.Session(player,undo.before().getCompound("Human").getCompound("External"),undo.after().getCompound("Human").getCompound("External")):null;
         bindings=CreateLivingRuntime.bind(actor,List.of(undo.before().getCompound("LivingRuntime"),undo.after().getCompound("LivingRuntime")));
         for(var state:List.of(undo.before(),undo.after())){
             var tag=state.getCompound("Human");validate(tag);bindings.run(()->CreateLivingRuntime.validateForRestore(player,actor,state.getCompound("LivingRuntime")));
@@ -32,7 +35,7 @@ public final class CreateHumanRestore implements CreateTransferRollbackCoordinat
         ticking.add("HurtTime");ticking.add("recipeBook");
         verifyAfter();CartRestoreLocks.player(player);CartRestoreLocks.handler(player.getStats());CartRestoreLocks.handler(player.getAdvancements());CartRestoreLocks.keepLoaded(level,player.blockPosition());CartAuditContext.LOCKED_ENTITIES.add(player.getUUID());CreateScoreRuntime.reserve(player);
     }
-    private CompoundTag stable(CompoundTag data){var tag=data.copy();CreateLivingRuntime.normalize(tag);for(String field:ticking)tag.remove(field);return tag;}
+    private CompoundTag stable(CompoundTag data){var tag=data.copy();CreateLivingRuntime.normalize(tag);for(String field:ticking)tag.remove(field);if(external!=null)tag.remove("neoforge:attachments");return tag;}
     private CompoundTag progressTarget(CompoundTag current,CompoundTag desired,boolean writing,boolean compensating){
         var other=desired==undo.before()?undo.after():undo.before();var from=(writing?other:desired).getCompound("Human");var to=(writing?desired:other).getCompound("Human");
         // During verification, merging to the opposite side merely checks every changed value.
@@ -48,6 +51,7 @@ public final class CreateHumanRestore implements CreateTransferRollbackCoordinat
         human.put("Progress",live.getCompound("Progress"));human.put("Scores",live.getCompound("Scores"));
         var b=undo.before().getCompound("Human").getCompound("Cooldowns");var a=undo.after().getCompound("Human").getCompound("Cooldowns");
         human.put("Cooldowns",b.equals(a)?live.getCompound("Cooldowns"):cooldown(human.getCompound("Cooldowns"),live.getCompound("Cooldowns").getInt("Tick")));
+        if(external!=null)external.verify(expected==undo.before());live.remove("External");human.remove("External");live.putInt("Format",human.getInt("Format"));
         if(!live.equals(human))throw new IllegalStateException("Состояние получателя изменилось: "+differences("Human",live,human));
         var runtime=CreateLivingRuntime.capture(player,actor);var wanted=CreateLivingRuntime.project(expected.getCompound("LivingRuntime"),player.tickCount);
         if(!runtime.equals(wanted))throw new IllegalStateException("Runtime получателя изменился: "+differences("Living",runtime,wanted));
@@ -71,6 +75,7 @@ public final class CreateHumanRestore implements CreateTransferRollbackCoordinat
         if(!ticking.contains("OnGround"))player.setOnGround(nbt.getBoolean("OnGround"));
         if(!ticking.contains("PortalCooldown"))player.setPortalCooldown(nbt.getInt("PortalCooldown"));
         if(!ticking.contains("TicksFrozen"))player.setTicksFrozen(nbt.getInt("TicksFrozen"));
+        if(external!=null)external.set(state==undo.before());
         var tag=state.getCompound("Human");bindings.run(()->CreateLivingRuntime.restore(player,actor,state.getCompound("LivingRuntime")));
         CreatePlayerProgress.restore(player,merged.getCompound("Progress"));CreateScoreRuntime.restore(player,merged.getCompound("Scores"));
         if(!undo.before().getCompound("Human").getCompound("Cooldowns").equals(undo.after().getCompound("Human").getCompound("Cooldowns")))((CreateCooldownRuntimeAccess)player.getCooldowns()).avilixlogger$cooldownRuntime(cooldown(tag.getCompound("Cooldowns"),current.getCompound("Cooldowns").getInt("Tick")));player.containerMenu.setCarried(CreateLivingRuntime.item(tag.getCompound("Cursor"),player));
