@@ -21,7 +21,7 @@ jobs:
             tasks.register('exportDeployerClasspath') {
               dependsOn 'compileCreateSmokeJava', 'testClasses', 'prepareServerRun'
               doLast {
-                file('build/deployer-classpath.txt').text = (sourceSets.main.compileClasspath + sourceSets.main.runtimeClasspath + sourceSets.createSmoke.runtimeClasspath + sourceSets.test.runtimeClasspath).asPath
+                project.file('build/deployer-classpath.txt').text = (project.sourceSets.main.compileClasspath + project.sourceSets.main.runtimeClasspath + project.sourceSets.createSmoke.runtimeClasspath + project.sourceSets.test.runtimeClasspath).asPath
               }
             }
           } }
@@ -30,11 +30,14 @@ jobs:
       - name: Package reproducible local compiler and native runtime
         run: |
           python3 - <<'PY'
-          import os, pathlib, tarfile
+          import os, pathlib, tarfile, re
           project = pathlib.Path.cwd()
-          jars = list((pathlib.Path.home()/'.gradle/caches').rglob('*.jar'))
+          jars = set(pathlib.Path(p) for p in (project/'build/deployer-classpath.txt').read_text().split(os.pathsep) if p.endswith('.jar'))
+          for args in (project/'build/moddev').rglob('*.txt'):
+              jars.update(pathlib.Path(p) for p in re.findall(r'/[^\s:\";]+\.jar', args.read_text()))
+          jars.update(p for p in (pathlib.Path.home()/'.gradle/caches').rglob('*.jar') if 'devlaunch' in p.name.lower())
           with tarfile.open('deployer-toolchain.tar.gz', 'w:gz', compresslevel=1) as archive:
-              for source in jars + [pathlib.Path(os.environ['JAVA_HOME']), project/'build/classes', project/'build/resources', project/'build/moddev']:
+              for source in list(jars) + [pathlib.Path(os.environ['JAVA_HOME']), project/'build/classes', project/'build/resources', project/'build/moddev']:
                   if source.exists(): archive.add(source, arcname=str(source).lstrip('/'))
               archive.add(project/'build/deployer-classpath.txt', arcname='classpath.txt')
           print('Packed jars:', len(jars))
