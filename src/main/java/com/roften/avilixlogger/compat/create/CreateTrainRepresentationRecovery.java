@@ -140,6 +140,7 @@ public final class CreateTrainRepresentationRecovery {
             for(var body:missing){var entity=body.staged().entity;if(entity.isRemoved()||level(body).getEntity(entity.getUUID())!=entity||carriage.getDimensionalIfPresent(body.dimension()).entity.get()!=entity||entity.getContraption().getStorage()!=carriage.storage)throw new IllegalStateException("Представление не закрепилось в мире");}
             verifyPayload();committed=true;return true;
         }
+        public CarriageContraptionEntity result(){if(!committed)throw new IllegalStateException("Восстановление ещё не завершено");return (CarriageContraptionEntity)missing.getFirst().staged().entity;}
         public int count(){return missing.size();}
         public boolean committed(){return committed;}
         public void cancel(){if(!committed)compensating=true;}
