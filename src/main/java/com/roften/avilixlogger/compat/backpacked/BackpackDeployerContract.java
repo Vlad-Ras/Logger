@@ -22,11 +22,14 @@ public final class BackpackDeployerContract {
         int capacity=com.mrcrayfish.backpacked.inventory.ManagementInventory.getMaxEquipable();
         // The supplier starts with an empty list; the native getter expands it to
         // the configured empty slots. Never invoke its resizing/drop path on items.
-        if(!backpacks.isEmpty()&&backpacks.size()!=capacity)
+        if(backpacks.size()!=capacity&&backpacks.stream().anyMatch(stack->!stack.isEmpty()))
             throw new IllegalStateException("Размер существующего инвентаря Backpacked требует миграции до снимка");
         com.mrcrayfish.backpacked.BackpackHelper.getBackpacks(player);
         var slots=ModSyncedDataKeys.UNLOCKABLE_BACKPACK_SLOTS.getValue(player);
-        if(slots.getMaxSlots()!=0&&slots.getMaxSlots()!=capacity)
+        var defaults=ModSyncedDataKeys.UNLOCKABLE_BACKPACK_SLOTS.defaultValueSupplier().get();
+        boolean initial=slots.getMaxSlots()==defaults.getMaxSlots()&&slots.getUnlockCount()==defaults.getUnlockCount();
+        if(initial)for(int slot=0;slot<slots.getMaxSlots();slot++)if(slots.isUnlocked(slot)!=defaults.isUnlocked(slot)){initial=false;break;}
+        if(!initial&&slots.getMaxSlots()!=capacity)
             throw new IllegalStateException("Существующие слоты Backpacked требуют миграции до снимка");
         com.mrcrayfish.backpacked.BackpackHelper.getBackpackUnlockableSlots(player);
         ModSyncedDataKeys.COSMETIC_PROPERTIES.getValue(player);

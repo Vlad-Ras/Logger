@@ -145,7 +145,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             b.put("Cargo",oldCargo);a.put("Cargo",newCargo);b.put("Hand",beforeHand.copy());a.put("Hand",afterHand);b.put("World",oldWorld);a.put("World",newWorld);b.put("Targets",oldEntities);a.put("Targets",newEntities);
             before=b.copy();after=a.copy();reading=false;
         }
-        public boolean changed(){reading=true;try{if(!cargo.rows().isEmpty()||!cargo.complete()||!beforeHand.equals(hand(context,player)))return true;for(var entry:blocks.entrySet())if(!entry.getValue().equals(CreateStructuralAudit.world(entry.getKey().level,entry.getKey().pos)))return true;for(var entry:targets.entrySet())if(!entry.getValue().equals(entity(entry.getKey(),!entry.getKey().isRemoved())))return true;return !complete;}finally{reading=false;}}
+        public boolean changed(){reading=true;try{if(!cargo.rows().isEmpty()||!cargo.complete()||!beforeHand.equals(hand(context,player))||!Objects.equals(attachments,attachments(player)))return true;for(var entry:blocks.entrySet())if(!entry.getValue().equals(CreateStructuralAudit.world(entry.getKey().level,entry.getKey().pos)))return true;for(var entry:targets.entrySet())if(!entry.getValue().equals(entity(entry.getKey(),!entry.getKey().isRemoved())))return true;return !complete;}finally{reading=false;}}
         public void close(){if(!closed){closed=true;cargo.close();if(previous==null)CURRENT.remove();else CURRENT.set(previous);}}
     }
 }

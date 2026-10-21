@@ -154,7 +154,12 @@ dependencies {
         localRuntime 'maven.modrinth:immersive-aircraft:RkWu0N4D' // NeoForge 1.21.1, IA 1.4.6
     }
     // Native food/container contract regression; optional and never bundled in production.
-    if (project.hasProperty('createSmoke') && !project.hasProperty('createAbsent')) localRuntime 'maven.modrinth:farmers-delight:XTVZDOol' // NeoForge 1.21.1, FD 1.3.4
+    if (project.hasProperty('createSmoke') && !project.hasProperty('createAbsent')) {
+        def foodVersions = ['1.3.2': 'GbNuOZ4S', '1.3.4': 'XTVZDOol']
+        def foodVersion = project.findProperty('fdSmokeVersion') ?: '1.3.4'
+        if (!foodVersions.containsKey(foodVersion)) throw new GradleException("Unsupported FD smoke version: ${foodVersion}")
+        localRuntime "maven.modrinth:farmers-delight:${foodVersions[foodVersion]}"
+    }
     // Optional integration: never ship AE2 classes inside the logger JAR.
     compileOnly 'org.appliedenergistics:appliedenergistics2:19.2.12'
     localRuntime 'org.appliedenergistics:appliedenergistics2:19.2.12'
@@ -165,7 +170,7 @@ dependencies {
     [Backpacked: ['backpacked-neoforge', '1.21.1-3.0.5'], Framework: ['framework-neoforge', '1.21.1-0.13.10']].each { module, spec ->
         def external = { artifact { name = spec[0]; type = 'jar' }; transitive = false }
         compileOnly("com.mrcrayfish.release:${module}:${spec[1]}", external)
-        if (project.hasProperty('backpackSmoke') && !project.hasProperty('backpackAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
+        if ((project.hasProperty('backpackSmoke') || project.hasProperty('createSmoke')) && !project.hasProperty('backpackAbsent') && !project.hasProperty('createAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
     }
     // --- ClickHouse backend ---
     // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.
