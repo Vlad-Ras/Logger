@@ -12,8 +12,8 @@ import com.roften.avilixlogger.compat.create.CreateExternalPlayerState;
 import java.util.*;
 
 /** Materialize known lazy defaults before taking a snapshot, never during an undo.
- * A new empty Framework holder is not a gameplay change. Progress changes still
- * invalidate the joint operation until a progress rollback contract is provided.
+ * A new empty Framework holder is not a gameplay change. Audited Framework data is restored as sparse deltas; unknown attachments
+ * still invalidate the joint operation.
  * Loaded only behind the optional Backpacked guard.
  */
 public final class BackpackDeployerContract {
@@ -99,7 +99,7 @@ public final class BackpackDeployerContract {
         out.put(ModSyncedDataKeys.BACKPACK,item(player,state.getCompound("Backpack")));
         if(!state.contains("BagSize",3)||state.getInt("BagSize")<0||state.getInt("BagSize")>64)throw new IllegalStateException("Неполный размер Backpacked");
         var bags=net.minecraft.core.NonNullList.withSize(state.getInt("BagSize"),ItemStack.EMPTY);
-        for(int i=0;i<bags.size();i++){if(!state.contains("bag:"+i,10))throw new IllegalStateException("Потерян слот Backpacked");bags.set(i,item(player,state.getCompound("bag:"+i)));}out.put(ModSyncedDataKeys.BACKPACKS,bags);
+        for(int i=0;i<bags.size();i++){if(!state.contains("bag:"+i,10))throw new IllegalStateException("Потерян слот Backpacked");var stack=item(player,state.getCompound("bag:"+i));if(!stack.isEmpty()&&stack.getItem().getClass()!=com.mrcrayfish.backpacked.item.BackpackItem.class)throw new IllegalStateException("Неподдержанный предмет в экипировке Backpacked");bags.set(i,stack);}out.put(ModSyncedDataKeys.BACKPACKS,bags);
         for(var key:keys())if(!out.containsKey(key)){var value=state.get(key.id().toString());if(value==null)throw new IllegalStateException("Потерян ключ Backpacked");out.put(key,read(player,key,value));}
         if(!state(player,out).equals(state))throw new IllegalStateException("Данные/определения Backpacked не прочитаны полностью");return out;
     }
@@ -118,7 +118,9 @@ public final class BackpackDeployerContract {
     public static void check(Player player,CompoundTag from,CompoundTag to,boolean apply){
         var live=state(player,values(player));var merged=CreateExternalPlayerState.merge(live,from.getCompound("State"),to.getCompound("State"));
         if(!apply||live.equals(merged))return;var decoded=decode(player,merged);
+        boolean bagsChanged=!stateForKey(live,ModSyncedDataKeys.BACKPACKS).equals(stateForKey(merged,ModSyncedDataKeys.BACKPACKS));
         for(var key:keys())if(!stateForKey(live,key).equals(stateForKey(merged,key)))set(player,key,decoded.get(key));
+        if(bagsChanged){var access=(com.mrcrayfish.backpacked.inventory.BackpackedInventoryAccess)player;for(int slot=0;slot<merged.getInt("BagSize");slot++){var inventory=access.backpacked$GetBackpackInventory(slot);if(inventory!=null)BackpackAudit.rebase(inventory);}}
     }
     private static CompoundTag stateForKey(CompoundTag state,SyncedDataKey<Player,?> key){
         var out=new CompoundTag();for(String name:state.getAllKeys())if(key==ModSyncedDataKeys.UNLOCK_TRACKER?name.startsWith("unlock:")||name.startsWith("tracker:")||name.startsWith("type:"):key==ModSyncedDataKeys.BACKPACKS?name.equals("BagSize")||name.startsWith("bag:"):name.equals(key==ModSyncedDataKeys.BACKPACK?"Backpack":key.id().toString()))out.put(name,state.get(name).copy());return out;

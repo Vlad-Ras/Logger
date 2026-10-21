@@ -46,7 +46,11 @@ public final class CreateLifecycleAudit {
             }
             tag.put("Representations",dimensions);tag.put("RepresentationStatus",status);
             tag.putBoolean("Portal",carriage.getCarriage().presentInMultipleDimensions());
-            tag.put("TrainRepresentations",CreateTrainRepresentationState.capture(carriage));
+            var nativeCarriage=carriage.getCarriage();
+            boolean addressed=!entity.isRemoved()&&(form.equals("entity")||form.equals("unloaded"))&&nativeCarriage.train!=null&&nativeCarriage.train.carriages!=null&&nativeCarriage.train.carriages.indexOf(nativeCarriage)==carriage.carriageIndex;
+            tag.putBoolean("TrainRepresentationsComplete",addressed);
+            if(addressed)tag.put("TrainRepresentations",CreateTrainRepresentationState.capture(carriage));
+            else tag.putString("TrainRepresentationsFailure","У представления нет активного payload или связи с составом");
         }
         if(tag.sizeInBytes()>128L*1024*1024)throw new IllegalStateException("Снимок конструкции превышает 128 MiB");
         return tag.copy();

@@ -89,6 +89,7 @@ public final class CreateDeployerJointSmoke {
                 items.setStackInSlot(0,new ItemStack(Items.DIAMOND,7));
                 if(mode.equals("cargo-grab")||mode.equals("cargo-conflict"))fake.setItemInHand(InteractionHand.MAIN_HAND,ItemStack.EMPTY);
                 var cargoBefore=new ArrayList<ItemStack>();for(int slot=0;slot<items.getSlots();slot++)cargoBefore.add(items.getStackInSlot(slot).copy());
+                if(mode.startsWith("backpack-inventory-"))backpackFixture(fake,2);
                 var before=CreateDeployerTransaction.hand(context,fake);
                 int heldCount=held.getCount();var consumed=held.getItem();var food=held.getFoodProperties(target instanceof LivingEntity living?living:fake);int fedLevel=food==null?7:Math.min(20,7+food.nutrition());
                 var humanBefore=target instanceof net.minecraft.server.level.ServerPlayer human?CreateHumanRestore.capture(human):null;
@@ -117,7 +118,7 @@ public final class CreateDeployerJointSmoke {
                         .invokeWithArguments(new DeployerMovementBehaviour(),context,pos,fake,Enum.valueOf(modeClass,punch?"PUNCH":"USE")); } catch(Throwable failure) { throw new IllegalStateException("Native activate",failure); }
                     }
                     if(mode.contains("backpack-progress-"))check(com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(mode.startsWith("feed-")?(net.minecraft.world.entity.player.Player)target:fake).unlockBackpack(ResourceLocation.parse("backpacked:cogwheel")),"backpack progress fixture did not unlock");
-                    if(mode.startsWith("backpack-inventory-"))com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(fake).set(0,new ItemStack(Items.DIAMOND));
+                    if(mode.startsWith("backpack-inventory-"))backpackFixture(fake,12);
                     row=session.finish(!mode.equals("failure"));
                 }
                 if(mode.equals("noop")||mode.startsWith("self-noop-fd/")){check(row==null,"idle/no-op activation invented a row");if(mode.startsWith("self-noop-fd/"))check(fake.getRemainingFireTicks()==100&&fake.getMainHandItem().is(held.getItem())&&fake.getMainHandItem().getCount()==heldCount,"native self-food refusal changed state");tested++;continue;}
@@ -187,7 +188,7 @@ public final class CreateDeployerJointSmoke {
                 if(mode.contains("backpack-")&&mode.endsWith("conflict")){
                     var owner=mode.startsWith("feed-")?(net.minecraft.world.entity.player.Player)target:fake;
                     if(mode.contains("progress-"))com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.setValue(owner,new com.mrcrayfish.backpacked.data.unlock.UnlockTracker());
-                    else com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(owner).set(0,new ItemStack(Items.GOLD_INGOT));
+                    else {var bag=com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(owner).get(0).copy();bag.set(DataComponents.CUSTOM_NAME,Component.literal("later bag change"));com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(owner).set(0,bag);}
                 }
                 if(mode.contains("backpack-")&&mode.endsWith("unrelated")){
                     var owner=mode.startsWith("feed-")?(net.minecraft.world.entity.player.Player)target:fake;
@@ -235,6 +236,7 @@ public final class CreateDeployerJointSmoke {
                         if(mode.startsWith("feed-fd/"))check(((LivingEntity)target).getHealth()==12&&target.getRemainingFireTicks()==100&&(!(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))||((LivingEntity)target).hasEffect(MobEffects.POISON)),"FD heal/fire/cure was not undone");
                         if(mode.startsWith("feed-drink"))check(((LivingEntity)target).hasEffect(MobEffects.POISON),"recipient drink did not restore previous effect");
                         if(mode.contains("backpack-")&&mode.endsWith("locks"))check(locked,"external locks not tested");
+                        if(mode.startsWith("backpack-inventory-"))check(((com.mrcrayfish.backpacked.inventory.BackpackedInventoryAccess)fake).backpacked$GetBackpackInventory(0).getItem(0).getCount()==2,"native backpack cache retained consumed contents");
                         if(mode.startsWith("feed"))check(CreateHumanRestore.capture((net.minecraft.server.level.ServerPlayer)target).equals(humanBefore)&&((net.minecraft.server.level.ServerPlayer)target).getFoodData().getFoodLevel()==7,"recipient feed was not undone");
                         if(mode.startsWith("combat")&&!nonlethal)check(world.getEntity(target.getUUID()) instanceof LivingEntity living&&living.isAlive()&&living.getHealth()==1&&living==target,"lethal target or its native AI identity was not restored");
                         if(mode.startsWith("combat-cardboard"))check(!((LivingEntity)target).hasEffect(MobEffects.MOVEMENT_SLOWDOWN)&&target.getDeltaMovement().equals(Vec3.ZERO),"cardboard motion/effect not undone");
@@ -248,6 +250,13 @@ public final class CreateDeployerJointSmoke {
             }finally{boolean prior=CartAuditContext.restoring(true);try{if(row!=null){var a=NbtSerde.fromSnbt(row.beAfter);if(a!=null)for(var raw:a.getList("Targets",10)){var t=(CompoundTag)raw;var e=world.getEntity(t.getUUID("Entity"));if(e!=null&&!e.isRemoved())e.discard();}}if(target!=null&&!target.isRemoved())target.discard();((CartEntityAccess)body).avilixlogger$discardForRollback();for(var p:List.of(pos,pos.below(),pos.west(),pos.east()))world.setBlock(p,Blocks.AIR.defaultBlockState(),3);}finally{CartAuditContext.restoring(prior);CartRestoreLocks.clear();CartAuditContext.LOCKED_ENTITIES.clear();}}
         }
         System.out.println("CREATE_DEPLOYER_JOINT_NATIVE_OK: "+tested+" scenarios; four construction kinds, native block/bucket/lever/name/frame, nonlethal combat and sandpaper consumption, runtime restoration/compensation, early conflicts, locks, no-op and failure barriers; lethal corpse/recreated target, scoreboard/team restoration, recipient inventory/statistics/advancements, real-level loose input, Create food/tea/cardboard and optional native FD food/effects/containers");
+    }
+    private static void backpackFixture(net.minecraft.world.entity.player.Player player,int count){
+        var bag=com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(player).get(0);if(bag.isEmpty())bag=new ItemStack(com.mrcrayfish.backpacked.core.ModItems.BACKPACK.get());
+        bag.set(com.mrcrayfish.backpacked.core.ModDataComponents.UNLOCKABLE_SLOTS.get(),com.mrcrayfish.backpacked.common.backpack.UnlockableSlots.ALL);
+        com.mrcrayfish.backpacked.core.ModSyncedDataKeys.BACKPACKS.getValue(player).set(0,bag);
+        var nativeInventory=((com.mrcrayfish.backpacked.inventory.BackpackedInventoryAccess)player).backpacked$GetBackpackInventory(0);
+        nativeInventory.setItem(0,new ItemStack(Items.DIAMOND,count));nativeInventory.saveItemsToStack();
     }
     private static void runtimeRoundTrip(ServerLevel world){
         var fake=new DeployerFakePlayer(world,UUID.randomUUID());fake.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(Items.MILK_BUCKET));
