@@ -78,7 +78,12 @@ public final class CreateDeployerJointSmoke {
                 if(mode.startsWith("name")||mode.startsWith("shear")||mode.equals("entity-conflict")||mode.startsWith("combat")){var sheep=EntityType.SHEEP.create(world);if(!nonlethal&&mode.startsWith("combat"))sheep.setHealth(1);sheep.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);check(world.addFreshEntity(sheep),"target sheep spawn");target=sheep;}
                 if(mode.startsWith("feed")){
                     var profile=new com.mojang.authlib.GameProfile(UUID.randomUUID(),"FeedRecipient");var human=new net.minecraft.server.level.ServerPlayer(world.getServer(),world,profile,net.minecraft.server.level.ClientInformation.createDefault());
-                    human.connection=new net.minecraft.server.network.ServerGamePacketListenerImpl(world.getServer(),new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND),human,net.minecraft.server.network.CommonListenerCookie.createInitial(profile,false));
+                    // This is a server-state fixture, without a negotiated client connection.
+                    // Sink outbound packets before NeoForge channel capability checks.
+                    human.connection=new net.minecraft.server.network.ServerGamePacketListenerImpl(world.getServer(),new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND),human,net.minecraft.server.network.CommonListenerCookie.createInitial(profile,false)){
+                        @Override public void send(net.minecraft.network.protocol.Packet<?> packet){}
+                        @Override public void send(net.minecraft.network.protocol.Packet<?> packet,net.minecraft.network.PacketSendListener callback){}
+                    };
                     human.setPos(Vec3.atCenterOf(pos));human.getFoodData().setFoodLevel(7);human.getFoodData().setSaturation(2);if(mode.startsWith("feed-fd/")){human.setHealth(12);human.setRemainingFireTicks(100);if(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))human.addEffect(new MobEffectInstance(MobEffects.POISON,200));}
                     if(mode.startsWith("feed-drink"))human.addEffect(new MobEffectInstance(MobEffects.POISON,200));human.getInventory().setItem(8,new ItemStack(Items.EMERALD,1024));if(mode.equals("feed-create-tea-full")||mode.startsWith("feed-fd/")&&mode.endsWith("full"))for(int slot=0;slot<36;slot++)human.getInventory().setItem(slot,new ItemStack(Items.EMERALD,64));world.addNewPlayer(human);target=human;
                 }
@@ -212,6 +217,11 @@ public final class CreateDeployerJointSmoke {
                                 com.mrcrayfish.backpacked.core.ModSyncedDataKeys.SELECTED_BACKPACK.setValue(owner,3);
                                 check(!com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(owner).unlockBackpack(ResourceLocation.parse("backpacked:cogwheel")),"reserved unlock was accepted");
                                 for(var progress:com.mrcrayfish.backpacked.core.ModSyncedDataKeys.UNLOCK_TRACKER.getValue(owner).getProgressTrackerMap().values())if(progress instanceof com.mrcrayfish.backpacked.common.tracker.impl.CountProgressTracker count)count.increment(1,(net.minecraft.server.level.ServerPlayer)owner);
+                                if(mode.startsWith("backpack-inventory-")){
+                                    var bagInventory=((com.mrcrayfish.backpacked.inventory.BackpackedInventoryAccess)owner).backpacked$GetBackpackInventory(0);
+                                    bagInventory.setItem(0,new ItemStack(Items.EMERALD));check(bagInventory.getItem(0).is(Items.DIAMOND),"reserved backpack contents changed");
+                                    check(!com.mrcrayfish.backpacked.BackpackHelper.setBackpackStack(owner,ItemStack.EMPTY,0),"reserved backpack unequipped");
+                                }
                                 check(CreateExternalPlayerState.capture(owner).equals(external),"reserved external state changed");
                             }
                             if(target instanceof net.minecraft.server.level.ServerPlayer human){

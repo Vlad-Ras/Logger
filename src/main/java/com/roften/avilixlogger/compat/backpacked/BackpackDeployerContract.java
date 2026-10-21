@@ -112,6 +112,8 @@ public final class BackpackDeployerContract {
         var tracker=ModSyncedDataKeys.UNLOCK_TRACKER.getValue(player);
         if(!(tracker instanceof BackpackDeployerGuard))throw new IllegalStateException("Нет защиты прогресса Backpacked");
         reserve(tracker);
+        var access=(com.mrcrayfish.backpacked.inventory.BackpackedInventoryAccess)player;
+        for(int slot=0;slot<access.backpacked$GetBackpackInventoryCount();slot++){var inventory=access.backpacked$GetBackpackInventory(slot);if(inventory!=null){if(!(inventory instanceof BackpackDeployerGuard))throw new IllegalStateException("Нет защиты инвентаря Backpacked");com.roften.avilixlogger.core.CartRestoreLocks.container(inventory);}}
         // Schema/configuration witnesses may never change inside a reversible action.
         var b=before.getCompound("State");var a=after.getCompound("State");
         if(player.containerMenu!=player.inventoryMenu&&(!stateForKey(b,ModSyncedDataKeys.BACKPACKS).equals(stateForKey(a,ModSyncedDataKeys.BACKPACKS))||!stateForKey(b,ModSyncedDataKeys.BACKPACK).equals(stateForKey(a,ModSyncedDataKeys.BACKPACK))))throw new IllegalStateException("Закройте меню перед возвратом экипировки Backpacked");
