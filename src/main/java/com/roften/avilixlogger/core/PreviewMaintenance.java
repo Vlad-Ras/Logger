@@ -14,6 +14,7 @@ public final class PreviewMaintenance {
             com.roften.avilixlogger.compat.create.CartRollbackCoordinator.expirePreviews(now);
             com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.expirePreviews(now);
             com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.expirePreviews(now);
+            com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.expirePreviews(now);
             com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.expirePreviews(now);
         }
         if(com.roften.avilixlogger.compat.backpacked.BackpackSupport.available())

@@ -5,7 +5,7 @@ import java.util.*;
 /** Exercise actual coordinator caches, including the heavy plan/item/NBT owners. */
 final class PreviewMaintenanceSmoke {
     static void run() throws Exception {
-        for(String name:List.of("CartItemRecovery","CartRollbackCoordinator","CreateTransferRollbackCoordinator","CreateStructuralRollbackCoordinator","CreateCouplingRollbackCoordinator"))
+        for(String name:List.of("CartItemRecovery","CartRollbackCoordinator","CreateTransferRollbackCoordinator","CreateStructuralRollbackCoordinator","CreateCouplingRollbackCoordinator","CreateTrainRepresentationCoordinator"))
             cache(Class.forName("com.roften.avilixlogger.compat.create."+name),false);
         if(net.neoforged.fml.ModList.get().isLoaded("backpacked"))
             cache(Class.forName("com.roften.avilixlogger.compat.backpacked.BackpackRecovery"),true);

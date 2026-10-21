@@ -40,7 +40,7 @@ public final class CartRollbackCoordinator {
     private record Preview(UUID id,long checkpoint,long expires) {}
     private static long lastProgress;
     private CartRollbackCoordinator() {}
-    public static boolean busy() { return preparing || active != null || CreateTransferRollbackCoordinator.busy() || CreateStructuralRollbackCoordinator.busy() || CreateCouplingRollbackCoordinator.busy(); }
+    public static boolean busy() { return preparing || active != null || CreateTrainRepresentationCoordinator.busy() || CreateTransferRollbackCoordinator.busy() || CreateStructuralRollbackCoordinator.busy() || CreateCouplingRollbackCoordinator.busy(); }
     public static boolean locked(Entity e) { return LOCKED.contains(e.getUUID()); }
     static void prepareTransferHistory(Runnable task){WORKER.execute(task);}
     public static boolean query(CommandSourceStack source, Runnable task) {

@@ -1,6 +1,7 @@
 package com.roften.avilixlogger.compat.create;
 
 import com.simibubi.create.content.trains.entity.CarriageContraptionEntity;
+import com.simibubi.create.content.trains.entity.Carriage;
 import com.simibubi.create.content.trains.graph.DimensionPalette;
 import net.minecraft.nbt.*;
 import net.minecraft.server.level.ServerLevel;
@@ -14,11 +15,16 @@ public final class CreateTrainRepresentationState {
         var carriage=entity.getCarriage();
         if(!(entity.level() instanceof ServerLevel level)||carriage==null||carriage.train==null||carriage.train.carriages.indexOf(carriage)!=entity.carriageIndex)
             throw new IllegalStateException("Нет адресуемого вагона");
+        return capture(carriage,level,entity.carriageIndex);
+    }
+    public static CompoundTag capture(Carriage carriage,ServerLevel level,int index) {
+        if(!level.getServer().isSameThread()||carriage.train==null||index<0||index>=carriage.train.carriages.size()||carriage.train.carriages.get(index)!=carriage)
+            throw new IllegalStateException("Нет адресуемого вагона в серверном потоке");
         var angles=new IdentityHashMap<CreateOrientationAccess,Boolean>();
         carriage.forEachPresentEntity(e->{if(e instanceof CreateOrientationAccess a)angles.put(a,a.avilixlogger$forceAngle());});
         var tag=new CompoundTag();var palette=new DimensionPalette();
         try{tag.put("Native",carriage.write(palette,level.registryAccess()));}finally{angles.forEach(CreateOrientationAccess::avilixlogger$forceAngle);}
-        palette.write(tag);tag.putInt("Format",1);tag.putUUID("Train",carriage.train.id);tag.putUUID("Carriage",((ContraptionIdentity)carriage).avilixlogger$identity());tag.putInt("Index",entity.carriageIndex);
+        palette.write(tag);tag.putInt("Format",1);tag.putUUID("Train",carriage.train.id);tag.putUUID("Carriage",((ContraptionIdentity)carriage).avilixlogger$identity());tag.putInt("Index",index);
         tag.putInt("CargoVersion",carriage.storage.getVersion());
         prepare(tag);return tag;
     }

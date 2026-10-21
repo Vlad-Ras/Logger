@@ -27,7 +27,10 @@ public final class StagedContraptionRestore {
     public AbstractContraptionEntity entity;
     private Contraption contraption;
     private com.simibubi.create.content.trains.entity.Carriage carriage;
+    private boolean sharedCargo;
     public void carriage(com.simibubi.create.content.trains.entity.Carriage target){carriage=target;}
+    /** A representation joins an existing cargo owner; it must never reset or decode that owner's inventory. */
+    public void sharedCarriage(com.simibubi.create.content.trains.entity.Carriage target){carriage=target;sharedCargo=true;}
     private record Part(String kind, CompoundTag nbt) {}
     /** Called on the preparation worker: all deep copying and list traversal happens here. */
     public StagedContraptionRestore(CompoundTag original) {
@@ -62,13 +65,14 @@ public final class StagedContraptionRestore {
             var restored=EntityType.loadEntityRecursive(skeleton,level,e->e);
             if(!(restored instanceof AbstractContraptionEntity ce) || ce.getContraption()==null)throw new IllegalStateException("Create не смог создать конструкцию");
             entity=ce;contraption=ce.getContraption();if(carriage!=null)((CreateCarriageEntityAccess)entity).avilixlogger$bind(carriage);
-            ((CartStorageAccessor)contraption.getStorage()).avilixlogger$reset();return false;
+            if(!sharedCargo)((CartStorageAccessor)contraption.getStorage()).avilixlogger$reset();return false;
         }
         if (index >= parts.size()) {
-            contraption.getStorage().initialize();
+            if(!sharedCargo)contraption.getStorage().initialize();
             return true;
         }
         Part part = parts.get(index++); CompoundTag n = part.nbt; var access = (CartContraptionAccessor)contraption;
+        if(sharedCargo&&(part.kind.equals("items")||part.kind.equals("fluids")))return false;
         switch (part.kind) {
             case "block" -> {
                 BlockPos pos = BlockPos.of(n.getLong("Pos"));

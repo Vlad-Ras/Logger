@@ -89,6 +89,6 @@ public final class CartHistoryNetwork {
         else if(kind==S2CCartHistoryPayload.ERROR)source.sendFailure(Component.literal(message));else source.sendSystemMessage(Component.literal(message));
     }
     private static String clip(String s,int max){return s==null?"":s.substring(0,Math.min(s.length(),max));}
-    public static void logout(UUID id){LAST_REQUEST.remove(id);VIEWERS.remove(id);LAST_RESULT.remove(id);if(com.roften.avilixlogger.core.CreateSupport.available()){CartItemRecovery.logout(id);CartRollbackCoordinator.logout(id);}}
+    public static void logout(UUID id){LAST_REQUEST.remove(id);VIEWERS.remove(id);LAST_RESULT.remove(id);if(com.roften.avilixlogger.core.CreateSupport.available()){CartItemRecovery.logout(id);CartRollbackCoordinator.logout(id);com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.logout(id);}}
     public static void stop(){LAST_REQUEST.clear();VIEWERS.clear();LAST_RESULT.clear();}
 }
