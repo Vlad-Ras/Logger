@@ -54,6 +54,24 @@ public final class CreatePlayerProgress {
         }
         var recipes=new ServerRecipeBook();recipes.fromNbt(tag.getCompound("Recipes"),player.server.getRecipeManager());if(!recipes.toNbt().equals(tag.getCompound("Recipes")))throw new IllegalStateException("Рецепты получателя не прочитаны полностью");return result;
     }
+    /** Preserve counters and advancements this activation did not touch (for example play time). */
+    public static CompoundTag merge(CompoundTag current,CompoundTag from,CompoundTag to){return merge(current,from,to,false);}
+    public static CompoundTag merge(CompoundTag current,CompoundTag from,CompoundTag to,boolean compensating){
+        var out=current.copy();
+        for(String field:List.of("Stats","Advancements")){
+            var live=index(current,field);var start=index(from,field);var end=index(to,field);var keys=new HashSet<>(start.keySet());keys.addAll(end.keySet());
+            for(String key:keys)if(!Objects.equals(start.get(key),end.get(key))){
+                if(!Objects.equals(live.get(key),start.get(key))&&(!compensating||!Objects.equals(live.get(key),end.get(key))))throw new IllegalStateException("Статистика или достижение действия изменились");
+                if(end.containsKey(key))live.put(key,end.get(key).copy());else live.remove(key);
+            }
+            var list=new ListTag();live.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(e->list.add(e.getValue()));out.put(field,list);
+        }
+        if(!from.getCompound("Recipes").equals(to.getCompound("Recipes"))){if(!current.getCompound("Recipes").equals(from.getCompound("Recipes"))&&(!compensating||!current.getCompound("Recipes").equals(to.getCompound("Recipes"))))throw new IllegalStateException("Рецепты награды изменились");out.put("Recipes",to.getCompound("Recipes").copy());}
+        return out;
+    }
+    private static Map<String,CompoundTag> index(CompoundTag state,String field){
+        var map=new HashMap<String,CompoundTag>();for(var raw:state.getList(field,10)){var row=(CompoundTag)raw;map.put(field.equals("Stats")?row.getString("Type")+"/"+row.getString("Value"):row.getString("Id"),row.copy());}return map;
+    }
     public static void preflight(ServerPlayer player,CompoundTag tag){decode(player,tag);}
     public static void restore(ServerPlayer player,CompoundTag tag){
         var decoded=decode(player,tag);var counter=player.getStats();var stats=((PlayerStatsAccessor)counter).avilixlogger$stats();var old=new HashSet<>(stats.keySet());stats.clear();

@@ -45,8 +45,19 @@ public final class CreateDeployerRuntimeTest {
         modifier.put("Value",AttributeModifier.CODEC.encodeStart(NbtOps.INSTANCE,new AttributeModifier(ResourceLocation.parse("avilixlogger:test"),5,AttributeModifier.Operation.ADD_VALUE)).result().orElseThrow());
         values.add(modifier);attribute.put("Modifiers",values);modifiers.getList("Attributes",10).add(attribute);CreateLivingRuntime.validate(modifiers);
         values.add(modifier.copy());reject(()->CreateLivingRuntime.validate(modifiers),"duplicate modifier accepted");
-        cooldowns();legacyAndCurrentPlan();
+        var player=saved.copy();player.put("Food",new CompoundTag());check(CreateLivingRuntime.project(player,112).getInt("NoAction")==0,"player inactivity counter must reset as native aiStep does");
+        progressDeltas();cooldowns();legacyAndCurrentPlan();
         System.out.println("CREATE_DEPLOYER_RUNTIME_DATA_OK: bounded complete schema, damaged history rejection, detached aging, cooldowns and legacy/current plans");
+    }
+    private static CompoundTag stat(String value,int count){var row=new CompoundTag();row.putString("Type","minecraft:custom");row.putString("Value",value);row.putInt("Count",count);return row;}
+    private static void progressDeltas(){
+        var before=new CompoundTag();before.put("Stats",new ListTag());before.put("Advancements",new ListTag());before.put("Recipes",new CompoundTag());
+        var after=before.copy();after.getList("Stats",10).add(stat("minecraft:eat_cake_slice",1));
+        var live=after.copy();live.getList("Stats",10).add(stat("minecraft:play_time",20));
+        var undone=CreatePlayerProgress.merge(live,after,before);check(undone.getList("Stats",10).size()==1&&undone.getList("Stats",10).getCompound(0).getInt("Count")==20,"undo rewound unrelated play time");
+        var changed=live.copy();changed.getList("Stats",10).getCompound(0).putInt("Count",2);reject(()->CreatePlayerProgress.merge(changed,after,before),"changed action statistic accepted");
+        var compensated=CreatePlayerProgress.merge(undone,before,after,true);check(compensated.getList("Stats",10).size()==2,"compensation lost action counter or unrelated time");
+        var repeat=CreatePlayerProgress.merge(compensated,before,after,true);check(repeat.equals(compensated),"compensation was not idempotent after a partial restore");
     }
     private static void cooldowns(){
         var tag=new CompoundTag();tag.putInt("Tick",4);var entries=new ListTag();var entry=new CompoundTag();

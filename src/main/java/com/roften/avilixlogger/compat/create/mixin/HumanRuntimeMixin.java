@@ -11,5 +11,6 @@ import org.spongepowered.asm.mixin.Mixin;
 @Mixin(ServerPlayer.class)
 public abstract class HumanRuntimeMixin extends Player implements CreateHumanRuntimeAccess {
     protected HumanRuntimeMixin(Level level,BlockPos pos,float yaw,GameProfile profile){super(level,pos,yaw,profile);}
+    public void avilixlogger$savePlayerRuntime(CompoundTag tag){super.addAdditionalSaveData(tag);}
     public void avilixlogger$loadPlayerRuntime(CompoundTag tag){super.readAdditionalSaveData(tag);}
 }

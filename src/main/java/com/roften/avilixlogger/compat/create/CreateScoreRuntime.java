@@ -37,6 +37,18 @@ public final class CreateScoreRuntime {
         if(tag.contains("Team")){var saved=tag.getCompound("Team");var nativeTeam=player.level().getScoreboard().getPlayerTeam(saved.getString("Name"));if(nativeTeam==null||!team(player,nativeTeam).equals(saved))throw new IllegalStateException("Определение команды scoreboard изменилось");}
         for(var raw:tag.getList("Objectives",10)){var row=(CompoundTag)raw;if(row.contains("Score")){var score=Score.read(row.getCompound("Score"),player.registryAccess());if(!score.write(player.registryAccess()).equals(row.getCompound("Score")))throw new IllegalStateException("Scoreboard не прочитан полностью");}}
     }
+    public static CompoundTag merge(CompoundTag current,CompoundTag from,CompoundTag to){return merge(current,from,to,false);}
+    public static CompoundTag merge(CompoundTag current,CompoundTag from,CompoundTag to,boolean compensating){
+        var out=current.copy();var start=new HashMap<String,CompoundTag>();var end=new HashMap<String,CompoundTag>();
+        for(var raw:from.getList("Objectives",10)){var row=(CompoundTag)raw;start.put(row.getString("Name"),row);}
+        for(var raw:to.getList("Objectives",10)){var row=(CompoundTag)raw;end.put(row.getString("Name"),row);}
+        for(var raw:out.getList("Objectives",10)){var live=(CompoundTag)raw;var b=start.get(live.getString("Name"));var a=end.get(live.getString("Name"));
+            if(b==null||a==null)throw new IllegalStateException("Определения scoreboard изменились");
+            if(!Objects.equals(b.get("Score"),a.get("Score"))){if(!Objects.equals(live.get("Score"),b.get("Score"))&&(!compensating||!Objects.equals(live.get("Score"),a.get("Score"))))throw new IllegalStateException("Счётчик действия изменился");live.remove("Score");if(a.contains("Score"))live.put("Score",a.getCompound("Score").copy());}
+        }
+        if(!Objects.equals(from.get("Team"),to.get("Team"))){if(!Objects.equals(current.get("Team"),from.get("Team"))&&(!compensating||!Objects.equals(current.get("Team"),to.get("Team"))))throw new IllegalStateException("Команда участника изменилась");out.remove("Team");if(to.contains("Team"))out.put("Team",to.getCompound("Team").copy());}
+        return out;
+    }
     public static void reserve(net.minecraft.world.entity.Entity player){
         CartRestoreLocks.resource(LOCK);CartRestoreLocks.resource("create-score:"+player.getScoreboardName());
         for(var objective:player.level().getScoreboard().getObjectives())CartRestoreLocks.handler(player.level().getScoreboard().getPlayerScoreInfo(player,objective));

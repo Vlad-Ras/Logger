@@ -116,7 +116,7 @@ public final class AvilixLoggerMod {
         ChatLogPager.shutdown();
         LoggerNetwork.shutdown();
         RollbackCoordinator.shutdown();
-        if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();}
+        if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();com.roften.avilixlogger.compat.create.CreateDeployerTransaction.clearRetained();}
         LoggerRuntime.shutdown();
         if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available()) {
             com.roften.avilixlogger.compat.backpacked.BackpackRecovery.stop();

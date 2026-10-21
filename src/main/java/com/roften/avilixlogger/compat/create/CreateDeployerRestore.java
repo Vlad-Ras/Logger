@@ -20,11 +20,11 @@ public final class CreateDeployerRestore {
     public static Map<UUID,Entity> prepareTargets(MinecraftServer server,List<CreateDeployerRollbackPlan.Undo> targets){
         var values=new HashMap<UUID,Entity>();
         for(var undo:targets){var tag=undo.after();var world=level(server,tag);var id=tag.getUUID("Entity");var entity=world.getEntity(id);
-            if(tag.getBoolean("Terminal")&&(entity==null||entity.isRemoved())){
+            if(tag.getBoolean("Terminal")){
+                var retained=CreateDeployerTransaction.retained(tag,world);
+                if(entity!=null&&entity!=retained)throw new IllegalStateException("Умершая цель заменена другой сущностью");
                 if(!world.hasChunkAt(BlockPos.of(tag.getLong("Pos"))))throw new IllegalStateException("Чанк умершей цели выгружен");
-                var data=undo.before().getCompound("NBT").copy();data.remove("Team");entity=EntityType.loadEntityRecursive(data,world,e->e);
-                if(!(entity instanceof LivingEntity)||!id.equals(entity.getUUID()))throw new IllegalStateException("Нет кандидата возврата умершей цели");
-                entity.tickCount=Math.max(undo.before().getCompound("LivingRuntime").getInt("Tick"),tag.getCompound("Death").getCompound("LivingRuntime").getInt("Tick"));
+                entity=retained;
             }
             if(entity!=null)values.put(id,entity);
         }
@@ -122,11 +122,13 @@ public final class CreateDeployerRestore {
         static Set<String> differences(CompoundTag actual,CompoundTag expected){var keys=new TreeSet<>(actual.getAllKeys());keys.addAll(expected.getAllKeys());keys.removeIf(k->Objects.equals(actual.get(k),expected.get(k)));return keys;}
         void set(CompoundTag tag){var existing=level.getEntity(id);
             if(tag.getBoolean("Terminal")){
-                if(!corpse){if(existing!=null&&!existing.isRemoved())existing.discard();if(candidate!=null&&tag.getCompound("Death").contains("Scores",10)){var empty=tag.getCompound("Death").getCompound("Scores").copy();empty.remove("Team");for(var row:empty.getList("Objectives",10))((CompoundTag)row).remove("Score");CreateScoreRuntime.restore(candidate,empty);}verify(tag);return;}
+                if(!corpse){if(existing!=null&&!existing.isRemoved())existing.discard();if(candidate!=null&&!candidate.isRemoved())candidate.discard();if(candidate!=null&&tag.getCompound("Death").contains("Scores",10)){var empty=tag.getCompound("Death").getCompound("Scores").copy();empty.remove("Team");for(var row:empty.getList("Objectives",10))((CompoundTag)row).remove("Score");CreateScoreRuntime.restore(candidate,empty);}verify(tag);return;}
                 var dead=tag.getCompound("Death").copy();if(liveAfter!=null)dead.put("NBT",liveAfter.copy());if(deathRuntime!=null)dead.put("LivingRuntime",deathRuntime.copy());set(dead);verify(tag);return;
             }
             if(!tag.getBoolean("Exists")){if(existing!=null&&!existing.isRemoved())existing.discard();verify(tag);return;}
-            if(existing==null||existing.isRemoved()){var restored=candidate!=null&&!candidate.isRemoved()?candidate:EntityType.loadEntityRecursive(tag.getCompound("NBT").copy(),level,e->e);if(restored==null||!id.equals(restored.getUUID())||!level.addFreshEntity(restored))throw new IllegalStateException("Мир отклонил возврат цели");}
+            if(existing==null||existing.isRemoved()){var restored=candidate!=null?candidate:EntityType.loadEntityRecursive(tag.getCompound("NBT").copy(),level,e->e);
+                if(restored!=null&&candidate!=null){((com.roften.avilixlogger.compat.create.mixin.CreateOriginDataAccessor)restored).avilixlogger$revive();var data=tag.getCompound("NBT").copy();((com.roften.avilixlogger.compat.create.mixin.CreateOriginDataAccessor)restored).avilixlogger$originData(data.contains("NeoForgeData",10)?data.getCompound("NeoForgeData").copy():null);restored.setCustomName(null);restored.load(data);if(restored instanceof LivingEntity living&&tag.contains("LivingRuntime",10))bindings.run(()->CreateLivingRuntime.restore(living,actor,tag.getCompound("LivingRuntime")));}
+                if(restored==null||!id.equals(restored.getUUID())||!level.addFreshEntity(restored))throw new IllegalStateException("Мир отклонил возврат цели");}
             else {var restored=tag.getCompound("NBT").copy();var live=NbtSerde.snapshotEntity(level,existing);if(live==null)throw new IllegalStateException("Нет текущего снимка цели");
                 for(String key:ticking){if(live.contains(key))restored.put(key,live.get(key).copy());else restored.remove(key);}existing.setCustomName(null);((com.roften.avilixlogger.compat.create.mixin.CreateOriginDataAccessor)existing).avilixlogger$originData(restored.contains("NeoForgeData",10)?restored.getCompound("NeoForgeData").copy():null);existing.load(restored);}
             if(tag.contains("LivingRuntime",10)&&level.getEntity(id) instanceof LivingEntity living)bindings.run(()->CreateLivingRuntime.restore(living,actor,tag.getCompound("LivingRuntime")));if(tag.contains("Scores",10))CreateScoreRuntime.restore(level.getEntity(id),tag.getCompound("Scores"));verify(tag);}

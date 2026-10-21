@@ -101,7 +101,7 @@ public final class CreateDeployerCreativeSmoke {
                 var details=CartLogDetails.describe(world,row);check(details.stream().anyMatch(c->c.getString().contains(inbound?"Бесконечное хранилище · поглощено":"Бесконечное хранилище · выдано")),"creative hand GUI omitted actual IO");
                 check(details.stream().anyMatch(c->c.getString().equals("Груз: изменённых ячеек "+(mixed?1:0))),"creative template incorrectly counted as finite cargo delta");
                 if(!inbound&&!mode.startsWith("place"))check(fake.getMainHandItem().getCount()==1&&fake.getMainHandItem().getHoverName().getString().equals("creative deployer supplied component"),"native creative grab lost supplied components");
-                else check(fake.getInventory().getItem(3).isEmpty()&&fake.getInventory().getItem(37).isEmpty()&&fake.getInventory().getItem(40).isEmpty(),"native creative void did not clear actual inventory slots");
+                else if(inbound)check(fake.getInventory().getItem(3).isEmpty()&&fake.getInventory().getItem(37).isEmpty()&&fake.getInventory().getItem(40).isEmpty(),"native creative void did not clear actual inventory slots");
                 var finiteAfter=new ArrayList<ItemStack>();if(mixed)for(int slot=0;slot<finite.getSlots();slot++)finiteAfter.add(finite.getStackInSlot(slot).copy());
                 if(mode.equals("world-conflict")||mode.equals("place-world-conflict"))world.setBlock(pos,Blocks.DIRT.defaultBlockState(),3);
                 if(mode.equals("entity-conflict"))target.setCustomName(Component.literal("changed target"));

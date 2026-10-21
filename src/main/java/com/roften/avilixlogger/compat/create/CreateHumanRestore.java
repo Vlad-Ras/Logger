@@ -28,16 +28,39 @@ public final class CreateHumanRestore implements CreateTransferRollbackCoordinat
             ((CreateCooldownRuntimeAccess)player.getCooldowns()).avilixlogger$validateCooldownRuntime(tag.getCompound("Cooldowns"));
             if(!tag.getCompound("Cursor").isEmpty())CreateLivingRuntime.item(tag.getCompound("Cursor"),player);
         }
-        for(String key:List.of("Pos","Motion","Rotation","FallDistance","Fire","Air","OnGround","PortalCooldown","TicksFrozen"))if(Objects.equals(undo.before().getCompound("NBT").get(key),undo.after().getCompound("NBT").get(key)))ticking.add(key);
-        ticking.add("HurtTime");
+        for(String key:List.of("Pos","Motion","Rotation","FallDistance","Fire","Air","OnGround","PortalCooldown","TicksFrozen","warden_spawn_tracker"))if(Objects.equals(undo.before().getCompound("NBT").get(key),undo.after().getCompound("NBT").get(key)))ticking.add(key);
+        ticking.add("HurtTime");ticking.add("recipeBook");
         verifyAfter();CartRestoreLocks.player(player);CartRestoreLocks.handler(player.getStats());CartRestoreLocks.handler(player.getAdvancements());CartRestoreLocks.keepLoaded(level,player.blockPosition());CartAuditContext.LOCKED_ENTITIES.add(player.getUUID());CreateScoreRuntime.reserve(player);
     }
     private CompoundTag stable(CompoundTag data){var tag=data.copy();CreateLivingRuntime.normalize(tag);for(String field:ticking)tag.remove(field);return tag;}
+    private CompoundTag progressTarget(CompoundTag current,CompoundTag desired,boolean writing,boolean compensating){
+        var other=desired==undo.before()?undo.after():undo.before();var from=(writing?other:desired).getCompound("Human");var to=(writing?desired:other).getCompound("Human");
+        // During verification, merging to the opposite side merely checks every changed value.
+        var out=current.copy();out.put("Progress",CreatePlayerProgress.merge(current.getCompound("Progress"),from.getCompound("Progress"),to.getCompound("Progress"),compensating));
+        out.put("Scores",CreateScoreRuntime.merge(current.getCompound("Scores"),from.getCompound("Scores"),to.getCompound("Scores"),compensating));return out;
+    }
+    private static CompoundTag cooldown(CompoundTag saved,int tick){
+        if(tick<saved.getInt("Tick"))throw new IllegalStateException("Получатель перезашёл после действия");var tag=saved.copy();tag.putInt("Tick",tick);tag.getList("Entries",10).removeIf(raw->((CompoundTag)raw).getInt("End")<=tick);return tag;
+    }
     private void verify(CompoundTag expected){
         if(player.isRemoved()||player.hasDisconnected()||player.level()!=level||level.getEntity(player.getUUID())!=player||!player.isAlive()||player.isPassenger()||!player.getPassengers().isEmpty()||!level.hasChunkAt(player.blockPosition()))throw new IllegalStateException("Получатель недоступен");
-        if(!capture(player).equals(expected.getCompound("Human"))||!CreateLivingRuntime.matches(player,actor,expected.getCompound("LivingRuntime"))||!stable(CreateLivingRuntime.entitySnapshot(level,player)).equals(stable(expected.getCompound("NBT"))))throw new IllegalStateException("Инвентарь, питание, статистика или достижения получателя изменились");
+        var live=capture(player);progressTarget(live,expected,false,false);var human=expected.getCompound("Human").copy();
+        human.put("Progress",live.getCompound("Progress"));human.put("Scores",live.getCompound("Scores"));
+        var b=undo.before().getCompound("Human").getCompound("Cooldowns");var a=undo.after().getCompound("Human").getCompound("Cooldowns");
+        human.put("Cooldowns",b.equals(a)?live.getCompound("Cooldowns"):cooldown(human.getCompound("Cooldowns"),live.getCompound("Cooldowns").getInt("Tick")));
+        if(!live.equals(human))throw new IllegalStateException("Состояние получателя изменилось: "+differences("Human",live,human));
+        var runtime=CreateLivingRuntime.capture(player,actor);var wanted=CreateLivingRuntime.project(expected.getCompound("LivingRuntime"),player.tickCount);
+        if(!runtime.equals(wanted))throw new IllegalStateException("Runtime получателя изменился: "+differences("Living",runtime,wanted));
+        var actual=stable(CreateLivingRuntime.entitySnapshot(level,player));var nbt=stable(expected.getCompound("NBT"));if(!actual.equals(nbt))throw new IllegalStateException("NBT получателя изменился: "+differences("NBT",actual,nbt));
     }
-    private void set(CompoundTag state){
+    private static List<String> differences(String path,CompoundTag actual,CompoundTag expected){
+        var out=new ArrayList<String>();var keys=new TreeSet<>(actual.getAllKeys());keys.addAll(expected.getAllKeys());
+        for(String key:keys){if(Objects.equals(actual.get(key),expected.get(key)))continue;String name=path+"/"+key;
+            if(actual.get(key) instanceof CompoundTag a&&expected.get(key) instanceof CompoundTag b)out.addAll(differences(name,a,b));else out.add(name+(actual.get(key) instanceof NumericTag?" ("+actual.get(key)+" / "+expected.get(key)+")":""));if(out.size()>=16)break;
+        }return out;
+    }
+    private void set(CompoundTag state,boolean compensating){
+        var current=capture(player);var merged=progressTarget(current,state,true,compensating);
         var nbt=state.getCompound("NBT");
         ((com.roften.avilixlogger.compat.create.mixin.CreateOriginDataAccessor)player).avilixlogger$originData(nbt.contains("NeoForgeData",10)?nbt.getCompound("NeoForgeData").copy():null);
         if(!ticking.contains("Pos")||!ticking.contains("Rotation")){var pos=nbt.getList("Pos",6);var rot=nbt.getList("Rotation",5);player.teleportTo(level,ticking.contains("Pos")?player.getX():pos.getDouble(0),ticking.contains("Pos")?player.getY():pos.getDouble(1),ticking.contains("Pos")?player.getZ():pos.getDouble(2),ticking.contains("Rotation")?player.getYRot():rot.getFloat(0),ticking.contains("Rotation")?player.getXRot():rot.getFloat(1));}
@@ -49,9 +72,9 @@ public final class CreateHumanRestore implements CreateTransferRollbackCoordinat
         if(!ticking.contains("PortalCooldown"))player.setPortalCooldown(nbt.getInt("PortalCooldown"));
         if(!ticking.contains("TicksFrozen"))player.setTicksFrozen(nbt.getInt("TicksFrozen"));
         var tag=state.getCompound("Human");bindings.run(()->CreateLivingRuntime.restore(player,actor,state.getCompound("LivingRuntime")));
-        CreatePlayerProgress.restore(player,tag.getCompound("Progress"));CreateScoreRuntime.restore(player,tag.getCompound("Scores"));
-        ((CreateCooldownRuntimeAccess)player.getCooldowns()).avilixlogger$cooldownRuntime(tag.getCompound("Cooldowns"));player.containerMenu.setCarried(CreateLivingRuntime.item(tag.getCompound("Cursor"),player));
+        CreatePlayerProgress.restore(player,merged.getCompound("Progress"));CreateScoreRuntime.restore(player,merged.getCompound("Scores"));
+        if(!undo.before().getCompound("Human").getCompound("Cooldowns").equals(undo.after().getCompound("Human").getCompound("Cooldowns")))((CreateCooldownRuntimeAccess)player.getCooldowns()).avilixlogger$cooldownRuntime(cooldown(tag.getCompound("Cooldowns"),current.getCompound("Cooldowns").getInt("Tick")));player.containerMenu.setCarried(CreateLivingRuntime.item(tag.getCompound("Cursor"),player));
         player.getInventory().setChanged();player.inventoryMenu.broadcastFullState();if(player.containerMenu!=player.inventoryMenu)player.containerMenu.broadcastFullState();player.resetSentInfo();verify(state);
     }
-    public void verifyAfter(){verify(undo.after());}public void verifyBefore(){verify(undo.before());}public void apply(){set(undo.before());}public void compensate(){set(undo.after());}
+    public void verifyAfter(){verify(undo.after());}public void verifyBefore(){verify(undo.before());}public void apply(){set(undo.before(),false);}public void compensate(){set(undo.after(),true);}
 }

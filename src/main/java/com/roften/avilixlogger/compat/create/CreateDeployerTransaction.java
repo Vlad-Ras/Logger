@@ -12,12 +12,21 @@ import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import java.util.*;
 /** Sparse endpoints for one actual activation. No snapshots on idle ticks. */
 public final class CreateDeployerTransaction implements CreateDeployerHooks.Observer {
+    // Keep the actual native AI/controllers for recently removed known mobs. NBT alone
+    // cannot reconstruct running goals. Eviction/restart must refuse, never synthesize AI.
+    private static final LinkedHashMap<UUID,Entity> RETAINED=new LinkedHashMap<>();
+    public static void clearRetained(){RETAINED.clear();}
+    private static UUID retain(Entity entity){var token=UUID.randomUUID();RETAINED.put(token,entity);while(RETAINED.size()>256)RETAINED.remove(RETAINED.keySet().iterator().next());return token;}
+    public static Entity retained(CompoundTag terminal,ServerLevel level){
+        var entity=terminal.hasUUID("Retained")?RETAINED.get(terminal.getUUID("Retained")):null;
+        if(entity==null||entity.level()!=level||!entity.getUUID().equals(terminal.getUUID("Entity")))throw new IllegalStateException("Нативный AI умершей цели больше не доступен; возврат из одного NBT запрещён");return entity;
+    }
     private static final ThreadLocal<Capture> CURRENT=new ThreadLocal<>();
     private record Address(ServerLevel level,BlockPos pos){}
     public static void install(){CreateDeployerHooks.install(new CreateDeployerTransaction());}
     public boolean before(net.minecraft.world.level.Level level,BlockPos pos){var c=CURRENT.get();if(c==null||c.reading||CartAuditContext.restoring()||!(level instanceof ServerLevel s)||!s.getServer().isSameThread())return false;c.block(s,pos);return true;}
     public static void unsupported(String reason){var c=CURRENT.get();if(c!=null){c.complete=false;c.reason=reason;}}
-    public static void entityBefore(Entity entity){var c=CURRENT.get();if(c!=null&&entity!=null&&!(entity instanceof DeployerFakePlayer))c.target(entity,false);}
+    public static void entityBefore(Entity entity){var c=CURRENT.get();if(c==null||entity==null||entity==c.player)return;if(entity instanceof net.neoforged.neoforge.common.util.FakePlayer){unsupported("Другой технический игрок не имеет собственного адресуемого endpoint");return;}c.target(entity,false);}
     public static void join(EntityJoinLevelEvent event){var c=CURRENT.get();if(c!=null&&!event.isCanceled()&&!event.loadedFromDisk()&&event.getLevel() instanceof ServerLevel)c.target(event.getEntity(),true);}
     public static Capture begin(MovementContext context,DeployerFakePlayer player,BlockPos target){return new Capture(context,player,target);}
     public static boolean supportedItem(ItemStack stack,DeployerFakePlayer player){
@@ -104,7 +113,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
             for(var entry:targets.entrySet())try{var old=entry.getValue();
                 boolean terminal=entry.getKey() instanceof net.minecraft.world.entity.LivingEntity&&!entry.getKey().isAlive()&&old.getBoolean("Exists");
                 if(terminal&&!Set.of("minecraft:pig","minecraft:cow","minecraft:sheep","minecraft:chicken").contains(old.getString("Type"))){complete=false;reason="У смерти этой цели нет полного контракта";}
-                var now=entity(entry.getKey(),!entry.getKey().isRemoved()&&!terminal);if(terminal){now.putBoolean("Terminal",true);now.put("Death",entity(entry.getKey(),true));}charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
+                var now=entity(entry.getKey(),!entry.getKey().isRemoved()&&!terminal);if(terminal){now.putUUID("Retained",retain(entry.getKey()));now.putBoolean("Terminal",true);now.put("Death",entity(entry.getKey(),true));}charge(now);if(!old.equals(now)){oldEntities.add(old.copy());newEntities.add(now);}}catch(RuntimeException failure){complete=false;}
             var oldCargo=new ListTag();var newCargo=new ListTag();int creativeIO=0;
             if(!cargo.complete())complete=false;
             for(var row:cargo.rows()){

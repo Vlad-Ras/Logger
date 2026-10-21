@@ -132,7 +132,7 @@ public final class CreateLivingRuntime {
         // Materialize supported attributes before saving native data so capture itself cannot
         // make the next snapshot appear to contain a new attribute definition.
         var persistent=new CompoundTag();var previous=SAVING.get();SAVING.set(entity);
-        try{entity.addAdditionalSaveData(persistent);}finally{if(previous==null)SAVING.remove();else SAVING.set(previous);}
+        try{if(entity instanceof net.minecraft.server.level.ServerPlayer&&!(entity instanceof FakePlayer))((CreateHumanRuntimeAccess)entity).avilixlogger$savePlayerRuntime(persistent);else entity.addAdditionalSaveData(persistent);}finally{if(previous==null)SAVING.remove();else SAVING.set(previous);}
         normalize(persistent);tag.put("Persistent",persistent);
         tag.put("Attributes",attributes);if(entity instanceof Player player){var food=new CompoundTag();player.getFoodData().addAdditionalSaveData(food);tag.put("Food",food);}
         if(entity instanceof Mob mob){tag.put("MobTarget",reference(mob.getTarget(),actor));tag.putBoolean("Aggressive",mob.isAggressive());}
@@ -214,6 +214,7 @@ public final class CreateLivingRuntime {
         if(!original.contains("Tick",3)||tick<original.getInt("Tick"))throw new IllegalStateException("Цель была перезагружена после действия активатора");
         var tag=original.copy();normalize(tag.getCompound("Persistent"));long elapsed=(long)tick-original.getInt("Tick");tag.putInt("Tick",tick);
         for(String field:List.of("AttackStrength","NoAction"))tag.putInt(field,(int)Math.min(Integer.MAX_VALUE,(long)original.getInt(field)+elapsed));
+        if(tag.contains("Food",10)&&elapsed>0)tag.putInt("NoAction",0);
         for(String field:List.of("HurtTime","Invulnerable","LastPlayerTime"))tag.putInt(field,(int)Math.max(0,(long)original.getInt(field)-elapsed));
         if(elapsed>original.getInt("LastPlayerTime"))tag.put("LastPlayer",new CompoundTag());
         if((long)tick-original.getInt("LastMobAt")>100)tag.put("LastMob",new CompoundTag());
