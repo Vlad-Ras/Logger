@@ -93,7 +93,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
         final MovementContext context;final DeployerFakePlayer player;final CompoundTag attachments;final Capture previous;final CompoundTag beforeHand;final CreateCargoAudit.Capture cargo;final boolean nestedAutomation;
         final LinkedHashMap<Address,CompoundTag> blocks=new LinkedHashMap<>();final LinkedHashMap<Entity,CompoundTag> targets=new LinkedHashMap<>();
         final ListTag uses=new ListTag();final LinkedHashMap<String,CompoundTag> contracts=new LinkedHashMap<>();boolean complete=true,closed,reading;private long bytes;private CompoundTag before,after;private String reason;
-        Capture(MovementContext context,DeployerFakePlayer player,BlockPos target){this.context=context;this.player=player;preparePlayer(player);attachments=attachments(player);beforeHand=hand(context,player);previous=CURRENT.get();nestedAutomation=CartAutomationAudit.capturingChanges();CartStorageAudit.ensureBound(context.contraption.entity);cargo=CreateCargoAudit.captureChanges(context.contraption.entity);CURRENT.set(this);try{charge(beforeHand);contract(player.getMainHandItem());block((ServerLevel)context.world,target);}catch(RuntimeException failure){close();throw failure;}}
+        Capture(MovementContext context,DeployerFakePlayer player,BlockPos target){this.context=context;this.player=player;preparePlayer(player);attachments=attachments(player);beforeHand=hand(context,player);previous=CURRENT.get();nestedAutomation=CartAutomationAudit.capturingChanges();CartStorageAudit.ensureBound(context.contraption.entity);cargo=CreateCargoAudit.captureChanges(context.contraption.entity);CURRENT.set(this);try{charge(beforeHand);charge(attachments);contract(player.getMainHandItem());block((ServerLevel)context.world,target);}catch(RuntimeException failure){close();throw failure;}}
         void contract(ItemStack stack){
             try{var tag=CreateDeployerItemContracts.describe(stack);if(!tag.isEmpty()&&contracts.containsKey(tag.getString("Item"))&&!contracts.get(tag.getString("Item")).equals(tag))throw new IllegalStateException("Предмет сменил контракт внутри действия");if(!tag.isEmpty()&&!contracts.containsKey(tag.getString("Item"))){if(contracts.size()>=64)throw new IllegalStateException("Слишком много контрактов предметов");charge(tag);contracts.put(tag.getString("Item"),tag);}}
             catch(IllegalStateException failure){complete=false;reason=failure.getMessage();}
@@ -135,7 +135,8 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
                 }
                 try{charge(x);charge(y);oldCargo.add(x);newCargo.add(y);if(y.getString("Kind").equals("storage_io"))creativeIO++;}catch(RuntimeException failure){complete=false;}
             }
-            if(!Objects.equals(attachments,attachments(player))){complete=false;reason="Использование изменило внешние attachments технического игрока; нужен контракт мода";}
+            var afterAttachments=attachments(player);charge(afterAttachments);
+            if(!Objects.equals(attachments,afterAttachments)){complete=false;reason="Использование изменило внешние attachments технического игрока; нужен контракт мода";}
             if(!player.isAlive()){complete=false;reason="Технический игрок умер во время действия";}
             var afterHand=hand(context,player);charge(afterHand);var transfer=UUID.randomUUID();
             for(var tag:List.of(b,a)){tag.putUUID("Transfer",transfer);tag.putInt("JointFormat",5);if(creativeIO>0)tag.putInt("CreativeIO",creativeIO);tag.putBoolean("Complete",completed&&complete);if(reason!=null)tag.putString("JointFailure",reason);}
