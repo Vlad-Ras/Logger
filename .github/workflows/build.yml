@@ -29,6 +29,8 @@ jobs:
         run: |
           mkdir -p run
           printf 'eula=true\n' > run/eula.txt
+          # Startup smoke cases run synchronously; the outer timeout bounds the stand.
+          printf 'max-tick-time=-1\n' > run/server.properties
           timeout --signal=INT --kill-after=15s 240s ./gradlew runServer -PcreateSmoke -PfdSmokeVersion=${{ matrix.fd }} --console=plain --no-daemon > create-smoke.log 2>&1 || status=$?
           tail -n 100 create-smoke.log
           if ! grep -q 'AVILIX_CREATE_SMOKE_OK' create-smoke.log || grep -qE '(AVILIX_CREATE_SMOKE_FAILED|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-smoke.log; then
@@ -53,4 +55,5 @@ jobs:
           path: |
             compile.log
             *smoke.log
+            run/crash-reports/*.txt
           if-no-files-found: ignore
