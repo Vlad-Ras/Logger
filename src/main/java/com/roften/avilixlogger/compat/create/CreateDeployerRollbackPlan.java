@@ -7,7 +7,7 @@ public final class CreateDeployerRollbackPlan {
     public record Undo(CompoundTag before,CompoundTag after){}
     private CreateDeployerRollbackPlan(){}
     public static CreateTransferRollbackPlan prepare(CompoundTag before,CompoundTag after){
-        if(before==null||after==null||before.sizeInBytes()+after.sizeInBytes()>8L*1024*1024||!before.getBoolean("Complete")||!after.getBoolean("Complete")||!Set.of(1,2,3,4).contains(before.getInt("JointFormat"))||before.getInt("JointFormat")!=after.getInt("JointFormat")||!before.hasUUID("Transfer")||!before.getUUID("Transfer").equals(after.getUUID("Transfer"))||!before.getString("Kind").equals("deployer_action")||!after.getString("Kind").equals("deployer_action"))throw new IllegalStateException("Нет полного совместного снимка активатора");
+        if(before==null||after==null||before.sizeInBytes()+after.sizeInBytes()>8L*1024*1024||!before.getBoolean("Complete")||!after.getBoolean("Complete")||!Set.of(1,2,3,4,5).contains(before.getInt("JointFormat"))||before.getInt("JointFormat")!=after.getInt("JointFormat")||!before.hasUUID("Transfer")||!before.getUUID("Transfer").equals(after.getUUID("Transfer"))||!before.getString("Kind").equals("deployer_action")||!after.getString("Kind").equals("deployer_action"))throw new IllegalStateException("Нет полного совместного снимка активатора");
         if(after.getInt("JointFormat")>=4){
             for(var tag:List.of(before,after))for(var pair:Map.of("World","WorldCount","Targets","TargetCount","Cargo","CargoCount","Uses","UseCount").entrySet())
                 if(!tag.contains(pair.getValue(),3)||!tag.contains(pair.getKey(),9)||tag.getInt(pair.getValue())!=CreatePlayerProgress.rows(tag,pair.getKey(),512).size()||tag.getInt(pair.getValue())!=after.getInt(pair.getValue()))throw new IllegalStateException("Манифест активатора потерял участника");
@@ -16,11 +16,22 @@ public final class CreateDeployerRollbackPlan {
                 for(String key:List.of("Before","After")){var slots=new HashSet<Integer>();for(var value:CreatePlayerProgress.rows(use,key,41)){var item=(CompoundTag)value;if(!item.contains("Slot",3)||item.getInt("Slot")<0||item.getInt("Slot")>=41||!slots.add(item.getInt("Slot"))||item.getString("id").isBlank()||!item.contains("count",3)||item.getInt("count")<=0)throw new IllegalStateException("Некорректный слот использования предмета");}}
             }
         }
+        if(after.getInt("JointFormat")>=5){
+            var ids=new HashSet<String>();
+            for(var tag:List.of(before,after))if(!tag.contains("ContractCount",3)||!tag.contains("ItemContracts",9)||tag.getInt("ContractCount")!=CreatePlayerProgress.rows(tag,"ItemContracts",64).size())throw new IllegalStateException("Потерян манифест контрактов предметов");
+            if(!before.getList("ItemContracts",10).equals(after.getList("ItemContracts",10)))throw new IllegalStateException("Не согласованы контракты предметов");
+            for(var raw:after.getList("ItemContracts",10)){var contract=(CompoundTag)raw;CreateDeployerItemContracts.validate(contract);if(!ids.add(contract.getString("Item")))throw new IllegalStateException("Повторный контракт предмета");}
+        }
+        var contracts=new HashSet<String>();for(var raw:after.getList("ItemContracts",10))contracts.add(((CompoundTag)raw).getString("Item"));
+        int selected=before.getCompound("Hand").getInt("Selected");
+        validateUsedItems(before.getCompound("Hand").getList("Inventory",10),selected,after.getInt("JointFormat"),contracts);
+        for(var raw:after.getList("Uses",10))validateUsedItems(((CompoundTag)raw).getList("Before",10),selected,after.getInt("JointFormat"),contracts);
         var b=before.getCompound("Hand");var a=after.getCompound("Hand");
         if(!b.hasUUID("Construction")||!a.hasUUID("Construction")||!b.getUUID("Construction").equals(a.getUUID("Construction"))||!b.hasUUID("StorageEntity")||!b.getUUID("StorageEntity").equals(a.getUUID("StorageEntity"))||!b.getString("Dimension").equals(a.getString("Dimension"))||a.getString("Dimension").isBlank()||!b.contains("LocalPos",4)||b.getLong("LocalPos")!=a.getLong("LocalPos")||!b.getString("ConstructionKind").equals(a.getString("ConstructionKind"))||CreateContraptionKind.valueOf(a.getString("ConstructionKind"))==CreateContraptionKind.UNKNOWN||!b.getCompound("State").equals(a.getCompound("State"))||!b.getCompound("State").getString("Name").equals("create:deployer")||!b.getCompound("Settings").equals(a.getCompound("Settings")))throw new IllegalStateException("Идентичность или настройки активатора изменены");
         for(var hand:List.of(b,a)){
             if(hand.getInt("Size")!=41||hand.getInt("Selected")<0||hand.getInt("Selected")>=9||!hand.contains("Inventory",9)||!hand.contains("Runtime",10))throw new IllegalStateException("Некорректный инвентарь активатора");
             var runtime=hand.getCompound("Runtime");
+            if(after.getInt("JointFormat")>=5)CreateDeployerRuntimeAccess.validatePhysical(runtime.getCompound("Physical"));
             if(!runtime.contains("PlacedTracks",1)||runtime.contains("BreakingPos")!=runtime.contains("BreakingProgress")||runtime.contains("BreakingProgress")&&(!Float.isFinite(runtime.getFloat("BreakingProgress"))||runtime.getFloat("BreakingProgress")<0)||runtime.contains("Timer")&&(runtime.getInt("Timer")<0||runtime.getInt("Timer")>20))throw new IllegalStateException("Некорректное состояние активатора");
             if(runtime.contains("Effects")&&(runtime.getCompound("Effects").getString("id").isBlank()||runtime.getCompound("Effects").getInt("count")<=0))throw new IllegalStateException("Неполный предмет эффекта активатора");
             if(after.getInt("JointFormat")>=3){
@@ -61,6 +72,12 @@ public final class CreateDeployerRollbackPlan {
         }
         if(b.equals(a)&&world.isEmpty()&&targets.isEmpty()&&cargo.isEmpty()&&creative.isEmpty())throw new IllegalStateException("В операции активатора нет изменений");
         return new CreateTransferRollbackPlan(after.getUUID("Transfer"),cargo,List.of(),List.of(),Set.of(a.getUUID("Construction")),before.copy(),after.copy(),List.of(new Undo(b.copy(),a.copy())),world,targets,List.copyOf(creative));
+    }
+    private static void validateUsedItems(ListTag inventory,int selected,int format,Set<String> contracts){
+        for(var raw:inventory){var item=(CompoundTag)raw;if(item.getInt("Slot")!=selected)continue;String id=item.getString("id");
+            if(id.startsWith("minecraft:"))continue;
+            if(format>=5? !contracts.contains(id): !Set.of("create:sand_paper","create:red_sand_paper").contains(id))throw new IllegalStateException("Нет контракта модового предмета использования");
+        }
     }
     private static CompoundTag addressedDeath(CompoundTag address,CompoundTag death){var expected=death.copy();for(String key:List.of("Entity","Dimension","Type","Pos"))expected.put(key,address.get(key).copy());return expected;}
     private static List<CreateTransferRollbackPlan.CargoUndo> cargo(CompoundTag b,CompoundTag a,CompoundTag hand,List<CreateCreativeTransferPlan.IO> creative){

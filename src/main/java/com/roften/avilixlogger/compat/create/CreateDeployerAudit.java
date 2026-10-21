@@ -126,8 +126,7 @@ public final class CreateDeployerAudit {
             source = decoratedSource; cause = installedCause;
             try{
                 transaction=CreateDeployerTransaction.begin(context,player,target);
-                if(!CreateDeployerTransaction.supportedItem(heldBefore,player))
-                    CreateDeployerTransaction.unsupported("Внешние эффекты предмета активатора требуют отдельного контракта: "+net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(heldBefore.getItem()));
+
             }catch(Throwable failure){close();throw failure;}
         }
         public LogEntry finish(boolean completed) {

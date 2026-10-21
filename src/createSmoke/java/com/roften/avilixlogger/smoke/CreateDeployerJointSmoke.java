@@ -38,19 +38,33 @@ public final class CreateDeployerJointSmoke {
         runtimeRoundTrip(world);
         var factory=method(CreateCargoSmoke.class,"entity",ServerLevel.class,CreateContraptionKind.class);var attach=method(CreateLinkedTransferSmoke.class,"attachCarriage",AbstractContraptionEntity.class);
         var pos=world.getSharedSpawnPos().offset(40,40,40);method(CreateFunnelSmoke.class,"visible",ServerLevel.class,BlockPos.class).invoke(null,world,pos);
+        var modes=new ArrayList<String>(List.of("place","place-cancel-first","place-cancel-all","water","lever","name","name-cancel-all","frame","frame-cancel-all","hand-conflict","world-conflict","entity-conflict","locks","failure","noop","combat","combat-cancel-first","combat-cancel-all","combat-removed","combat-removed-cancel-all","combat-dead-conflict","combat-runtime-conflict","combat-cardboard","combat-cardboard-cancel-first","combat-cardboard-cancel-all","combat-cardboard-conflict","feed-create-chocolate","feed-create-roll","feed-create-berries","feed-create-apple","feed-create-tea","feed-create-tea-cancel-first","feed-create-tea-cancel-all","feed-create-tea-conflict","feed-create-tea-stack","feed-create-tea-stack-cancel-all","feed-create-tea-bottle-conflict","feed-create-tea-full","feed","feed-drink","feed-drink-cancel-first","feed-drink-cancel-all","feed-drink-effect-conflict","feed-drink-stat-conflict","feed-unrelated-progress","feed-natural-ticks","feed-cancel-first","feed-cancel-all","feed-stat-conflict","feed-adv-conflict","feed-inventory-conflict","feed-locks","consume-loose","consume-loose-cancel-all","consume-loose-conflict","combat-live","combat-live-cancel-first","combat-live-cancel-all","combat-live-conflict","consume-polish","consume-polish-cancel-all","consume-polish-conflict","name-move","name-locks","shear","shear-cancel-all","frame-break","frame-break-cancel-all","cargo-grab","cargo-return","cargo-conflict","cargo-cancel-all","place-oversized"));
+        if(net.neoforged.fml.ModList.get().isLoaded("farmersdelight")){
+            for(var id:net.minecraft.core.registries.BuiltInRegistries.ITEM.keySet().stream().filter(k->k.getNamespace().equals("farmersdelight")).sorted().toList()){
+                var stack=new ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id));
+                if(stack.has(DataComponents.FOOD)&&CreateDeployerTransaction.supportedItem(stack,null))modes.add("feed-fd/"+id.getPath()+"/native");
+            }
+            modes.add("feed-fd/dog_food/barrier");modes.add("feed-fd/horse_feed/barrier");
+            for(String food:List.of("beef_stew","apple_cider","milk_bottle","hot_cocoa","melon_juice","melon_popsicle"))for(String phase:List.of("native","stack","cancel-first","cancel-all","effect-conflict","full"))modes.add((List.of("milk_bottle","hot_cocoa","melon_juice","melon_popsicle").contains(food)?"consume-fd/":"feed-fd/")+food+"/"+phase);
+        }
         int tested=0;
         for(var kind:List.of(CreateContraptionKind.MINECART,CreateContraptionKind.TRAIN,CreateContraptionKind.BEARING,CreateContraptionKind.OTHER))
-        for(String mode:List.of("place","place-cancel-first","place-cancel-all","water","lever","name","name-cancel-all","frame","frame-cancel-all","hand-conflict","world-conflict","entity-conflict","locks","failure","noop","combat","combat-cancel-first","combat-cancel-all","combat-removed","combat-removed-cancel-all","combat-dead-conflict","combat-runtime-conflict","feed","feed-drink","feed-drink-cancel-first","feed-drink-cancel-all","feed-drink-effect-conflict","feed-drink-stat-conflict","feed-unrelated-progress","feed-natural-ticks","feed-cancel-first","feed-cancel-all","feed-stat-conflict","feed-adv-conflict","feed-inventory-conflict","feed-locks","consume-loose","consume-loose-cancel-all","consume-loose-conflict","combat-live","combat-live-cancel-first","combat-live-cancel-all","combat-live-conflict","consume-polish","consume-polish-cancel-all","consume-polish-conflict","name-move","name-locks","shear","shear-cancel-all","frame-break","frame-break-cancel-all","cargo-grab","cargo-return","cargo-conflict","cargo-cancel-all","place-oversized")){
+        for(String mode:modes){
             var body=(AbstractContraptionEntity)factory.invoke(null,world,kind);attach.invoke(null,body);body.setPos(pos.above(5).getX(),pos.above(5).getY(),pos.above(5).getZ());check(world.addFreshEntity(body),"deployer construction spawn");Entity target=null;LogEntry row=null;
             try{
                 world.setBlock(pos.below(),Blocks.STONE.defaultBlockState(),3);world.setBlock(pos,mode.equals("lever")?Blocks.LEVER.defaultBlockState().setValue(LeverBlock.FACE,net.minecraft.world.level.block.state.properties.AttachFace.FLOOR):Blocks.AIR.defaultBlockState(),3);
+                boolean nonlethal=mode.startsWith("combat-live")||mode.startsWith("combat-cardboard");
                 boolean punch=mode.startsWith("combat")||mode.startsWith("frame-break");
                 var actorPos=new BlockPos(7,0,0);var settings=new CompoundTag();settings.putUUID("Owner",UUID.randomUUID());settings.putString("Mode",punch?"PUNCH":"USE");
                 var info=new StructureBlockInfo(actorPos,AllBlocks.DEPLOYER.getDefaultState().setValue(DeployerBlock.FACING,Direction.EAST),settings);var context=new MovementContext(world,info,body.getContraption());context.position=Vec3.atCenterOf(pos);body.getContraption().getActors().add(MutablePair.of(info,context));
                 var fake=new DeployerFakePlayer(world,settings.getUUID("Owner"));context.temporaryData=fake;fake.getInventory().selected=1;board.addPlayerToTeam(fake.getScoreboardName(),blue);
-                ItemStack held=new ItemStack(mode.equals("water")?Items.WATER_BUCKET:mode.startsWith("name")||mode.equals("entity-conflict")?Items.NAME_TAG:mode.startsWith("shear")?Items.SHEARS:mode.startsWith("frame")?Items.DIAMOND:mode.startsWith("combat")&&!mode.startsWith("combat-live")?Items.DIAMOND_SWORD:mode.equals("lever")||mode.equals("noop")?Items.AIR:Items.STONE);
-                if(mode.startsWith("combat-live"))held=new ItemStack(Items.WOODEN_SWORD);
+                ItemStack held=new ItemStack(mode.equals("water")?Items.WATER_BUCKET:mode.startsWith("name")||mode.equals("entity-conflict")?Items.NAME_TAG:mode.startsWith("shear")?Items.SHEARS:mode.startsWith("frame")?Items.DIAMOND:mode.startsWith("combat")&&!nonlethal?Items.DIAMOND_SWORD:mode.equals("lever")||mode.equals("noop")?Items.AIR:Items.STONE);
+                if(nonlethal)held=new ItemStack(Items.WOODEN_SWORD);
+                if(mode.startsWith("combat-cardboard")){held=AllItems.CARDBOARD_SWORD.asStack();fake.setSprinting(true);fake.setDeltaMovement(.5,0,.5);}
                 if(mode.startsWith("feed"))held=mode.startsWith("feed-drink")?new ItemStack(Items.MILK_BUCKET):new ItemStack(Items.APPLE,2);
+                if(mode.startsWith("feed-create"))held=new ItemStack(mode.startsWith("feed-create-tea")?AllItems.BUILDERS_TEA.get():mode.equals("feed-create-chocolate")?AllItems.BAR_OF_CHOCOLATE.get():mode.equals("feed-create-roll")?AllItems.SWEET_ROLL.get():mode.equals("feed-create-berries")?AllItems.CHOCOLATE_BERRIES.get():AllItems.HONEYED_APPLE.get(),mode.contains("stack")||mode.contains("bottle-conflict")||mode.endsWith("full")?2:1);
+                if(mode.startsWith("feed-fd/")||mode.startsWith("consume-fd/")){var id=ResourceLocation.fromNamespaceAndPath("farmersdelight",mode.split("/")[1]);check(net.minecraft.core.registries.BuiltInRegistries.ITEM.containsKey(id),"missing FD fixture "+id);held=new ItemStack(net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id),mode.endsWith("stack")||mode.endsWith("full")?2:1);}
+                if(mode.startsWith("consume-fd/")){fake.setHealth(12);fake.setRemainingFireTicks(100);fake.getFoodData().setFoodLevel(7);if(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))fake.getActiveEffectsMap().put(MobEffects.POISON,new MobEffectInstance(MobEffects.POISON,200));if(mode.endsWith("full"))for(int slot=0;slot<36;slot++)if(slot!=1)fake.getInventory().setItem(slot,new ItemStack(Items.EMERALD,64));}
                 if(mode.startsWith("consume-loose"))held=AllItems.SAND_PAPER.asStack();
                 if(mode.startsWith("consume-polish")){
                     held=new ItemStack(AllItems.SAND_PAPER.get());fake.setItemInHand(InteractionHand.OFF_HAND,new ItemStack(AllItems.ROSE_QUARTZ.get(),2));
@@ -59,20 +73,22 @@ public final class CreateDeployerJointSmoke {
                 }
                 if(mode.equals("place-oversized")){held.setCount(1024);held.set(DataComponents.CUSTOM_NAME,Component.literal("large hand component"));}
                 if(held.is(Items.NAME_TAG))held.set(DataComponents.CUSTOM_NAME,Component.literal("deployer named target"));fake.setItemInHand(InteractionHand.MAIN_HAND,held);fake.getInventory().setItem(37,new ItemStack(Items.IRON_CHESTPLATE));
-                if(mode.startsWith("name")||mode.startsWith("shear")||mode.equals("entity-conflict")||mode.startsWith("combat")){var sheep=EntityType.SHEEP.create(world);if(!mode.startsWith("combat-live")&&mode.startsWith("combat"))sheep.setHealth(1);sheep.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);check(world.addFreshEntity(sheep),"target sheep spawn");target=sheep;}
+                if(mode.startsWith("name")||mode.startsWith("shear")||mode.equals("entity-conflict")||mode.startsWith("combat")){var sheep=EntityType.SHEEP.create(world);if(!nonlethal&&mode.startsWith("combat"))sheep.setHealth(1);sheep.setPos(pos.getX()+.5,pos.getY(),pos.getZ()+.5);check(world.addFreshEntity(sheep),"target sheep spawn");target=sheep;}
                 if(mode.startsWith("feed")){
                     var profile=new com.mojang.authlib.GameProfile(UUID.randomUUID(),"FeedRecipient");var human=new net.minecraft.server.level.ServerPlayer(world.getServer(),world,profile,net.minecraft.server.level.ClientInformation.createDefault());
                     human.connection=new net.minecraft.server.network.ServerGamePacketListenerImpl(world.getServer(),new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND),human,net.minecraft.server.network.CommonListenerCookie.createInitial(profile,false));
-                    human.setPos(Vec3.atCenterOf(pos));human.getFoodData().setFoodLevel(7);human.getFoodData().setSaturation(2);if(mode.startsWith("feed-drink"))human.addEffect(new MobEffectInstance(MobEffects.POISON,200));human.getInventory().setItem(8,new ItemStack(Items.EMERALD,1024));world.addNewPlayer(human);target=human;
+                    human.setPos(Vec3.atCenterOf(pos));human.getFoodData().setFoodLevel(7);human.getFoodData().setSaturation(2);if(mode.startsWith("feed-fd/")){human.setHealth(12);human.setRemainingFireTicks(100);if(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))human.addEffect(new MobEffectInstance(MobEffects.POISON,200));}
+                    if(mode.startsWith("feed-drink"))human.addEffect(new MobEffectInstance(MobEffects.POISON,200));human.getInventory().setItem(8,new ItemStack(Items.EMERALD,1024));if(mode.equals("feed-create-tea-full")||mode.startsWith("feed-fd/")&&mode.endsWith("full"))for(int slot=0;slot<36;slot++)human.getInventory().setItem(slot,new ItemStack(Items.EMERALD,64));world.addNewPlayer(human);target=human;
                 }
                 if(mode.startsWith("consume-loose")){world.setBlock(pos.east(),Blocks.STONE.defaultBlockState(),3);var loose=new net.minecraft.world.entity.item.ItemEntity(world,pos.getX()+.5,pos.getY()+.5,pos.getZ()+.5,new ItemStack(AllItems.ROSE_QUARTZ.get(),2));loose.setNoGravity(true);check(world.addFreshEntity(loose),"loose polish input spawn");target=loose;}
                 if(mode.startsWith("frame")){world.setBlock(pos.west(),Blocks.STONE.defaultBlockState(),3);var frame=new ItemFrame(world,pos,Direction.EAST);check(world.addFreshEntity(frame),"target frame spawn");target=frame;}
-                if(target instanceof LivingEntity){board.addPlayerToTeam(target.getScoreboardName(),red);if(mode.startsWith("combat")&&!mode.startsWith("combat-live"))board.getOrCreatePlayerScore(target,board.getObjective("avilix_team_death"),true).set(7);}
+                if(target instanceof LivingEntity){board.addPlayerToTeam(target.getScoreboardName(),red);if(mode.startsWith("combat")&&!nonlethal)board.getOrCreatePlayerScore(target,board.getObjective("avilix_team_death"),true).set(7);}
                 var items=body.getContraption().getStorage().getAllItemStorages().get(BlockPos.ZERO);
                 items.setStackInSlot(0,new ItemStack(Items.DIAMOND,7));
                 if(mode.equals("cargo-grab")||mode.equals("cargo-conflict"))fake.setItemInHand(InteractionHand.MAIN_HAND,ItemStack.EMPTY);
                 var cargoBefore=new ArrayList<ItemStack>();for(int slot=0;slot<items.getSlots();slot++)cargoBefore.add(items.getStackInSlot(slot).copy());
                 var before=CreateDeployerTransaction.hand(context,fake);
+                int heldCount=held.getCount();var consumed=held.getItem();var food=held.getFoodProperties(target instanceof LivingEntity living?living:fake);int fedLevel=food==null?7:Math.min(20,7+food.nutrition());
                 var humanBefore=target instanceof net.minecraft.server.level.ServerPlayer human?CreateHumanRestore.capture(human):null;
                 try(var session=CreateDeployerAudit.capture(context,pos,fake,punch?"PUNCH":"USE")){
                     if(mode.startsWith("consume-loose")){
@@ -98,7 +114,7 @@ public final class CreateDeployerJointSmoke {
                 if(mode.equals("noop")){check(row==null,"idle/no-op activation invented a row");tested++;continue;}
                 check(row!=null,"native deployer action not captured: "+kind+"/"+mode);row.materializeSnapshots();var b=NbtSerde.fromSnbt(row.beBefore);var a=NbtSerde.fromSnbt(row.beAfter);
                 check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"deployer blamed its owner");check(CreateContraptionKind.id(row.source).equals(CreateContraptionSources.id(body)),"deployer root ID lost");
-                if(mode.equals("failure")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
+                if(mode.equals("failure")||mode.endsWith("/barrier")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
                 check(a.getBoolean("Complete"),"capture incomplete: "+kind+"/"+mode+" reason="+a.getString("JointFailure"));
                 if(mode.equals("feed-natural-ticks")){var human=(net.minecraft.server.level.ServerPlayer)target;for(int t=0;t<20;t++){human.doTick();world.tickNonPassenger(human);}}
                 if(mode.equals("feed-unrelated-progress")||mode.equals("feed-natural-ticks")){
@@ -106,10 +122,26 @@ public final class CreateDeployerJointSmoke {
                     humanBefore=CreateHumanRestore.capture(human);var from=a.getList("Targets",10).getCompound(0).getCompound("Human");var to=b.getList("Targets",10).getCompound(0).getCompound("Human");humanBefore.put("Progress",CreatePlayerProgress.merge(humanBefore.getCompound("Progress"),from.getCompound("Progress"),to.getCompound("Progress")));humanBefore.put("Scores",CreateScoreRuntime.merge(humanBefore.getCompound("Scores"),from.getCompound("Scores"),to.getCompound("Scores")));
                 }
                 var plan=CreateTransferRollbackPlan.prepare(b,a);
-                if(mode.startsWith("combat")&&!mode.startsWith("combat-live")){check(!target.isAlive()&&a.getList("Targets",10).stream().anyMatch(t->((CompoundTag)t).getBoolean("Terminal")),"lethal activation was not captured");if(mode.contains("removed"))target.discard();}
-                if(mode.startsWith("feed")){var human=(net.minecraft.server.level.ServerPlayer)target;boolean drink=mode.startsWith("feed-drink");check(human.getFoodData().getFoodLevel()==(drink?7:11)&&human.getStats().getValue(net.minecraft.stats.Stats.ITEM_USED.get(drink?Items.MILK_BUCKET:Items.APPLE))==1&&(drink?fake.getMainHandItem().is(Items.BUCKET)&&!human.hasEffect(MobEffects.POISON):fake.getMainHandItem().getCount()==1),"native feed/drink did not change recipient/counter/hand");}
+                if(mode.startsWith("combat")&&!nonlethal){check(!target.isAlive()&&a.getList("Targets",10).stream().anyMatch(t->((CompoundTag)t).getBoolean("Terminal")),"lethal activation was not captured");if(mode.contains("removed"))target.discard();}
+                if(mode.startsWith("feed")){var human=(net.minecraft.server.level.ServerPlayer)target;boolean drink=mode.startsWith("feed-drink");check(human.getFoodData().getFoodLevel()==fedLevel&&human.getStats().getValue(net.minecraft.stats.Stats.ITEM_USED.get(consumed))==1,"native feed/drink did not change recipient/counter: "+mode+" food="+human.getFoodData().getFoodLevel()+" expected="+fedLevel+" stat="+human.getStats().getValue(net.minecraft.stats.Stats.ITEM_USED.get(consumed)));
+                    if(drink)check(fake.getMainHandItem().is(Items.BUCKET)&&!human.hasEffect(MobEffects.POISON),"milk remainder/effect missing");
+                    if(mode.startsWith("feed-create-tea")){check(human.hasEffect(MobEffects.DIG_SPEED),"builder tea haste missing");if(heldCount==1)check(fake.getMainHandItem().is(Items.GLASS_BOTTLE),"empty tea hand lost bottle");else check(fake.getMainHandItem().getCount()==1&&human.getInventory().countItem(Items.GLASS_BOTTLE)==(mode.endsWith("full")?0:1),"stacked tea bottle endpoint wrong");}
+                }
                 if(mode.startsWith("consume-loose"))check(((net.minecraft.world.entity.item.ItemEntity)target).getItem().getCount()==1&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==1,"native loose polishing did not finish");
-                if(mode.startsWith("combat-live"))check(target.isAlive()&&((LivingEntity)target).getHealth()<8&&a.getInt("JointFormat")>=3,"nonlethal combat runtime was not captured");
+                if(nonlethal&&!mode.startsWith("combat-cardboard"))check(target.isAlive()&&((LivingEntity)target).getHealth()<8&&a.getInt("JointFormat")>=3,"nonlethal combat runtime was not captured");
+                if(mode.startsWith("consume-fd/")){
+                    if(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))check(!fake.hasEffect(MobEffects.POISON),"FD self drink did not cure effect: "+mode);
+                    if(mode.contains("melon_juice"))check(fake.getHealth()==14,"FD self juice did not heal");
+                    if(mode.contains("melon_popsicle"))check(!fake.isOnFire(),"FD self popsicle did not extinguish");
+                }
+                if(mode.startsWith("feed-fd/")){
+                    var human=(net.minecraft.server.level.ServerPlayer)target;
+                    if(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))check(!human.hasEffect(MobEffects.POISON),"FD drink did not cure effect: "+mode);
+                    if(mode.contains("melon_juice"))check(human.getHealth()==14,"FD juice did not heal");
+                    if(mode.contains("melon_popsicle"))check(!human.isOnFire(),"FD popsicle did not extinguish");
+                    if(mode.contains("beef_stew"))check(human.hasEffect(net.minecraft.core.registries.BuiltInRegistries.MOB_EFFECT.getHolder(ResourceLocation.parse("farmersdelight:nourishment")).orElseThrow()),"FD nourishment missing");
+                }
+                if(mode.startsWith("combat-cardboard"))check(((LivingEntity)target).getHealth()==8&&((LivingEntity)target).hasEffect(MobEffects.MOVEMENT_SLOWDOWN)&&target.getDeltaMovement().lengthSqr()>0,"native cardboard sword knockback/slowness missing");
                 if(mode.startsWith("consume-polish"))check(fake.getOffhandItem().getCount()==1&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==1,"native sandpaper consumption did not finish");
                 var noRuntime=a.copy();noRuntime.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateTransferRollbackPlan.prepare(b,noRuntime),"new-format action lost its living runtime");
                 var invalid=a.copy();invalid.getCompound("Hand").putUUID("StorageEntity",UUID.randomUUID());reject(()->CreateTransferRollbackPlan.prepare(b,invalid),"wrong hand identity accepted");
@@ -128,6 +160,11 @@ public final class CreateDeployerJointSmoke {
                 if(mode.equals("hand-conflict"))fake.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(Items.EMERALD));
                 if(mode.equals("combat-runtime-conflict"))CreateDeployerTransaction.clearRetained();
                 if(mode.equals("combat-dead-conflict"))((LivingEntity)target).setHealth(2);
+                if(mode.startsWith("consume-fd/")&&mode.endsWith("effect-conflict"))fake.setHealth(1);
+                if(mode.startsWith("feed-fd/")&&mode.endsWith("effect-conflict"))((net.minecraft.server.level.ServerPlayer)target).getFoodData().setFoodLevel(1);
+                if(mode.equals("combat-cardboard-conflict"))target.setDeltaMovement(Vec3.ZERO);
+                if(mode.equals("feed-create-tea-conflict"))((LivingEntity)target).removeEffect(MobEffects.DIG_SPEED);
+                if(mode.equals("feed-create-tea-bottle-conflict")){var inv=((net.minecraft.server.level.ServerPlayer)target).getInventory();for(int slot=0;slot<41;slot++)if(inv.getItem(slot).is(Items.GLASS_BOTTLE)){inv.setItem(slot,ItemStack.EMPTY);break;}}
                 if(mode.equals("feed-drink-effect-conflict"))((LivingEntity)target).addEffect(new MobEffectInstance(MobEffects.POISON,100));
                 if(mode.equals("feed-drink-stat-conflict"))((net.minecraft.server.level.ServerPlayer)target).awardStat(net.minecraft.stats.Stats.ITEM_USED.get(Items.MILK_BUCKET));
                 if(mode.equals("feed-stat-conflict"))((net.minecraft.server.level.ServerPlayer)target).awardStat(net.minecraft.stats.Stats.ITEM_USED.get(Items.APPLE));
@@ -167,11 +204,14 @@ public final class CreateDeployerJointSmoke {
                         if(mode.equals("name-move"))check(target.position().equals(pose),"data-only undo teleported moving target");
                         if(mode.startsWith("shear"))check(!((Sheep)target).isSheared(),"native shear not undone");
                         if(mode.equals("feed-natural-ticks")){var now=CreateLivingRuntime.entitySnapshot(world,target);for(String key:List.of("NeoForgeData","neoforge:attachments"))check(Objects.equals(now.get(key),recipientLive.get(key)),"undo overwrote unrelated player metadata: "+key);}
+                        if(mode.startsWith("consume-fd/"))check(fake.getHealth()==12&&fake.getRemainingFireTicks()==100&&(!(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))||fake.hasEffect(MobEffects.POISON)),"FD self consumption was not undone: "+mode+" health="+fake.getHealth()+" fire="+fake.getRemainingFireTicks()+" poison="+fake.hasEffect(MobEffects.POISON));
+                        if(mode.startsWith("feed-fd/"))check(((LivingEntity)target).getHealth()==12&&target.getRemainingFireTicks()==100&&(!(mode.contains("milk_bottle")||mode.contains("hot_cocoa"))||((LivingEntity)target).hasEffect(MobEffects.POISON)),"FD heal/fire/cure was not undone");
                         if(mode.startsWith("feed-drink"))check(((LivingEntity)target).hasEffect(MobEffects.POISON),"recipient drink did not restore previous effect");
                         if(mode.startsWith("feed"))check(CreateHumanRestore.capture((net.minecraft.server.level.ServerPlayer)target).equals(humanBefore)&&((net.minecraft.server.level.ServerPlayer)target).getFoodData().getFoodLevel()==7,"recipient feed was not undone");
-                        if(mode.startsWith("combat")&&!mode.startsWith("combat-live"))check(world.getEntity(target.getUUID()) instanceof LivingEntity living&&living.isAlive()&&living.getHealth()==1&&living==target,"lethal target or its native AI identity was not restored");
+                        if(mode.startsWith("combat")&&!nonlethal)check(world.getEntity(target.getUUID()) instanceof LivingEntity living&&living.isAlive()&&living.getHealth()==1&&living==target,"lethal target or its native AI identity was not restored");
+                        if(mode.startsWith("combat-cardboard"))check(!((LivingEntity)target).hasEffect(MobEffects.MOVEMENT_SLOWDOWN)&&target.getDeltaMovement().equals(Vec3.ZERO),"cardboard motion/effect not undone");
                         if(mode.startsWith("consume-loose"))check(world.getEntity(target.getUUID()) instanceof net.minecraft.world.entity.item.ItemEntity item&&item.getItem().getCount()==2&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==0,"loose world input was not returned");
-                        if(mode.startsWith("combat-live"))check(((LivingEntity)target).getHealth()==8&&((LivingEntity)target).getLastHurtByMob()==null&&((LivingEntity)target).getLastHurtMob()==null,"combat health/references were not undone");
+                        if(nonlethal)check(((LivingEntity)target).getHealth()==8&&((LivingEntity)target).getLastHurtByMob()==null&&((LivingEntity)target).getLastHurtMob()==null,"combat health/references were not undone");
                         if(mode.startsWith("consume-polish"))check(fake.getOffhandItem().getCount()==2&&fake.getInventory().countItem(AllItems.POLISHED_ROSE_QUARTZ.get())==0&&fake.getFoodData().getFoodLevel()==7&&fake.getCooldowns().isOnCooldown(Items.ENDER_PEARL),"consumption runtime was not undone");
                         if(mode.startsWith("frame-break"))check(world.getEntity(target.getUUID()) instanceof ItemFrame,"removed frame UUID not restored");
                         for(int slot=0;slot<items.getSlots();slot++)check(ItemStack.matches(cargoBefore.get(slot),items.getStackInSlot(slot)),"deployer undo lost mounted cargo");}
@@ -179,7 +219,7 @@ public final class CreateDeployerJointSmoke {
                 tested++;
             }finally{boolean prior=CartAuditContext.restoring(true);try{if(row!=null){var a=NbtSerde.fromSnbt(row.beAfter);if(a!=null)for(var raw:a.getList("Targets",10)){var t=(CompoundTag)raw;var e=world.getEntity(t.getUUID("Entity"));if(e!=null&&!e.isRemoved())e.discard();}}if(target!=null&&!target.isRemoved())target.discard();((CartEntityAccess)body).avilixlogger$discardForRollback();for(var p:List.of(pos,pos.below(),pos.west(),pos.east()))world.setBlock(p,Blocks.AIR.defaultBlockState(),3);}finally{CartAuditContext.restoring(prior);CartRestoreLocks.clear();CartAuditContext.LOCKED_ENTITIES.clear();}}
         }
-        System.out.println("CREATE_DEPLOYER_JOINT_NATIVE_OK: "+tested+" scenarios; four construction kinds, native block/bucket/lever/name/frame, nonlethal combat and sandpaper consumption, runtime restoration/compensation, early conflicts, locks, no-op and failure barriers; lethal corpse/recreated target, scoreboard/team restoration, recipient inventory/statistics/advancements and real-level loose input");
+        System.out.println("CREATE_DEPLOYER_JOINT_NATIVE_OK: "+tested+" scenarios; four construction kinds, native block/bucket/lever/name/frame, nonlethal combat and sandpaper consumption, runtime restoration/compensation, early conflicts, locks, no-op and failure barriers; lethal corpse/recreated target, scoreboard/team restoration, recipient inventory/statistics/advancements, real-level loose input, Create food/tea/cardboard and optional native FD food/effects/containers");
     }
     private static void runtimeRoundTrip(ServerLevel world){
         var fake=new DeployerFakePlayer(world,UUID.randomUUID());fake.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(Items.MILK_BUCKET));

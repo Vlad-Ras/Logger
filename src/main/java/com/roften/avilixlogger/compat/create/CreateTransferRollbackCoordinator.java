@@ -112,6 +112,7 @@ public final class CreateTransferRollbackCoordinator {
         void cancel(String reason){if(!committed&&phase!=4){failure=reason;phase=4;}}
         boolean step(MinecraftServer server){
             if(phase==0){
+                if(index==0&&plan.after().getInt("JointFormat")>=5)for(var raw:plan.after().getList("ItemContracts",10))CreateDeployerItemContracts.verifyImplementation((CompoundTag)raw);
                 if(index<plan.cargo().size()){endpoints.add(new CargoEndpoint(server,plan.cargo().get(index++)));return false;}
                 int external=index-plan.cargo().size();
                 if(external<plan.external().size()){

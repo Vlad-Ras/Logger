@@ -92,6 +92,22 @@ public final class CreateDeployerRuntimeTest {
         var wrongCount=now4.copy();wrongCount.putInt("TargetCount",1);reject(()->CreateDeployerRollbackPlan.prepare(old4,wrongCount),"lost target accepted");
         for(String key:List.of("Progress","Scores")){var broken=now4.copy();broken.getCompound("Hand").getCompound("Runtime").remove(key);reject(()->CreateDeployerRollbackPlan.prepare(old4,broken),"missing progression accepted: "+key);}
         var wrongStats=now4.getCompound("Hand").getCompound("Runtime").getCompound("Progress").copy();var text=new ListTag();text.add(StringTag.valueOf("bad"));wrongStats.put("Stats",text);reject(()->CreatePlayerProgress.validate(wrongStats),"invalid stats list silently became empty");
+        var old5=old4.copy();var now5=now4.copy();
+        var contract=new CompoundTag();contract.putString("Item","create:builders_tea");contract.putInt("Version",1);contract.putString("Implementation","com.simibubi.create.content.equipment.BuildersTeaItem");contract.putString("Effects","food_and_bottle");contract.putString("Provider","create");contract.putString("ProviderVersion","6.0.11");
+        for(var tag:List.of(old5,now5)){
+            tag.putInt("JointFormat",5);var physical=new CompoundTag();physical.put("PersistentData",new CompoundTag());physical.putInt("Fire",0);physical.putBoolean("Sprinting",false);var motion=new ListTag();for(int i=0;i<3;i++)motion.add(DoubleTag.valueOf(0));physical.put("Motion",motion);tag.getCompound("Hand").getCompound("Runtime").put("Physical",physical);tag.putInt("ContractCount",1);var receipts=new ListTag();receipts.add(contract.copy());tag.put("ItemContracts",receipts);
+            tag.getCompound("Hand").getList("Inventory",10).getCompound(0).putString("id","create:builders_tea");
+        }
+        check(CreateDeployerRollbackPlan.prepare(old5,now5).hands().size()==1,"contracted mod item rejected");
+        for(String key:List.of("ContractCount","ItemContracts")){var broken=now5.copy();broken.remove(key);reject(()->CreateDeployerRollbackPlan.prepare(old5,broken),"missing contract manifest accepted: "+key);}
+        for(String key:List.of("Version","Implementation","Effects","Item","Provider","ProviderVersion")){
+            var x=old5.copy();var y=now5.copy();for(var tag:List.of(x,y))tag.getList("ItemContracts",10).getCompound(0).remove(key);
+            reject(()->CreateDeployerRollbackPlan.prepare(x,y),"missing contract identity accepted: "+key);
+        }
+        var x=old5.copy();var y=now5.copy();for(var tag:List.of(x,y)){tag.putInt("ContractCount",0);tag.put("ItemContracts",new ListTag());}
+        reject(()->CreateDeployerRollbackPlan.prepare(x,y),"used mod item lost its contract");
+        for(var tag:List.of(x,y))tag.putInt("JointFormat",4);
+        reject(()->CreateDeployerRollbackPlan.prepare(x,y),"new mod item silently downgraded to an older contract");
         after.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateDeployerRollbackPlan.prepare(before,after),"new format accepted legacy partial runtime");
     }
     private static CompoundTag manifest(){

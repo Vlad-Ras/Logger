@@ -51,6 +51,7 @@ public final class CreateDeployerRestore {
             if(!(context.temporaryData instanceof DeployerFakePlayer fake))throw new IllegalStateException("Активатор выгружен или сменил технического игрока");player=fake;
             bindings=CreateLivingRuntime.bind(fake,List.of(undo.before().getCompound("Runtime").getCompound("Living"),undo.after().getCompound("Runtime").getCompound("Living")),candidates);
             for(var tag:List.of(undo.before(),undo.after())){var runtime=tag.getCompound("Runtime");
+                if(runtime.contains("Physical",10))CreateDeployerRuntimeAccess.validatePhysical(runtime.getCompound("Physical"));
                 if(runtime.contains("Progress",10))CreatePlayerProgress.preflight(fake,runtime.getCompound("Progress"));
                 if(runtime.contains("Scores",10))CreateScoreRuntime.preflight(fake,runtime.getCompound("Scores"));
                 if(runtime.contains("Living",10))bindings.run(()->CreateLivingRuntime.validateForRestore(fake,fake,runtime.getCompound("Living")));
@@ -61,6 +62,7 @@ public final class CreateDeployerRestore {
         void verify(CompoundTag expected){expected=expected.copy();CreateLivingRuntime.normalize(expected.getCompound("Runtime").getCompound("Living").getCompound("Persistent"));var actual=CreateDeployerTransaction.hand(context,player);
             if(!expected.getCompound("Runtime").contains("Progress")){actual.getCompound("Runtime").remove("Progress");actual.getCompound("Runtime").remove("Scores");}
             if(!expected.getCompound("Runtime").contains("Living")){actual.getCompound("Runtime").remove("Living");actual.getCompound("Runtime").remove("Cooldowns");}
+            if(!expected.getCompound("Runtime").contains("Physical"))actual.getCompound("Runtime").remove("Physical");
             if(entity.isRemoved()||!entity.level().hasChunkAt(entity.blockPosition())||context.contraption!=entity.getContraption()||context.temporaryData!=player||entity.getContraption().getActors().stream().noneMatch(p->p.getRight()==context)||!actual.equals(expected))throw new IllegalStateException("Рука или настройки активатора изменились");}
         void set(CompoundTag tag){bindings.run(()->((CreateDeployerRuntimeAccess)player).avilixlogger$deployerRuntime(tag.getCompound("Runtime")));
             var inv=player.getInventory();inv.clearContent();inv.selected=tag.getInt("Selected");for(var raw:tag.getList("Inventory",10)){var slot=(CompoundTag)raw;inv.setItem(slot.getInt("Slot"),NbtSerde.readItemStack(slot,player.registryAccess()));}
