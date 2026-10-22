@@ -12,6 +12,8 @@ jobs:
           - {profile: current-fd132, fd: '1.3.2', create: '6.0.11-313', ae2: '19.2.12', framework: '1.21.1-0.13.10'}
           - {profile: current-fd134, fd: '1.3.4', create: '6.0.11-313', ae2: '19.2.12', framework: '1.21.1-0.13.10'}
           - {profile: logged-pack, fd: '1.3.2', create: '6.0.10-281', ae2: '19.2.18', framework: '1.21.1-0.13.11'}
+          # Matches the main module versions inventoried on the live Windows s4 client (JARs may differ by SHA-256).
+          - {profile: client-s4-core, fd: '1.3.4', create: '6.0.10-281', ae2: '19.2.18', framework: '1.21.1-0.13.11'}
     runs-on: ubuntu-latest
     env:
       ORG_GRADLE_PROJECT_compatCreateVersion: ${{ matrix.create }}
