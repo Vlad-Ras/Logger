@@ -145,6 +145,9 @@ public final class CreateLivingRuntime {
         if(persistent.contains("active_effects",9))for(var raw:persistent.getList("active_effects",10)){
             var effect=(CompoundTag)raw;
             if(!(effect.get("neoforge:cures") instanceof ListTag cures)||cures.getElementType()!=Tag.TAG_STRING||cures.size()<2)continue;
+            boolean alreadySorted=true;
+            for(int i=1;i<cures.size();i++)if(cures.getString(i-1).compareTo(cures.getString(i))>0){alreadySorted=false;break;}
+            if(alreadySorted)continue;
             var ordered=cures.stream().map(Tag::getAsString).sorted().toList();
             var canonical=new ListTag();for(var cure:ordered)canonical.add(StringTag.valueOf(cure));
             effect.put("neoforge:cures",canonical);
