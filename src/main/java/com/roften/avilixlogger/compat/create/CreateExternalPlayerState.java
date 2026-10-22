@@ -20,7 +20,7 @@ public final class CreateExternalPlayerState {
                 ||!Set.of("Format","Unknown","Backpacked").containsAll(tag.getAllKeys()))throw new IllegalStateException("Неполный контракт внешних данных игрока");
         if(tag.contains("Backpacked")){
             var bp=tag.getCompound("Backpacked");
-            if(!bp.getString("Version").equals("3.0.5")||!bp.getString("Framework").equals("0.13.10")||bp.getInt("Format")!=1||!bp.contains("State",10)||bp.getAllKeys().size()!=6||!bp.contains("CellCount",3)||!bp.contains("TrackerCount",3)||bp.getInt("CellCount")!=bp.getCompound("State").size())
+            if(!bp.getString("Version").equals("3.0.5")||!Set.of("0.13.10","0.13.11").contains(bp.getString("Framework"))||bp.getInt("Format")!=1||!bp.contains("State",10)||bp.getAllKeys().size()!=6||!bp.contains("CellCount",3)||!bp.contains("TrackerCount",3)||bp.getInt("CellCount")!=bp.getCompound("State").size())
                 throw new IllegalStateException("Неизвестный контракт внешних данных Backpacked");
             var state=bp.getCompound("State");
             if(!state.contains("BagSize",3)||state.getInt("BagSize")<0||state.getInt("BagSize")>64||!state.contains("Backpack",10))throw new IllegalStateException("Потеряны слоты Backpacked");
@@ -41,7 +41,8 @@ public final class CreateExternalPlayerState {
     }
     public static void validatePair(CompoundTag before,CompoundTag after) {
         validate(before);validate(after);
-        if(!before.getCompound("Unknown").equals(after.getCompound("Unknown"))||before.contains("Backpacked")!=after.contains("Backpacked"))
+        if(!before.getCompound("Unknown").equals(after.getCompound("Unknown"))||before.contains("Backpacked")!=after.contains("Backpacked")
+                ||before.contains("Backpacked")&&!before.getCompound("Backpacked").getString("Framework").equals(after.getCompound("Backpacked").getString("Framework")))
             throw new IllegalStateException("Изменены внешние данные без контракта");
     }
     /** Changed cells are atomic; unrelated progress, backpack slots and other keys survive. */
