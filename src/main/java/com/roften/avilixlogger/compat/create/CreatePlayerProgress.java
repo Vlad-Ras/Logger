@@ -13,9 +13,21 @@ public final class CreatePlayerProgress {
     // Avoid re-encoding every advancement definition for every Deployer/player snapshot.
     // The weak owner is the live reloadable advancement manager, not a permanent server reference.
     // Each recorded snapshot still gets its own detached NBT copy.
+    // Identical lexical order to ResourceLocation.toString(), but without allocating strings
+    // for every comparison. Namespace prefix cases such as "a:" versus "a-:" matter.
+    static int compareAdvancementIds(ResourceLocation a, ResourceLocation b) {
+        String left = a.getNamespace(), right = b.getNamespace();
+        int limit = Math.min(left.length(), right.length());
+        for (int i = 0; i < limit; i++) {
+            int comparison = Character.compare(left.charAt(i), right.charAt(i));
+            if (comparison != 0) return comparison;
+        }
+        if (left.length() < right.length()) return Character.compare(':', right.charAt(limit));
+        if (left.length() > right.length()) return Character.compare(left.charAt(limit), ':');
+        return a.getPath().compareTo(b.getPath());
+    }
     private static final Comparator<AdvancementHolder> ADVANCEMENT_ORDER =
-            Comparator.comparing((AdvancementHolder h) -> h.id().getNamespace())
-                      .thenComparing(h -> h.id().getPath());
+            (a, b) -> compareAdvancementIds(a.id(), b.id());
     private static final long MAX_DEFINITION_BYTES = 4L * 1024 * 1024;
     private static final int MAX_DEFINITIONS = 256;
     private static final Map<Object, DefinitionCache> DEFINITIONS = new WeakHashMap<>();
