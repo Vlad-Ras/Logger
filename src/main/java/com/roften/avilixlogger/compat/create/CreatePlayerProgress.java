@@ -13,6 +13,9 @@ public final class CreatePlayerProgress {
     // Avoid re-encoding every advancement definition for every Deployer/player snapshot.
     // The weak owner is the live reloadable advancement manager, not a permanent server reference.
     // Each recorded snapshot still gets its own detached NBT copy.
+    private static final Comparator<AdvancementHolder> ADVANCEMENT_ORDER =
+            Comparator.comparing((AdvancementHolder h) -> h.id().getNamespace())
+                      .thenComparing(h -> h.id().getPath());
     private static final long MAX_DEFINITION_BYTES = 4L * 1024 * 1024;
     private static final int MAX_DEFINITIONS = 256;
     private static final Map<Object, DefinitionCache> DEFINITIONS = new WeakHashMap<>();
@@ -52,7 +55,7 @@ public final class CreatePlayerProgress {
         for(var entry:entries){var row=new CompoundTag();var stat=entry.getKey();row.putString("Type",BuiltInRegistries.STAT_TYPE.getKey(stat.getType()).toString());row.putString("Value",value(stat));row.putInt("Count",entry.getIntValue());stats.add(row);}
         out.put("Stats",stats);var advancements=new ListTag();
         var progress=((PlayerProgressAccessor)player.getAdvancements()).avilixlogger$progress();
-        for(var holder:progress.keySet().stream().sorted(Comparator.comparing(h->h.id().toString())).toList()){
+        for(var holder:progress.keySet().stream().sorted(ADVANCEMENT_ORDER).toList()){
             var state=progress.get(holder);if(!state.hasProgress())continue;var row=new CompoundTag();row.putString("Id",holder.id().toString());
             row.put("Definition",definition(player,holder));
             var criteria=new ListTag();
