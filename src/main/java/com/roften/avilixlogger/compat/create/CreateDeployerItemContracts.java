@@ -38,7 +38,7 @@ public final class CreateDeployerItemContracts {
     }
 
     private static String provider(Contract contract,String id){return CONTRACTS.containsKey(id)?"create":contract.implementation().startsWith("vectorwing.")||contract.effects().equals("food_with_nourishment")?"farmersdelight":"minecraft";}
-    private static boolean supportedVersion(String provider,String version){return switch(provider){case "create"->version.equals("6.0.11");case "farmersdelight"->java.util.Set.of("1.3.2","1.3.4").contains(version);case "minecraft"->version.equals("1.21.1");default->false;};}
+    private static boolean supportedVersion(String provider,String version){return switch(provider){case "create"->java.util.Set.of("6.0.10","6.0.11").contains(version);case "farmersdelight"->java.util.Set.of("1.3.2","1.3.4").contains(version);case "minecraft"->version.equals("1.21.1");default->false;};}
     private static String verifyProvider(String provider,String expected){
         String actual=net.neoforged.fml.ModList.get().getModContainerById(provider).orElseThrow(()->new IllegalStateException("Нет мода контракта: "+provider)).getModInfo().getVersion().toString();
         if(!supportedVersion(provider,actual)||expected!=null&&!actual.equals(expected))throw new IllegalStateException("Версия мода не проверена контрактом активатора: "+provider+" "+actual);
