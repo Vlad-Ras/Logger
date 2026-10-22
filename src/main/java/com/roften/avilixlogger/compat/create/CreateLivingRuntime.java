@@ -140,6 +140,15 @@ public final class CreateLivingRuntime {
     }
     /** Native attribute maps do not promise iteration order after an entity is recreated. */
     public static void normalize(CompoundTag persistent){
+        // NeoForge serializes a cure set in iteration order. Compare the actual cure
+        // members, not their incidental order, across native save/load round-trips.
+        if(persistent.contains("active_effects",9))for(var raw:persistent.getList("active_effects",10)){
+            var effect=(CompoundTag)raw;
+            if(!(effect.get("neoforge:cures") instanceof ListTag cures)||cures.getElementType()!=Tag.TAG_STRING||cures.size()<2)continue;
+            var ordered=cures.stream().map(Tag::getAsString).sorted().toList();
+            var canonical=new ListTag();for(var cure:ordered)canonical.add(StringTag.valueOf(cure));
+            effect.put("neoforge:cures",canonical);
+        }
         if(!persistent.contains("attributes",9))return;var sorted=new ListTag();
         for(var raw:persistent.getList("attributes",10).stream().sorted(Comparator.comparing(t->((CompoundTag)t).getString("id"))).toList()){
             var row=((CompoundTag)raw).copy();if(row.contains("modifiers",9)){var modifiers=new ListTag();row.getList("modifiers",10).stream().sorted(Comparator.comparing(t->((CompoundTag)t).getString("id"))).forEach(t->modifiers.add(t.copy()));row.put("modifiers",modifiers);}sorted.add(row);
