@@ -10,6 +10,41 @@ import java.util.*;
 /** Exact criteria timestamps and raw counters. Restoring never grants a reward. */
 public final class CreatePlayerProgress {
     private CreatePlayerProgress(){}
+    // Avoid re-encoding every advancement definition for every Deployer/player snapshot.
+    // The weak owner is the live reloadable advancement manager, not a permanent server reference.
+    // Each recorded snapshot still gets its own detached NBT copy.
+    private static final long MAX_DEFINITION_BYTES = 4L * 1024 * 1024;
+    private static final int MAX_DEFINITIONS = 256;
+    private static final Map<Object, DefinitionCache> DEFINITIONS = new WeakHashMap<>();
+    private static final class DefinitionCache {
+        final LinkedHashMap<AdvancementHolder, Tag> values = new LinkedHashMap<>(32, .75f, true);
+        long bytes;
+    }
+    public static void clearDefinitionCache() {
+        synchronized (DEFINITIONS) { DEFINITIONS.clear(); }
+    }
+    private static Tag definition(ServerPlayer player, AdvancementHolder holder) {
+        synchronized (DEFINITIONS) {
+            var owner = player.server.getAdvancements();
+            var cache = DEFINITIONS.computeIfAbsent(owner, ignored -> new DefinitionCache());
+            var previous = cache.values.get(holder);
+            if (previous != null) return previous.copy();
+            var encoded = Advancement.CODEC.encodeStart(
+                    player.registryAccess().createSerializationContext(NbtOps.INSTANCE), holder.value()).getOrThrow();
+            long bytes = encoded.sizeInBytes();
+            if (bytes <= MAX_DEFINITION_BYTES) {
+                cache.values.put(holder, encoded.copy());
+                cache.bytes += bytes;
+                while (cache.values.size() > MAX_DEFINITIONS || cache.bytes > MAX_DEFINITION_BYTES) {
+                    var oldest = cache.values.entrySet().iterator();
+                    var removed = oldest.next();
+                    cache.bytes -= removed.getValue().sizeInBytes();
+                    oldest.remove();
+                }
+            }
+            return encoded;
+        }
+    }
     @SuppressWarnings({"rawtypes","unchecked"}) private static String value(Stat<?> stat){return ((net.minecraft.core.Registry)stat.getType().getRegistry()).getKey(stat.getValue()).toString();}
     public static CompoundTag capture(ServerPlayer player){
         var out=new CompoundTag();out.putInt("Format",1);var stats=new ListTag();
@@ -19,7 +54,7 @@ public final class CreatePlayerProgress {
         var progress=((PlayerProgressAccessor)player.getAdvancements()).avilixlogger$progress();
         for(var holder:progress.keySet().stream().sorted(Comparator.comparing(h->h.id().toString())).toList()){
             var state=progress.get(holder);if(!state.hasProgress())continue;var row=new CompoundTag();row.putString("Id",holder.id().toString());
-            row.put("Definition",Advancement.CODEC.encodeStart(player.registryAccess().createSerializationContext(NbtOps.INSTANCE),holder.value()).getOrThrow());
+            row.put("Definition",definition(player,holder));
             var criteria=new ListTag();
             for(String key:holder.value().criteria().keySet().stream().sorted().toList()){
                 var criterion=state.getCriterion(key);if(criterion==null||!criterion.isDone())continue;var time=criterion.getObtained();var c=new CompoundTag();c.putString("Key",key);c.putLong("Second",time.getEpochSecond());c.putInt("Nano",time.getNano());criteria.add(c);
@@ -46,7 +81,7 @@ public final class CreatePlayerProgress {
         validate(tag);for(var raw:tag.getList("Stats",10))stat((CompoundTag)raw);
         var result=new LinkedHashMap<AdvancementHolder,AdvancementProgress>();
         for(var raw:tag.getList("Advancements",10)){var row=(CompoundTag)raw;var holder=player.server.getAdvancements().get(ResourceLocation.parse(row.getString("Id")));
-            if(holder==null||!row.getCompound("Definition").equals(Advancement.CODEC.encodeStart(player.registryAccess().createSerializationContext(NbtOps.INSTANCE),holder.value()).getOrThrow()))throw new IllegalStateException("Определение достижения изменилось");
+            if(holder==null||!row.getCompound("Definition").equals(definition(player,holder)))throw new IllegalStateException("Определение достижения изменилось");
             var progress=new AdvancementProgress();progress.update(holder.value().requirements());
             for(var item:row.getList("Criteria",10)){var c=(CompoundTag)item;var criterion=progress.getCriterion(c.getString("Key"));if(criterion==null)throw new IllegalStateException("Критерий достижения удалён");
                 ((CriterionTimeAccessor)criterion).avilixlogger$obtained(java.time.Instant.ofEpochSecond(c.getLong("Second"),c.getInt("Nano")));}
