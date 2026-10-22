@@ -281,6 +281,13 @@ public final class CreateDeployerJointSmoke {
         bindings.run(()->access.avilixlogger$deployerRuntime(before));
         var restoredRuntime=access.avilixlogger$deployerRuntime();
         check(restoredRuntime.equals(before),"runtime round trip: "+differences("",before,restoredRuntime));
+        var reordered=before.copy();
+        var persistent=reordered.getCompound("Living").getCompound("Persistent");
+        var cures=persistent.getList("active_effects",10).getCompound(0).getList("neoforge:cures",8);
+        check(cures.size()>1,"native cure-set regression fixture missing");
+        java.util.Collections.reverse(cures);
+        CreateLivingRuntime.normalize(persistent);
+        check(reordered.equals(before),"runtime cure-set ordering affected semantic snapshot");
         var sheep=EntityType.SHEEP.create(world);var health=sheep.getAttribute(Attributes.MAX_HEALTH);
         health.addTransientModifier(new AttributeModifier(ResourceLocation.fromNamespaceAndPath("avilixlogger","smoke_health"),32,AttributeModifier.Operation.ADD_VALUE));sheep.setHealth(35);
         var healthy=CreateLivingRuntime.capture(sheep,fake);health.removeModifiers();sheep.setHealth(4);
