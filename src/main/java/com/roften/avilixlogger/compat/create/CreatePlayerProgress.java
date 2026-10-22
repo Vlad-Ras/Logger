@@ -110,9 +110,12 @@ public final class CreatePlayerProgress {
     public static void preflight(ServerPlayer player,CompoundTag tag){decode(player,tag);}
     public static void restore(ServerPlayer player,CompoundTag tag){
         var decoded=decode(player,tag);var counter=player.getStats();var stats=((PlayerStatsAccessor)counter).avilixlogger$stats();var old=new HashSet<>(stats.keySet());stats.clear();
-        for(var raw:tag.getList("Stats",10)){var row=(CompoundTag)raw;stats.put(stat(row),row.getInt("Count"));}old.addAll(stats.keySet());
-        // Include removed counters as explicit zero updates, then retain their original absence.
-        for(var stat:old)counter.setValue(player,stat,stats.getInt(stat));counter.sendStats(player);stats.keySet().removeIf(s->tag.getList("Stats",10).stream().noneMatch(t->stat((CompoundTag)t).equals(s)));
+        for(var raw:tag.getList("Stats",10)){var row=(CompoundTag)raw;stats.put(stat(row),row.getInt("Count"));}
+        // The restored snapshot is already the exact desired set. The native zero updates
+        // may reinsert absent counters; remove only those, with O(1) membership checks.
+        var desired=new HashSet<>(stats.keySet());old.addAll(desired);
+        for(var stat:old)counter.setValue(player,stat,stats.getInt(stat));counter.sendStats(player);
+        stats.keySet().removeIf(s->!desired.contains(s));
         var advancements=player.getAdvancements();var access=(PlayerProgressAccessor)advancements;var changed=new HashSet<>(access.avilixlogger$progress().keySet());changed.addAll(decoded.keySet());
         advancements.stopListening();access.avilixlogger$progress().clear();access.avilixlogger$progress().putAll(decoded);
         access.avilixlogger$changed().addAll(changed);changed.forEach(access::avilixlogger$visibility);access.avilixlogger$listen(player.server.getAdvancements());advancements.flushDirty(player);
