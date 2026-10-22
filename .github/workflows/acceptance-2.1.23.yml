@@ -1,0 +1,151 @@
+name: 2.1.23 isolated ClickHouse and JFR evidence
+
+on:
+  push:
+    branches:
+      - fix/2.1.23-memory-ci-20261022
+    paths:
+      - .github/workflows/acceptance-2.1.23.yml
+      - build.gradle
+      - tools/acceptance/**
+      - src/main/**
+      - src/test/**
+      - src/createSmoke/**
+  workflow_dispatch:
+
+jobs:
+  real-clickhouse:
+    name: Real ClickHouse schema and durable lookup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_USER: avilix_ci
+          CLICKHOUSE_PASSWORD: local_ci_only
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+    env:
+      AVILIX_CI_CLICKHOUSE_URL: http://127.0.0.1:8123
+      AVILIX_CI_CLICKHOUSE_USER: avilix_ci
+      AVILIX_CI_CLICKHOUSE_PASSWORD: local_ci_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Require ready actual ClickHouse, not a mock
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --show-error -u "$AVILIX_CI_CLICKHOUSE_USER:$AVILIX_CI_CLICKHOUSE_PASSWORD" "$AVILIX_CI_CLICKHOUSE_URL/ping" >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Real schema + insert + feed + details + new connection
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew testNativeClickHouse --no-daemon --console=plain 2>&1 | tee native-clickhouse.log
+          grep -q 'CLICKHOUSE_NATIVE_OK' native-clickhouse.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clickhouse-native-acceptance
+          path: native-clickhouse.log
+          if-no-files-found: ignore
+
+  native-server-jfr:
+    name: Native Create JFR (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {profile: current-fd134, fd: '1.3.4', create: '6.0.11-313', ae2: '19.2.12', framework: '1.21.1-0.13.10'}
+          - {profile: logged-pack, fd: '1.3.2', create: '6.0.10-281', ae2: '19.2.18', framework: '1.21.1-0.13.11'}
+    env:
+      ORG_GRADLE_PROJECT_compatCreateVersion: ${{ matrix.create }}
+      ORG_GRADLE_PROJECT_compatAe2Version: ${{ matrix.ae2 }}
+      ORG_GRADLE_PROJECT_compatFrameworkVersion: ${{ matrix.framework }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Record actual game JVM through native Create fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p run
+          printf 'eula=true\n' > run/eula.txt
+          printf 'max-tick-time=-1\n' > run/server.properties
+          timeout --signal=INT --kill-after=15s 360s ./gradlew runServer -PcreateSmoke -PacceptanceJfr -PfdSmokeVersion=${{ matrix.fd }} --no-daemon --console=plain > server-profile.log 2>&1 || result=$?
+          tail -n 80 server-profile.log
+          grep -q 'AVILIX_CREATE_SMOKE_OK' server-profile.log
+          ! grep -qE 'AVILIX_CREATE_SMOKE_FAILED|MixinApplyError|MixinTransformerError' server-profile.log
+          test -s run/avilixlogger-server-ci.jfr
+          java tools/acceptance/ProfileSummary.java run/avilixlogger-server-ci.jfr > run/avilixlogger-server-ci-summary.json
+          python3 -c 'import json; d=json.load(open("run/avilixlogger-server-ci-summary.json")); assert d["observed_seconds"]>0 and d["events"]>0, d'
+          printf 'profile=%s\ncreate=%s\nae2=%s\nframework=%s\nfd=%s\nsha=%s\nauthcore=not-authorized\nfull-modpack=no\n' \
+            "${{ matrix.profile }}" "${{ matrix.create }}" "${{ matrix.ae2 }}" "${{ matrix.framework }}" "${{ matrix.fd }}" "$GITHUB_SHA" > run/ci-profile-metadata.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-jfr-${{ matrix.profile }}
+          path: |
+            server-profile.log
+            run/avilixlogger-server-ci.jfr
+            run/avilixlogger-server-ci-summary.json
+            run/ci-profile-metadata.txt
+          if-no-files-found: ignore
+
+  native-client-jfr:
+    name: Native GUI client JFR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Software OpenGL
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0
+      - name: Record actual Minecraft GUI test JVM
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: 'true'
+          MESA_GL_VERSION_OVERRIDE: '4.5'
+          ALSOFT_DRIVERS: 'null'
+        run: |
+          set -euo pipefail
+          mkdir -p run
+          printf 'onboardAccessibility:false\nlang:ru_ru\n' > run/options.txt
+          timeout --signal=INT --kill-after=15s 600s xvfb-run -a ./gradlew runClient -PguiSmoke -PacceptanceJfr --no-daemon --console=plain > client-profile.log 2>&1 || result=$?
+          tail -n 80 client-profile.log
+          grep -q 'CART_GUI_CLIENT_OK' client-profile.log
+          ! grep -qE 'CART_GUI_CLIENT_FAILED|MixinApplyError|MixinTransformerError' client-profile.log
+          test -s run/avilixlogger-client-ci.jfr
+          java tools/acceptance/ProfileSummary.java run/avilixlogger-client-ci.jfr > run/avilixlogger-client-ci-summary.json
+          python3 -c 'import json; d=json.load(open("run/avilixlogger-client-ci-summary.json")); assert d["observed_seconds"]>0 and d["events"]>0, d'
+          printf 'sha=%s\nclient=xvfb-software-render\nauthcore=not-authorized\nfull-modpack=no\n' "$GITHUB_SHA" > run/client-profile-metadata.txt
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-jfr-gui-fixture
+          path: |
+            client-profile.log
+            run/avilixlogger-client-ci.jfr
+            run/avilixlogger-client-ci-summary.json
+            run/client-profile-metadata.txt
+          if-no-files-found: ignore
