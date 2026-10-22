@@ -1,0 +1,48 @@
+name: 2.1.23 candidate JAR (not a release)
+
+on:
+  push:
+    branches:
+      - fix/2.1.23-memory-ci-20261022
+    paths:
+      - .github/workflows/acceptance-candidate-jar.yml
+      - build.gradle
+      - gradle.properties
+      - proguard-rules.pro
+      - src/main/**
+      - src/generated/**
+  workflow_dispatch:
+
+jobs:
+  candidate-jar:
+    name: Obfuscated candidate with deterministic SHA256
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build and validate production-obfuscated binary (candidate only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew verifyObfuscatedJar --no-daemon --console=plain 2>&1 | tee candidate-build.log
+          mkdir -p build/candidate-evidence
+          jar_path=build/libs/avilixlogger-2.1.23.jar
+          test -s "$jar_path"
+          sha256sum "$jar_path" > build/candidate-evidence/SHA256SUMS
+          printf 'status=UNAPPROVED_ACCEPTANCE_CANDIDATE\nsha=%s\nbranch=%s\nfull_modpack_accepted=no\nauthcore_production_accepted=no\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" > build/candidate-evidence/STATUS.txt
+          cat build/candidate-evidence/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logger-2.1.23-UNAPPROVED-candidate
+          path: |
+            build/libs/avilixlogger-2.1.23.jar
+            build/candidate-evidence/SHA256SUMS
+            build/candidate-evidence/STATUS.txt
+            candidate-build.log
+          if-no-files-found: ignore
