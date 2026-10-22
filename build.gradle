@@ -72,6 +72,7 @@ neoForge {
     runs {
         client {
             client()
+            if (project.hasProperty('acceptanceJfr')) jvmArgument "-XX:StartFlightRecording=name=avilix_client,settings=profile,dumponexit=true,maxsize=64m,filename=${project.file('run/avilixlogger-client-ci.jfr').absolutePath}"
             if (project.hasProperty('guiSmoke')) systemProperty 'avilixlogger.guiSmoke', 'true'
 
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
@@ -80,6 +81,7 @@ neoForge {
 
         server {
             server()
+            if (project.hasProperty('acceptanceJfr')) jvmArgument "-XX:StartFlightRecording=name=avilix_server,settings=profile,dumponexit=true,maxsize=64m,filename=${project.file('run/avilixlogger-server-ci.jfr').absolutePath}"
             if (project.hasProperty('createSmoke')) systemProperty 'avilixlogger.createSmoke', 'true'
             if (project.hasProperty('createAbsent')) {
                 systemProperty 'avilixlogger.createAbsentSmoke', 'true'
@@ -383,6 +385,14 @@ tasks.named('check').configure {
     dependsOn tasks.named('verifyObfuscatedJar')
     dependsOn tasks.named('verifyMixinSafety')
     dependsOn 'testAsyncPipeline'
+}
+
+tasks.register('testNativeClickHouse', JavaExec) {
+    group = 'verification'
+    description = 'Runs a real ClickHouse schema/flush/lookup/restart integration, with no AuthCore bypass.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.roften.avilixlogger.core.ClickHouseNativeSmoke'
 }
 
 tasks.register('testAsyncPipeline', JavaExec) {
