@@ -18,11 +18,16 @@ import java.util.*;
  */
 public final class BackpackDeployerContract {
     private BackpackDeployerContract() {}
-    public static void prepare(Player player){
+    public static String frameworkVersion(){
         var mods=ModList.get();
+        String framework=mods.getModContainerById("framework").orElseThrow().getModInfo().getVersion().toString();
         if(!mods.getModContainerById("backpacked").orElseThrow().getModInfo().getVersion().toString().equals("3.0.5")
-                ||!mods.getModContainerById("framework").orElseThrow().getModInfo().getVersion().toString().equals("0.13.10"))
+                ||!Set.of("0.13.10","0.13.11").contains(framework))
             throw new IllegalStateException("Неизвестный контракт lazy defaults Backpacked/Framework");
+        return framework;
+    }
+    public static void prepare(Player player){
+        frameworkVersion();
         ModSyncedDataKeys.UNLOCK_TRACKER.getValue(player);
         ModSyncedDataKeys.BACKPACK.getValue(player);
         var backpacks=ModSyncedDataKeys.BACKPACKS.getValue(player);
@@ -82,7 +87,7 @@ public final class BackpackDeployerContract {
     @SuppressWarnings({"unchecked","rawtypes"}) private static Tag writeUnchecked(Player player,SyncedDataKey key,Object value){return write(player,key,value);}
     private static Map<SyncedDataKey<Player,?>,Object> values(Player player){var values=new LinkedHashMap<SyncedDataKey<Player,?>,Object>();for(var key:keys())values.put(key,key.getValue(player));return values;}
     public static CompoundTag capture(Player player,CompoundTag unknown){
-        prepare(player);var out=new CompoundTag();out.putInt("Format",1);out.putString("Version","3.0.5");out.putString("Framework","0.13.10");out.put("State",state(player,values(player)));out.putInt("CellCount",out.getCompound("State").size());out.putInt("TrackerCount",(int)out.getCompound("State").getAllKeys().stream().filter(k->k.startsWith("tracker:")).count());
+        prepare(player);var out=new CompoundTag();out.putInt("Format",1);out.putString("Version","3.0.5");out.putString("Framework",frameworkVersion());out.put("State",state(player,values(player)));out.putInt("CellCount",out.getCompound("State").size());out.putInt("TrackerCount",(int)out.getCompound("State").getAllKeys().stream().filter(k->k.startsWith("tracker:")).count());
         // Strip only the audited Framework rows, preserving all other attachments/keys.
         var rows=unknown.getList("framework:data_holder",10);
         rows.removeIf(raw->{var row=(CompoundTag)raw;return keys().stream().anyMatch(key->key.id().toString().equals(row.getString("DataKey"))&&key.classKey().id().toString().equals(row.getString("ClassKey")));});
@@ -107,7 +112,11 @@ public final class BackpackDeployerContract {
         if(!state(player,out).equals(state))throw new IllegalStateException("Данные/определения Backpacked не прочитаны полностью");return out;
     }
     public static void preflight(Player player,CompoundTag before,CompoundTag after){
-        prepare(player);if(before.getCompound("State").equals(after.getCompound("State")))return;decode(player,before.getCompound("State"));decode(player,after.getCompound("State"));
+        prepare(player);
+        String installed=frameworkVersion();
+        if(!installed.equals(before.getString("Framework"))||!installed.equals(after.getString("Framework")))
+            throw new IllegalStateException("Снимок Backpacked создан с другой версией Framework");
+        if(before.getCompound("State").equals(after.getCompound("State")))return;decode(player,before.getCompound("State"));decode(player,after.getCompound("State"));
         for(var key:keys())if(!((Object)key instanceof BackpackDeployerGuard))throw new IllegalStateException("Нет защиты записей Framework");
         var tracker=ModSyncedDataKeys.UNLOCK_TRACKER.getValue(player);
         if(!(tracker instanceof BackpackDeployerGuard))throw new IllegalStateException("Нет защиты прогресса Backpacked");
