@@ -22,6 +22,8 @@ public final class AsyncLogStorage implements LogStorage {
     @Override public void append(LogEntry entry) {
         if (entry == null) return;
         if (CartAuditContext.restoring()) return;
+        // Decide before enriching, deep-copying or enqueuing a row.
+        if (!CaptureTypePolicy.allows(entry.type,entry.source,entry.extra)) return;
         // Deployer capture already resolved its own owner; null explicitly means unknown.
         if (entry.type != ActionType.CREATE_DEPLOYER_ACTION) CartAuditContext.enrich(entry);
         String constructionSource = MutationSourceResolver.resolveExternalSource();
@@ -44,6 +46,7 @@ public final class AsyncLogStorage implements LogStorage {
     public void appendBlockChange(SetBlockCapture before,
                                   net.minecraft.world.level.block.state.BlockState after,
                                   String afterId, long timestamp) {
+        if (!CaptureTypePolicy.allows(ActionType.BLOCK_PLACE,before.source(),null)) return;
         appendCaptured(new BlockChangeEvent(before, after, afterId, timestamp),
                 PayloadSizeEstimator.estimateBlockChange(before, afterId));
     }
