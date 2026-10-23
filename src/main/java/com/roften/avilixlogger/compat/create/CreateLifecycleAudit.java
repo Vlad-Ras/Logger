@@ -80,11 +80,11 @@ public final class CreateLifecycleAudit {
         return tag;
     }
     public static Disassembly disassembly(AbstractContraptionEntity entity){
-        try{return !CreateStructuralAudit.covered(entity)&&CreateCartAudit.state(entity)==null&&CreateCapturePolicy.lifecycle(entity)&&CreateCartAudit.enabled()&&entity.isAlive()?new Disassembly(entity):null;}
+        try{return !CreateStructuralAudit.covered(entity)&&CreateCartAudit.state(entity)==null&&CreateCapturePolicy.lifecycle(entity)&&CreateCargoAudit.lifecycleActive(entity)&&entity.isAlive()?new Disassembly(entity):null;}
         catch(RuntimeException failure){CreateCartAudit.failed("lifecycle before disassembly",failure);return null;}
     }
     public static void removed(AbstractContraptionEntity entity,Entity.RemovalReason reason){
-        if(CreateCartAudit.state(entity)!=null||!CreateCapturePolicy.lifecycle(entity)||!CreateCartAudit.enabled()||entity.isRemoved())return;
+        if(CreateCartAudit.state(entity)!=null||!CreateCapturePolicy.lifecycle(entity)||!CreateCargoAudit.lifecycleActive(entity)||entity.isRemoved())return;
         if(CreateStructuralAudit.covered(entity))return;
         var scope=CURRENT.get();if(scope!=null&&scope.entity==entity)return;
         boolean unload=reason==Entity.RemovalReason.UNLOADED_TO_CHUNK||reason==Entity.RemovalReason.UNLOADED_WITH_PLAYER||reason==Entity.RemovalReason.CHANGED_DIMENSION;
