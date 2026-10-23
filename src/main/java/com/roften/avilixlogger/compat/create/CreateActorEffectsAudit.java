@@ -10,7 +10,7 @@ public final class CreateActorEffectsAudit {
     private CreateActorEffectsAudit() {}
     public static Scope begin(MovementContext context,String reason,boolean internal,boolean structure){
         var entity=context.contraption.entity;
-        return entity==null||!CreateCargoAudit.active(entity)?null:new Scope(context,reason,internal,structure);
+        return entity==null||!CreateCapturePolicy.actors(entity)||!CreateCargoAudit.active(entity)?null:new Scope(context,reason,internal,structure);
     }
     public static void spawning(ItemEntity drop){
         var scope=CURRENT.get();if(scope==null)return;
