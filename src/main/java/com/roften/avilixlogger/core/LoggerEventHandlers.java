@@ -573,7 +573,8 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onRightClickEntity(PlayerInteractEvent.EntityInteract event) {
-        if (!CaptureTypePolicy.enabled(3)) return;
+        // Container interaction can remain enabled while entity interaction is muted.
+        if (!CaptureTypePolicy.enabled(3) && !CaptureTypePolicy.enabled(2)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
@@ -1263,6 +1264,9 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onEntitySpawn(EntityJoinLevelEvent event) {
+        // Item drops remain independent when generic entity capture is switched off.
+        if (!CaptureTypePolicy.enabled(3) && !(event.getEntity() instanceof ItemEntity
+                && CaptureTypePolicy.enabled(4))) return;
         if (!LoggerConfig.isEnabled() || (!LoggerConfig.VALUES.logEntities.get() && CartAuditContext.current()==null
                 && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource())==null)) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
@@ -1281,6 +1285,7 @@ public final class LoggerEventHandlers {
         if (ent instanceof ItemEntity itemEnt) {
             var createOrigin=CreateEntityOrigin.context();
             if(createOrigin!=null) {
+                if (!CaptureTypePolicy.enabled(3)) return;
                 CreateEntityOrigin.capture(itemEnt);
                 LogEntry drop=new LogEntry();drop.ts=System.currentTimeMillis();drop.type=ActionType.ENTITY_SPAWN;drop.dim=level.dimension().location().toString();drop.entityUuid=itemEnt.getUUID();drop.entityType="minecraft:item";
                 drop.x=itemEnt.blockPosition().getX();drop.y=itemEnt.blockPosition().getY();drop.z=itemEnt.blockPosition().getZ();drop.source=createOrigin.source();drop.actorUuid=null;drop.actorName="SYSTEM";drop.count=itemEnt.getItem().getCount();drop.extra="construction work: world item drop";
@@ -1700,7 +1705,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onProjectileImpact(ProjectileImpactEvent event) {
-        if (!CaptureTypePolicy.enabled(3)) return;
+        if (!CaptureTypePolicy.enabled(3) || !CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
 
         Object projectileObj = callNoArg(event, "getProjectile");
