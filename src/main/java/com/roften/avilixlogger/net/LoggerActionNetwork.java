@@ -25,7 +25,7 @@ final class LoggerActionNetwork {
             public boolean acceptsFailure(){return true;}
             public boolean shouldInformAdmins(){return true;}
         });
-        if(!AuthCoreBridge.isAuthorized(player.getServer()))return;
+        if(!com.roften.avilixlogger.core.PermissionUtil.isAdministrator(player))return;
         try{
             String command=LoggerActionCatalog.find(payload.action()).command(payload.values());
             player.getServer().getCommands().performPrefixedCommand(source,command);
