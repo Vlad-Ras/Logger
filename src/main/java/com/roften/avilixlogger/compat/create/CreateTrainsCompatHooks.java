@@ -97,7 +97,8 @@ public final class CreateTrainsCompatHooks {
     private static boolean enabled(ActionType event) {
         try {
             // Cheap category checks precede authorization, item NBT and train reflection.
-            if (!LoggerConfig.VALUES.logCreateTrains.get()) return false;
+            if (!LoggerConfig.VALUES.logCreateTrains.get()
+                    || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(5)) return false;
             boolean category = switch (event) {
                 case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE -> LoggerConfig.VALUES.logCreateLifecycle.get();
                 case TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> LoggerConfig.VALUES.logCreateCargoTransfers.get();
