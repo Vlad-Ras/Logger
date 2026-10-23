@@ -73,8 +73,13 @@ public final class PermissionUtil {
     /** Security boundary used by commands, GUI packets and inspect interaction.
      * Player must remain a server OP even when LuckPerms has a grant. */
     public static boolean isAdministrator(ServerPlayer sp) {
-        return sp != null && sp.hasPermissions(2)
-                && com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(sp.getServer());
+        return sp != null && sp.getServer() != null && operatorGate(sp.hasPermissions(2),
+                com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(sp.getServer()));
+    }
+
+    /** Invariant: neither LuckPerms grants nor GUI packets may replace OP status. */
+    static boolean operatorGate(boolean operatorLevelTwo, boolean authorizedServer) {
+        return operatorLevelTwo && authorizedServer;
     }
 
     private static Object permissionData(ServerPlayer sp) {
