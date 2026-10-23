@@ -10,6 +10,7 @@ public final class CreateCapturePolicy {
     private CreateCapturePolicy() {}
 
     public static boolean kindEnabled(CreateContraptionKind kind) {
+        if (!com.roften.avilixlogger.core.CaptureTypePolicy.allowsCreateKind(kind)) return false;
         return switch (kind) {
             case MINECART -> LoggerConfig.VALUES.logCreateMinecarts.get();
             case TRAIN -> LoggerConfig.VALUES.logCreateTrains.get();
