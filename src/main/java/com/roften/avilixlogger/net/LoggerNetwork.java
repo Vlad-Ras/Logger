@@ -109,6 +109,8 @@ public final class LoggerNetwork {
 
     /** Tracks which players actually have the client mod. */
     private static final Map<UUID, Boolean> CLIENT_PRESENT = new ConcurrentHashMap<>();
+    /** Only peers which actually requested the new 2.1.24 channel receive broadcasts. */
+    private static final java.util.Set<UUID> CAPTURE_SETTINGS_PEERS = ConcurrentHashMap.newKeySet();
 
     /** Per-player GUI filter state (button-driven). */
     private static final Map<UUID, GuiFilters> GUI_FILTERS = new ConcurrentHashMap<>();
@@ -126,6 +128,7 @@ public final class LoggerNetwork {
             CLIENT_PRESENT.remove(uuid);
             CartHistoryNetwork.logout(uuid);
             GUI_FILTERS.remove(uuid);
+            CAPTURE_SETTINGS_PEERS.remove(uuid);
             GUI_PAGE_SIZES.remove(uuid);
             LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
             LAST_GUI_PAGE_REQUEST_SIG.remove(uuid);
@@ -159,6 +162,7 @@ public final class LoggerNetwork {
         CLIENT_PRESENT.clear();
         CartHistoryNetwork.stop();
         GUI_FILTERS.clear();
+        CAPTURE_SETTINGS_PEERS.clear();
         GUI_PAGE_SIZES.clear();
         LATEST_GUI_PAGE_SEQ.clear();
         LATEST_GUI_DETAILS_SEQ.clear();
@@ -498,6 +502,7 @@ public final class LoggerNetwork {
     private static void handleCaptureTypes(C2SCaptureTypesPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> {
             if (!(ctx.player() instanceof ServerPlayer sp) || !hasGuiPermission(sp)) return;
+            CAPTURE_SETTINGS_PEERS.add(sp.getUUID());
             var data = LoggerServerData.get(sp.getServer().overworld());
             boolean editor = hasAdminPermission(sp);
             boolean success = true;
@@ -539,7 +544,7 @@ public final class LoggerNetwork {
             if (success && data.captureMask() != current) {
                 // Keep other connected administrators' GUIs in sync.
                 for (var other : sp.getServer().getPlayerList().getPlayers()) {
-                    if (other == sp || !Boolean.TRUE.equals(CLIENT_PRESENT.get(other.getUUID())) || !hasGuiPermission(other)) continue;
+                    if (other == sp || !CAPTURE_SETTINGS_PEERS.contains(other.getUUID()) || !hasGuiPermission(other)) continue;
                     PacketDistributor.sendToPlayer(other,new S2CCaptureTypesPayload(
                             data.captureMask(),data.captureRevision(),hasAdminPermission(other),true,
                             "Другой администратор изменил настройки логирования"));
