@@ -40,7 +40,7 @@ public enum CreateContraptionKind {
         };
     }
     /** Hot-path type lookup without allocating a ResourceLocation.toString(). */
-    public static CreateContraptionKind fromType(net.minecraft.resources.ResourceLocation type) {
+    public static CreateContraptionKind fromLocation(net.minecraft.resources.ResourceLocation type) {
         if (type == null || !"create".equals(type.getNamespace())) return UNKNOWN;
         return switch (type.getPath()) {
             case "mounted" -> MINECART;
