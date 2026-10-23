@@ -64,7 +64,7 @@ public final class CreateStructuralAudit implements CreateStructuralHooks.Observ
     public static Scope begin(BlockEntity controller){
         if(CURRENT.get()!=null||!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()||!CreateCartAudit.enabled())return null;
         try{return controller instanceof CreateControllerAccess access&&access.avilixlogger$controlled().stream()
-                .anyMatch(entity -> entity.isAlive() && CreateCapturePolicy.lifecycle(entity))?capture(controller,true):null;
+                .anyMatch(entity -> entity.isAlive() && CreateCapturePolicy.lifecycle(entity))?capture(controller,true):null;}
         catch(RuntimeException failure){CreateCartAudit.failed("structural before controller",failure);return null;}
     }
     /** Detached fixture exercises the same capture, without authorizing publication. */
