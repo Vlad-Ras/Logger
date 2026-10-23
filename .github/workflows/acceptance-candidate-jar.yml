@@ -1,10 +1,11 @@
-name: 2.1.23 candidate JAR (not a release)
+name: 2.1.24 candidate JAR (not a release)
 
 on:
   push:
     branches:
       - fix/2.1.23-memory-ci-20261022
       - feat/2.1.23-create-capture-tps-switches-20261023
+      - feat/2.1.24-live-gui-capture-switches-20261023
     paths:
       - .github/workflows/acceptance-candidate-jar.yml
       - build.gradle
@@ -34,7 +35,7 @@ jobs:
           set -euo pipefail
           ./gradlew verifyObfuscatedJar --no-daemon --console=plain 2>&1 | tee candidate-build.log
           mkdir -p build/candidate-evidence
-          jar_path=build/libs/avilixlogger-2.1.23.jar
+          jar_path=build/libs/avilixlogger-2.1.24.jar
           test -s "$jar_path"
           sha256sum "$jar_path" > build/candidate-evidence/SHA256SUMS
           printf 'status=UNAPPROVED_ACCEPTANCE_CANDIDATE\nsha=%s\nbranch=%s\nfull_modpack_accepted=no\nauthcore_production_accepted=no\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" > build/candidate-evidence/STATUS.txt
@@ -42,9 +43,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: logger-2.1.23-UNAPPROVED-candidate
+          name: logger-2.1.24-UNAPPROVED-candidate
           path: |
-            build/libs/avilixlogger-2.1.23.jar
+            build/libs/avilixlogger-2.1.24.jar
             build/candidate-evidence/SHA256SUMS
             build/candidate-evidence/STATUS.txt
             candidate-build.log

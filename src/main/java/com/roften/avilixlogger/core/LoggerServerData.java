@@ -15,8 +15,12 @@ public final class LoggerServerData extends SavedData {
     private static final String DATA_NAME = "avilixlogger_data";
     private static final String KEY_INSPECT_TOOL = "inspectToolItemId";
     private static final String KEY_PRESETS = "presets";
+    private static final String KEY_CAPTURE_MASK = "guiCaptureDisabledMask";
+    private static final String KEY_CAPTURE_REVISION = "guiCaptureRevision";
 
     private String inspectToolItemId;
+    private int guiCaptureDisabledMask;
+    private int guiCaptureRevision;
 
     /** Stored command argument presets (name -> raw args string). */
     private final java.util.Map<String, String> presets = new java.util.LinkedHashMap<>();
@@ -34,6 +38,8 @@ public final class LoggerServerData extends SavedData {
         if (tag.contains(KEY_INSPECT_TOOL)) {
             d.inspectToolItemId = tag.getString(KEY_INSPECT_TOOL);
         }
+        d.guiCaptureDisabledMask = tag.getInt(KEY_CAPTURE_MASK) & CaptureTypePolicy.ALL_DISABLED;
+        d.guiCaptureRevision = Math.max(0, tag.getInt(KEY_CAPTURE_REVISION));
         if (tag.contains(KEY_PRESETS, net.minecraft.nbt.Tag.TAG_COMPOUND)) {
             CompoundTag p = tag.getCompound(KEY_PRESETS);
             for (String k : p.getAllKeys()) {
@@ -49,6 +55,8 @@ public final class LoggerServerData extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         if (inspectToolItemId != null) tag.putString(KEY_INSPECT_TOOL, inspectToolItemId);
+        tag.putInt(KEY_CAPTURE_MASK, guiCaptureDisabledMask);
+        tag.putInt(KEY_CAPTURE_REVISION, guiCaptureRevision);
         CompoundTag p = new CompoundTag();
         for (var e : presets.entrySet()) {
             if (e.getKey() != null && !e.getKey().isBlank() && e.getValue() != null && !e.getValue().isBlank()) {
@@ -57,6 +65,18 @@ public final class LoggerServerData extends SavedData {
         }
         tag.put(KEY_PRESETS, p);
         return tag;
+    }
+
+    public int captureMask() { return guiCaptureDisabledMask; }
+    public int captureRevision() { return guiCaptureRevision; }
+    /** Server thread only: durable level SavedData and immediate volatile hot-path update. */
+    public void setCaptureMask(int mask) {
+        int sanitized = mask & CaptureTypePolicy.ALL_DISABLED;
+        if (guiCaptureDisabledMask == sanitized) return;
+        guiCaptureDisabledMask = sanitized;
+        guiCaptureRevision++;
+        CaptureTypePolicy.install(sanitized);
+        setDirty();
     }
 
     public String getInspectToolItemId() {

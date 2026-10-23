@@ -131,6 +131,7 @@ public final class LogViewerScreen extends Screen {
     private Button btnTabRaw;
     private Button btnShowRaw;
     private Button btnSettings;
+    private Button btnCaptureTypes;
 
     private EditBox searchBox;
     private EditBox timeBox;
@@ -482,7 +483,10 @@ public final class LogViewerScreen extends Screen {
 
         int y2 = actionTop + btnH + gap;
         this.btnSettings = addButton(Component.translatable("gui.avilixlogger.settings"), b -> openSettings(),
-                rightX, y2, rightW, btnH);
+                rightX, y2, half, btnH);
+        this.btnCaptureTypes = addButton(Component.literal("Запись событий"),
+                b -> Minecraft.getInstance().setScreen(new CaptureTypesScreen(this)),
+                rightX+half+gap,y2,rightW-half-gap,btnH);
 
         y2 += btnH + gap;
         this.btnCopy = addButton(sideLabel("gui.avilixlogger.copy_xyz", "XYZ"), b -> copySelectedXYZ(),

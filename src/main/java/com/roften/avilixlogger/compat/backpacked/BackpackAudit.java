@@ -31,7 +31,8 @@ public final class BackpackAudit {
     private static int depth;
     private static final Scope INACTIVE=new Scope(null,List.of(),null,false);
     public static boolean restoring;
-    public static boolean enabled(){return !restoring&&!CartAuditContext.restoring()&&LoggerConfig.isEnabled();}
+    public static boolean enabled(){return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(10)
+            && !restoring&&!CartAuditContext.restoring()&&LoggerConfig.isEnabled();}
     /** Rebase the native cache/index after a joint restore, without gameplay events or new IDs. */
     public static void rebase(Container container){
         CONTENTS.put(container,copySlots(container));DIRTY.remove(container);

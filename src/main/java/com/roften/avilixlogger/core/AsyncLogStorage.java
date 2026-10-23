@@ -22,12 +22,17 @@ public final class AsyncLogStorage implements LogStorage {
     @Override public void append(LogEntry entry) {
         if (entry == null) return;
         if (CartAuditContext.restoring()) return;
+        // Decide before enriching, deep-copying or enqueuing a row.
+        if (!CaptureTypePolicy.allows(entry.type,entry.source,entry.extra)) return;
         // Deployer capture already resolved its own owner; null explicitly means unknown.
         if (entry.type != ActionType.CREATE_DEPLOYER_ACTION) CartAuditContext.enrich(entry);
         String constructionSource = MutationSourceResolver.resolveExternalSource();
         if (CreateContraptionKind.fromSource(entry.source) == CreateContraptionKind.UNKNOWN
                 && CreateContraptionKind.id(constructionSource) != null) entry.source = constructionSource;
         entry.source = CreateMechanismContext.decorate(entry.source);
+        // The current CartAuditContext may have supplied the definitive source.
+        // Recheck before item-identity snapshots to prevent typed-source bypasses.
+        if (!CaptureTypePolicy.allows(entry.type,entry.source,entry.extra)) return;
         entry.attachCartItemIdentity();
         if (entry.source != null && entry.source.startsWith("create:cart:")) LogIdGenerator.ensure(entry);
         LogEntry snapshot = entry.copyForQueue();
@@ -44,6 +49,7 @@ public final class AsyncLogStorage implements LogStorage {
     public void appendBlockChange(SetBlockCapture before,
                                   net.minecraft.world.level.block.state.BlockState after,
                                   String afterId, long timestamp) {
+        if (!CaptureTypePolicy.allows(ActionType.BLOCK_PLACE,before.source(),null)) return;
         appendCaptured(new BlockChangeEvent(before, after, afterId, timestamp),
                 PayloadSizeEstimator.estimateBlockChange(before, afterId));
     }

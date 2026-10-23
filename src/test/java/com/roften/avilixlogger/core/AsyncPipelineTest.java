@@ -10,6 +10,8 @@ public final class AsyncPipelineTest {
         PreviewExpiryTest.run();
         LoggerActionLinksTest.run();
         CreateContraptionKindTest.run();
+        CaptureTypePolicyTest.run();
+        OperatorAccessTest.run();
         com.roften.avilixlogger.compat.create.CreatePlayerProgressOrderTest.run();
         DetailFormattingTest.run();
         orderedHandoffAndBackpressure();

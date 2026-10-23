@@ -88,6 +88,11 @@ public final class LogViewerClientHooks {
         if (screen != null) screen.applyDetails(payload);
     }
 
+    public static void acceptCaptureTypes(com.roften.avilixlogger.net.S2CCaptureTypesPayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null && mc.screen instanceof CaptureTypesScreen screen) screen.apply(payload);
+    }
+
     public static void acceptInspectTool(S2CInspectToolPayload payload) {
         if (payload == null) return;
         var screen=OPEN_SCREEN.get();

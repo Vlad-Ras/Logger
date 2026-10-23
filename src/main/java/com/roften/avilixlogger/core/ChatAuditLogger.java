@@ -44,7 +44,7 @@ public final class ChatAuditLogger {
      * written twice.
      */
     public static void packetMessage(ServerPlayer player, String raw) {
-        if (!LoggerConfig.isEnabled()) return;
+        if (!CaptureTypePolicy.enabled(7) || !LoggerConfig.isEnabled()) return;
         String message = raw == null ? "" : raw.trim();
         if (player == null || message.isBlank()) return;
         runOnServer(player, () -> {
@@ -60,7 +60,7 @@ public final class ChatAuditLogger {
     }
 
     public static void publicMessage(ServerPlayer player, String raw) {
-        if (!LoggerConfig.isEnabled()) return;
+        if (!CaptureTypePolicy.enabled(7) || !LoggerConfig.isEnabled()) return;
         String message = raw == null ? "" : raw.trim();
         if (player == null || message.isBlank()) return;
         PENDING_PUBLIC.remove(new PendingKey(player.getUUID(), message));
@@ -68,7 +68,7 @@ public final class ChatAuditLogger {
     }
 
     public static void command(ServerPlayer player, String rawCommand) {
-        if (!LoggerConfig.isEnabled()) return;
+        if (!CaptureTypePolicy.enabled(7) || !LoggerConfig.isEnabled()) return;
         String command = trimSlash(rawCommand);
         if (command.isBlank()) return;
 

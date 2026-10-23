@@ -230,6 +230,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onBlockBreak(BlockEvent.BreakEvent event) {
+        if (!CaptureTypePolicy.enabled(1)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getPlayer())) return;
         if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
@@ -261,6 +262,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
+        if (!CaptureTypePolicy.enabled(1)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity() instanceof Player p0 ? p0 : null)) return;
         if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
@@ -309,6 +311,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
@@ -537,6 +540,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onAttackEntity(AttackEntityEvent event) {
+        if (!CaptureTypePolicy.enabled(3)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
@@ -569,6 +573,8 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onRightClickEntity(PlayerInteractEvent.EntityInteract event) {
+        // Container interaction can remain enabled while entity interaction is muted.
+        if (!CaptureTypePolicy.enabled(3) && !CaptureTypePolicy.enabled(2)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
@@ -625,6 +631,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onContainerOpen(PlayerContainerEvent.Open event) {
+        if (!CaptureTypePolicy.enabled(2)) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -737,6 +744,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onEntityMount(EntityMountEvent event) {
+        if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntityMounting() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -796,6 +804,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onContainerClose(PlayerContainerEvent.Close event) {
+        if (!CaptureTypePolicy.enabled(2)) return;
         if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         Level lvl = sp.level();
@@ -1066,6 +1075,7 @@ public final class LoggerEventHandlers {
      */
     @SubscribeEvent
     public void onEntityHurtPreDeath(LivingDamageEvent.Pre event) {
+        if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
@@ -1138,6 +1148,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onEntityDeath(LivingDeathEvent event) {
+        if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
         net.minecraft.world.entity.LivingEntity victim = event.getEntity();
@@ -1230,6 +1241,7 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onItemToss(ItemTossEvent event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled()) return;
         Player pl = event.getPlayer();
         if (!(pl instanceof ServerPlayer sp)) return;
@@ -1252,6 +1264,9 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onEntitySpawn(EntityJoinLevelEvent event) {
+        // Item drops remain independent when generic entity capture is switched off.
+        if (!CaptureTypePolicy.enabled(3) && !(event.getEntity() instanceof ItemEntity
+                && CaptureTypePolicy.enabled(4))) return;
         if (!LoggerConfig.isEnabled() || (!LoggerConfig.VALUES.logEntities.get() && CartAuditContext.current()==null
                 && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource())==null)) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
@@ -1270,6 +1285,7 @@ public final class LoggerEventHandlers {
         if (ent instanceof ItemEntity itemEnt) {
             var createOrigin=CreateEntityOrigin.context();
             if(createOrigin!=null) {
+                if (!CaptureTypePolicy.enabled(3)) return;
                 CreateEntityOrigin.capture(itemEnt);
                 LogEntry drop=new LogEntry();drop.ts=System.currentTimeMillis();drop.type=ActionType.ENTITY_SPAWN;drop.dim=level.dimension().location().toString();drop.entityUuid=itemEnt.getUUID();drop.entityType="minecraft:item";
                 drop.x=itemEnt.blockPosition().getX();drop.y=itemEnt.blockPosition().getY();drop.z=itemEnt.blockPosition().getZ();drop.source=createOrigin.source();drop.actorUuid=null;drop.actorName="SYSTEM";drop.count=itemEnt.getItem().getCount();drop.extra="construction work: world item drop";
@@ -1392,6 +1408,7 @@ public final class LoggerEventHandlers {
     
     @SubscribeEvent
     public void onItemPickup(ItemEntityPickupEvent.Pre event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getPlayer().level() instanceof ServerLevel level)) return;
 
@@ -1489,6 +1506,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemUseStart(LivingEntityUseItemEvent.Start event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -1503,6 +1521,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemUseStop(LivingEntityUseItemEvent.Stop event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -1517,6 +1536,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemUseFinish(LivingEntityUseItemEvent.Finish event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logItemConsume)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -1545,6 +1565,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
         if (event.getEntity() == null) return;
@@ -1570,6 +1591,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemSmelted(PlayerEvent.ItemSmeltedEvent event) {
+        if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
@@ -1639,6 +1661,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -1660,6 +1683,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -1681,6 +1705,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onProjectileImpact(ProjectileImpactEvent event) {
+        if (!CaptureTypePolicy.enabled(3) || !CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
 
         Object projectileObj = callNoArg(event, "getProjectile");
