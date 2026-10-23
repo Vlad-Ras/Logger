@@ -13,7 +13,7 @@ public abstract class EntityTickSourceMixin {
     @WrapMethod(method = "tickNonPassenger")
     private void avilixlogger$withSource(Entity entity, Operation<Void> original) {
         if (com.roften.avilixlogger.core.CartAuditContext.rollbackActive && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID())) return;
-        if (!LoggerConfig.isTickCaptureEnabled()) { original.call(entity); return; }
+        // Muted Create ticks bypass AuthCore lookup before generic source attribution.
         if (com.roften.avilixlogger.core.CreateSupport.available()
                 && com.roften.avilixlogger.compat.create.CreateCapturePolicy.mutedEntity(entity)) {
             // Suppress the generic mod:create attribution too: otherwise BLOCK_CHANGE
@@ -22,6 +22,7 @@ public abstract class EntityTickSourceMixin {
             try { original.call(entity); } finally { MutationSourceResolver.restore(previous); }
             return;
         }
+        if (!LoggerConfig.isTickCaptureEnabled()) { original.call(entity); return; }
         String source = MutationSourceResolver.sourceFor(entity);
         if (source == null) source = MutationSourceResolver.VANILLA_SIMULATION;
         String previous = MutationSourceResolver.enter(source);
@@ -32,13 +33,14 @@ public abstract class EntityTickSourceMixin {
     @WrapMethod(method = "tickPassenger")
     private void avilixlogger$withPassengerSource(Entity vehicle, Entity passenger, Operation<Void> original) {
         if (com.roften.avilixlogger.core.CartAuditContext.rollbackActive && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(passenger.getUUID())) return;
-        if (!LoggerConfig.isTickCaptureEnabled()) { original.call(vehicle, passenger); return; }
+        // Muted Create ticks bypass AuthCore lookup before generic source attribution.
         if (com.roften.avilixlogger.core.CreateSupport.available()
                 && com.roften.avilixlogger.compat.create.CreateCapturePolicy.mutedEntity(passenger)) {
             String previous = MutationSourceResolver.enter(MutationSourceResolver.VANILLA_SIMULATION);
             try { original.call(vehicle, passenger); } finally { MutationSourceResolver.restore(previous); }
             return;
         }
+        if (!LoggerConfig.isTickCaptureEnabled()) { original.call(vehicle, passenger); return; }
         String source = MutationSourceResolver.sourceFor(passenger);
         if (source == null) source = MutationSourceResolver.VANILLA_SIMULATION;
         String previous = MutationSourceResolver.enter(source);
