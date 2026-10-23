@@ -44,7 +44,7 @@ public final class CaptureTypePolicy {
         if (type.name().startsWith("BACKPACK_") && !enabled(10)) return false;
         if (type.name().startsWith("PLANE_") && !enabled(8)) return false;
         if (type == ActionType.CHAT_MESSAGE && !enabled(7)) return false;
-        if (extra != null && extra.toLowerCase(java.util.Locale.ROOT).contains("cannon") && !enabled(6)) return false;
+        if (!enabled(6) && extra != null && extra.toLowerCase(java.util.Locale.ROOT).contains("cannon")) return false;
         return switch (type) {
             case BLOCK_BREAK, BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE ->
                     enabled(1);
