@@ -95,7 +95,8 @@ public abstract class ServerLevelSetBlockMixin {
     private SetBlockCapture capture(BlockPos pos, BlockState newState) {
         boolean ownsGuard = false;
         try {
-            if (pos == null || newState == null || CartAuditContext.restoring()) return null;
+            if (pos == null || newState == null || CartAuditContext.restoring()
+                    || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(1)) return null;
             if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return null;
 
             if (!((Object) this instanceof ServerLevel level)) return null;
