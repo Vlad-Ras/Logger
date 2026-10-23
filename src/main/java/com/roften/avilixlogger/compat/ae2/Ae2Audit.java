@@ -73,7 +73,8 @@ public final class Ae2Audit {
 
     public static boolean enabled() {
         try {
-            return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logAe2.get();
+            return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(2)
+                    && LoggerConfig.isEnabled() && LoggerConfig.VALUES.logAe2.get();
         } catch (Throwable ignored) {
             return false;
         }
