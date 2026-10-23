@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -72,7 +72,12 @@ public final class CartGuiClientSmoke {
                     var guide=Class.forName("com.roften.avilixlogger.client.gui.LoggerGuideScreen").getDeclaredConstructor(Screen.class);guide.setAccessible(true);mc.setScreen((Screen)guide.newInstance(root));
                 }
                 else if(stage==7)mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
+                else if(stage==8)mc.setScreen(new com.roften.avilixlogger.client.gui.CaptureTypesScreen(mc.screen));
                 if(stage<FILES.size())layout(mc.screen,mc);
+                if(stage==8){
+                    var capture=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;
+                    capture.apply(new com.roften.avilixlogger.net.S2CCaptureTypesPayload(1<<10,7,true,true,"Подшипники отключены без перезагрузки"));
+                }
             }else{
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);
                 System.out.println("CART_GUI_CLIENT_OK: actual history/actions/confirmation/results, shared action forms, help and journal rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks");finished=true;mc.stop();
