@@ -11,7 +11,7 @@ public final class CreateContraptionSources {
     public static CreateContraptionKind kind(AbstractContraptionEntity entity) {
         var contraption = entity.getContraption();
         return contraption == null ? CreateContraptionKind.UNKNOWN
-                : CreateContraptionKind.fromType(contraption.getType().holder.key().location().toString());
+                : CreateContraptionKind.fromType(contraption.getType().holder.key().location());
     }
     public static UUID id(AbstractContraptionEntity entity) {
         if (entity instanceof CartEntityAccess access && access.avilixlogger$mountedState() != null)
