@@ -106,6 +106,13 @@ public abstract class ServerLevelSetBlockMixin {
             if (cause != null && CreateContraptionKind.id(source) == null) source = null;
             if (cart != null) source = cart.source();
             source = CreateMechanismContext.decorate(source);
+            // Before any block/BE/slot snapshot or authorization check, skip
+            // mutations whose explicit contraption kind is disabled.
+            if (source != null && source.startsWith("create:")) {
+                var kind = CreateContraptionKind.fromSource(source);
+                if (kind != CreateContraptionKind.UNKNOWN && com.roften.avilixlogger.core.CreateSupport.available()
+                        && !com.roften.avilixlogger.compat.create.CreateCapturePolicy.kindEnabled(kind)) return null;
+            }
             if (cart == null && cause == null && MutationSourceResolver.VANILLA_SIMULATION.equals(source)) return null;
             // Ignored simulation/client calls need no authorization lookup. Every captured
             // mutation still checks the current authorization before reading world snapshots.
