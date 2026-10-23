@@ -29,6 +29,7 @@
     public static void acceptActionResult(...);
     public static void acceptDetails(...);
     public static void acceptInspectTool(...);
+    public static void acceptCaptureTypes(...);
     public static void acceptRollbackPreview(...);
 }
 
