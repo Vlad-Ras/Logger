@@ -24,6 +24,14 @@ public final class CreateCapturePolicy {
                 && kindEnabled(CreateContraptionSources.kind(entity));
     }
 
+    /** Treat excluded Create entity ticks as simulation so generic world hooks do not
+     * rebuild block-entity NBT under an unattributed mod:create source. */
+    public static boolean mutedEntity(Object entity) {
+        return entity instanceof AbstractContraptionEntity contraption
+                && contraption.getContraption() != null
+                && !kindEnabled(CreateContraptionSources.kind(contraption));
+    }
+
     public static boolean actors(AbstractContraptionEntity entity) {
         return LoggerConfig.VALUES.logCreateActorWork.get() && allows(entity);
     }
