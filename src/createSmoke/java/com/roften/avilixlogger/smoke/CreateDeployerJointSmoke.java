@@ -52,7 +52,15 @@ public final class CreateDeployerJointSmoke {
         int tested=0;
         for(var kind:List.of(CreateContraptionKind.MINECART,CreateContraptionKind.TRAIN,CreateContraptionKind.BEARING,CreateContraptionKind.OTHER))
         for(String mode:modes){
-            var body=(AbstractContraptionEntity)factory.invoke(null,world,kind);attach.invoke(null,body);body.setPos(pos.above(5).getX(),pos.above(5).getY(),pos.above(5).getZ());check(world.addFreshEntity(body),"deployer construction spawn");Entity target=null;LogEntry row=null;
+            var body=(AbstractContraptionEntity)factory.invoke(null,world,kind);attach.invoke(null,body);body.setPos(pos.above(5).getX(),pos.above(5).getY(),pos.above(5).getZ());
+            // These fixture-controlled entities are assembled reflectively instead of by Create.
+            // A joining test player serializes every tracked entity; Create 6.0.10 requires
+            // a non-null controllerPos for this controlled representation.
+            if(body instanceof ControlledContraptionEntity controlled){
+                var controller=ControlledContraptionEntity.class.getDeclaredField("controllerPos");controller.setAccessible(true);
+                if(controller.get(controlled)==null)controller.set(controlled,pos.below());
+            }
+            check(world.addFreshEntity(body),"deployer construction spawn");Entity target=null;LogEntry row=null;
             try{
                 world.setBlock(pos.below(),Blocks.STONE.defaultBlockState(),3);world.setBlock(pos,mode.equals("lever")?Blocks.LEVER.defaultBlockState().setValue(LeverBlock.FACE,net.minecraft.world.level.block.state.properties.AttachFace.FLOOR):Blocks.AIR.defaultBlockState(),3);
                 boolean nonlethal=mode.startsWith("combat-live")||mode.startsWith("combat-cardboard");
