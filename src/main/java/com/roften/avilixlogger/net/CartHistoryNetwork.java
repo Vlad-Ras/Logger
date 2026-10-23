@@ -21,11 +21,11 @@ public final class CartHistoryNetwork {
     private static long sequence;
     private static final DateTimeFormatter TIME=DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss");
     private CartHistoryNetwork(){}
-    public static boolean viewing(CommandSourceStack source){return source.getPlayer()!=null&&VIEWERS.contains(source.getPlayer().getUUID())&&LoggerNetwork.isClientPresent(source.getPlayer());}
+    public static boolean viewing(CommandSourceStack source){return source.getPlayer()!=null&&allowed(source.getPlayer())&&VIEWERS.contains(source.getPlayer().getUUID())&&LoggerNetwork.isClientPresent(source.getPlayer());}
     public static boolean detailsAllowed(ServerPlayer p){return VIEWERS.contains(p.getUUID())&&allowed(p);}
     private static boolean allowed(ServerPlayer p){return CreateSupport.available()&&AuthCoreBridge.isAuthorized(p.getServer())&&PermissionUtil.has(p.createCommandSourceStack(),"avilixlogger.command.lookup",2);}
     public static boolean open(CommandSourceStack source,String id){
-        var p=source.getPlayer();if(p==null||!LoggerNetwork.isClientPresent(p))return false;VIEWERS.add(p.getUUID());
+        var p=source.getPlayer();if(p==null||!allowed(p)||!LoggerNetwork.isClientPresent(p))return false;VIEWERS.add(p.getUUID());
         PacketDistributor.sendToPlayer(p,new S2CCartHistoryPayload(S2CCartHistoryPayload.OPEN,0,id,0,restore(p),"","",List.of()));return true;
     }
     public static void handleAction(C2SCartActionPayload payload,IPayloadContext ctx){ctx.enqueueWork(()->{
