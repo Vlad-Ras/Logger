@@ -274,7 +274,7 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
-        PayloadRegistrar r = event.registrar("9").optional();
+        PayloadRegistrar r = event.registrar("10").optional();
 
         r.playToServer(C2SLoggerActionPayload.TYPE,C2SLoggerActionPayload.STREAM_CODEC,LoggerActionNetwork::handle);
         r.playToClient(S2CLoggerActionResultPayload.TYPE,S2CLoggerActionResultPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptActionResult",new Class<?>[]{S2CLoggerActionResultPayload.class},new Object[]{payload})));
@@ -288,12 +288,15 @@ public final class LoggerNetwork {
         r.playToServer(C2SRequestPagePayload.TYPE, C2SRequestPagePayload.STREAM_CODEC, LoggerNetwork::handleRequestPage);
         r.playToServer(C2SRequestDetailsPayload.TYPE, C2SRequestDetailsPayload.STREAM_CODEC, LoggerNetwork::handleRequestDetails);
         r.playToServer(C2SInspectToolPayload.TYPE, C2SInspectToolPayload.STREAM_CODEC, LoggerNetwork::handleInspectTool);
+        r.playToServer(C2SCaptureTypesPayload.TYPE, C2SCaptureTypesPayload.STREAM_CODEC, LoggerNetwork::handleCaptureTypes);
 
         // Server -> Client (отправляются только тем, у кого есть клиент-мод; запрос приходит с клиента)
         r.playToClient(S2COpenGuiPayload.TYPE, S2COpenGuiPayload.STREAM_CODEC, LoggerNetwork::handleOpenGuiClient);
         r.playToClient(S2CLogPagePayload.TYPE, S2CLogPagePayload.STREAM_CODEC, LoggerNetwork::handleLogPageClient);
         r.playToClient(S2CLogDetailsPayload.TYPE, S2CLogDetailsPayload.STREAM_CODEC, LoggerNetwork::handleDetailsClient);
         r.playToClient(S2CInspectToolPayload.TYPE, S2CInspectToolPayload.STREAM_CODEC, LoggerNetwork::handleInspectToolClient);
+        r.playToClient(S2CCaptureTypesPayload.TYPE, S2CCaptureTypesPayload.STREAM_CODEC,
+                (payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureTypes",new Class<?>[]{S2CCaptureTypesPayload.class},new Object[]{payload})));
         r.playToClient(S2CRollbackPreviewPayload.TYPE, S2CRollbackPreviewPayload.STREAM_CODEC, LoggerNetwork::handleRollbackPreviewClient);
     }
 
@@ -489,6 +492,59 @@ public final class LoggerNetwork {
             if (!Boolean.TRUE.equals(CLIENT_PRESENT.get(sp.getUUID()))) return; // client addon absent
             if (!hasGuiPermission(sp)) return;
             PacketDistributor.sendToPlayer(sp, new S2COpenGuiPayload());
+        });
+    }
+
+    private static void handleCaptureTypes(C2SCaptureTypesPayload payload, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> {
+            if (!(ctx.player() instanceof ServerPlayer sp) || !hasGuiPermission(sp)) return;
+            var data = LoggerServerData.get(sp.getServer().overworld());
+            boolean editor = hasAdminPermission(sp);
+            boolean success = true;
+            String message = "";
+            int current = data.captureMask();
+            if (payload.action() != C2SCaptureTypesPayload.Action.QUERY) {
+                if (!editor) {
+                    success = false;
+                    message = "Недостаточно прав для изменения логирования";
+                } else if (payload.expectedRevision() != data.captureRevision()) {
+                    success = false;
+                    message = "Настройки изменены другим администратором: обновите состояние";
+                } else {
+                    int next = current;
+                    switch (payload.action()) {
+                        case SET -> {
+                            if (payload.preset() < 1 || payload.preset() > com.roften.avilixlogger.core.CaptureTypePolicy.GROUPS) {
+                                success = false;
+                                message = "Неизвестный тип событий";
+                            } else {
+                                next = com.roften.avilixlogger.core.CaptureTypePolicy.changed(current,payload.preset(),payload.enabled());
+                            }
+                        }
+                        case ENABLE_ALL -> next = 0;
+                        case DISABLE_ALL -> next = com.roften.avilixlogger.core.CaptureTypePolicy.ALL_DISABLED;
+                        default -> {}
+                    }
+                    if (success && next != current) {
+                        data.setCaptureMask(next);
+                        com.roften.avilixlogger.AvilixLoggerMod.LOGGER.info(
+                                "[AvilixLogger] {} changed live GUI capture mask {:04x} -> {:04x} (type {}, enabled {})",
+                                sp.getGameProfile().getName(),current,next,payload.preset(),payload.enabled());
+                        message = "Применено без перезапуска; настройка сохранена в мире";
+                    } else if (success) message = "Настройки без изменений";
+                }
+            }
+            var state = new S2CCaptureTypesPayload(data.captureMask(),data.captureRevision(),editor,success,message);
+            PacketDistributor.sendToPlayer(sp,state);
+            if (success && data.captureMask() != current) {
+                // Keep other connected administrators' GUIs in sync.
+                for (var other : sp.getServer().getPlayerList().getPlayers()) {
+                    if (other == sp || !Boolean.TRUE.equals(CLIENT_PRESENT.get(other.getUUID())) || !hasGuiPermission(other)) continue;
+                    PacketDistributor.sendToPlayer(other,new S2CCaptureTypesPayload(
+                            data.captureMask(),data.captureRevision(),hasAdminPermission(other),true,
+                            "Другой администратор изменил настройки логирования"));
+                }
+            }
         });
     }
 
