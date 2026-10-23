@@ -34,6 +34,9 @@ public final class PermissionUtil {
             return source.hasPermission(opFallbackLevel);
         }
 
+        // A LuckPerms node must NEVER elevate a normal player into logger access.
+        // Being an operator (permission level >= 2) is an unconditional prerequisite.
+        if (!isAdministrator(sp)) return false;
         Object permData = permissionData(sp);
         if (permData != null) {
             return checkAny(permData, node);
@@ -49,6 +52,9 @@ public final class PermissionUtil {
             return source.hasPermission(opFallbackLevel);
         }
 
+        // A LuckPerms node must NEVER elevate a normal player into logger access.
+        // Being an operator (permission level >= 2) is an unconditional prerequisite.
+        if (!isAdministrator(sp)) return false;
         Object permData = permissionData(sp);
         if (permData != null) {
             if (nodes != null) {
@@ -62,6 +68,13 @@ public final class PermissionUtil {
         }
 
         return source.hasPermission(opFallbackLevel);
+    }
+
+    /** Security boundary used by commands, GUI packets and inspect interaction.
+     * Player must remain a server OP even when LuckPerms has a grant. */
+    public static boolean isAdministrator(ServerPlayer sp) {
+        return sp != null && sp.hasPermissions(2)
+                && com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(sp.getServer());
     }
 
     private static Object permissionData(ServerPlayer sp) {
