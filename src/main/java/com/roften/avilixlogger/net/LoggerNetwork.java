@@ -119,7 +119,8 @@ public final class LoggerNetwork {
     private static final Map<UUID, Integer> GUI_PAGE_SIZES = new ConcurrentHashMap<>();
 
     public static boolean isClientPresent(ServerPlayer player) {
-        return player != null && Boolean.TRUE.equals(CLIENT_PRESENT.get(player.getUUID()));
+        return player != null && com.roften.avilixlogger.core.PermissionUtil.isAdministrator(player)
+                && Boolean.TRUE.equals(CLIENT_PRESENT.get(player.getUUID()));
     }
 
     public static void clear(ServerPlayer player) {
@@ -484,7 +485,7 @@ public final class LoggerNetwork {
     private static void handleHello(C2SHelloPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> {
             if (ctx.player() instanceof ServerPlayer sp) {
-                if (!AuthCoreBridge.isAuthorized(sp.getServer())) return;
+                if (!com.roften.avilixlogger.core.PermissionUtil.isAdministrator(sp)) return;
                 CLIENT_PRESENT.put(sp.getUUID(), true);
             }
         });
