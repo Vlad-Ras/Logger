@@ -63,8 +63,14 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         return CreateCartAudit.enabled()?authorizedTick(source):null;
     }
     @Override public CartAutomationHooks.Capture authorizedTick(BlockEntity source){
-        if(current!=null||publishing||CartAuditContext.restoring()||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
-        if(!BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType()).getNamespace().equals("create"))return null;
+        if(!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
+                ||current!=null||publishing||CartAuditContext.restoring()
+                ||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
+        var blockType = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType());
+        if(!"create".equals(blockType.getNamespace()))return null;
+        // Avoid an automation scope on bearing controller ticks when bearings are muted.
+        if(!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateBearings.get()
+                && (blockType.getPath().contains("bearing") || blockType.getPath().contains("clockwork")))return null;
         activeServer=level.getServer();REUSABLE.reset(source);REUSABLE.publish=true;return current=REUSABLE;
     }
     /** Detached native-operation capture; this scope never publishes to the journal. */
