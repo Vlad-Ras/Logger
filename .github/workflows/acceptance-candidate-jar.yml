@@ -11,6 +11,8 @@ on:
       - gradle.properties
       - proguard-rules.pro
       - src/main/**
+      - src/createSmoke/**
+      - src/test/**
       - src/generated/**
   workflow_dispatch:
 
