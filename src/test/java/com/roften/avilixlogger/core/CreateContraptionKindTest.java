@@ -16,6 +16,13 @@ public final class CreateContraptionKindTest {
         check(CreateContraptionKind.fromType("othermod:bearing") == CreateContraptionKind.UNKNOWN, "foreign bearing");
         check(CreateContraptionKind.fromType(null) == CreateContraptionKind.UNKNOWN, "null registry type");
         check(CreateContraptionKind.fromType("create:future_type") == CreateContraptionKind.UNKNOWN, "unverified type guessed");
+        for (var type : new String[]{"create:mounted", "create:carriage", "create:bearing",
+                "create:clockwork", "create:piston", "create:pulley", "create:gantry",
+                "create:elevator", "create:stabilized", "create:future_type", "minecraft:bearing"}) {
+            check(CreateContraptionKind.fromLocation(net.minecraft.resources.ResourceLocation.parse(type))
+                    == CreateContraptionKind.fromType(type), "alloc-free kind lookup changed: " + type);
+        }
+
         check(CreateContraptionKind.fromSource("create:trainwreck") == CreateContraptionKind.UNKNOWN, "prefix alias");
         check(CreateContraptionKind.fromSource("create:train") == CreateContraptionKind.TRAIN, "legacy train");
         for (var kind : CreateContraptionKind.values()) if (kind != CreateContraptionKind.UNKNOWN) {
