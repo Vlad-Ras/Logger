@@ -29,6 +29,15 @@ public final class CreateCargoAudit {
                 && !CartAuditContext.restoring() && !CreateStructuralAudit.covered(entity)
                 && (capture != null || CartAutomationAudit.capturingChanges() || CreateCartAudit.enabled());
     }
+    /** Lifecycle is independent of cargo switches; detached native capture remains
+     * available for rollback fixtures even when AuthCore disallows publication. */
+    static boolean lifecycleActive(AbstractContraptionEntity entity) {
+        return entity != null && entity.level() instanceof ServerLevel level
+                && level.getServer().isSameThread() && !CartAuditContext.restoring()
+                && (captureFor(entity) != null || CartAutomationAudit.capturingChanges()
+                    || CreateCartAudit.enabled());
+    }
+
     public static boolean internal(AbstractContraptionEntity entity) {
         var operation = OPERATION.get();
         return operation != null && operation.entity == entity && operation.internal
