@@ -4,12 +4,15 @@ on:
   push:
     branches:
       - fix/2.1.23-memory-ci-20261022
+      - feat/2.1.23-create-capture-tps-switches-20261023
     paths:
       - .github/workflows/acceptance-candidate-jar.yml
       - build.gradle
       - gradle.properties
       - proguard-rules.pro
       - src/main/**
+      - src/createSmoke/**
+      - src/test/**
       - src/generated/**
   workflow_dispatch:
 

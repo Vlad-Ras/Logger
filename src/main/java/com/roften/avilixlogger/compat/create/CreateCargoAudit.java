@@ -24,11 +24,20 @@ public final class CreateCargoAudit {
     private static Capture captureFor(AbstractContraptionEntity entity){for(var capture=CAPTURE.get();capture!=null;capture=capture.previous)if(capture.entity==entity)return capture;return null;}
     public static boolean active(AbstractContraptionEntity entity) {
         var capture = captureFor(entity);
-        return entity.getContraption() != null && CreateContraptionSources.kind(entity) != CreateContraptionKind.UNKNOWN
+        return CreateCapturePolicy.cargo(entity)
                 && entity.level() instanceof ServerLevel level && level.getServer().isSameThread()
                 && !CartAuditContext.restoring() && !CreateStructuralAudit.covered(entity)
                 && (capture != null || CartAutomationAudit.capturingChanges() || CreateCartAudit.enabled());
     }
+    /** Lifecycle is independent of cargo switches; detached native capture remains
+     * available for rollback fixtures even when AuthCore disallows publication. */
+    static boolean lifecycleActive(AbstractContraptionEntity entity) {
+        return entity != null && entity.level() instanceof ServerLevel level
+                && level.getServer().isSameThread() && !CartAuditContext.restoring()
+                && (captureFor(entity) != null || CartAutomationAudit.capturingChanges()
+                    || CreateCartAudit.enabled());
+    }
+
     public static boolean internal(AbstractContraptionEntity entity) {
         var operation = OPERATION.get();
         return operation != null && operation.entity == entity && operation.internal
@@ -44,6 +53,7 @@ public final class CreateCargoAudit {
     }
     static boolean capture(AbstractContraptionEntity entity, ActionType type, String phase,
                            CompoundTag before, CompoundTag after, String detail) {
+        if (!CreateCapturePolicy.action(entity, type)) return false;
         var capture = captureFor(entity);
         if (capture == null) return false;
         if (capture.rows.size() == 512) { capture.complete = false; return true; }
@@ -85,10 +95,11 @@ public final class CreateCargoAudit {
     }
     public static void emit(AbstractContraptionEntity entity, ActionType type, String phase,
                             CompoundTag before, CompoundTag after, String detail) {
-        if (!CreateCartAudit.enabled() || !(entity.level() instanceof ServerLevel level)) return;
+        if (!CreateCapturePolicy.action(entity,type) || !CreateCartAudit.enabled() || !(entity.level() instanceof ServerLevel level)) return;
         LoggerRuntime.storage(level).append(row(entity, type, phase, before, after, detail));
     }
     static void deliver(AbstractContraptionEntity entity,LogEntry row){
+        if (!CreateCapturePolicy.action(entity,row.type)) return;
         var capture=captureFor(entity);
         if(capture!=null){if(capture.rows.size()<512)capture.rows.add(row);else capture.complete=false;return;}
         if(CreateCartAudit.enabled())LoggerRuntime.storage((ServerLevel)entity.level()).append(row);
@@ -96,7 +107,7 @@ public final class CreateCargoAudit {
     /** Only native, verified block-breaking collection passes internal=true. */
     public static OperationScope operation(MovementContext context, String reason, boolean internal) {
         var entity = context.contraption.entity;
-        if (entity == null || !active(entity)) return null;
+        if (entity == null || !active(entity) || !CreateCapturePolicy.actors(entity)) return null;
         return new OperationScope(context, reason, internal);
     }
     public static final class Capture implements AutoCloseable {

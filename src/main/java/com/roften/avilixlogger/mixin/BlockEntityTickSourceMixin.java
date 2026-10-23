@@ -18,6 +18,21 @@ public abstract class BlockEntityTickSourceMixin {
     @WrapMethod(method = "tick")
     private void avilixlogger$withSource(Operation<Void> original) {
         if (com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(blockEntity.getLevel(),blockEntity.getBlockPos())) return;
+        // Bearing controller ticks must not pay authorization, actor and NBT audit costs
+        // when the corresponding Create contraption type is switched off.
+        if (blockEntity.getLevel() instanceof ServerLevel
+                && com.roften.avilixlogger.core.CreateSupport.available()
+                && !LoggerConfig.VALUES.logCreateBearings.get()
+                && blockEntity.getClass().getName().contains("Bearing")) {
+            var type = net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
+            if ("create".equals(type.getNamespace())
+                    && (type.getPath().contains("bearing") || type.getPath().contains("clockwork"))) {
+                String previous = MutationSourceResolver.enter(MutationSourceResolver.VANILLA_SIMULATION);
+                try (var ignored = com.roften.avilixlogger.core.CauseContext.unattributed()) { original.call(); }
+                finally { MutationSourceResolver.restore(previous); }
+                return;
+            }
+        }
         if (!(blockEntity.getLevel() instanceof ServerLevel) || !LoggerConfig.isTickCaptureEnabled()) {
             original.call();
             return;

@@ -14,7 +14,10 @@ public final class CreateMechanismAudit {
     private CreateMechanismAudit() {}
     public static CreateMechanismContext.Stamp enter(MovementContext context) {
         var previous = CreateMechanismContext.current();
-        if (context.world.isClientSide || context.state == null || context.localPos == null
+        // Check policy before actor cache, block registry, or position tracking.
+        if (!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateActorWork.get()
+                || context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+                || context.world.isClientSide || context.state == null || context.localPos == null
                 || CartAuditContext.current() == null
                 && CreateContraptionKind.fromSource(MutationSourceResolver.resolveExternalSource()) == CreateContraptionKind.UNKNOWN)
             return previous;

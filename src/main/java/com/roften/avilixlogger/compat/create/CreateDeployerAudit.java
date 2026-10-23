@@ -20,7 +20,8 @@ public final class CreateDeployerAudit {
     private static final ThreadLocal<Session> CURRENT = new ThreadLocal<>();
     private CreateDeployerAudit() {}
     public static Session begin(MovementContext context, BlockPos target, DeployerFakePlayer player, String mode) {
-        if (!CreateCartAudit.enabled()) return null;
+        if (context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+                || !CreateCartAudit.enabled()) return null;
         return capture(context, target, player, mode);
     }
     /** Capture/finish are also usable by dev fixtures; publishing always requires authorization. */
@@ -64,7 +65,8 @@ public final class CreateDeployerAudit {
     }
     /** An incomplete history barrier prevents a later undo from crossing a failed capture. */
     public static void captureFailed(MovementContext context, BlockPos pos, String mode) {
-        if (!CreateCartAudit.enabled() || !(context.world instanceof ServerLevel level) || context.contraption.entity == null) return;
+        if (context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+                || !CreateCartAudit.enabled() || !(context.world instanceof ServerLevel level)) return;
         var kind = CreateContraptionSources.kind(context.contraption.entity);
         if (kind == CreateContraptionKind.UNKNOWN) return;
         var tag = new CompoundTag(); tag.putInt("Format", 1); tag.putString("Kind", "deployer_action");

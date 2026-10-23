@@ -68,6 +68,42 @@ public final class CreateContraptionKindsSmoke {
             CreateMechanismContext.restore(cached);
         } finally { MutationSourceResolver.restore(previous); }
         check(CreateMechanismContext.current() == null, "native actor context leaked");
+        var flags = com.roften.avilixlogger.LoggerConfig.VALUES;
+        boolean bearingEnabled = flags.logCreateBearings.get();
+        boolean actorEnabled = flags.logCreateActorWork.get();
+        boolean cargoEnabled = flags.logCreateCargoTransfers.get();
+        boolean lifecycleEnabled = flags.logCreateLifecycle.get();
+        boolean movementEnabled = flags.logCreateMovement.get();
+        try {
+            flags.logCreateBearings.set(false);
+            check(CreateCapturePolicy.mutedEntity(bearing), "bearing tick must be muted");
+            check(!CreateCapturePolicy.allows(bearing), "bearing must be excluded");
+            check(CreateCapturePolicy.allows(train) && CreateCapturePolicy.allows(mounted), "other construction types were disabled");
+            check(CreateMechanismAudit.enter(context) == null && CreateMechanismContext.current() == null,
+                    "disabled bearing still allocated actor stamp");
+            flags.logCreateBearings.set(true);
+            flags.logCreateActorWork.set(false);
+            check(!CreateCapturePolicy.actors(bearing) && CreateCapturePolicy.cargo(bearing),
+                    "actor flag unexpectedly switched cargo category");
+            flags.logCreateActorWork.set(true);
+            flags.logCreateCargoTransfers.set(false);
+            check(!CreateCapturePolicy.cargo(bearing) && CreateCapturePolicy.lifecycle(bearing),
+                    "cargo flag unexpectedly disabled lifecycle");
+            flags.logCreateCargoTransfers.set(true);
+            flags.logCreateLifecycle.set(false);
+            check(!CreateCapturePolicy.lifecycle(bearing) && CreateCapturePolicy.cargo(bearing),
+                    "lifecycle flag unexpectedly disabled cargo");
+            flags.logCreateLifecycle.set(true);
+            flags.logCreateMovement.set(false);
+            check(!CreateCapturePolicy.movement(bearing) && CreateCapturePolicy.cargo(bearing),
+                    "movement flag unexpectedly disabled cargo");
+        } finally {
+            flags.logCreateBearings.set(bearingEnabled);
+            flags.logCreateActorWork.set(actorEnabled);
+            flags.logCreateCargoTransfers.set(cargoEnabled);
+            flags.logCreateLifecycle.set(lifecycleEnabled);
+            flags.logCreateMovement.set(movementEnabled);
+        }
         var profile = new com.mojang.authlib.GameProfile(UUID.randomUUID(), "type_filter_fixture");
         var player = new net.minecraft.server.level.ServerPlayer(world.getServer(), world, profile, net.minecraft.server.level.ClientInformation.createDefault());
         var build = com.roften.avilixlogger.net.LoggerNetwork.class.getDeclaredMethod("buildBaseGuiQuery", net.minecraft.server.level.ServerPlayer.class, com.roften.avilixlogger.net.GuiFilters.class, int.class);
