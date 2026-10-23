@@ -11,11 +11,12 @@ public final class CreateStructureAudit {
     private static final ThreadLocal<Interaction> CURRENT=new ThreadLocal<>();
     private CreateStructureAudit() {}
     public static CompoundTag beforeChange(AbstractContraptionEntity entity,BlockPos pos){
+        if (!CreateCapturePolicy.actors(entity) || !CreateCapturePolicy.cargo(entity)) return null;
         var scope=CURRENT.get();if(scope!=null&&scope.entity==entity&&scope.track(pos))return null;
         return snapshot(entity,pos);
     }
     public static Interaction interaction(AbstractContraptionEntity entity,BlockPos pos){
-        if(!CreateCargoAudit.active(entity))return null;
+        if(!CreateCapturePolicy.actors(entity) || !CreateCargoAudit.active(entity))return null;
         var current=CURRENT.get();if(current!=null&&current.entity==entity){current.track(pos);return null;}
         return new Interaction(entity,pos);
     }
@@ -26,7 +27,7 @@ public final class CreateStructureAudit {
         return tag;
     }
     public static void changed(AbstractContraptionEntity entity,BlockPos pos,CompoundTag before){
-        if(before==null)return;var after=snapshot(entity,pos);if(before.equals(after))return;
+        if(before==null || !CreateCapturePolicy.actors(entity) || !CreateCapturePolicy.cargo(entity))return;var after=snapshot(entity,pos);if(before.equals(after))return;
         if(CreateCargoAudit.capture(entity,ActionType.CART_STRUCTURE_CHANGE,"structure",before,after,"local="+pos.toShortString()))return;
         CreateCargoAudit.emit(entity,ActionType.CART_STRUCTURE_CHANGE,"structure",before,after,"local="+pos.toShortString());
     }
