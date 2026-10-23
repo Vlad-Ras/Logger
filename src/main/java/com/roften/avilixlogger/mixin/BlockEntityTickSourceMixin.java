@@ -20,7 +20,8 @@ public abstract class BlockEntityTickSourceMixin {
         if (com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(blockEntity.getLevel(),blockEntity.getBlockPos())) return;
         // Bearing controller ticks must not pay authorization, actor and NBT audit costs
         // when the corresponding Create contraption type is switched off.
-        if (com.roften.avilixlogger.core.CreateSupport.available()
+        if (blockEntity.getLevel() instanceof ServerLevel
+                && com.roften.avilixlogger.core.CreateSupport.available()
                 && !LoggerConfig.VALUES.logCreateBearings.get()
                 && blockEntity.getClass().getName().contains("Bearing")) {
             var type = net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.getType());
