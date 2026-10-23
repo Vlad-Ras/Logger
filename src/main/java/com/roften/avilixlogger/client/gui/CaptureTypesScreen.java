@@ -56,10 +56,11 @@ public final class CaptureTypesScreen extends Screen {
         relayout();
         // A fresh server response prevents accidentally using a previous world's state.
         loaded=false;pending=false;
-        PacketDistributor.sendToServer(new C2SCaptureTypesPayload(C2SCaptureTypesPayload.Action.QUERY,0,false,0));
+        if (Minecraft.getInstance().getConnection() != null)
+            PacketDistributor.sendToServer(new C2SCaptureTypesPayload(C2SCaptureTypesPayload.Action.QUERY,0,false,0));
     }
 
-    private int visibleCount() { return Math.max(1,Math.min(CaptureTypePolicy.GROUPS,(height - 100)/21)); }
+    private int visibleCount() { return Math.max(1,Math.min(CaptureTypePolicy.GROUPS,(height - 134)/21)); }
     private void relayout() {
         int visible = visibleCount();
         scroll=Math.max(0,Math.min(scroll,CaptureTypePolicy.GROUPS-visible));
