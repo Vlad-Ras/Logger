@@ -30,6 +30,9 @@ public final class AsyncLogStorage implements LogStorage {
         if (CreateContraptionKind.fromSource(entry.source) == CreateContraptionKind.UNKNOWN
                 && CreateContraptionKind.id(constructionSource) != null) entry.source = constructionSource;
         entry.source = CreateMechanismContext.decorate(entry.source);
+        // The current CartAuditContext may have supplied the definitive source.
+        // Recheck before item-identity snapshots to prevent typed-source bypasses.
+        if (!CaptureTypePolicy.allows(entry.type,entry.source,entry.extra)) return;
         entry.attachCartItemIdentity();
         if (entry.source != null && entry.source.startsWith("create:cart:")) LogIdGenerator.ensure(entry);
         LogEntry snapshot = entry.copyForQueue();
