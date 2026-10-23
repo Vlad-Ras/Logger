@@ -55,7 +55,9 @@ public class AbstractContraptionEntityMixin {
     @com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod(method = "tick")
     private void avilixlogger$typedTick(com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
         var self = (com.simibubi.create.content.contraptions.AbstractContraptionEntity)(Object)this;
-        if (self.level().isClientSide || !com.roften.avilixlogger.compat.create.CreateCartAudit.enabled()
+        // Skip per-tick provenance, ID and actor bookkeeping for excluded kinds.
+        if (self.level().isClientSide || !com.roften.avilixlogger.compat.create.CreateCapturePolicy.allows(self)
+                || !com.roften.avilixlogger.compat.create.CreateCartAudit.enabled()
                 || self instanceof com.roften.avilixlogger.compat.create.CartEntityAccess access && access.avilixlogger$mountedState() != null) {
             original.call(); return;
         }
