@@ -44,8 +44,12 @@ public final class CreateCapturePolicy {
         if (!allows(entity)) return false;
         return switch (action) {
             case CART_MOVE, CART_STATUS -> LoggerConfig.VALUES.logCreateMovement.get();
-            case CART_ASSEMBLE, CART_DISASSEMBLE, CART_LOAD, CART_UNLOAD, CART_REMOVE ->
+            case CART_ASSEMBLE, CART_DISASSEMBLE, CART_LOAD, CART_UNLOAD, CART_REMOVE,
+                    CART_PACK, CART_PLACE, TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE ->
                     LoggerConfig.VALUES.logCreateLifecycle.get();
+            case CREATE_DEPLOYER_ACTION, CART_STRUCTURE_CHANGE ->
+                    LoggerConfig.VALUES.logCreateActorWork.get();
+            case CART_ROLLBACK -> true; // Audit of committed rollback must never be silenced.
             default -> LoggerConfig.VALUES.logCreateCargoTransfers.get();
         };
     }
