@@ -87,6 +87,12 @@ neoForge {
                 jvmArgument '-Xmx4G'
                 jvmArgument '-XX:+ExitOnOutOfMemoryError'
             }
+            if (project.hasProperty('trainStateSmoke')) {
+                systemProperty 'avilixlogger.createSmoke', 'false'
+                systemProperty 'avilixlogger.trainRollbackSmoke', 'true'
+                systemProperty 'avilixlogger.trainSmokeRepeats', project.findProperty('trainSmokeRepeats') ?: '1'
+                if(project.hasProperty('trainSmokeCase')) systemProperty 'avilixlogger.trainSmokeCase', project.property('trainSmokeCase')
+            }
             if (project.hasProperty('createAbsent')) {
                 systemProperty 'avilixlogger.createAbsentSmoke', 'true'
                 gameDirectory = project.file('run-create-absent')

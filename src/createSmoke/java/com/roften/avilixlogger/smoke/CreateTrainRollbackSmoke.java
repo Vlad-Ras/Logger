@@ -25,7 +25,7 @@ public final class CreateTrainRollbackSmoke {
     public static final class Probe {
         @net.neoforged.bus.api.SubscribeEvent public static void start(net.neoforged.neoforge.event.server.ServerStartedEvent event){
             if(!Boolean.getBoolean("avilixlogger.trainRollbackSmoke"))return;
-            try{run(event.getServer().overworld());}catch(Throwable failure){failure.printStackTrace();System.out.println("CREATE_TRAIN_ROLLBACK_FAILED");}finally{event.getServer().halt(false);}
+            try{for(int repeat=0;repeat<Integer.getInteger("avilixlogger.trainSmokeRepeats",1);repeat++)run(event.getServer().overworld());}catch(Throwable failure){failure.printStackTrace();System.out.println("CREATE_TRAIN_ROLLBACK_FAILED");}finally{event.getServer().halt(false);}
         }
     }
     public static void run(ServerLevel world)throws Exception {
@@ -35,6 +35,7 @@ public final class CreateTrainRollbackSmoke {
         for(int x=0;x<3;x++)manager.updateChunkStatus(new net.minecraft.world.level.ChunkPos(pos.east(x*8)),net.minecraft.world.level.entity.Visibility.TRACKED);
         int tested=0;
         for(String mode:List.of("commit","cancel-world","cancel-spawn","cancel-registry","world-conflict","graph-conflict","graph-late","registry-conflict","apply-failure","locks","backwards","two-carriages","portal-refusal","unloaded-refusal","station-conflict","signal-busy","fluid-cargo","fluid-conflict","waiting-queue","schedule","signal-reserve","body-conflict","two-bogeys","representation-unloaded","representation-portal","representation-cancel","representation-cancel-portal","representation-cargo-conflict","representation-position-conflict","representation-graph-late","representation-uuid-conflict","representation-links-refusal","representation-missing-anchor","representation-locks","representation-spawn-reject","representation-spawn-throw","state-loaded","state-unloaded","state-portal","state-portal-both","state-portal-unloaded","state-multiple","state-cancel","state-duplicate","state-loaded-duplicate","state-graph-conflict")){
+            if(System.getProperty("avilixlogger.trainSmokeCase")!=null&&!mode.equals(System.getProperty("avilixlogger.trainSmokeCase")))continue;
             var graph=new TrackGraph();var a=new TrackNode(new TrackNodeLocation(Vec3.atLowerCornerOf(pos.west(8)).add(.5,0,.5)).in(world),TrackGraph.nextNodeId(),new Vec3(0,1,0));var b=new TrackNode(new TrackNodeLocation(Vec3.atLowerCornerOf(pos.east(32)).add(.5,0,.5)).in(world),TrackGraph.nextNodeId(),new Vec3(0,1,0));graph.addNode(a);graph.addNode(b);var edge=new TrackEdge(a,b,null,TrackMaterial.ANDESITE);graph.putConnection(a,b,edge);graph.putConnection(b,a,new TrackEdge(b,a,null,TrackMaterial.ANDESITE));Create.RAILWAYS.putGraphWithDefaultGroup(graph);
             var carriages=new ArrayList<Carriage>();var constructions=new ArrayList<CarriageContraption>();var originals=new ArrayList<CarriageContraptionEntity>();var glues=new ArrayList<SuperGlueEntity>();var stationPos=pos.north(3);CreateStructuralAudit.Scope capture=null;Train train=null;Train competingTrain=null;
             try{

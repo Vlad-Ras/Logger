@@ -16,6 +16,18 @@ import java.util.*;
 public final class CreateTrainRegistry {
     public static final String RAILWAY_MUTATION="create/railway/world-mutation";
     private CreateTrainRegistry(){}
+    private static String difference(Tag actual,Tag expected,String path){
+        if(Objects.equals(actual,expected))return path;
+        if(actual instanceof CompoundTag a&&expected instanceof CompoundTag b){
+            var keys=new TreeSet<String>();keys.addAll(a.getAllKeys());keys.addAll(b.getAllKeys());
+            for(var key:keys)if(!Objects.equals(a.get(key),b.get(key)))return difference(a.get(key),b.get(key),path+"."+key);
+        }else if(actual instanceof ListTag a&&expected instanceof ListTag b){
+            if(a.size()!=b.size())return path+".size";
+            for(int i=0;i<a.size();i++)if(!a.get(i).equals(b.get(i)))return difference(a.get(i),b.get(i),path+"["+i+"]");
+        }
+        return path;
+    }
+
     public static String key(UUID id){return "create/train/"+id;}
     public static boolean locked(UUID id){return CartRestoreLocks.resourceLocked(key(id));}
     public static boolean stationLocked(UUID id){return CartRestoreLocks.resourceLocked("create/station/"+id);}
@@ -119,7 +131,7 @@ public final class CreateTrainRegistry {
         }
         private void verifyPayload(){
             if(!carriageRuntime(restored).equals(before.getList("CarriageRuntime",10)))throw new IllegalStateException("Runtime вагона или груза отличается от снимка");
-            var actual=write(restored,new DimensionPalette(new ArrayList<>(before.getList("DimensionPalette",10).stream().map(raw->net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,net.minecraft.resources.ResourceLocation.parse(((CompoundTag)raw).getString("Id")))).toList())),server.registryAccess());if(!actual.equals(before.getCompound("Native")))throw new IllegalStateException("NBT восстановленного поезда отличается от снимка");
+            var actual=write(restored,new DimensionPalette(new ArrayList<>(before.getList("DimensionPalette",10).stream().map(raw->net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,net.minecraft.resources.ResourceLocation.parse(((CompoundTag)raw).getString("Id")))).toList())),server.registryAccess());if(!actual.equals(before.getCompound("Native")))throw new IllegalStateException("NBT восстановленного поезда отличается от снимка: "+difference(actual,before.getCompound("Native"),"Native"));
             if(!((CreateNavigationAccess)restored.navigation).avilixlogger$navigation(palette).equals(before.getCompound("NavigationRuntime")))throw new IllegalStateException("Навигация поезда отличается от снимка");
             if(!((CreateTrainRuntimeAccess)restored).avilixlogger$trainRuntime(server.registryAccess()).equals(before.getCompound("Runtime")))throw new IllegalStateException("Runtime поезда отличается от снимка");
         }
