@@ -29,7 +29,6 @@ public final class CreateCompletionSmoke {
         CreateCoupledStructuralSmoke.run(world);
         CreateTrainRollbackSmoke.run(world);
         CreateDeployerJointSmoke.run(world);
-        CreateDeployerRecipientSmoke.run(world);
         CreateCreativeTransferSmoke.run(world);
         CreateWorldCreativeSmoke.run(world);
         CreateDeployerCreativeSmoke.run(world);

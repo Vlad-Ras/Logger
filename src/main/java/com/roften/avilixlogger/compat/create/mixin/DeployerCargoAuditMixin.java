@@ -25,12 +25,22 @@ public abstract class DeployerCargoAuditMixin {
         avilixlogger$exchange(context, "deployer_return", original);
     }
     @Unique private void avilixlogger$exchange(MovementContext context, String reason, Operation<Void> original) {
-        if (!com.roften.avilixlogger.compat.create.CreateCartAudit.enabled()) {
+        var entity=context.contraption==null?null:context.contraption.entity;
+        if (!com.roften.avilixlogger.compat.create.CreateCapturePolicy.actors(entity)
+                || !com.roften.avilixlogger.compat.create.CreateCapturePolicy.cargo(entity)) {
+            original.call(context);return;
+        }
+        if (!com.roften.avilixlogger.compat.create.CreateCartAudit.tickEnabled()) {
             try (var scope = CreateCargoAudit.operation(context, reason, false)) { original.call(context); } return;
         }
-        var target = context.position == null ? context.contraption.entity.blockPosition() : BlockPos.containing(context.position);
+        var player=getPlayer(context);
+        if (player==null || reason.equals("deployer_take")&&!player.getMainHandItem().isEmpty()
+                || reason.equals("deployer_return")&&player.getInventory().isEmpty()) {
+            original.call(context);return;
+        }
+        var target = context.position == null ? entity.blockPosition() : BlockPos.containing(context.position);
         CreateDeployerAudit.Session session;
-        try { session = CreateDeployerAudit.capture(context, target, getPlayer(context), "USE"); }
+        try { session = CreateDeployerAudit.begin(context, target, player, "USE"); }
         catch (Throwable failure) {
             com.roften.avilixlogger.AvilixLoggerMod.LOGGER.error("[AvilixLogger] Deployer inventory capture failed", failure);
             try { original.call(context); } finally { CreateDeployerAudit.captureFailed(context, target, "USE"); } return;

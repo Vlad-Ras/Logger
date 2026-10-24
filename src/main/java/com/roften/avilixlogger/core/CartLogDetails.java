@@ -12,9 +12,16 @@ public final class CartLogDetails {
     private CartLogDetails(){}
     public static List<Component> describe(ServerLevel level,LogEntry row){
         if(CreateContraptionKind.id(row.source)==null)return List.of();
-        var before=NbtSerde.fromSnbt(row.beBefore);var after=NbtSerde.fromSnbt(row.beAfter);if(after==null)return List.of();if(before==null){if(!after.getString("Kind").equals("lifecycle"))return List.of();before=new CompoundTag();}
+        var before=NbtSerde.fromSnbt(row.beBefore);var after=NbtSerde.fromSnbt(row.beAfter);if(after==null)return List.of();if(before==null){if(!Set.of("lifecycle","train_state").contains(after.getString("Kind")))return List.of();before=new CompoundTag();}
         List<Component> lines=new ArrayList<>();String kind=after.getString("Kind");
-        if(kind.equals("deployer_action")&&Set.of(1,2,3,4).contains(after.getInt("JointFormat"))){
+        if(kind.equals("train_state")){
+            var registry=after.getCompound("Registry");
+            lines.add(Component.literal("Контрольная точка поезда · "+(registry.hasUUID("Id")?registry.getUUID("Id"):"ID отсутствует")));
+            lines.add(Component.literal("Вагонов: "+registry.getCompound("Native").getList("Carriages",10).size()+" · "+(after.getBoolean("Complete")?"полный снимок":"неполный снимок — восстановление запрещено")));
+            if(after.contains("Failure"))lines.add(Component.literal(after.getString("Failure")));
+            return lines;
+        }
+        if(kind.equals("deployer_action")&&Set.of(1,2,3,4,5,6).contains(after.getInt("JointFormat"))){
             lines.add(Component.literal("Активатор · операция "+after.getUUID("Transfer")+" · "+(after.getBoolean("Complete")?"рука и цели связаны":"неполный снимок — откат запрещён")));
             lines.add(Component.literal("Груз: изменённых ячеек "+after.getList("Cargo",10).stream().filter(t->!((CompoundTag)t).getString("Kind").equals("storage_io")).count()));
             for(var raw:after.getList("Cargo",10)){var io=(CompoundTag)raw;if(io.getString("Kind").equals("storage_io"))lines.add(Component.literal(io.getString("Direction").equals("in")?"Бесконечное хранилище · поглощено: ":"Бесконечное хранилище · выдано: ").append(resource(level,io.getString("ResourceKind"),io.getCompound("Payload"))));}

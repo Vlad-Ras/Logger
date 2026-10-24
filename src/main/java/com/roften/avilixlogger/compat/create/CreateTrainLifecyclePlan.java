@@ -42,3 +42,4 @@ public record CreateTrainLifecyclePlan(UUID id,CompoundTag registry,int carriage
     }
     private static ListTag list(CompoundTag tag,String key,int limit){if(!(tag.get(key) instanceof ListTag list)||list.size()>limit||!list.isEmpty()&&list.getElementType()!=10)throw new IllegalStateException("Повреждён список поезда: "+key);return list;}
 }
+

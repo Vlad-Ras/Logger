@@ -79,9 +79,15 @@ public final class LoggerCommands {
 
             .then(CartCommands.node())
             .then(BackpackCommands.node())
+            .then(literal("perf")
+                .requires(s -> PermissionUtil.has(s, "avilixlogger.command.admin", 2))
+                .executes(c -> { c.getSource().sendSystemMessage(Component.literal(HotPathMetrics.report()));return 1; })
+                .then(literal("start").executes(c -> { HotPathMetrics.start();c.getSource().sendSystemMessage(Component.literal("Замеры Logger включены. /log perf — отчёт; /log perf stop — остановка."));return 1; }))
+                .then(literal("stop").executes(c -> { String report=HotPathMetrics.stop();c.getSource().sendSystemMessage(Component.literal(report));AvilixLoggerMod.LOGGER.info("[AvilixLogger] {}",report);return 1; })))
 
             // Short help + examples
-            .then(literal("help").executes(LoggerCommands::help))
+            .then(literal("help").executes(LoggerCommands::help)
+                .then(argument("topic",StringArgumentType.word()).executes(c->{sendGuide(c.getSource(),StringArgumentType.getString(c,"topic"));return 1;})))
 
             // Optional GUI (requires the client to have the mod installed)
             .then(literal("gui")
@@ -222,7 +228,7 @@ public final class LoggerCommands {
     }
 
     private static boolean hasAnyPlanePermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+        return net.neoforged.fml.ModList.get().isLoaded("immersive_aircraft") && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.plane",
                 "avilixlogger.command.plane.find",
                 "avilixlogger.command.plane.find.offline",
@@ -233,7 +239,7 @@ public final class LoggerCommands {
     }
 
     private static boolean hasAnyPlaneOwnerPermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
+        return net.neoforged.fml.ModList.get().isLoaded("immersive_aircraft") && com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
                 && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.plane",
                 "avilixlogger.command.plane.owner.info",
@@ -1429,27 +1435,16 @@ public final class LoggerCommands {
     }
 
     private static void sendShortHelp(CommandSourceStack src) {
-        src.sendSystemMessage(Component.literal("AvilixLogger — /log").withStyle(ChatFormatting.GOLD));
-
-        src.sendSystemMessage(Component.literal("Просмотр").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --t 30m --r 10 --m theft").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --d 2026-01-25 --r 20 --p Steve").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --d 2026-01-25 --ad   (все миры)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log i [флаги...]   |   /log last [флаги...]" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Откат").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log rollback --t 2h --r 30 --m grief   (состояние 2 часа назад)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log rollback --at 2026-08-27T12:30 --we   (состояние на точный момент)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log rollback --confirm   |   /log rollback --cancel" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Флаги (коротко)").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  --t time | --at yyyy-MM-ddTHH:mm | --d date (00:00) | --r radius | --we | --block" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  mode: grief | theft | combat | planes | all   |   types: --ty break,place,container_take" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  dim: overworld | nether | end   (или полный id: minecraft:overworld)" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Пресеты").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log preset save <name> <args...>   |   /log preset run <name> [args...]" ).withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("AvilixLogger — /log gui · «Действия» · «Справка»").withStyle(ChatFormatting.GOLD));
+        src.sendSystemMessage(Component.literal("Поиск: /log --t 30m --r 20 --p Steve · осмотр: /log i").withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("Откат: /log rollback --t 2h --r 20, затем --confirm или --cancel").withStyle(ChatFormatting.GRAY));
+        for(var topic:com.roften.avilixlogger.core.LoggerUserGuide.TOPICS)
+            src.sendSystemMessage(Component.literal("/log help "+topic.id()+" — "+topic.title()).withStyle(style->style.withColor(ChatFormatting.AQUA).withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND,"/log help "+topic.id()))));
+    }
+    private static void sendGuide(CommandSourceStack src,String topic) {
+        var guide=com.roften.avilixlogger.core.LoggerUserGuide.topic(topic);
+        src.sendSystemMessage(Component.literal(guide.title()).withStyle(ChatFormatting.GOLD));
+        for(String line:guide.text().lines().toList())src.sendSystemMessage(Component.literal(line).withStyle(ChatFormatting.GRAY));
     }
 
     private static final class ParsedFlags {

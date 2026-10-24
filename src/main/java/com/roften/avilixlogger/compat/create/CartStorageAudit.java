@@ -92,6 +92,9 @@ public final class CartStorageAudit {
         if(storage!=alias.manager.get()||alias.aggregate&&handler!=storage.getAllItems()&&handler!=storage.getFluids())return null;
         return entity;
     }
+    public static boolean capturing(Ref ref) {
+        var entity=ref==null?null:ref.entity.get();return entity!=null&&CreateCargoAudit.active(entity);
+    }
     public static boolean locked(Ref ref) { var e = ref == null ? null : ref.entity.get(); return e != null && (CreateCargoAudit.restoreLocked(e) || CreateCartAudit.state(e) != null && CreateCartAudit.state(e).locked); }
     public static void changed(Ref ref, int slot, ItemStack before, ItemStack after) {
         var e = ref == null ? null : ref.entity.get();

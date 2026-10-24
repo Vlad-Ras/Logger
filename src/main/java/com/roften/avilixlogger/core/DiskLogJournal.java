@@ -64,11 +64,22 @@ final class DiskLogJournal {
     }
 
     List<Path> pending() throws IOException {
-        ArrayList<Path> paths = new ArrayList<>();
+        return pending(Integer.MAX_VALUE);
+    }
+
+    /** Delivery needs only the oldest window, even after a long database outage. */
+    List<Path> pending(int limit) throws IOException {
+        if (limit < 1) throw new IllegalArgumentException("Invalid journal window");
+        Comparator<Path> order = Comparator.comparing(path -> path.getFileName().toString());
+        PriorityQueue<Path> oldest = new PriorityQueue<>(Math.min(limit, 64), order.reversed());
         try (var files = Files.newDirectoryStream(directory, "*.jsonl")) {
-            for (Path file : files) paths.add(file);
+            for (Path file : files) {
+                if (oldest.size() < limit) oldest.add(file);
+                else if (order.compare(file, oldest.peek()) < 0) { oldest.poll(); oldest.add(file); }
+            }
         }
-        paths.sort(Comparator.comparing(path -> path.getFileName().toString()));
+        ArrayList<Path> paths = new ArrayList<>(oldest);
+        paths.sort(order);
         return paths;
     }
 

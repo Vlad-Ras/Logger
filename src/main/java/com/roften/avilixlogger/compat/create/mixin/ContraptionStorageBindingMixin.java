@@ -15,12 +15,12 @@ public abstract class ContraptionStorageBindingMixin {
     private void avilixlogger$bind(Contraption contraption, CallbackInfo ci) {
         if(contraption!=null && contraption instanceof com.roften.avilixlogger.compat.create.ContraptionIdentity identity
                 && identity.avilixlogger$identity()==null) identity.avilixlogger$identity(((AbstractContraptionEntity)(Object)this).getUUID());
-        avilixlogger$refresh();
+        avilixlogger$refresh(true);
     }
     @Inject(method = "tick", at = @At("HEAD"), require = 1)
-    private void avilixlogger$bindings(CallbackInfo ci) { avilixlogger$refresh(); }
-    private void avilixlogger$refresh() {
+    private void avilixlogger$bindings(CallbackInfo ci) { avilixlogger$refresh(false); }
+    private void avilixlogger$refresh(boolean initial) {
         var entity = (AbstractContraptionEntity)(Object)this;
-        if (!entity.level().isClientSide && CreateCartAudit.enabled()) CartStorageAudit.ensureBound(entity);
+        if (!entity.level().isClientSide && (initial || com.roften.avilixlogger.core.CartAuditContext.rollbackActive || com.roften.avilixlogger.compat.create.CreateCapturePolicy.cargo(entity)) && CreateCartAudit.tickEnabled()) CartStorageAudit.ensureBound(entity);
     }
 }

@@ -9,8 +9,8 @@ public final class CreateMechanismContext {
     }
     private static final ThreadLocal<Stamp> CURRENT = new ThreadLocal<>();
     private CreateMechanismContext() {}
-    public static Stamp enter(Stamp stamp) { var previous = CURRENT.get(); CURRENT.set(stamp); return previous; }
-    public static void restore(Stamp previous) { if (previous == null) CURRENT.remove(); else CURRENT.set(previous); }
+    public static Stamp enter(Stamp stamp) { var previous = CURRENT.get(); if(previous!=stamp)CURRENT.set(stamp); return previous; }
+    public static void restore(Stamp previous) { if(CURRENT.get()==previous)return; if (previous == null) CURRENT.remove(); else CURRENT.set(previous); }
     public static Stamp current() { return CURRENT.get(); }
     public static String decorate(String source) {
         var stamp = CURRENT.get();

@@ -20,7 +20,8 @@ public final class CreateDeployerAudit {
     private static final ThreadLocal<Session> CURRENT = new ThreadLocal<>();
     private CreateDeployerAudit() {}
     public static Session begin(MovementContext context, BlockPos target, DeployerFakePlayer player, String mode) {
-        if (!CreateCartAudit.enabled()) return null;
+        if (context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+                || !CreateCartAudit.enabled()) return null;
         return capture(context, target, player, mode);
     }
     /** Capture/finish are also usable by dev fixtures; publishing always requires authorization. */
@@ -40,8 +41,6 @@ public final class CreateDeployerAudit {
         }
     }
     public static void attacked(Entity entity, float healthBefore, float absorptionBefore, Vec3 motionBefore, boolean aliveBefore) {
-        if(entity instanceof net.minecraft.world.entity.player.Player)CreateDeployerTransaction.unsupported("PvP требует отдельного контракта");
-        if(entity instanceof LivingEntity&&!entity.isAlive())CreateDeployerTransaction.unsupported("Смерть живой цели требует отдельного возврата трупа, AI и внешних эффектов смерти");
         boolean changed = entity.isRemoved() || entity.isAlive() != aliveBefore || !entity.getDeltaMovement().equals(motionBefore);
         float damage = 0;
         if (entity instanceof LivingEntity living) {
@@ -66,7 +65,8 @@ public final class CreateDeployerAudit {
     }
     /** An incomplete history barrier prevents a later undo from crossing a failed capture. */
     public static void captureFailed(MovementContext context, BlockPos pos, String mode) {
-        if (!CreateCartAudit.enabled() || !(context.world instanceof ServerLevel level) || context.contraption.entity == null) return;
+        if (context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+                || !CreateCartAudit.enabled() || !(context.world instanceof ServerLevel level)) return;
         var kind = CreateContraptionSources.kind(context.contraption.entity);
         if (kind == CreateContraptionKind.UNKNOWN) return;
         var tag = new CompoundTag(); tag.putInt("Format", 1); tag.putString("Kind", "deployer_action");
@@ -128,8 +128,7 @@ public final class CreateDeployerAudit {
             source = decoratedSource; cause = installedCause;
             try{
                 transaction=CreateDeployerTransaction.begin(context,player,target);
-                if(!CreateDeployerTransaction.supportedItem(heldBefore,player))
-                    CreateDeployerTransaction.unsupported("Внешние эффекты предмета активатора требуют отдельного контракта: "+net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(heldBefore.getItem()));
+
             }catch(Throwable failure){close();throw failure;}
         }
         public LogEntry finish(boolean completed) {

@@ -51,7 +51,7 @@ base {
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
 sourceSets.create("createSmoke")
-if (project.hasProperty('createAbsent')) sourceSets.createSmoke.java.exclude('**/CreateCartSmoke.java', '**/CreateAutomationSmoke.java', '**/CreateContraptionKindsSmoke.java', '**/CreateMechanismActionsSmoke.java', '**/CreateCargoSmoke.java', '**/CreateBaseHopperSmoke.java', '**/CreateCompletionSmoke.java', '**/CreateFunnelSmoke.java')
+if (project.hasProperty('createAbsent')) sourceSets.createSmoke.java.include('**/CreateAbsentSmoke.java')
 sourceSets.createSmoke.compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
 sourceSets.createSmoke.runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
 
@@ -72,6 +72,8 @@ neoForge {
     runs {
         client {
             client()
+            if (project.hasProperty('acceptanceJfr')) jvmArgument "-XX:StartFlightRecording=name=avilix_client,settings=profile,dumponexit=true,maxsize=64m,filename=${project.file('run/avilixlogger-client-ci.jfr').absolutePath}"
+            if (project.hasProperty('guiSmoke')) systemProperty 'avilixlogger.guiSmoke', 'true'
 
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
@@ -79,8 +81,16 @@ neoForge {
 
         server {
             server()
-            if (project.hasProperty('createSmoke')) systemProperty 'avilixlogger.createSmoke', 'true'
-            if (project.hasProperty('createAbsent')) systemProperty 'avilixlogger.createAbsentSmoke', 'true'
+            if (project.hasProperty('acceptanceJfr')) jvmArgument "-XX:StartFlightRecording=name=avilix_server,settings=profile,dumponexit=true,maxsize=64m,filename=${project.file('run/avilixlogger-server-ci.jfr').absolutePath}"
+            if (project.hasProperty('createSmoke')) {
+                systemProperty 'avilixlogger.createSmoke', 'true'
+                jvmArgument '-Xmx4G'
+                jvmArgument '-XX:+ExitOnOutOfMemoryError'
+            }
+            if (project.hasProperty('createAbsent')) {
+                systemProperty 'avilixlogger.createAbsentSmoke', 'true'
+                gameDirectory = project.file('run-create-absent')
+            }
             if (project.hasProperty('backpackSmoke')) systemProperty 'avilixlogger.backpackSmoke', 'true'
             if (project.hasProperty('backpackAbsent')) systemProperty 'avilixlogger.backpackAbsent', 'true'
             if (project.hasProperty('actorSmoke')) systemProperty 'avilixlogger.actorSmoke', 'true'
@@ -128,7 +138,7 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
-            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke')) sourceSet(sourceSets.createSmoke)
+            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke')) sourceSet(sourceSets.createSmoke)
         }
     }
 }
@@ -150,17 +160,41 @@ dependencies {
     if (project.hasProperty('actorSmoke') && !project.hasProperty('aircraftAbsent')) {
         localRuntime 'maven.modrinth:immersive-aircraft:RkWu0N4D' // NeoForge 1.21.1, IA 1.4.6
     }
+    // Native food/container contract regression; optional and never bundled in production.
+    if (project.hasProperty('createSmoke') && !project.hasProperty('createAbsent')) {
+        def foodVersions = ['1.3.2': 'GbNuOZ4S', '1.3.4': 'XTVZDOol']
+        def foodVersion = project.findProperty('fdSmokeVersion') ?: '1.3.4'
+        if (!foodVersions.containsKey(foodVersion)) throw new GradleException("Unsupported FD smoke version: ${foodVersion}")
+        localRuntime "maven.modrinth:farmers-delight:${foodVersions[foodVersion]}"
+    }
     // Optional integration: never ship AE2 classes inside the logger JAR.
-    compileOnly 'org.appliedenergistics:appliedenergistics2:19.2.12'
-    localRuntime 'org.appliedenergistics:appliedenergistics2:19.2.12'
+    def compatAe2Version = project.findProperty('compatAe2Version') ?: '19.2.12'
+    compileOnly "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
+    localRuntime "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
     // Optional Create integration. Never embed Create or its libraries in the logger.
-    compileOnly 'com.simibubi.create:create-1.21.1:6.0.11-313'
-    if (!project.hasProperty('createAbsent')) localRuntime 'com.simibubi.create:create-1.21.1:6.0.11-313'
+    def compatCreateVersion = project.findProperty('compatCreateVersion') ?: '6.0.11-313'
+    if (compatCreateVersion.startsWith('6.0.10-')) {
+        // Old Create's POM publishes all development integrations as runtime dependencies.
+        // Its real required libraries are explicit here; do not pull unrelated optional mods.
+        compileOnly("com.simibubi.create:create-1.21.1:${compatCreateVersion}") { transitive = false }
+        compileOnly 'com.tterrag.registrate:Registrate:MC1.21-1.3.0+67'
+        compileOnly 'net.createmod.ponder:ponder-neoforge:1.0.82+mc1.21.1'
+        compileOnly 'dev.engine-room.flywheel:flywheel-neoforge-api-1.21.1:1.0.6'
+        if (!project.hasProperty('createAbsent')) {
+            localRuntime("com.simibubi.create:create-1.21.1:${compatCreateVersion}") { transitive = false }
+            localRuntime 'com.tterrag.registrate:Registrate:MC1.21-1.3.0+67'
+            localRuntime 'net.createmod.ponder:ponder-neoforge:1.0.82+mc1.21.1'
+            localRuntime 'dev.engine-room.flywheel:flywheel-neoforge-1.21.1:1.0.6'
+        }
+    } else {
+        compileOnly "com.simibubi.create:create-1.21.1:${compatCreateVersion}"
+        if (!project.hasProperty('createAbsent')) localRuntime "com.simibubi.create:create-1.21.1:${compatCreateVersion}"
+    }
     // Official release artifacts, compile-only. Neither mod is bundled or required in production.
-    [Backpacked: ['backpacked-neoforge', '1.21.1-3.0.5'], Framework: ['framework-neoforge', '1.21.1-0.13.10']].each { module, spec ->
+    [Backpacked: ['backpacked-neoforge', '1.21.1-3.0.5'], Framework: ['framework-neoforge', project.findProperty('compatFrameworkVersion') ?: '1.21.1-0.13.10']].each { module, spec ->
         def external = { artifact { name = spec[0]; type = 'jar' }; transitive = false }
         compileOnly("com.mrcrayfish.release:${module}:${spec[1]}", external)
-        if (project.hasProperty('backpackSmoke') && !project.hasProperty('backpackAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
+        if ((project.hasProperty('backpackSmoke') || project.hasProperty('createSmoke') || project.hasProperty('guiSmoke')) && !project.hasProperty('backpackAbsent') && !project.hasProperty('createAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
     }
     // --- ClickHouse backend ---
     // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.
@@ -286,6 +320,20 @@ tasks.register('verifyObfuscatedJar') {
             throw new GradleException('ActionType is missing from the ProGuard mapping')
         }
 
+        // Network/client boundaries invoke these methods by literal names after obfuscation.
+        def hookClass = 'com.roften.avilixlogger.client.gui.LogViewerClientHooks'
+        def hookStart = mappingText.indexOf(hookClass + ' -> ')
+        if (hookStart < 0) throw new GradleException('Client hooks missing from ProGuard mapping')
+        def hookEnd = mappingText.indexOf('\ncom.', hookStart + 1)
+        def hookMapping = mappingText.substring(hookStart, hookEnd < 0 ? mappingText.length() : hookEnd)
+        def networkSource = file('src/main/java/com/roften/avilixlogger/net/LoggerNetwork.java').getText('UTF-8')
+        def hookCalls = networkSource =~ /invokeClientHook\("([^"\n]+)"/
+        hookCalls.each { call ->
+            def name = call[1]
+            if (!(hookMapping =~ /(?m)\b${name}\([^\n]* -> ${name}\s*$/).find())
+                throw new GradleException("Client hook renamed/missing after obfuscation: ${name}")
+        }
+
         def actionTypeName = actionTypeMapping.group(1)
         def jarUrl = releaseJar.get().asFile.toURI().toURL()
         def loader = new URLClassLoader(([jarUrl] + sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() }) as URL[], ClassLoader.getPlatformClassLoader())
@@ -318,6 +366,18 @@ tasks.register('verifyMixinSafety') {
             include '**/*Mixin.java'
         }.findAll { unsafePattern.matcher(it.getText('UTF-8')).find() }
 
+        def networkSource = file('src/main/java/com/roften/avilixlogger/net/LoggerNetwork.java').getText('UTF-8')
+        def rules = file('proguard-rules.pro').getText('UTF-8')
+        def hooks = networkSource =~ /invokeClientHook\("([^"\n]+)"/
+        hooks.each { call ->
+            if (!rules.contains("public static void ${call[1]}(...);"))
+                throw new GradleException("Reflection client hook lacks keep rule: ${call[1]}")
+        }
+
+        fileTree('src/main/java/com/roften/avilixlogger/compat/create/mixin') { include '**/*.java' }.each { source ->
+            if(source.getText('UTF-8').contains('CreateDeployerAudit.capture('))
+                throw new GradleException("Production mixin bypasses live capture policy: ${source.name}")
+        }
         if (!unsafeFiles.isEmpty()) {
             throw new GradleException('Unsafe mixin instance collection initializer(s): '
                     + unsafeFiles.collect { project.relativePath(it) }.join(', '))
@@ -333,6 +393,14 @@ tasks.named('check').configure {
     dependsOn tasks.named('verifyObfuscatedJar')
     dependsOn tasks.named('verifyMixinSafety')
     dependsOn 'testAsyncPipeline'
+}
+
+tasks.register('testNativeClickHouse', JavaExec) {
+    group = 'verification'
+    description = 'Runs a real ClickHouse schema/flush/lookup/restart integration, with no AuthCore bypass.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.roften.avilixlogger.core.ClickHouseNativeSmoke'
 }
 
 tasks.register('testAsyncPipeline', JavaExec) {

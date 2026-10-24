@@ -10,6 +10,7 @@ import org.spongepowered.asm.mixin.injection.Coerce;
 public abstract class BackpackUpgradePacketsMixin {
     @WrapMethod(method={"handleChangeAugment","handleSetAugmentState","handleUpdateAugment","handleUnlockSlot","handleUnlockAugmentBay","handleRenameBackpack","handleCustomiseBackpack","handleSortBackpack"})
     private static void avilixlogger$setting(@Coerce Object message,MessageContext context,Operation<Void> original){
+        if(context.getPlayer().map(com.roften.avilixlogger.core.CartRestoreLocks::playerLocked).orElse(false))return;
         try(var scope=BackpackAudit.scope(context.getPlayer().orElse(null),"setting:"+message.getClass().getSimpleName())){original.call(message,context);}
     }
 }

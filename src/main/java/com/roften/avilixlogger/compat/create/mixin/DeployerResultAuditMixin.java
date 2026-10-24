@@ -27,32 +27,32 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class DeployerResultAuditMixin {
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lcom/simibubi/create/content/kinetics/deployer/DeployerHandler;safeOnUse(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/phys/BlockHitResult;)Lnet/minecraft/world/InteractionResult;"), require = 1)
     private static InteractionResult avilixlogger$block(BlockState state, Level level, BlockPos pos, Player player, InteractionHand hand, BlockHitResult hit, Operation<InteractionResult> original) {
-        var result = original.call(state, level, pos, player, hand, hit);
-        CreateDeployerAudit.used("block_use", result.consumesAction(), null); return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("block_use")){var result = original.call(state, level, pos, player, hand, hit);
+        CreateDeployerAudit.used("block_use", result.consumesAction(), null); return result;}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;useOn(Lnet/minecraft/world/item/context/UseOnContext;)Lnet/minecraft/world/InteractionResult;"), require = 1)
     private static InteractionResult avilixlogger$item(ItemStack stack, UseOnContext context, Operation<InteractionResult> original) {
-        var result = original.call(stack, context); CreateDeployerAudit.used("item_use", result.consumesAction(), null); return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("item_use")){var result = original.call(stack, context); CreateDeployerAudit.used("item_use", result.consumesAction(), null); return result;}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;onItemUseFirst(Lnet/minecraft/world/item/context/UseOnContext;)Lnet/minecraft/world/InteractionResult;"), require = 1)
     private static InteractionResult avilixlogger$itemFirst(ItemStack stack, UseOnContext context, Operation<InteractionResult> original) {
-        var result = original.call(stack, context); CreateDeployerAudit.used("item_first", result.consumesAction(), null); return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("item_first")){var result = original.call(stack, context); CreateDeployerAudit.used("item_first", result.consumesAction(), null); return result;}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/Item;use(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;)Lnet/minecraft/world/InteractionResultHolder;"), require = 1)
     private static InteractionResultHolder<ItemStack> avilixlogger$itemUse(Item item, Level level, Player player, InteractionHand hand, Operation<InteractionResultHolder<ItemStack>> original) {
-        var result = original.call(item, level, player, hand); CreateDeployerAudit.used("item_use", result.getResult().consumesAction(), null); return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("item_use")){var result = original.call(item, level, player, hand); CreateDeployerAudit.used("item_use", result.getResult().consumesAction(), null); return result;}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/Entity;interact(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;)Lnet/minecraft/world/InteractionResult;"), require = 1)
     private static InteractionResult avilixlogger$entity(Entity entity, Player player, InteractionHand hand, Operation<InteractionResult> original) {
         if(com.roften.avilixlogger.core.CartAuditContext.rollbackActive&&!com.roften.avilixlogger.core.CartAuditContext.restoring()&&com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID()))return InteractionResult.FAIL;
         com.roften.avilixlogger.compat.create.CreateDeployerTransaction.entityBefore(entity);
-        var result = original.call(entity, player, hand); CreateDeployerAudit.used("entity_use", result.consumesAction(), entity); return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("entity_use")){var result = original.call(entity, player, hand); CreateDeployerAudit.used("entity_use", result.consumesAction(), entity); return result;}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;interactLivingEntity(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/InteractionHand;)Lnet/minecraft/world/InteractionResult;"), require = 1)
     private static InteractionResult avilixlogger$entityItem(ItemStack stack, Player player, LivingEntity entity, InteractionHand hand, Operation<InteractionResult> original) {
         if(com.roften.avilixlogger.core.CartAuditContext.rollbackActive&&!com.roften.avilixlogger.core.CartAuditContext.restoring()&&com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID()))return InteractionResult.FAIL;
         com.roften.avilixlogger.compat.create.CreateDeployerTransaction.entityBefore(entity);
-        var result = original.call(stack, player, entity, hand); CreateDeployerAudit.used("entity_use", result.consumesAction(), entity); return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("entity_use")){var result = original.call(stack, player, entity, hand); CreateDeployerAudit.used("entity_use", result.consumesAction(), entity); return result;}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lcom/simibubi/create/content/kinetics/deployer/DeployerFakePlayer;attack(Lnet/minecraft/world/entity/Entity;)V"), require = 1)
     private static void avilixlogger$attack(com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer player, Entity entity, Operation<Void> original) {
@@ -60,11 +60,11 @@ public abstract class DeployerResultAuditMixin {
         float before = entity instanceof LivingEntity living ? living.getHealth() : 0;
         float absorption = entity instanceof LivingEntity living ? living.getAbsorptionAmount() : 0;
         var motion = entity.getDeltaMovement(); boolean alive = entity.isAlive();
-        try { original.call(player, entity); } finally { CreateDeployerAudit.attacked(entity, before, absorption, motion, alive); }
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("attack")){try { original.call(player, entity); } finally { CreateDeployerAudit.attacked(entity, before, absorption, motion, alive); }}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lcom/simibubi/create/content/kinetics/deployer/DeployerHandler;tryHarvestBlock(Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/server/level/ServerPlayerGameMode;Lnet/minecraft/core/BlockPos;)Z"), require = 1)
     private static boolean avilixlogger$harvest(ServerPlayer player, ServerPlayerGameMode mode, BlockPos pos, Operation<Boolean> original) {
-        boolean result = original.call(player, mode, pos); CreateDeployerAudit.used("harvest", result, null); return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("harvest")){boolean result = original.call(player, mode, pos); CreateDeployerAudit.used("harvest", result, null); return result;}
     }
     @WrapOperation(method = "activateInner", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;finishUsingItem(Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;)Lnet/minecraft/world/item/ItemStack;"), require = 1)
     private static ItemStack avilixlogger$finishUse(ItemStack stack, Level level, LivingEntity recipient, Operation<ItemStack> original) {
@@ -72,12 +72,13 @@ public abstract class DeployerResultAuditMixin {
         boolean self = recipient instanceof Player player && com.roften.avilixlogger.core.CreateActorContext.isTechnicalPlayer(player);
         if(!self){
             com.roften.avilixlogger.compat.create.CreateDeployerTransaction.entityBefore(recipient);
-            if(!(recipient instanceof ServerPlayer)||recipient instanceof net.neoforged.neoforge.common.util.FakePlayer)
-                com.roften.avilixlogger.compat.create.CreateDeployerTransaction.unsupported("Неизвестный получатель пищи");
+
         }
-        var result = original.call(stack, level, recipient);
-        CreateDeployerAudit.used(self ? "item_use" : recipient instanceof Player ? "player_feed" : "entity_use",true,self ? null : recipient);
-        return result;
+        try(var use=com.roften.avilixlogger.compat.create.CreateDeployerTransaction.using("item_finish")){
+        var result = original.call(stack, level, recipient);use.returned(result);
+        CreateDeployerAudit.used(self ? "item_use" : recipient instanceof Player ? "player_feed" : "entity_use",
+                true, self ? null : recipient);
+        return result;}
     }
 
 }

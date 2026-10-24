@@ -10,6 +10,11 @@ final class JournalPipelineTest {
     static void run() throws Exception {
         Path directory = Files.createTempDirectory("avilixlogger-journal-test");
         try {
+            Path window=Files.createDirectory(directory.resolve("window"));
+            for(int i=149;i>=0;i--)Files.createFile(window.resolve(String.format(java.util.Locale.ROOT,"%04d.jsonl",i)));
+            var oldest=new DiskLogJournal(window).pending(64);
+            check(oldest.size()==64&&oldest.getFirst().getFileName().toString().equals("0000.jsonl")&&oldest.getLast().getFileName().toString().equals("0063.jsonl"),"bounded journal window skipped/reordered oldest files");
+            check(new DiskLogJournal(window).pending().size()==150,"bounded journal scan deleted pending files");
             PendingLogStorage offline = new PendingLogStorage(directory, 256, 1024 * 1024, 100, 10);
             for (int i = 0; i < 1000; i++) {
                 LogEntry row = row("строка " + i); row.count = i;

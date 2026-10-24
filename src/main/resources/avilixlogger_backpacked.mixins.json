@@ -5,6 +5,11 @@
   "plugin": "com.roften.avilixlogger.compat.backpacked.mixin.BackpackedMixinPlugin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
+    "BackpackSyncedKeyReservationMixin",
+    "BackpackUnlockReservationMixin",
+    "BackpackCountReservationMixin",
+    "BackpackCraftingProgressReservationMixin",
+    "BackpackExploreReservationMixin",
     "BackpackInventoryAccessor",
     "BackpackShelfStackAccessor",
     "BackpackContentsMixin",

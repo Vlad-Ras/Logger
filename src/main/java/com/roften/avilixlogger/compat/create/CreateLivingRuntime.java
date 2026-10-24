@@ -20,6 +20,7 @@ import java.util.*;
 /** Operation-bound, registry-aware runtime. An actor reference can never resolve to its human owner. */
 public final class CreateLivingRuntime {
     private static final ThreadLocal<Bindings> BOUND=new ThreadLocal<>();
+    private static final ThreadLocal<LivingEntity> SAVING=new ThreadLocal<>();
     private CreateLivingRuntime(){}
     public static final class Bindings {
         private final LivingEntity actor;private final Map<CompoundTag,Entity> values=new HashMap<>();
@@ -27,13 +28,21 @@ public final class CreateLivingRuntime {
         public void run(Runnable action){var previous=BOUND.get();BOUND.set(this);try{action.run();}finally{if(previous==null)BOUND.remove();else BOUND.set(previous);}}
     }
     public static Bindings bind(LivingEntity actor,Collection<CompoundTag> states){
+        return bind(actor,states,Map.of());
+    }
+    public static Bindings bind(LivingEntity actor,Collection<CompoundTag> states,Map<UUID,Entity> candidates){
         var bindings=new Bindings(actor);
         for(var state:states){if(state.isEmpty())continue;var refs=new ArrayList<CompoundTag>();
             for(String key:List.of("LastMob","LastVictim","LastPlayer","MobTarget"))refs.add(state.getCompound(key));
             var sources=new ArrayList<CompoundTag>();sources.add(state.getCompound("LastSource"));
             for(var raw:state.getCompound("Tracker").getList("Entries",10))sources.add(((CompoundTag)raw).getCompound("Source"));
             for(var source:sources){refs.add(source.getCompound("Direct"));refs.add(source.getCompound("Causing"));}
-            for(var ref:refs)if(!ref.isEmpty())bindings.values.put(ref.copy(),reference(ref,actor));
+            for(var ref:refs)if(!ref.isEmpty()){
+                Entity entity=candidates.get(ref.hasUUID("UUID")?ref.getUUID("UUID"):null);
+                if(ref.getBoolean("Actor")||entity==null)entity=reference(ref,actor);
+                if(!entity.level().dimension().location().toString().equals(ref.getString("Dimension"))||!BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString().equals(ref.getString("Type")))throw new IllegalStateException("Кандидат цели сменил тип или измерение");
+                bindings.values.put(ref.copy(),entity);
+            }
         }
         return bindings;
     }
@@ -77,6 +86,35 @@ public final class CreateLivingRuntime {
             throw new IllegalStateException("Предмет runtime не прочитан полностью");
         return stack;
     }
+    public static CompoundTag entitySnapshot(ServerLevel level,Entity entity){
+        var previous=SAVING.get();if(entity instanceof LivingEntity living)SAVING.set(living);
+        try{return NbtSerde.snapshotEntity(level,entity);}finally{if(previous==null)SAVING.remove();else SAVING.set(previous);}
+    }
+    public static boolean savingInventory(Player player){return SAVING.get()==player;}
+    /** Same slot addresses as Inventory.save, with expanded counts preserved. */
+    public static ListTag inventorySnapshot(Player player){
+        var inventory=player.getInventory();if(inventory.getContainerSize()!=41)throw new IllegalStateException("Неизвестный размер инвентаря runtime");
+        var list=new ListTag();
+        for(int slot=0;slot<41;slot++){
+            var stack=inventory.getItem(slot);if(stack.isEmpty())continue;
+            var value=NbtSerde.snapshotItemStack(stack,player.registryAccess());
+            if(value==null)throw new IllegalStateException("Предмет инвентаря runtime не сохранён");
+            value.putByte("Slot",(byte)(slot<36?slot:slot<40?slot+64:150));list.add(value);
+        }
+        return list;
+    }
+    private static int inventorySlot(CompoundTag value){
+        int slot=value.getByte("Slot")&255;
+        return slot<36?slot:slot>=100&&slot<104?slot-64:slot==150?40:-1;
+    }
+    private static void validateInventory(CompoundTag persistent){
+        var inventory=list(persistent,"Inventory");var slots=new HashSet<Integer>();
+        if(inventory.size()>41||!persistent.contains("XpSeed",3)||!persistent.contains("SelectedItemSlot",3)||persistent.getInt("SelectedItemSlot")<0||persistent.getInt("SelectedItemSlot")>=9)
+            throw new IllegalStateException("Неполный инвентарь runtime");
+        for(var raw:inventory){var value=(CompoundTag)raw;int slot=inventorySlot(value);
+            if(!value.contains("Slot",1)||slot<0||!slots.add(slot)||!value.contains("id",8)||!value.contains("count",3)||value.getInt("count")<=0)
+                throw new IllegalStateException("Некорректный слот инвентаря runtime");}
+    }
     public static CompoundTag capture(LivingEntity entity,LivingEntity actor){
         var tag=((CreateLivingRuntimeAccess)entity).avilixlogger$livingRuntime(actor);
         var attributes=new ListTag();
@@ -93,21 +131,42 @@ public final class CreateLivingRuntime {
         }
         // Materialize supported attributes before saving native data so capture itself cannot
         // make the next snapshot appear to contain a new attribute definition.
-        var persistent=new CompoundTag();if(entity instanceof net.minecraft.server.level.ServerPlayer){persistent=((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving();tag.putBoolean("PlayerBase",true);}else entity.addAdditionalSaveData(persistent);tag.put("Persistent",persistent);
-        if(entity instanceof com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer technical)tag.put("ActorState",CreateDeployerActorState.capture(technical));
+        var persistent=new CompoundTag();var previous=SAVING.get();SAVING.set(entity);
+        try{if(entity instanceof net.minecraft.server.level.ServerPlayer&&!(entity instanceof FakePlayer))((CreateHumanRuntimeAccess)entity).avilixlogger$savePlayerRuntime(persistent);else entity.addAdditionalSaveData(persistent);}finally{if(previous==null)SAVING.remove();else SAVING.set(previous);}
+        normalize(persistent);tag.put("Persistent",persistent);
         tag.put("Attributes",attributes);if(entity instanceof Player player){var food=new CompoundTag();player.getFoodData().addAdditionalSaveData(food);tag.put("Food",food);}
         if(entity instanceof Mob mob){tag.put("MobTarget",reference(mob.getTarget(),actor));tag.putBoolean("Aggressive",mob.isAggressive());}
         if(tag.sizeInBytes()>2*1024*1024)throw new IllegalStateException("Runtime активатора превышает 2 MiB");return tag;
+    }
+    /** Native attribute maps do not promise iteration order after an entity is recreated. */
+    public static void normalize(CompoundTag persistent){
+        // NeoForge serializes a cure set in iteration order. Compare the actual cure
+        // members, not their incidental order, across native save/load round-trips.
+        if(persistent.contains("active_effects",9))for(var raw:persistent.getList("active_effects",10)){
+            var effect=(CompoundTag)raw;
+            if(!(effect.get("neoforge:cures") instanceof ListTag cures)||cures.getElementType()!=Tag.TAG_STRING||cures.size()<2)continue;
+            boolean alreadySorted=true;
+            for(int i=1;i<cures.size();i++)if(cures.getString(i-1).compareTo(cures.getString(i))>0){alreadySorted=false;break;}
+            if(alreadySorted)continue;
+            var ordered=cures.stream().map(Tag::getAsString).sorted().toList();
+            var canonical=new ListTag();for(var cure:ordered)canonical.add(StringTag.valueOf(cure));
+            effect.put("neoforge:cures",canonical);
+        }
+        if(!persistent.contains("attributes",9))return;var sorted=new ListTag();
+        for(var raw:persistent.getList("attributes",10).stream().sorted(Comparator.comparing(t->((CompoundTag)t).getString("id"))).toList()){
+            var row=((CompoundTag)raw).copy();if(row.contains("modifiers",9)){var modifiers=new ListTag();row.getList("modifiers",10).stream().sorted(Comparator.comparing(t->((CompoundTag)t).getString("id"))).forEach(t->modifiers.add(t.copy()));row.put("modifiers",modifiers);}sorted.add(row);
+        }
+        persistent.put("attributes",sorted);
     }
     private record AttributeState(AttributeInstance instance,double base,List<AttributeModifier> permanent,List<AttributeModifier> temporary){}
     private static List<AttributeState> decode(LivingEntity entity,LivingEntity actor,CompoundTag tag){
         validate(tag);validateReferences(tag,actor);
         if(entity instanceof Player){
             if(!tag.contains("Food",10))throw new IllegalStateException("Нет снимка питания активатора");
+            validateInventory(tag.getCompound("Persistent"));
+            for(var raw:tag.getCompound("Persistent").getList("Inventory",10))item((CompoundTag)raw,entity);
         }
         if(entity instanceof Mob&&(!tag.contains("MobTarget",10)||!tag.contains("Aggressive",1)))throw new IllegalStateException("Нет состояния цели моба");
-        if(entity instanceof FakePlayer&&tag.getBoolean("PlayerBase")&&!tag.contains("ActorState",10))throw new IllegalStateException("Нет данных технического игрока");
-        if(tag.contains("ActorState",10)){if(!(entity instanceof com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer technical))throw new IllegalStateException("Технический игрок заменён");CreateDeployerActorState.preflight(technical,tag.getCompound("ActorState"));}
         var ops=entity.registryAccess().createSerializationContext(NbtOps.INSTANCE);
         var persistent=tag.getCompound("Persistent");
         if(persistent.contains("active_effects"))for(var raw:list(persistent,"active_effects"))
@@ -128,26 +187,27 @@ public final class CreateLivingRuntime {
     public static void restore(LivingEntity entity,LivingEntity actor,CompoundTag tag){
         tag=project(tag,entity.tickCount);
         var states=decode(entity,actor,tag);
-        var previousEffects=new HashSet<>(entity.getActiveEffectsMap().keySet());
         ((CreateLivingRuntimeAccess)entity).avilixlogger$clearEffectsForRestore();
-        if(tag.getBoolean("PlayerBase")){if(!(entity instanceof net.minecraft.server.level.ServerPlayer))throw new IllegalStateException("Получатель заменён техническим игроком");((CreatePlayerLivingAccess)entity).avilixlogger$baseLiving(tag.getCompound("Persistent").copy());}else entity.readAdditionalSaveData(tag.getCompound("Persistent").copy());
-        // Native Player loading replaces a valid zero seed with a random value.
-        if(entity instanceof Player&&tag.getCompound("Persistent").contains("XpSeed",3))((CreatePlayerLivingAccess)entity).avilixlogger$enchantmentSeed(tag.getCompound("Persistent").getInt("XpSeed"));
-        if(tag.contains("ActorState",10))CreateDeployerActorState.restore((net.minecraft.server.level.ServerPlayer)entity,tag.getCompound("ActorState"));
+        var nativeData=tag.getCompound("Persistent").copy();
+        // Inventory.load uses the vanilla count-limited codec. Decode these stacks
+        // separately, after native data is loaded, without changing the saved snapshot.
+        if(entity instanceof Player)nativeData.put("Inventory",new ListTag());
+        if(entity instanceof net.minecraft.server.level.ServerPlayer&&!(entity instanceof FakePlayer))((CreateHumanRuntimeAccess)entity).avilixlogger$loadPlayerRuntime(nativeData);
+        else entity.readAdditionalSaveData(nativeData);
         for(var state:states){state.instance.removeModifiers();state.instance.setBaseValue(state.base);for(var modifier:state.permanent)state.instance.addPermanentModifier(modifier);for(var modifier:state.temporary)state.instance.addTransientModifier(modifier);}
         // Native loading clamps health before transient max-health modifiers are back.
         // Reapply these values only after restoring the complete attribute set.
         entity.setHealth(tag.getCompound("Persistent").getFloat("Health"));
         entity.setAbsorptionAmount(tag.getCompound("Persistent").getFloat("AbsorptionAmount"));
-        if(entity instanceof Player player)player.getFoodData().readAdditionalSaveData(tag.getCompound("Food"));
+        if(entity instanceof Player player){
+            player.getFoodData().readAdditionalSaveData(tag.getCompound("Food"));
+            ((CreatePlayerRuntimeAccess)player).avilixlogger$enchantmentSeed(tag.getCompound("Persistent").getInt("XpSeed"));
+            var inventory=player.getInventory();inventory.clearContent();
+            for(var raw:tag.getCompound("Persistent").getList("Inventory",10)){var value=(CompoundTag)raw;inventory.setItem(inventorySlot(value),item(value,player));}
+        }
         ((CreateLivingRuntimeAccess)entity).avilixlogger$livingRuntime(tag,actor);
         if(entity instanceof Mob mob){var target=reference(tag.getCompound("MobTarget"),actor);if(target!=null&&!(target instanceof LivingEntity))throw new IllegalStateException("Цель моба сменила тип");
             ((MobTargetRuntimeAccessor)mob).avilixlogger$target((LivingEntity)target);mob.setAggressive(tag.getBoolean("Aggressive"));}
-        // Direct packets avoid awarding effect advancements again during restoration.
-        if(entity instanceof net.minecraft.server.level.ServerPlayer player&&!(player instanceof FakePlayer)&&player.connection!=null){
-            for(var effect:previousEffects)if(!entity.hasEffect(effect))player.connection.send(new net.minecraft.network.protocol.game.ClientboundRemoveMobEffectPacket(player.getId(),effect));
-            for(var effect:entity.getActiveEffects())player.connection.send(new net.minecraft.network.protocol.game.ClientboundUpdateMobEffectPacket(player.getId(),effect,false));
-        }
     }
     public static void validateReferences(CompoundTag tag,LivingEntity actor){
         for(String field:List.of("LastMob","LastVictim","LastPlayer","MobTarget")){
@@ -157,21 +217,16 @@ public final class CreateLivingRuntime {
         damage(tag.getCompound("LastSource"),actor);item(tag.getCompound("UseItem"),actor);
         for(var raw:tag.getCompound("Tracker").getList("Entries",10))damage(((CompoundTag)raw).getCompound("Source"),actor);
     }
-    public static void matchHistorySchema(LivingEntity entity,CompoundTag actual,CompoundTag expected){
-        if(actual.getBoolean("PlayerBase")&&!expected.getBoolean("PlayerBase")){
-            if(!(entity instanceof FakePlayer))throw new IllegalStateException("Старый снимок реального игрока не поддержан");
-            var persistent=new CompoundTag();entity.addAdditionalSaveData(persistent);actual.put("Persistent",persistent);actual.remove("PlayerBase");actual.remove("ActorState");
-        }
-    }
     public static boolean matches(LivingEntity entity,LivingEntity actor,CompoundTag expected){
-        var actual=capture(entity,actor);matchHistorySchema(entity,actual,expected);return actual.equals(project(expected,entity.tickCount));
+        return capture(entity,actor).equals(project(expected,entity.tickCount));
     }
     /** Only deterministic native counters are aged; health, inventory, effects, AI and
      * combat entries still have to match. An intervening action is a conflict. */
     public static CompoundTag project(CompoundTag original,int tick){
         if(!original.contains("Tick",3)||tick<original.getInt("Tick"))throw new IllegalStateException("Цель была перезагружена после действия активатора");
-        var tag=original.copy();long elapsed=(long)tick-original.getInt("Tick");tag.putInt("Tick",tick);
+        var tag=original.copy();normalize(tag.getCompound("Persistent"));long elapsed=(long)tick-original.getInt("Tick");tag.putInt("Tick",tick);
         for(String field:List.of("AttackStrength","NoAction"))tag.putInt(field,(int)Math.min(Integer.MAX_VALUE,(long)original.getInt(field)+elapsed));
+        if(tag.contains("Food",10)&&elapsed>0)tag.putInt("NoAction",0);
         for(String field:List.of("HurtTime","Invulnerable","LastPlayerTime"))tag.putInt(field,(int)Math.max(0,(long)original.getInt(field)-elapsed));
         if(elapsed>original.getInt("LastPlayerTime"))tag.put("LastPlayer",new CompoundTag());
         if((long)tick-original.getInt("LastMobAt")>100)tag.put("LastMob",new CompoundTag());
@@ -199,12 +254,12 @@ public final class CreateLivingRuntime {
                 if(!Double.isFinite(decoded.amount())||!modifierIds.add(decoded.id()))throw new IllegalStateException("Повторный или некорректный модификатор runtime");
             }
         }
-        if(tag.contains("ActorState")){if(!tag.contains("ActorState",10)||!tag.getBoolean("PlayerBase"))throw new IllegalStateException("Неполные данные технического игрока");CreateDeployerActorState.validate(tag.getCompound("ActorState"));}
         var persistent=tag.getCompound("Persistent");
         if(!persistent.contains("Health",5)||!Float.isFinite(persistent.getFloat("Health"))||persistent.getFloat("Health")<0
                 ||!persistent.contains("AbsorptionAmount",5)||!Float.isFinite(persistent.getFloat("AbsorptionAmount"))||persistent.getFloat("AbsorptionAmount")<0
                 ||!persistent.contains("attributes",9))throw new IllegalStateException("Нет полного здоровья/атрибутов runtime");
         list(persistent,"attributes");
+        if(persistent.contains("Inventory"))validateInventory(persistent);
         for(String key:List.of("LastMob","LastVictim","LastPlayer")){if(!tag.contains(key,10))throw new IllegalStateException("Отсутствует ссылка боя: "+key);referenceSchema(tag.getCompound(key));}
         if(!tag.contains("LastSource",10))throw new IllegalStateException("Нет последнего источника урона");damageSchema(tag.getCompound("LastSource"));
         var useItem=tag.getCompound("UseItem");

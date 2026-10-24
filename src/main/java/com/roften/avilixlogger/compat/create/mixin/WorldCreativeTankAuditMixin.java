@@ -15,7 +15,7 @@ public abstract class WorldCreativeTankAuditMixin {
     @WrapMethod(method="fill")
     private int avilixlogger$fill(FluidStack input,IFluidHandler.FluidAction action,Operation<Integer> original){
         if(CartRestoreLocks.handlerLocked(this)||CartAutomationHooks.locked(this))return 0;
-        if(action.simulate()||!CartAutomationAudit.worldCreativeActive())return original.call(input,action);
+        if(action.simulate()||!CartAutomationAudit.worldCreativeActive(this))return original.call(input,action);
         FluidStack template;
         try{template=((IFluidHandler)this).getFluidInTank(0).copy();}
         catch(RuntimeException error){CartAutomationAudit.worldCreativeUnverified();return original.call(input,action);}
@@ -32,7 +32,7 @@ public abstract class WorldCreativeTankAuditMixin {
     private FluidStack avilixlogger$drainStack(FluidStack request,IFluidHandler.FluidAction action,
                                                 Operation<FluidStack> original){
         if(CartRestoreLocks.handlerLocked(this)||CartAutomationHooks.locked(this))return FluidStack.EMPTY;
-        if(action.simulate()||!CartAutomationAudit.worldCreativeActive())return original.call(request,action);
+        if(action.simulate()||!CartAutomationAudit.worldCreativeActive(this))return original.call(request,action);
         FluidStack template;
         try{template=((IFluidHandler)this).getFluidInTank(0).copy();}
         catch(RuntimeException error){CartAutomationAudit.worldCreativeUnverified();return original.call(request,action);}
@@ -49,7 +49,7 @@ public abstract class WorldCreativeTankAuditMixin {
     private FluidStack avilixlogger$drainAmount(int amount,IFluidHandler.FluidAction action,
                                                  Operation<FluidStack> original){
         if(CartRestoreLocks.handlerLocked(this)||CartAutomationHooks.locked(this))return FluidStack.EMPTY;
-        if(action.simulate()||!CartAutomationAudit.worldCreativeActive())return original.call(amount,action);
+        if(action.simulate()||!CartAutomationAudit.worldCreativeActive(this))return original.call(amount,action);
         FluidStack template;
         try{template=((IFluidHandler)this).getFluidInTank(0).copy();}
         catch(RuntimeException error){CartAutomationAudit.worldCreativeUnverified();return original.call(amount,action);}

@@ -92,6 +92,12 @@ public final class NbtSerde {
 
     /** Captures detached NBT on the world thread; SNBT encoding can run on a worker. */
     public static CompoundTag snapshotBlockEntity(ServerLevel level, BlockEntity be) {
+        long started = HotPathMetrics.beginSnapshot();
+        try { return snapshotBlockEntityPayload(level, be); }
+        finally { HotPathMetrics.endSnapshot(started); }
+    }
+
+    private static CompoundTag snapshotBlockEntityPayload(ServerLevel level, BlockEntity be) {
         if (be == null) return null;
 
         // Hot path for MC 1.21.x: avoid the reflection-heavy invokeBlockEntitySave chain.
@@ -134,6 +140,12 @@ public final class NbtSerde {
     }
 
     public static CompoundTag snapshotEntity(ServerLevel level, Entity ent) {
+        long started = HotPathMetrics.beginSnapshot();
+        try { return snapshotEntityPayload(level, ent); }
+        finally { HotPathMetrics.endSnapshot(started); }
+    }
+
+    private static CompoundTag snapshotEntityPayload(ServerLevel level, Entity ent) {
         if (ent == null) return null;
         CompoundTag tag = new CompoundTag();
         try {
@@ -151,12 +163,14 @@ public final class NbtSerde {
         // produce a half-empty snapshot where Contraption.Type is already missing. For rollback we need
         // the full nested Contraption NBT. Enrich it while the entity is still alive.
         try {
-            if (looksLikeCreateContraptionEntity(ent)) {
-                CompoundTag contraptionTag = extractCreateContraptionNbt(level, ent);
-                if (contraptionTag != null && !contraptionTag.isEmpty()) {
-                    tag.put("Contraption", contraptionTag);
-                }
+            if (looksLikeCreateContraptionEntity(ent)
+                    && (!CreateContraptionSnapshotStore.hasCompleteContraptionSnapshot(tag)
+                    || !tag.getCompound("Contraption").contains("Blocks", Tag.TAG_COMPOUND))) {
                 invokeCreateWriteAdditional(level, ent, tag);
+                if (!CreateContraptionSnapshotStore.hasCompleteContraptionSnapshot(tag)) {
+                    CompoundTag contraptionTag = extractCreateContraptionNbt(level, ent);
+                    if (contraptionTag != null && !contraptionTag.isEmpty()) tag.put("Contraption", contraptionTag);
+                }
             }
         } catch (Throwable ignored) {}
 
@@ -321,6 +335,12 @@ public final class NbtSerde {
     }
 
     public static CompoundTag snapshotItemStack(ItemStack stack, HolderLookup.Provider provider) {
+        long started = HotPathMetrics.beginSnapshot();
+        try { return snapshotItemStackPayload(stack, provider); }
+        finally { HotPathMetrics.endSnapshot(started); }
+    }
+
+    private static CompoundTag snapshotItemStackPayload(ItemStack stack, HolderLookup.Provider provider) {
         if (stack == null || stack.isEmpty()) return null;
         if (canUseSimpleItemStackSnbt(stack)) {
             CompoundTag tag = new CompoundTag();

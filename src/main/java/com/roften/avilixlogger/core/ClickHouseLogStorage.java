@@ -51,6 +51,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         TableKind(String suffix) { this.suffix = suffix; }
     }
 
+    private static final ActionType[] ACTION_TYPES = ActionType.values();
     private static final EnumMap<ActionType, TableKind> ACTION_TABLE = new EnumMap<>(ActionType.class);
     static {
         map(TableKind.BLOCKS,
@@ -1120,7 +1121,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (q == null) return;
         String block = normalizeSqlNeedle(q.blockIdFilter);
         if (!block.isBlank()) {
-            appendInsensitiveContainsAny(sql, block, "target_id", "short_text", "extra", "source");
+            appendSearchAlternatives(sql,block,q.blockAliases,"target_id","short_text","extra","source");
         }
         String planeName = normalizeSqlNeedle(q.planeNameFilter);
         if (!planeName.isBlank()) {
@@ -1138,8 +1139,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         String block = normalizeSqlNeedle(q.blockIdFilter);
         if (!block.isBlank()) {
             switch (kind) {
-                case BLOCKS, CONTAINERS, COMPAT -> appendInsensitiveContainsAny(sql, block, "block_before", "block_after", "extra", "source");
-                default -> appendInsensitiveContainsAny(sql, block, "extra", "source");
+                case BLOCKS, CONTAINERS, COMPAT -> appendSearchAlternatives(sql,block,q.blockAliases,"block_before","block_after","extra","source");
+                default -> appendSearchAlternatives(sql,block,q.blockAliases,"extra","source");
             }
         }
 
@@ -1177,9 +1178,21 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             String needle=q.textFilter.trim().toLowerCase(Locale.ROOT);var columns=new java.util.ArrayList<String>(List.of("actor_name",source,extra,entity,nbt));columns.addAll(List.of(targets));
             sql.append(" AND (");int n=0;
             for(String column:columns){if(n++>0)sql.append(" OR ");sql.append("positionCaseInsensitiveUTF8(").append(column).append(", ").append(sqlString(needle)).append(") > 0");}
+            appendAliases(sql,q.textAliases,columns.toArray(String[]::new));
             for(ActionType type:ActionType.values())if(LogText.actionLabel(type).toLowerCase(Locale.ROOT).contains(needle))sql.append(" OR action = ").append(type.ordinal());
             sql.append(')');
         }
+    }
+
+    private static void appendAliases(StringBuilder sql,List<String> aliases,String... columns){
+        if(aliases==null||aliases.isEmpty())return;
+        String values=aliases.stream().map(ClickHouseLogStorage::sqlString).collect(java.util.stream.Collectors.joining(",","[","]"));
+        for(String column:columns)sql.append(" OR multiSearchAnyCaseInsensitiveUTF8(").append(column).append(", ").append(values).append(") > 0");
+    }
+    private static void appendSearchAlternatives(StringBuilder sql,String needle,List<String> aliases,String... columns){
+        if(needle==null||needle.isBlank())return;
+        sql.append(" AND (");int n=0;for(String column:columns){if(n++>0)sql.append(" OR ");sql.append("positionCaseInsensitiveUTF8(").append(column).append(", ").append(sqlString(needle)).append(") > 0");}
+        appendAliases(sql,aliases,columns);sql.append(')');
     }
 
     private static void appendInsensitiveContainsAny(StringBuilder sql, String needle, String... columns) {
@@ -1326,9 +1339,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 markHealthy();
                 return out;
             }
-            String[] lines = response.split("\\R");
-            for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-                String line = lines[lineNumber];
+            int lineNumber = 0;
+            for (var lines = response.lines().iterator(); lines.hasNext(); lineNumber++) {
+                String line = lines.next();
                 if (line == null || line.isBlank()) continue;
                 int tab = line.indexOf('\t');
                 if (tab <= 0) throw new IllegalStateException("Invalid unified ClickHouse row at response line " + (lineNumber + 1));
@@ -1418,9 +1431,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     private List<LogEntry> parseFeedJsonEachRow(String response) {
         if (response == null || response.isBlank()) return List.of();
         ArrayList<LogEntry> out = new ArrayList<>();
-        String[] lines = response.split("\\R");
-        for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-            String line = lines[lineNumber];
+        int lineNumber = 0;
+        for (var lines = response.lines().iterator(); lines.hasNext(); lineNumber++) {
+            String line = lines.next();
             if (line == null || line.isBlank()) continue;
             try {
                 JsonObject o = JsonParser.parseString(line).getAsJsonObject();
@@ -1429,7 +1442,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 e.ts = getRequiredLong(o, "ts_ms");
                 e.dim = nullIfBlank(getString(o, "dim"));
                 int action = (int) getRequiredLong(o, "action");
-                ActionType[] values = ActionType.values();
+                ActionType[] values = ACTION_TYPES;
                 e.type = action >= 0 && action < values.length ? values[action] : null;
                 e.actorName = nullIfBlank(getString(o, "actor_name"));
                 e.actorUuid = parseUuid(getString(o, "actor_uuid"));
@@ -1473,9 +1486,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     private List<LogEntry> parseSplitJsonEachRow(String response) {
         if (response == null || response.isBlank()) return List.of();
         ArrayList<LogEntry> out = new ArrayList<>();
-        String[] lines = response.split("\\R");
-        for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-            String line = lines[lineNumber];
+        int lineNumber = 0;
+        for (var lines = response.lines().iterator(); lines.hasNext(); lineNumber++) {
+            String line = lines.next();
             if (line == null || line.isBlank()) continue;
             try {
                 JsonObject o = JsonParser.parseString(line).getAsJsonObject();
@@ -1493,7 +1506,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         e.ts = getRequiredLong(o, "ts_ms");
         e.dim = nullIfBlank(getString(o, "dim"));
         int action = (int) getRequiredLong(o, "action");
-        ActionType[] values = ActionType.values();
+        ActionType[] values = ACTION_TYPES;
         e.type = action >= 0 && action < values.length ? values[action] : null;
         e.actorName = nullIfBlank(getString(o, "actor_name"));
         e.actorUuid = parseUuid(getString(o, "actor_uuid"));

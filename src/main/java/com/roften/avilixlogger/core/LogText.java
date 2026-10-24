@@ -49,8 +49,8 @@ public final class LogText {
 
         // New player-death rows persist the exact vanilla/modded death text produced by the combat
         // tracker. Render that text directly instead of rebuilding it from killer/victim fields.
-        if (e.type == ActionType.PLAYER_DEATH && e.extra != null && e.extra.startsWith("death_message:")) {
-            String deathMessage = e.extra.substring("death_message:".length()).trim();
+        if (e.type == ActionType.PLAYER_DEATH && DeathLogDetails.message(e) != null) {
+            String deathMessage = DeathLogDetails.message(e);
             if (!deathMessage.isBlank()) {
                 c.append(Component.literal(deathMessage).withStyle(ChatFormatting.DARK_RED));
                 c.append(Component.literal(" (").withStyle(ChatFormatting.DARK_GRAY));

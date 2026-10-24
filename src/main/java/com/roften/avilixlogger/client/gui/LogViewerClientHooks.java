@@ -21,20 +21,25 @@ import net.neoforged.neoforge.network.PacketDistributor;
 public final class LogViewerClientHooks {
     private LogViewerClientHooks() {}
 
-    private static LogViewerScreen OPEN_SCREEN;
+    private static java.lang.ref.WeakReference<LogViewerScreen> OPEN_SCREEN = new java.lang.ref.WeakReference<>(null);
     private static boolean serverCreateAvailable;
     public static boolean createAvailable() { return serverCreateAvailable && com.roften.avilixlogger.core.CreateSupport.available(); }
 
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
-        OPEN_SCREEN = null;
+        OPEN_SCREEN.clear();
+        LoggerActionsScreen.clear();
+        LocalizedLogSearch.clear();
         serverCreateAvailable = false;
         RollbackPreviewRenderer.clear();
         // Inform server that this player supports the GUI payloads.
-        PacketDistributor.sendToServer(new C2SHelloPayload());
+        var connection=Minecraft.getInstance().getConnection();
+        if(connection!=null&&connection.hasChannel(C2SHelloPayload.TYPE))PacketDistributor.sendToServer(new C2SHelloPayload());
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
-        OPEN_SCREEN = null;
+        OPEN_SCREEN.clear();
+        LoggerActionsScreen.clear();
+        LocalizedLogSearch.clear();
         serverCreateAvailable = false;
         RollbackPreviewRenderer.clear();
     }
@@ -45,15 +50,18 @@ public final class LogViewerClientHooks {
         LogViewerScreen.setLogTimeZone(timeZone);
         Minecraft mc = Minecraft.getInstance();
         if (mc == null) return;
-        OPEN_SCREEN = new LogViewerScreen();
-        mc.setScreen(OPEN_SCREEN);
+        var screen = new LogViewerScreen();
+        OPEN_SCREEN = new java.lang.ref.WeakReference<>(screen);
+        mc.setScreen(screen);
         // Load using the filters/mode restored by the screen, not hard-coded defaults.
-        OPEN_SCREEN.requestInitialData();
+        screen.requestInitialData();
     }
 
     public static void acceptCart(com.roften.avilixlogger.net.S2CCartHistoryPayload payload) {
         Minecraft mc=Minecraft.getInstance();
         if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.OPEN){
+            var existing=CartHistoryScreen.owner(mc.screen);
+            if(existing!=null&&!payload.cartId().isBlank()){existing.showHistory(payload.cartId());return;}
             var screen=new CartHistoryScreen(mc.screen,payload.cartId());mc.setScreen(screen);screen.load();
         }else {
             var screen=CartHistoryScreen.owner(mc.screen);if(screen==null)return;
@@ -62,21 +70,33 @@ public final class LogViewerClientHooks {
         }
     }
 
+    public static void acceptActionResult(com.roften.avilixlogger.net.S2CLoggerActionResultPayload payload) {
+        LoggerActionsScreen.accept(payload);
+    }
+
     public static void acceptPage(S2CLogPagePayload payload) {
         if (payload == null) return;
-        if (OPEN_SCREEN != null) OPEN_SCREEN.apply(payload);
+        var screen=OPEN_SCREEN.get();
+        if (screen != null) screen.apply(payload);
     }
 
     public static void acceptDetails(S2CLogDetailsPayload payload) {
         if (payload == null) return;
         var cartScreen=CartHistoryScreen.owner(Minecraft.getInstance().screen);
         if (cartScreen!=null) cartScreen.acceptDetails(payload);
-        if (OPEN_SCREEN != null) OPEN_SCREEN.applyDetails(payload);
+        var screen=OPEN_SCREEN.get();
+        if (screen != null) screen.applyDetails(payload);
+    }
+
+    public static void acceptCaptureTypes(com.roften.avilixlogger.net.S2CCaptureTypesPayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null && mc.screen instanceof CaptureTypesScreen screen) screen.apply(payload);
     }
 
     public static void acceptInspectTool(S2CInspectToolPayload payload) {
         if (payload == null) return;
-        if (OPEN_SCREEN != null) OPEN_SCREEN.applyInspectTool(payload);
+        var screen=OPEN_SCREEN.get();
+        if (screen != null) screen.applyInspectTool(payload);
     }
 
     public static void acceptRollbackPreview(S2CRollbackPreviewPayload payload) {

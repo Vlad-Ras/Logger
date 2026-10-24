@@ -23,7 +23,8 @@ public final class CreateMixinPlugin implements IMixinConfigPlugin {
             var version = file.getMods().stream().filter(m -> m.getModId().equals("create"))
                     .findFirst().orElseThrow().getVersion().toString();
             // New layouts need an audit even if their public API happens to still match.
-            if (!version.equals("6.0.11")) throw new IllegalStateException("unsupported Create " + version + "; validated version: 6.0.11");
+            if (!version.equals("6.0.11") && !version.equals("6.0.10"))
+                throw new IllegalStateException("unsupported Create " + version + "; validated versions: 6.0.10 and 6.0.11");
             var service = MixinService.getService();
             try (var stream = Objects.requireNonNull(service.getResourceAsStream("avilixlogger_create_trains.mixins.json"));
                  var reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {

@@ -14,3 +14,4 @@ public abstract class CarriageRepresentationAuditMixin {
     @Inject(method="removeAndSaveEntity",at=@At("RETURN"),require=1)
     private void avilixlogger$removed(CarriageContraptionEntity entity,boolean portal,CallbackInfo ci){if(entity.level() instanceof ServerLevel server)CreateTrainLifecycleAudit.changed(this$0,server,portal?"portal_departure":"representation_unloaded");}
 }
+

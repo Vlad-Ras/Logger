@@ -31,7 +31,15 @@ public final class BackpackAudit {
     private static int depth;
     private static final Scope INACTIVE=new Scope(null,List.of(),null,false);
     public static boolean restoring;
-    public static boolean enabled(){return !restoring&&LoggerConfig.isEnabled();}
+    public static boolean enabled(){return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(10)
+            && !restoring&&!CartAuditContext.restoring()&&LoggerConfig.isEnabled();}
+    /** Rebase the native cache/index after a joint restore, without gameplay events or new IDs. */
+    public static void rebase(Container container){
+        CONTENTS.put(container,copySlots(container));DIRTY.remove(container);
+        var ref=ref(container);if(ref==null)return;var id=BackpackIds.id(ref.stack);if(id==null)return;
+        var index=BackpackIndex.get(ref.level.getServer());if(index==null)return;var record=index.record(id);if(record==null)return;
+        locate(ref,record);index.snapshot(record,ref.stack,ref.level.registryAccess());index.touched(record);
+    }
     public static boolean isBag(ItemStack stack){return !stack.isEmpty()&&stack.getItem() instanceof BackpackItem;}
     public static Ref ref(Container container){
         if(container instanceof BackpackInventory bag){

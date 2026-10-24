@@ -18,6 +18,13 @@ public abstract class BlockEntityTickSourceMixin {
     @WrapMethod(method = "tick")
     private void avilixlogger$withSource(Operation<Void> original) {
         if (com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(blockEntity.getLevel(),blockEntity.getBlockPos())) return;
+        if (blockEntity.getLevel() instanceof ServerLevel
+                && com.roften.avilixlogger.core.CreateSupport.available()
+                && com.roften.avilixlogger.compat.create.CreateCapturePolicy.mutedController(blockEntity)) {
+            String previous=MutationSourceResolver.enter(MutationSourceResolver.VANILLA_SIMULATION);
+            try(var ignored=com.roften.avilixlogger.core.CauseContext.unattributed()){original.call();}
+            finally{MutationSourceResolver.restore(previous);}return;
+        }
         if (!(blockEntity.getLevel() instanceof ServerLevel) || !LoggerConfig.isTickCaptureEnabled()) {
             original.call();
             return;

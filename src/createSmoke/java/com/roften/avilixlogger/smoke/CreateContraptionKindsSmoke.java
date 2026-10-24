@@ -19,7 +19,33 @@ import java.util.UUID;
 
 /** Dev-only checks of the native registry, actual actor callbacks and server GUI filters. */
 public final class CreateContraptionKindsSmoke {
+    private static final class CountingBearing extends BearingContraption {
+        int writes;
+        CountingBearing() { super(false, Direction.UP); }
+        @Override public net.minecraft.nbt.CompoundTag writeNBT(net.minecraft.core.HolderLookup.Provider registries, boolean packet) {
+            writes++;return super.writeNBT(registries,packet);
+        }
+    }
+    private static void singleSnapshot(ServerLevel world) throws Exception {
+        var entity = new ControlledContraptionEntity(AllEntityTypes.CONTROLLED_CONTRAPTION.get(),world);
+        var contraption = new CountingBearing();contraption.anchor=BlockPos.ZERO;
+        contraption.bounds=new net.minecraft.world.phys.AABB(BlockPos.ZERO);
+        var set=ControlledContraptionEntity.class.getDeclaredMethod("setContraption",Contraption.class);
+        set.setAccessible(true);set.invoke(entity,contraption);
+        contraption.getBlocks().put(BlockPos.ZERO,new StructureBlockInfo(BlockPos.ZERO,Blocks.STONE.defaultBlockState(),null));
+        entity.setRotationAxis(Direction.Axis.Y);
+        var controller=ControlledContraptionEntity.class.getDeclaredField("controllerPos");controller.setAccessible(true);controller.set(entity,BlockPos.ZERO.below());
+        var tag=NbtSerde.snapshotEntity(world,entity);
+        check(CreateContraptionSnapshotStore.hasCompleteContraptionSnapshot(tag),"bearing snapshot lost native payload");
+        check(contraption.writes==1,"bearing snapshot serialized full construction "+contraption.writes+" times");
+        check(tag.getCompound("Contraption").getCompound("Blocks").getList("BlockList",10).size()==1,"bearing snapshot lost blocks");
+        contraption.getBlocks().clear();
+        check(tag.getCompound("Contraption").getCompound("Blocks").getList("BlockList",10).size()==1,"bearing snapshot retained mutable block map");
+        System.out.println("CREATE_BEARING_SINGLE_SERIALIZATION_OK");
+    }
     public static void run(ServerLevel world) throws Exception {
+        singleSnapshot(world);
+        CreateCaptureSuppressionSmoke.run(world);
         var mountedContraption = new MountedContraption(); mountedContraption.anchor = BlockPos.ZERO;
         mountedContraption.bounds = new net.minecraft.world.phys.AABB(BlockPos.ZERO);
         var mounted = OrientedContraptionEntity.create(world, mountedContraption, Direction.NORTH);
@@ -68,6 +94,42 @@ public final class CreateContraptionKindsSmoke {
             CreateMechanismContext.restore(cached);
         } finally { MutationSourceResolver.restore(previous); }
         check(CreateMechanismContext.current() == null, "native actor context leaked");
+        var flags = com.roften.avilixlogger.LoggerConfig.VALUES;
+        boolean bearingEnabled = flags.logCreateBearings.get();
+        boolean actorEnabled = flags.logCreateActorWork.get();
+        boolean cargoEnabled = flags.logCreateCargoTransfers.get();
+        boolean lifecycleEnabled = flags.logCreateLifecycle.get();
+        boolean movementEnabled = flags.logCreateMovement.get();
+        try {
+            flags.logCreateBearings.set(false);
+            check(CreateCapturePolicy.mutedEntity(bearing), "bearing tick must be muted");
+            check(!CreateCapturePolicy.allows(bearing), "bearing must be excluded");
+            check(CreateCapturePolicy.allows(train) && CreateCapturePolicy.allows(mounted), "other construction types were disabled");
+            check(CreateMechanismAudit.enter(context) == null && CreateMechanismContext.current() == null,
+                    "disabled bearing still allocated actor stamp");
+            flags.logCreateBearings.set(true);
+            flags.logCreateActorWork.set(false);
+            check(!CreateCapturePolicy.actors(bearing) && CreateCapturePolicy.cargo(bearing),
+                    "actor flag unexpectedly switched cargo category");
+            flags.logCreateActorWork.set(true);
+            flags.logCreateCargoTransfers.set(false);
+            check(!CreateCapturePolicy.cargo(bearing) && CreateCapturePolicy.lifecycle(bearing),
+                    "cargo flag unexpectedly disabled lifecycle");
+            flags.logCreateCargoTransfers.set(true);
+            flags.logCreateLifecycle.set(false);
+            check(!CreateCapturePolicy.lifecycle(bearing) && CreateCapturePolicy.cargo(bearing),
+                    "lifecycle flag unexpectedly disabled cargo");
+            flags.logCreateLifecycle.set(true);
+            flags.logCreateMovement.set(false);
+            check(!CreateCapturePolicy.movement(bearing) && CreateCapturePolicy.cargo(bearing),
+                    "movement flag unexpectedly disabled cargo");
+        } finally {
+            flags.logCreateBearings.set(bearingEnabled);
+            flags.logCreateActorWork.set(actorEnabled);
+            flags.logCreateCargoTransfers.set(cargoEnabled);
+            flags.logCreateLifecycle.set(lifecycleEnabled);
+            flags.logCreateMovement.set(movementEnabled);
+        }
         var profile = new com.mojang.authlib.GameProfile(UUID.randomUUID(), "type_filter_fixture");
         var player = new net.minecraft.server.level.ServerPlayer(world.getServer(), world, profile, net.minecraft.server.level.ClientInformation.createDefault());
         var build = com.roften.avilixlogger.net.LoggerNetwork.class.getDeclaredMethod("buildBaseGuiQuery", net.minecraft.server.level.ServerPlayer.class, com.roften.avilixlogger.net.GuiFilters.class, int.class);

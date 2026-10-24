@@ -61,3 +61,4 @@ public final class CreateTrainStateSmoke {
     private static void reject(Runnable action,String text){try{action.run();}catch(IllegalStateException expected){return;}throw new AssertionError(text);}
     private static void check(boolean condition,String text){if(!condition)throw new AssertionError(text);}
 }
+

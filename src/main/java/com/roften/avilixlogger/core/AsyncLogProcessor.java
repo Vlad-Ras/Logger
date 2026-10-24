@@ -18,7 +18,7 @@ public final class AsyncLogProcessor {
                 if (stopping) throw new IllegalStateException("Logger CPU workers stopped");
                 pool = new Pool(LoggerConfig.VALUES.asyncWorkerThreads.get(),
                         LoggerConfig.VALUES.asyncQueueCapacity.get(),
-                        LoggerConfig.VALUES.asyncMaxQueuedPayloadMiB.get() * 1024L * 1024L);
+                        LoggerConfig.captureQueueBytes());
             }
             return pool;
         }

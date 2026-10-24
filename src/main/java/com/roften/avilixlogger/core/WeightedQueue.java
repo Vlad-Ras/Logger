@@ -30,7 +30,11 @@ final class WeightedQueue<T> {
         try {
             // A single unusually large snapshot must still be logged. It runs alone.
             if (!closed && full(weight)) waits++;
-            while (!closed && full(weight)) space.awaitUninterruptibly();
+            if (!closed && full(weight)) {
+                long started = System.nanoTime();
+                try { while (!closed && full(weight)) space.awaitUninterruptibly(); }
+                finally { HotPathMetrics.waited(System.nanoTime()-started); }
+            }
             if (closed) throw new IllegalStateException("Logger queue is closed");
             entries.addLast(new Work<>(value, weight));
             bytes += weight;

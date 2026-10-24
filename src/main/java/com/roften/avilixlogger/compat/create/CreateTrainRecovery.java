@@ -23,6 +23,7 @@ public final class CreateTrainRecovery {
     private static final Map<UUID,Long> REQUESTS=new HashMap<>();
     private static final Map<UUID,Map<UUID,java.lang.ref.WeakReference<CarriageContraptionEntity>>> LOADED=new HashMap<>();
     private static long sequence,generation;private static Job active;
+    public static void expirePreviews(long now){PreviewExpiry.prune(PREVIEWS,now,Preview::expires);}
     private static boolean authorized(ServerPlayer p){return p!=null&&p.getServer()!=null&&CreateSupport.available()&&LoggerConfig.isEnabled()
             &&p.getServer().getPlayerList().getPlayer(p.getUUID())==p&&PermissionUtil.has(p.createCommandSourceStack(),"avilixlogger.command.rollback",2);}
     public static void preview(CommandSourceStack source,UUID id,long entry){
@@ -124,3 +125,4 @@ public final class CreateTrainRecovery {
     public static void stop(){generation++;PREVIEWS.clear();REQUESTS.clear();LOADED.clear();var job=active;
         if(job!=null){boolean old=CartAuditContext.restoring(true);try{if(!job.committed&&job.restore!=null)job.restore.compensate();}finally{CartAuditContext.restoring(old);active=null;release();}}}
 }
+

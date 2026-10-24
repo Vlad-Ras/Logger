@@ -13,6 +13,7 @@ final class DropAggregator {
     private final Consumer<LogEntry> sink;
     private long bytes;
     DropAggregator(Consumer<LogEntry> sink) { this.sink = sink; }
+    int pendingCount() { return pending.size(); }
 
     void add(LogEntry row, long now) {
         Key key = new Key(row.type, row.dim, row.x, row.y, row.z, row.actorUuid, row.actorName,

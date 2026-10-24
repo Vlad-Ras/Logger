@@ -53,3 +53,4 @@ final class CreateCargoLocation {
         if(body.getVehicle()!=null){CartAuditContext.LOCKED_ENTITIES.add(body.getVehicle().getUUID());if(body.getVehicle() instanceof net.minecraft.world.Container container)CartRestoreLocks.container(container);}
     }
 }
+

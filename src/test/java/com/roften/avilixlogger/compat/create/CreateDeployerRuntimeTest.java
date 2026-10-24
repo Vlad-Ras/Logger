@@ -25,6 +25,13 @@ public final class CreateDeployerRuntimeTest {
                 "expanded active stack count was lost during projection");
         largeUse.getCompound("UseItem").putInt("count",0);
         reject(()->CreateLivingRuntime.validate(largeUse),"empty active stack accepted");
+        var inventory=saved.copy();var persistent=inventory.getCompound("Persistent");
+        persistent.putInt("SelectedItemSlot",0);persistent.putInt("XpSeed",0);var items=new ListTag();var offhand=new CompoundTag();
+        offhand.putByte("Slot",(byte)150);offhand.putString("id","minecraft:apple");offhand.putInt("count",2048);
+        items.add(offhand);persistent.put("Inventory",items);CreateLivingRuntime.validate(inventory);
+        items.add(offhand.copy());reject(()->CreateLivingRuntime.validate(inventory),"duplicate runtime inventory slot accepted");
+        items.remove(1);offhand.putByte("Slot",(byte)41);
+        reject(()->CreateLivingRuntime.validate(inventory),"unknown runtime inventory slot accepted");
         for(String field:List.of("LastDamageTime","Start","End","InCombat","TakingDamage","Entries")){
             var broken=saved.copy();broken.getCompound("Tracker").remove(field);reject(()->CreateLivingRuntime.validate(broken),"missing tracker field accepted: "+field);
         }
@@ -38,8 +45,36 @@ public final class CreateDeployerRuntimeTest {
         modifier.put("Value",AttributeModifier.CODEC.encodeStart(NbtOps.INSTANCE,new AttributeModifier(ResourceLocation.parse("avilixlogger:test"),5,AttributeModifier.Operation.ADD_VALUE)).result().orElseThrow());
         values.add(modifier);attribute.put("Modifiers",values);modifiers.getList("Attributes",10).add(attribute);CreateLivingRuntime.validate(modifiers);
         values.add(modifier.copy());reject(()->CreateLivingRuntime.validate(modifiers),"duplicate modifier accepted");
-        cooldowns();legacyAndCurrentPlan();
+        var player=saved.copy();player.put("Food",new CompoundTag());check(CreateLivingRuntime.project(player,112).getInt("NoAction")==0,"player inactivity counter must reset as native aiStep does");
+        progressDeltas();cooldowns();legacyAndCurrentPlan();externalDeltas();
         System.out.println("CREATE_DEPLOYER_RUNTIME_DATA_OK: bounded complete schema, damaged history rejection, detached aging, cooldowns and legacy/current plans");
+    }
+    private static void externalDeltas(){
+        var before=new CompoundTag();before.putInt("tracker:a",1);
+        var after=before.copy();after.putInt("tracker:a",2);after.putBoolean("unlock:a",true);
+        var live=after.copy();live.putInt("tracker:unrelated",7);
+        var restored=CreateExternalPlayerState.merge(live,after,before);
+        check(restored.getInt("tracker:a")==1&&!restored.contains("unlock:a")&&restored.getInt("tracker:unrelated")==7,"external delta erased unrelated progress");
+        check(CreateExternalPlayerState.merge(restored,before,after).equals(live),"external compensation did not restore exact changed cells");
+        live.putInt("tracker:a",3);reject(()->CreateExternalPlayerState.merge(live,after,before),"external conflict overwritten");
+        var external=new CompoundTag();external.putInt("Format",1);external.put("Unknown",new CompoundTag());
+        CreateExternalPlayerState.validatePair(external,external.copy());
+        var changed=external.copy();changed.getCompound("Unknown").putInt("other:mod",1);reject(()->CreateExternalPlayerState.validatePair(external,changed),"unknown attachment mutation accepted");
+        var tracker=new CompoundTag();tracker.putInt("Count",-1);reject(()->CreateExternalPlayerState.trackerData(tracker),"negative external progress accepted");
+        tracker.putInt("Count",1);var set=new ListTag();set.add(StringTag.valueOf("minecraft:plains"));set.add(StringTag.valueOf("minecraft:desert"));tracker.put("ExploredBiomes",set);
+        check(CreateExternalPlayerState.trackerData(tracker).getList("ExploredBiomes",8).getString(0).equals("minecraft:desert"),"external set is not canonical");
+        set.add(StringTag.valueOf("minecraft:plains"));reject(()->CreateExternalPlayerState.trackerData(tracker),"duplicate external progress accepted");
+        var broken=external.copy();broken.remove("Unknown");reject(()->CreateExternalPlayerState.validate(broken),"truncated external state accepted");
+    }
+    private static CompoundTag stat(String value,int count){var row=new CompoundTag();row.putString("Type","minecraft:custom");row.putString("Value",value);row.putInt("Count",count);return row;}
+    private static void progressDeltas(){
+        var before=new CompoundTag();before.put("Stats",new ListTag());before.put("Advancements",new ListTag());before.put("Recipes",new CompoundTag());
+        var after=before.copy();after.getList("Stats",10).add(stat("minecraft:eat_cake_slice",1));
+        var live=after.copy();live.getList("Stats",10).add(stat("minecraft:play_time",20));
+        var undone=CreatePlayerProgress.merge(live,after,before);check(undone.getList("Stats",10).size()==1&&undone.getList("Stats",10).getCompound(0).getInt("Count")==20,"undo rewound unrelated play time");
+        var changed=live.copy();changed.getList("Stats",10).getCompound(0).putInt("Count",2);reject(()->CreatePlayerProgress.merge(changed,after,before),"changed action statistic accepted");
+        var compensated=CreatePlayerProgress.merge(undone,before,after,true);check(compensated.getList("Stats",10).size()==2,"compensation lost action counter or unrelated time");
+        var repeat=CreatePlayerProgress.merge(compensated,before,after,true);check(repeat.equals(compensated),"compensation was not idempotent after a partial restore");
     }
     private static void cooldowns(){
         var tag=new CompoundTag();tag.putInt("Tick",4);var entries=new ListTag();var entry=new CompoundTag();
@@ -62,6 +97,40 @@ public final class CreateDeployerRuntimeTest {
             var cooldowns=new CompoundTag();cooldowns.putInt("Tick",0);cooldowns.put("Entries",new ListTag());rt.put("Cooldowns",cooldowns);
         }
         check(CreateDeployerRollbackPlan.prepare(before,after).hands().size()==1,"complete runtime hand rejected");
+        var old4=before.copy();var now4=after.copy();
+        for(var tag:List.of(old4,now4)){
+            tag.putInt("JointFormat",4);for(String key:List.of("WorldCount","TargetCount","CargoCount","UseCount"))tag.putInt(key,0);tag.put("Uses",new ListTag());
+            var progress=new CompoundTag();progress.putInt("Format",1);progress.put("Stats",new ListTag());progress.put("Advancements",new ListTag());progress.put("Recipes",new CompoundTag());
+            var scores=new CompoundTag();scores.putString("Holder","[Deployer]");scores.put("Objectives",new ListTag());
+            tag.getCompound("Hand").getCompound("Runtime").put("Progress",progress);tag.getCompound("Hand").getCompound("Runtime").put("Scores",scores);
+        }
+        check(CreateDeployerRollbackPlan.prepare(old4,now4).hands().size()==1,"new complete manifest rejected");
+        for(String key:List.of("WorldCount","TargetCount","CargoCount","UseCount","Uses")){var broken=now4.copy();broken.remove(key);reject(()->CreateDeployerRollbackPlan.prepare(old4,broken),"missing manifest marker accepted: "+key);}
+        var wrongCount=now4.copy();wrongCount.putInt("TargetCount",1);reject(()->CreateDeployerRollbackPlan.prepare(old4,wrongCount),"lost target accepted");
+        for(String key:List.of("Progress","Scores")){var broken=now4.copy();broken.getCompound("Hand").getCompound("Runtime").remove(key);reject(()->CreateDeployerRollbackPlan.prepare(old4,broken),"missing progression accepted: "+key);}
+        var wrongStats=now4.getCompound("Hand").getCompound("Runtime").getCompound("Progress").copy();var text=new ListTag();text.add(StringTag.valueOf("bad"));wrongStats.put("Stats",text);reject(()->CreatePlayerProgress.validate(wrongStats),"invalid stats list silently became empty");
+        var old5=old4.copy();var now5=now4.copy();
+        var contract=new CompoundTag();contract.putString("Item","create:builders_tea");contract.putInt("Version",1);contract.putString("Implementation","com.simibubi.create.content.equipment.BuildersTeaItem");contract.putString("Effects","food_and_bottle");contract.putString("Provider","create");contract.putString("ProviderVersion","6.0.11");
+        for(var tag:List.of(old5,now5)){
+            tag.putInt("JointFormat",5);var physical=new CompoundTag();physical.put("PersistentData",new CompoundTag());physical.putInt("Fire",0);physical.putBoolean("Sprinting",false);var motion=new ListTag();for(int i=0;i<3;i++)motion.add(DoubleTag.valueOf(0));physical.put("Motion",motion);tag.getCompound("Hand").getCompound("Runtime").put("Physical",physical);tag.putInt("ContractCount",1);var receipts=new ListTag();receipts.add(contract.copy());tag.put("ItemContracts",receipts);
+            tag.getCompound("Hand").getList("Inventory",10).getCompound(0).putString("id","create:builders_tea");
+        }
+        check(CreateDeployerRollbackPlan.prepare(old5,now5).hands().size()==1,"contracted mod item rejected");
+        for(String key:List.of("ContractCount","ItemContracts")){var broken=now5.copy();broken.remove(key);reject(()->CreateDeployerRollbackPlan.prepare(old5,broken),"missing contract manifest accepted: "+key);}
+        for(String key:List.of("Version","Implementation","Effects","Item","Provider","ProviderVersion")){
+            var x=old5.copy();var y=now5.copy();for(var tag:List.of(x,y))tag.getList("ItemContracts",10).getCompound(0).remove(key);
+            reject(()->CreateDeployerRollbackPlan.prepare(x,y),"missing contract identity accepted: "+key);
+        }
+        var x=old5.copy();var y=now5.copy();for(var tag:List.of(x,y)){tag.putInt("ContractCount",0);tag.put("ItemContracts",new ListTag());}
+        reject(()->CreateDeployerRollbackPlan.prepare(x,y),"used mod item lost its contract");
+        for(var tag:List.of(x,y))tag.putInt("JointFormat",4);
+        reject(()->CreateDeployerRollbackPlan.prepare(x,y),"new mod item silently downgraded to an older contract");
+        var old6=old5.copy();var now6=now5.copy();
+        for(var tag:List.of(old6,now6)){tag.putInt("JointFormat",6);var external=new CompoundTag();external.putInt("Format",1);external.put("Unknown",new CompoundTag());tag.getCompound("Hand").put("External",external);}
+        check(CreateDeployerRollbackPlan.prepare(old6,now6).hands().size()==1,"complete external manifest rejected");
+        var missingExternal=now6.copy();missingExternal.getCompound("Hand").remove("External");reject(()->CreateDeployerRollbackPlan.prepare(old6,missingExternal),"lost external participant accepted");
+        for(var tag:List.of(old6,now6))tag.putInt("JointFormat",5);
+        reject(()->CreateDeployerRollbackPlan.prepare(old6,now6),"external action downgraded to old format");
         after.getCompound("Hand").getCompound("Runtime").remove("Living");reject(()->CreateDeployerRollbackPlan.prepare(before,after),"new format accepted legacy partial runtime");
     }
     private static CompoundTag manifest(){

@@ -29,7 +29,7 @@ public abstract class CartEntityAuditMixin implements CartEntityAccess {
         if(!self.level().isClientSide&&CreateCargoAudit.restoreLocked((AbstractContraptionEntity)self))return;
         if (s == null || self.level().isClientSide) { original.call(); return; }
         if (s.locked) return;
-        if (!CreateCartAudit.enabled()) { original.call(); return; }
+        if (!CreateCapturePolicy.allows((AbstractContraptionEntity)self) || !CreateCartAudit.tickEnabled()) { original.call(); return; }
         CreateCartAudit.beforeTick((OrientedContraptionEntity) self);
         var previous = CartAuditContext.enter(s.stamp("work"));
         try { original.call(); CreateCartAudit.afterTick((OrientedContraptionEntity) self); }

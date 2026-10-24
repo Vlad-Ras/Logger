@@ -63,8 +63,13 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         return CreateCartAudit.enabled()?authorizedTick(source):null;
     }
     @Override public CartAutomationHooks.Capture authorizedTick(BlockEntity source){
-        if(current!=null||publishing||CartAuditContext.restoring()||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
-        if(!BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType()).getNamespace().equals("create"))return null;
+        if(!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
+                ||current!=null||publishing||CartAuditContext.restoring()
+                ||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
+        var blockType = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType());
+        if(!"create".equals(blockType.getNamespace()))return null;
+        // Avoid an automation scope on bearing controller ticks when bearings are muted.
+        if(CreateCapturePolicy.mutedController(source))return null;
         activeServer=level.getServer();REUSABLE.reset(source);REUSABLE.publish=true;return current=REUSABLE;
     }
     /** Detached native-operation capture; this scope never publishes to the journal. */
@@ -193,6 +198,9 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         }catch(RuntimeException error){unknownCreative(scope,"fluid",inbound?"in":"out",null,"serialization failure");CreateCartAudit.failed("world creative fluid snapshot",error);}
     }
     public static boolean worldCreativeActive(){return serverThread()&&current!=null;}
+    public static boolean worldCreativeActive(Object handler){
+        return worldCreativeActive()&&(current.mountedCreative==null||!current.mountedCreative.containsKey(handler));
+    }
     public static void worldCreativeUnverified(){if(serverThread()&&current!=null)unknownCreative(current,"unknown","unknown",null,"unverified native result");}
     private static void unknownCreative(Scope scope,String kind,String direction,Object payload,String reason){
         scope.complete=false;
@@ -246,6 +254,18 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     private static boolean serverThread(){var server=activeServer;return server!=null&&server.isSameThread();}
     public static Scope enterMounted(){Scope scope=serverThread()?current:null;if(scope!=null)scope.mountedDepth++;return scope;}
     public static void leaveMounted(Scope scope){if(scope!=null)scope.mountedDepth--;}
+    public static Scope enterMounted(Object creativeHandler){
+        var scope=enterMounted();if(scope!=null&&creativeHandler!=null){
+            if(scope.mountedCreative==null)scope.mountedCreative=new IdentityHashMap<>();
+            scope.mountedCreative.merge(creativeHandler,1,Integer::sum);
+        }return scope;
+    }
+    public static void leaveMounted(Scope scope,Object creativeHandler){
+        if(scope!=null&&creativeHandler!=null&&scope.mountedCreative!=null){
+            int count=scope.mountedCreative.getOrDefault(creativeHandler,0);
+            if(count<=1)scope.mountedCreative.remove(creativeHandler);else scope.mountedCreative.put(creativeHandler,count-1);
+        }leaveMounted(scope);
+    }
     public static void worldItems(List<net.minecraft.world.entity.Entity> items) {
         var scope=serverThread()?current:null;if(scope==null||!scope.mounted)return;
         for(var item:items) {
@@ -274,14 +294,15 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     public static final class Scope implements CartAutomationHooks.Capture {
         private BlockEntity source;private AbstractContraptionEntity entity;private UUID id;
         private String machine,machineDim;private BlockPos machinePos;private boolean mounted,direct,cargoDelivery;
-        private final List<Change> changes=new ArrayList<>();
+        private List<Change> changes=new ArrayList<>();
         private final LinkedHashMap<Cell,Pair> external=new LinkedHashMap<>();
-        private final Map<Object,Endpoint> addresses=new IdentityHashMap<>();
-        private final Set<Object> directHandlers=Collections.newSetFromMap(new IdentityHashMap<>());
+        private Map<Object,Endpoint> addresses=new IdentityHashMap<>();
+        private Set<Object> directHandlers=Collections.newSetFromMap(new IdentityHashMap<>());
         private final Map<net.minecraft.world.entity.Entity,CompoundTag> worldBefore=new LinkedHashMap<>();
         private final ListTag worldCreative=new ListTag();
         private final ListTag unverifiedCreative=new ListTag();
         private boolean complete,publish;private int mountedDepth,handlerDepth;
+        private Map<Object,Integer> mountedCreative;
         private Scope(){}
         private void reset(BlockEntity source){
             if(CreateDeployerAudit.capturing())CreateDeployerTransaction.unsupported("Вложенная автоматика активатора требует общего снимка всех внешних участников");
@@ -442,10 +463,11 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         }
         private void clear(){
             source=null;entity=null;id=null;machine=null;machineDim=null;machinePos=null;
-            if(!changes.isEmpty())changes.clear();
+            if(changes.size()>64)changes=new ArrayList<>();else if(!changes.isEmpty())changes.clear();
             if(!external.isEmpty())external.clear();
-            if(!addresses.isEmpty())addresses.clear();
-            if(!directHandlers.isEmpty())directHandlers.clear();
+            if(addresses.size()>64)addresses=new IdentityHashMap<>();else if(!addresses.isEmpty())addresses.clear();
+            if(directHandlers.size()>64)directHandlers=Collections.newSetFromMap(new IdentityHashMap<>());else if(!directHandlers.isEmpty())directHandlers.clear();
+            mountedCreative=null;
             if(!worldBefore.isEmpty())worldBefore.clear();
             if(!worldCreative.isEmpty())worldCreative.clear();
             if(!unverifiedCreative.isEmpty())unverifiedCreative.clear();
@@ -453,7 +475,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         public void finish(boolean success){
             current=null;boolean previousPublishing=publishing;publishing=true;
             try{if(mounted||cargoDelivery)for(var row:rows(success))CreateCargoAudit.deliver(entity,row);
-                else if(publish&&CreateCartAudit.enabled()){
+                else if(publish&&(!changes.isEmpty()||!worldCreative.isEmpty()||!unverifiedCreative.isEmpty())&&CreateCartAudit.enabled()){
                     ServerLevel level=entity!=null?(ServerLevel)entity.level():source!=null&&source.getLevel() instanceof ServerLevel server?server:null;
                     if(level!=null&&(entity!=null&&(!changes.isEmpty()||!unverifiedCreative.isEmpty())||!worldCreative.isEmpty()||!unverifiedCreative.isEmpty()))for(var row:rows(success))LoggerRuntime.storage(level).append(row);
                 }}

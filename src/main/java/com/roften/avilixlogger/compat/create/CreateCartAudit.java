@@ -26,6 +26,8 @@ public final class CreateCartAudit {
     private static final Map<UUID, Set<Entity>> LOADED = new HashMap<>();
     private CreateCartAudit() {}
     public static boolean enabled() { return com.roften.avilixlogger.core.CreateSupport.available() && !CartAuditContext.restoring() && LoggerConfig.isEnabled(); }
+    /** Bookkeeping only; event publication still uses the direct authorization gate. */
+    public static boolean tickEnabled() { return CreateSupport.available() && !CartAuditContext.restoring() && LoggerConfig.isTickCaptureEnabled(); }
     public static CartAuditState state(Entity e) {
         return e instanceof CartEntityAccess a ? a.avilixlogger$mountedState() : null;
     }
@@ -38,7 +40,7 @@ public final class CreateCartAudit {
         if (entries.size() > 1) throw new IllegalStateException("Найдено несколько загруженных конструкций с одним ID");
         return entries.isEmpty() ? null : entries.iterator().next();
     }
-    public static void clear() { CreateLifecycleAudit.clear();CreateCouplingAudit.clear();CreateStructuralAudit.clear();CartItemTracker.clear();CartStorageAudit.clear();CreateMechanismAudit.clear();com.roften.avilixlogger.core.CreateActorContext.restore(null); LOADED.clear(); ASSEMBLING.remove(); METADATA_ONLY.remove(); }
+    public static void clear() { CreateLifecycleAudit.clear();CreateCouplingAudit.clear();CreateStructuralAudit.clear();CartItemTracker.clear();CartStorageAudit.clear();CreateMechanismAudit.clear();CreatePlayerProgress.clearDefinitionCache();com.roften.avilixlogger.core.CreateActorContext.restore(null); LOADED.clear(); ASSEMBLING.remove(); METADATA_ONLY.remove(); }
     public static OrientedContraptionEntity passenger(AbstractMinecart cart) {
         for (Entity e : cart.getPassengers()) if (e instanceof OrientedContraptionEntity oce && state(e) != null) return oce;
         return null;
@@ -84,13 +86,16 @@ public final class CreateCartAudit {
         if (e.getVehicle() instanceof AbstractMinecart cart) cart.getPersistentData().put(CartAuditState.KEY, s.write());
     }
     public static void beforeTick(OrientedContraptionEntity e) {
+        if (!CreateCapturePolicy.allows(e)) return;
         CartAuditState s = state(e);
-        if (s != null && !s.joined) { attach(e); emit(e, ActionType.CART_LOAD, "load", null, pose(e), "loaded"); }
+        if (s != null && !s.joined) { attach(e); if (com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()) emit(e, ActionType.CART_LOAD, "load", null, pose(e), "loaded"); }
     }
     /** No serialization, inventory scan, nearby-entity search or allocation on unchanged ticks. */
     public static void afterTick(OrientedContraptionEntity e) {
+        if (!CreateCapturePolicy.allows(e)) return;
         CartAuditState s = state(e); if (s == null || s.locked || !(e.level() instanceof ServerLevel level)) return;
-        if (!s.joined) { attach(e); emit(e, ActionType.CART_LOAD, "load", null, pose(e), "loaded"); }
+        if (!s.joined) { attach(e); if (com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()) emit(e, ActionType.CART_LOAD, "load", null, pose(e), "loaded"); }
+        if (!CreateCapturePolicy.movement(e)) return;
         Entity cart = e.getVehicle();
         boolean moving = cart != null && (cart.getDeltaMovement().lengthSqr() > 0.000001
                 || Math.abs(cart.getX() - cart.xo) + Math.abs(cart.getZ() - cart.zo) > 0.0001);
@@ -160,7 +165,7 @@ public final class CreateCartAudit {
         CompoundTag a = n.getCompound(CartAuditState.KEY); return a.hasUUID("Id") ? a.getUUID("Id") : null;
     }
     public static void emit(OrientedContraptionEntity e, ActionType type, String phase, CompoundTag before, CompoundTag after, String detail) {
-        if (CreateStructuralAudit.covered(e)||!enabled() || !(e.level() instanceof ServerLevel level)) return;
+        if (CreateStructuralAudit.covered(e)||!CreateCapturePolicy.action(e,type)||!enabled() || !(e.level() instanceof ServerLevel level)) return;
         CartAuditState s = state(e); if (s == null) return;
         LogEntry row = new LogEntry(); row.ts = System.currentTimeMillis(); row.type = type;
         row.dim = level.dimension().location().toString(); row.x = e.blockPosition().getX(); row.y = e.blockPosition().getY(); row.z = e.blockPosition().getZ();

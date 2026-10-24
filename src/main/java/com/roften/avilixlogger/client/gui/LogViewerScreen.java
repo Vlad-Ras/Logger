@@ -102,9 +102,10 @@ public final class LogViewerScreen extends Screen {
 
     private List<Component> detailLines = List.of();
     private List<Component> rawLines = List.of();
+    private final WrappedLogText detailLayout = new WrappedLogText();
+    private final WrappedLogText previewLayout = new WrappedLogText();
     private int detailsScroll = 0;
 
-    private String lastJson = "";
     private boolean pendingCopyJson = false;
 
     private Button btnPrev;
@@ -130,6 +131,7 @@ public final class LogViewerScreen extends Screen {
     private Button btnTabRaw;
     private Button btnShowRaw;
     private Button btnSettings;
+    private Button btnCaptureTypes;
 
     private EditBox searchBox;
     private EditBox timeBox;
@@ -288,7 +290,12 @@ public final class LogViewerScreen extends Screen {
     }
 
     private float controlScale() {
-        return clampFloat(autoControlScale() * (savedButtonScalePercent / 100.0f), 0.42f, 1.25f);
+        return sharedControlScale(width,height);
+    }
+
+    static float sharedControlScale(int width,int height) {
+        float byHeight=height<=420?0.62f:height<=540?0.72f:height<=680?0.86f:1f;
+        return clampFloat(Math.min(byHeight,width<=720?0.82f:1f)*(savedButtonScalePercent/100f),0.42f,1.25f);
     }
 
     private float wideControlScale() {
@@ -476,7 +483,10 @@ public final class LogViewerScreen extends Screen {
 
         int y2 = actionTop + btnH + gap;
         this.btnSettings = addButton(Component.translatable("gui.avilixlogger.settings"), b -> openSettings(),
-                rightX, y2, rightW, btnH);
+                rightX, y2, half, btnH);
+        this.btnCaptureTypes = addButton(Component.literal("Запись событий"),
+                b -> Minecraft.getInstance().setScreen(new CaptureTypesScreen(this)),
+                rightX+half+gap,y2,rightW-half-gap,btnH);
 
         y2 += btnH + gap;
         this.btnCopy = addButton(sideLabel("gui.avilixlogger.copy_xyz", "XYZ"), b -> copySelectedXYZ(),
@@ -505,7 +515,9 @@ public final class LogViewerScreen extends Screen {
             var screen=new CartHistoryScreen(this, "");Minecraft.getInstance().setScreen(screen);screen.load();
         }, rightX, y2, rightW, btnH);
 
-        // Details panel must start BELOW the right-side controls to avoid overlap.
+        y2 += btnH + gap;
+        addButton(Component.literal("Действия"), b -> Minecraft.getInstance().setScreen(new LoggerActionsScreen(this)),rightX,y2,half,btnH);
+        addButton(Component.literal("Справка"), b -> Minecraft.getInstance().setScreen(new LoggerGuideScreen(this)),rightX+half+gap,y2,rightW-half-gap,btnH);
         this.detailsPanelTop = y2 + btnH + gap + 2;
 
         updateButtons();
@@ -513,115 +525,11 @@ public final class LogViewerScreen extends Screen {
     }
 
     private Button addButton(Component message, Button.OnPress onPress, int x, int y, int w, int h) {
-        return this.addRenderableWidget(new ScaledTextButton(x, y, w, h, message, onPress));
+        return this.addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x, y, w, h, message, onPress, this::controlScale));
     }
 
     private EditBox makeEditBox(int x, int y, int w, int h, Component message) {
-        return new ScaledEditBox(this.font, x, y, w, h, message);
-    }
-
-    /**
-     * Vanilla Button scales only the rectangle. The label is always drawn with the normal Minecraft font size.
-     * When B- makes controls very small, text starts overflowing. This button scales and clips its own label.
-     */
-    private final class ScaledTextButton extends Button {
-        private ScaledTextButton(int x, int y, int width, int height, Component message, Button.OnPress onPress) {
-            super(x, y, width, height, message, onPress, Button.DEFAULT_NARRATION);
-        }
-
-        @Override
-        public void renderString(GuiGraphics g, Font font, int color) {
-            Component message = this.getMessage();
-            int x = this.getX();
-            int y = this.getY();
-            int w = this.getWidth();
-            int h = this.getHeight();
-            int textW = Math.max(1, font.width(message));
-            float s = controlScale();
-            s = Math.min(s, Math.max(0.35f, (h - 4) / (float) font.lineHeight));
-            s = Math.min(s, Math.max(0.35f, (w - 6) / (float) textW));
-            s = clampFloat(s, 0.35f, 1.25f);
-
-            int scLeft = x + 1;
-            int scTop = y + 1;
-            int scRight = x + w - 1;
-            int scBottom = y + h - 1;
-            if (scRight <= scLeft || scBottom <= scTop) return;
-
-            g.enableScissor(scLeft, scTop, scRight, scBottom);
-            g.pose().pushPose();
-            float drawX = x + (w / 2.0f) - (textW * s / 2.0f);
-            float drawY = y + (h / 2.0f) - (font.lineHeight * s / 2.0f);
-            g.pose().translate(drawX, drawY, 0);
-            g.pose().scale(s, s, 1.0f);
-            g.drawString(font, message, 0, 0, color, false);
-            g.pose().popPose();
-            g.disableScissor();
-        }
-    }
-
-    /**
-     * EditBox also does not follow our custom button scale. We keep its normal input behavior,
-     * but draw the visible text ourselves so long values are clipped and small controls stay readable.
-     */
-    private final class ScaledEditBox extends EditBox {
-        private final Font boxFont;
-        private Component localHint = Component.empty();
-
-        private ScaledEditBox(Font font, int x, int y, int width, int height, Component message) {
-            super(font, x, y, width, height, message);
-            this.boxFont = font;
-        }
-
-        @Override
-        public void setHint(Component hint) {
-            super.setHint(hint);
-            this.localHint = hint == null ? Component.empty() : hint;
-        }
-
-        @Override
-        public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-            int x = this.getX();
-            int y = this.getY();
-            int w = this.getWidth();
-            int h = this.getHeight();
-            if (w <= 0 || h <= 0) return;
-
-            boolean focused = this.isFocused();
-            int border = focused ? 0xFFE0E0E0 : 0xFF777777;
-            int bg = this.active ? 0xE0000000 : 0xA0202020;
-            g.fill(x, y, x + w, y + h, border);
-            g.fill(x + 1, y + 1, x + w - 1, y + h - 1, bg);
-
-            String value = this.getValue() == null ? "" : this.getValue();
-            boolean hint = value.isEmpty() && !focused;
-            Component text = hint ? this.localHint.copy().withStyle(ChatFormatting.DARK_GRAY) : Component.literal(value);
-            int color = this.active ? 0xFFE0E0E0 : 0xFF808080;
-            if (hint) color = 0xFF808080;
-
-            float s = Math.min(controlScale(), Math.max(0.35f, (h - 4) / (float) this.boxFont.lineHeight));
-            s = clampFloat(s, 0.45f, 1.10f);
-            int innerLeft = x + 3;
-            int innerTop = y + 2;
-            int innerRight = x + w - 3;
-            int innerBottom = y + h - 2;
-            if (innerRight <= innerLeft || innerBottom <= innerTop) return;
-
-            g.enableScissor(innerLeft, innerTop, innerRight, innerBottom);
-            g.pose().pushPose();
-            float drawY = y + (h / 2.0f) - (this.boxFont.lineHeight * s / 2.0f);
-            g.pose().translate(innerLeft, drawY, 0);
-            g.pose().scale(s, s, 1.0f);
-            g.drawString(this.boxFont, text, 0, 0, color, false);
-            if (focused && !hint && (System.currentTimeMillis() / 500L) % 2L == 0L) {
-                int cursor = Math.max(0, Math.min(value.length(), this.getCursorPosition()));
-                String before = value.substring(0, cursor);
-                int cx = this.boxFont.width(before);
-                g.fill(cx, 0, cx + 1, this.boxFont.lineHeight, 0xFFFFFFFF);
-            }
-            g.pose().popPose();
-            g.disableScissor();
-        }
+        return new LoggerGuiWidgets.ScaledEditBox(this.font, x, y, w, h, message, this::controlScale);
     }
 
     /**
@@ -670,7 +578,8 @@ public final class LogViewerScreen extends Screen {
         String train = (trainBox != null && !trainBox.getValue().isBlank()) ? trainBox.getValue().trim() : (trainFilter == null ? "" : trainFilter);
         String planeName = (planeNameBox != null && !planeNameBox.getValue().isBlank()) ? planeNameBox.getValue().trim() : (planeNameFilter == null ? "" : planeNameFilter);
         String blockId = (blockIdBox != null && !blockIdBox.getValue().isBlank()) ? blockIdBox.getValue().trim() : (blockIdFilter == null ? "" : blockIdFilter);
-        return new GuiFilters(timePresetIdx, radiusPresetIdx, typePresetIdx, customTime, customRadius, actor, train, planeName, blockId, time.since(), time.until(), searchBox == null ? "" : searchBox.getValue().trim());
+        String search=searchBox==null?"":searchBox.getValue().trim();
+        return new GuiFilters(timePresetIdx,radiusPresetIdx,typePresetIdx,customTime,customRadius,actor,train,planeName,blockId,time.since(),time.until(),search,LocalizedLogSearch.search(search),LocalizedLogSearch.blocks(blockId));
     }
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
@@ -726,7 +635,7 @@ public final class LogViewerScreen extends Screen {
         this.detailsScroll = 0;
         this.expandedRows.clear();
         this.listScroll = 0;
-        this.lastJson = "";
+        detailLayout.clear(); previewLayout.clear();
         this.pendingCopyJson = false;
 
         if (this.titleWidget != null) {
@@ -749,7 +658,6 @@ public final class LogViewerScreen extends Screen {
             if (payload.lines() != null && !payload.lines().isEmpty()) {
                 json = payload.lines().get(0).getString();
             }
-            this.lastJson = json;
             if (pendingCopyJson) {
                 pendingCopyJson = false;
                 copyToClipboard(json, "JSON");
@@ -783,7 +691,7 @@ public final class LogViewerScreen extends Screen {
         this.detailsScroll = 0;
         this.expandedRows.clear();
         this.listScroll = 0;
-        this.lastJson = "";
+        detailLayout.clear(); previewLayout.clear();
         this.pendingCopyJson = false;
         updateButtons();
         saveGuiStateFromInstance();
@@ -892,8 +800,9 @@ public final class LogViewerScreen extends Screen {
         int detailsBottom = this.height - 36;
         if (mouseX >= rightX && mouseX <= this.width - 10 && mouseY >= detailsTop && mouseY <= detailsBottom) {
             int step = (int) Math.signum(deltaY);
-            List<Component> lines = showRawTab ? rawLines : detailLines;
-            if (lines == null) lines = List.of();
+            int wrapW = Math.max(10, rightPanelW() - 8);
+            int splitW = Math.max(10, Math.round(wrapW / Math.max(0.25f, logTextScale())));
+            var lines = detailLayout.get(this.font, showRawTab ? rawLines : detailLines, splitW);
             int headerH = 14;
             int y = detailsTop + headerH;
             int maxLines = Math.max(0, (detailsBottom - y) / detailLineH());
@@ -912,6 +821,7 @@ public final class LogViewerScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        LoggerGuiWidgets.beginFrame(g,width,height);
         // Do NOT call Screen#renderBackground or Screen#render here.
         // On 1.21.x some Screen render paths apply the vanilla blurred/dimmed background.
         // This GUI draws logs/details before widgets, so a late vanilla background pass makes
@@ -975,7 +885,7 @@ public final class LogViewerScreen extends Screen {
             LogRow r = rows.get(selected);
             Component full = r.line() == null ? Component.empty() : r.line();
             int previewW = Math.max(20, Math.round((this.width - 22) / Math.max(0.25f, logTextScale())));
-            List<net.minecraft.util.FormattedCharSequence> previewLines = this.font.split(full, previewW);
+            List<net.minecraft.util.FormattedCharSequence> previewLines = previewLayout.get(this.font, full, previewW);
             int count = Math.min(2, Math.max(1, previewLines.size()));
             int previewLineH = detailLineH();
             int y = this.height - 8 - count * previewLineH;
@@ -1048,16 +958,7 @@ public final class LogViewerScreen extends Screen {
         // Wrap lines to fit the panel width.
         int wrapW = Math.max(10, (panelRight - panelLeft) - 8);
         int splitW = Math.max(10, Math.round(wrapW / Math.max(0.25f, logTextScale())));
-        java.util.ArrayList<net.minecraft.util.FormattedCharSequence> lines = new java.util.ArrayList<>();
-        for (Component c : base) {
-            if (c == null) continue;
-            var split = this.font.split(c, splitW);
-            if (split == null || split.isEmpty()) {
-                lines.add(net.minecraft.util.FormattedCharSequence.EMPTY);
-            } else {
-                lines.addAll(split);
-            }
-        }
+        var lines = detailLayout.get(this.font, base, splitW);
 
         // Fixed header inside the panel
         Component hdr = Component.translatable(showRawTab ? "gui.avilixlogger.hdr.raw" : "gui.avilixlogger.hdr.details")
@@ -1983,4 +1884,6 @@ public final class LogViewerScreen extends Screen {
     public boolean isPauseScreen() {
         return false;
     }
+
+    @Override public void onClose(){LocalizedLogSearch.clear();super.onClose();}
 }

@@ -39,6 +39,17 @@ public enum CreateContraptionKind {
             default -> UNKNOWN;
         };
     }
+    /** Hot-path type lookup without allocating a ResourceLocation.toString(). */
+    public static CreateContraptionKind fromLocation(net.minecraft.resources.ResourceLocation type) {
+        if (type == null || !"create".equals(type.getNamespace())) return UNKNOWN;
+        return switch (type.getPath()) {
+            case "mounted" -> MINECART;
+            case "carriage" -> TRAIN;
+            case "bearing", "clockwork" -> BEARING;
+            case "piston", "pulley", "gantry", "elevator", "stabilized" -> OTHER;
+            default -> UNKNOWN;
+        };
+    }
     public static CreateContraptionKind fromSource(String source) {
         if (source == null) return UNKNOWN;
         // Preserve train events emitted before source IDs were introduced.

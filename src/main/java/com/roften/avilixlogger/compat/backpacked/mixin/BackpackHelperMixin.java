@@ -12,6 +12,7 @@ import org.spongepowered.asm.mixin.Mixin;
 public abstract class BackpackHelperMixin {
     @WrapMethod(method="equipBackpack")
     private static boolean avilixlogger$equipFromItem(Player player,ItemStack stack,Operation<Boolean> original){
+        if(com.roften.avilixlogger.core.CartRestoreLocks.playerLocked(player))return false;
         if(!BackpackAudit.enabled()||!(player instanceof ServerPlayer p))return original.call(player,stack);
         BackpackAudit.ensure(new BackpackAudit.Ref(stack,p.serverLevel(),p.blockPosition(),p,"inventory",-1,null),p,ActionType.BACKPACK_DISCOVER);
         boolean result=original.call(player,stack);
@@ -19,6 +20,7 @@ public abstract class BackpackHelperMixin {
     }
     @WrapMethod(method="removeAllBackpacks")
     private static net.minecraft.core.NonNullList<ItemStack> avilixlogger$removeAll(Player player,Operation<net.minecraft.core.NonNullList<ItemStack>> original){
+        if(com.roften.avilixlogger.core.CartRestoreLocks.playerLocked(player))return net.minecraft.core.NonNullList.create();
         if(!BackpackAudit.enabled()||!(player instanceof ServerPlayer p))return original.call(player);
         BackpackAudit.trackPlayer(p,ActionType.BACKPACK_TRANSFER);
         var result=original.call(player);
@@ -27,6 +29,7 @@ public abstract class BackpackHelperMixin {
     }
     @WrapMethod(method="setBackpackStack")
     private static boolean avilixlogger$equip(Player player,ItemStack stack,int index,Operation<Boolean> original){
+        if(com.roften.avilixlogger.core.CartRestoreLocks.playerLocked(player))return false;
         if(!BackpackAudit.enabled()||!(player instanceof ServerPlayer p))return original.call(player,stack,index);
         var before=BackpackHelper.getBackpackStack(player,index);
         var incoming=new BackpackAudit.Ref(stack,p.serverLevel(),p.blockPosition(),p,"equipped",index,null);

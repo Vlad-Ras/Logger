@@ -15,7 +15,7 @@ public abstract class MountedItemStorageAuditMixin {
     private ItemStack avilixlogger$insert(int slot, ItemStack stack, boolean simulate, Operation<ItemStack> original) {
         var ref = simulate ? null : CartStorageAudit.ref(this);
         if (CartStorageAudit.locked(ref)) return stack;
-        if (ref == null) return original.call(slot, stack, simulate);
+        if (ref == null || !CartStorageAudit.capturing(ref)) return original.call(slot, stack, simulate);
         var h = (IItemHandler)this; ItemStack before = h.getStackInSlot(slot).copy();
         ItemStack result;var transfer=CartAutomationAudit.enterMounted();
         try{result=original.call(slot, stack, false);}finally{CartAutomationAudit.leaveMounted(transfer);}
@@ -25,7 +25,7 @@ public abstract class MountedItemStorageAuditMixin {
     private ItemStack avilixlogger$extract(int slot, int amount, boolean simulate, Operation<ItemStack> original) {
         var ref = simulate ? null : CartStorageAudit.ref(this);
         if (CartStorageAudit.locked(ref)) return ItemStack.EMPTY;
-        if (ref == null) return original.call(slot, amount, simulate);
+        if (ref == null || !CartStorageAudit.capturing(ref)) return original.call(slot, amount, simulate);
         var h = (IItemHandler)this; ItemStack before = h.getStackInSlot(slot).copy();
         ItemStack result;var transfer=CartAutomationAudit.enterMounted();
         try{result=original.call(slot, amount, false);}finally{CartAutomationAudit.leaveMounted(transfer);}
@@ -35,7 +35,7 @@ public abstract class MountedItemStorageAuditMixin {
     private void avilixlogger$set(int slot, ItemStack stack, Operation<Void> original) {
         var ref = CartStorageAudit.ref(this);
         if (CartStorageAudit.locked(ref)) return;
-        if (ref == null) { original.call(slot, stack); return; }
+        if (ref == null || !CartStorageAudit.capturing(ref)) { original.call(slot, stack); return; }
         var h = (IItemHandler)this; ItemStack before = h.getStackInSlot(slot).copy();
         var transfer=CartAutomationAudit.enterMounted();
         try{original.call(slot, stack);}finally{CartAutomationAudit.leaveMounted(transfer);}

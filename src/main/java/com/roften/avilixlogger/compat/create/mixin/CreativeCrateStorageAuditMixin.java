@@ -14,7 +14,7 @@ public abstract class CreativeCrateStorageAuditMixin {
     private ItemStack avilixlogger$void(int slot,ItemStack stack,boolean simulate,Operation<ItemStack> original){
         var ref=simulate?null:CartStorageAudit.ref(this);
         if(CartStorageAudit.locked(ref))return stack;
-        if(ref==null)return original.call(slot,stack,simulate);
+        if(ref==null || !CartStorageAudit.capturing(ref))return original.call(slot,stack,simulate);
         var supplied=((IItemHandler)this).getStackInSlot(0).copy();var input=stack.copy();
         var transfer=CartAutomationAudit.enterMounted();ItemStack result;
         try{result=original.call(slot,stack,false);}finally{CartAutomationAudit.leaveMounted(transfer);}
@@ -25,7 +25,7 @@ public abstract class CreativeCrateStorageAuditMixin {
     private ItemStack avilixlogger$supply(int slot,int amount,boolean simulate,Operation<ItemStack> original){
         var ref=simulate?null:CartStorageAudit.ref(this);
         if(CartStorageAudit.locked(ref))return ItemStack.EMPTY;
-        if(ref==null)return original.call(slot,amount,simulate);
+        if(ref==null || !CartStorageAudit.capturing(ref))return original.call(slot,amount,simulate);
         var supplied=((IItemHandler)this).getStackInSlot(0).copy();
         var transfer=CartAutomationAudit.enterMounted();ItemStack result;
         try{result=original.call(slot,amount,false);}finally{CartAutomationAudit.leaveMounted(transfer);}

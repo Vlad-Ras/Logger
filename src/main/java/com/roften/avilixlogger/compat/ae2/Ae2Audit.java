@@ -29,51 +29,36 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 /** Optional AE2 integration. All entry points run on the server thread, after a real mutation. */
 public final class Ae2Audit {
-    // A third-party storage can throw from a powered transfer before its RETURN hook runs.
-    // Expiring such an orphaned scope avoids suppressing all later network audit entries
-    // for the life of the server thread.
-    private static final long POWERED_SCOPE_TIMEOUT_NANOS = 30_000_000_000L;
+    // Only the WrapMethod hooks enter this scope, and both close it in finally.
+    // A primitive-only holder can remain empty without retaining game objects.
     private static final ThreadLocal<PoweredScope> POWERED_SCOPE = new ThreadLocal<>();
-
-    private static final class PoweredScope {
-        int depth;
-        long lastTouched;
-    }
+    private static final class PoweredScope { int depth; }
 
     private Ae2Audit() {}
 
     public static void enterPowered() {
-        PoweredScope scope = activeScope();
+        PoweredScope scope = POWERED_SCOPE.get();
         if (scope == null) {
             scope = new PoweredScope();
             POWERED_SCOPE.set(scope);
         }
         scope.depth++;
-        scope.lastTouched = System.nanoTime();
     }
 
     public static void leavePowered() {
-        PoweredScope scope = activeScope();
-        if (scope == null || --scope.depth <= 0) POWERED_SCOPE.remove();
-        else scope.lastTouched = System.nanoTime();
+        PoweredScope scope = POWERED_SCOPE.get();
+        if (scope != null && scope.depth > 0) scope.depth--;
     }
 
     public static boolean insidePowered() {
-        return activeScope() != null;
-    }
-
-    private static PoweredScope activeScope() {
         PoweredScope scope = POWERED_SCOPE.get();
-        if (scope != null && System.nanoTime() - scope.lastTouched > POWERED_SCOPE_TIMEOUT_NANOS) {
-            POWERED_SCOPE.remove();
-            return null;
-        }
-        return scope;
+        return scope != null && scope.depth > 0;
     }
 
     public static boolean enabled() {
         try {
-            return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logAe2.get();
+            return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(2)
+                    && LoggerConfig.isEnabled() && LoggerConfig.VALUES.logAe2.get();
         } catch (Throwable ignored) {
             return false;
         }

@@ -11,7 +11,7 @@ public final class CreateTrainLifecycleAudit {
     private record Pending(ServerLevel level,String phase){}
     private static final Map<Train,Pending> PENDING=new LinkedHashMap<>();
     public static void changed(Carriage carriage,ServerLevel level,String phase){
-        if(CartAuditContext.restoring()||!level.getServer().isSameThread()||!CreateCartAudit.enabled()||carriage.train==null)return;
+        if(!CreateCapturePolicy.kindEnabled(CreateContraptionKind.TRAIN)||!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()||CartAuditContext.restoring()||!level.getServer().isSameThread()||!CreateCartAudit.enabled()||carriage.train==null)return;
         if(PENDING.size()<128||PENDING.containsKey(carriage.train))PENDING.put(carriage.train,new Pending(level,phase));
         else CreateCartAudit.failed("train lifecycle queue",new IllegalStateException("Очередь снимков поездов заполнена"));
     }
@@ -26,7 +26,7 @@ public final class CreateTrainLifecycleAudit {
     }
     public static void onTick(ServerTickEvent.Post event){
         if(PENDING.isEmpty()||!event.hasTime())return;var iterator=PENDING.entrySet().iterator();var next=iterator.next();var train=next.getKey();var pending=next.getValue();iterator.remove();
-        if(Create.RAILWAYS.trains.get(train.id)!=train||CartAuditContext.restoring()||!CreateCartAudit.enabled())return;
+        if(!CreateCapturePolicy.kindEnabled(CreateContraptionKind.TRAIN)||!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()||Create.RAILWAYS.trains.get(train.id)!=train||CartAuditContext.restoring()||!CreateCartAudit.enabled())return;
         try{var tag=capture(train,pending.level,pending.phase);var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.CART_STATUS;row.actorName="SYSTEM";
             row.source=CreateContraptionKind.TRAIN.source(train.id,"state_checkpoint");row.dim=pending.level.dimension().location().toString();var position=train.carriages.getFirst().getDimensionalIfPresent(pending.level.dimension());
             if(position!=null&&position.positionAnchor!=null){row.x=(int)Math.floor(position.positionAnchor.x);row.y=(int)Math.floor(position.positionAnchor.y);row.z=(int)Math.floor(position.positionAnchor.z);}
@@ -35,3 +35,4 @@ public final class CreateTrainLifecycleAudit {
     }
     public static void clear(){PENDING.clear();}
 }
+

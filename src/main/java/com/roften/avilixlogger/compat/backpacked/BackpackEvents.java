@@ -16,7 +16,7 @@ public final class BackpackEvents {
             BackpackAudit.lifecycle(new BackpackAudit.Ref(event.getCrafting(),p.serverLevel(),p.blockPosition(),p,"inventory",-1,null),p,ActionType.BACKPACK_CREATE,"crafted");
     }
     public static void join(PlayerEvent.PlayerLoggedInEvent event){if(event.getEntity() instanceof ServerPlayer p)BackpackAudit.trackPlayer(p,ActionType.BACKPACK_LOAD);}
-    public static void leave(PlayerEvent.PlayerLoggedOutEvent event){if(event.getEntity() instanceof ServerPlayer p)BackpackAudit.trackPlayer(p,ActionType.BACKPACK_UNLOAD);}
+    public static void leave(PlayerEvent.PlayerLoggedOutEvent event){if(event.getEntity() instanceof ServerPlayer p){BackpackRecovery.logout(p.getUUID());BackpackAudit.trackPlayer(p,ActionType.BACKPACK_UNLOAD);}}
     public static void dimension(PlayerEvent.PlayerChangedDimensionEvent event){if(event.getEntity() instanceof ServerPlayer p)BackpackAudit.trackPlayer(p,ActionType.BACKPACK_TRANSFER);}
     public static void death(LivingDeathEvent event){
         if(!BackpackAudit.enabled())return;

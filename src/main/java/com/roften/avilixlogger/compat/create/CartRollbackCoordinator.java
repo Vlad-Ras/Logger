@@ -1,6 +1,7 @@
 package com.roften.avilixlogger.compat.create;
 
 import com.roften.avilixlogger.LoggerConfig;
+import com.roften.avilixlogger.net.CartHistoryNetwork;
 import com.roften.avilixlogger.core.*;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
@@ -25,47 +26,66 @@ import java.util.concurrent.*;
 /** At most one cart rollback. Queries/copies off-thread; preflight, construction and world edits in bounded steps. */
 public final class CartRollbackCoordinator {
     private static final Map<UUID, Preview> PREVIEWS = new HashMap<>();
+    public static void expirePreviews(long now){PreviewExpiry.prune(PREVIEWS,now,Preview::expires);}
+    private static final Map<UUID,Long> PREVIEW_REQUESTS=new HashMap<>();
+    private static long previewSequence;
     private static final Set<UUID> LOCKED = CartAuditContext.LOCKED_ENTITIES;
     private static final ThreadPoolExecutor WORKER = new ThreadPoolExecutor(1,1,30,TimeUnit.SECONDS,new ArrayBlockingQueue<>(8), r -> { Thread t=new Thread(r,"avilixlogger-cart-prepare");t.setDaemon(true);t.setPriority(Thread.NORM_PRIORITY-1);return t; });
+    static { WORKER.allowCoreThreadTimeOut(true); }
     private static Job active;
     private static boolean preparing;
     private static long generation;
     private static Entity preparingEntity;
     private static UUID preparingActor;
     private record Preview(UUID id,long checkpoint,long expires) {}
+    private static long lastProgress;
     private CartRollbackCoordinator() {}
-    public static boolean busy() { return preparing || active != null || CreateTransferRollbackCoordinator.busy() || CreateStructuralRollbackCoordinator.busy() || CreateCouplingRollbackCoordinator.busy(); }
+    public static boolean busy() { return preparing || active != null || CreateTrainRepresentationCoordinator.busy() || CreateTransferRollbackCoordinator.busy() || CreateStructuralRollbackCoordinator.busy() || CreateCouplingRollbackCoordinator.busy(); }
     public static boolean locked(Entity e) { return LOCKED.contains(e.getUUID()); }
     static void prepareTransferHistory(Runnable task){WORKER.execute(task);}
     public static boolean query(CommandSourceStack source, Runnable task) {
-        if (!LoggerConfig.isEnabled()) { source.sendFailure(Component.literal("Logger не авторизован")); return false; }
-        try { WORKER.execute(task); return true; } catch (RejectedExecutionException e) { source.sendFailure(Component.literal("Очередь запросов занята")); return false; }
+        if (!LoggerConfig.isEnabled()) { CartHistoryNetwork.error(source,"Logger не авторизован"); return false; }
+        try { WORKER.execute(task); return true; } catch (RejectedExecutionException e) { CartHistoryNetwork.error(source,"Очередь запросов занята"); return false; }
     }
     public static void preview(CommandSourceStack source, UUID id,long checkpoint) {
         var player=source.getPlayer(); if(player==null)return;
-        long request=generation;
-        query(source,()->{
+        long request=generation,token=++previewSequence;PREVIEWS.remove(player.getUUID());PREVIEW_REQUESTS.put(player.getUUID(),token);
+        CartHistoryNetwork.progress(source,"Подготовка предпросмотра отката действий…");
+        boolean queued=query(source,()->{
             try {
                 var plan=CartRollbackPlan.prepare(LoggerRuntime.storage(source.getLevel()),id,checkpoint);
                 source.getServer().execute(()->{
-                    if(request!=generation || !LoggerConfig.isEnabled())return;
+                    if(!Objects.equals(PREVIEW_REQUESTS.get(player.getUUID()),token))return;
+                    PREVIEW_REQUESTS.remove(player.getUUID());
+                    if(request!=generation){CartHistoryNetwork.error(source,"Состояние отката изменилось во время подготовки. Запросите предпросмотр заново");return;}
+                    if(!LoggerConfig.isEnabled()||source.getServer().getPlayerList().getPlayer(player.getUUID())!=player||!PermissionUtil.has(source,"avilixlogger.command.rollback",2)){CartHistoryNetwork.error(source,"Авторизация или права изменились");return;}
                     PREVIEWS.put(player.getUUID(),new Preview(id,checkpoint,System.currentTimeMillis()+120000));
                     com.roften.avilixlogger.net.CartHistoryNetwork.confirm(source,"ОТКАТ ДЕЙСТВИЙ конструкции "+id+" к entry="+checkpoint+". Будет изменён мир: блоков "+plan.blocks().size()+", слотов игроков "+plan.recipients().size()+", мировых creative-источников "+plan.worldCreative().size()+", внешних слотов/баков "+plan.automation().size()+". Целевая форма: "+plan.target().getString("Form")+". Это не отдельная выдача пропавшей штуковины. Подтверждение действует 2 минуты.","log cart confirm "+id+" "+checkpoint);
                 });
-            } catch(Exception e){ error(source,e); }
+            } catch(Exception e){source.getServer().execute(()->{if(Objects.equals(PREVIEW_REQUESTS.get(player.getUUID()),token)){PREVIEW_REQUESTS.remove(player.getUUID());errorNow(source,e);}});}
         });
+        if(!queued)PREVIEW_REQUESTS.remove(player.getUUID());
+    }
+    public static void cancelPreview(CommandSourceStack source){if(source.getPlayer()!=null){PREVIEWS.remove(source.getPlayer().getUUID());PREVIEW_REQUESTS.remove(source.getPlayer().getUUID());}}
+    public static boolean running(UUID actor){return preparing&&actor.equals(preparingActor)||active!=null&&active.source.getPlayer()!=null&&actor.equals(active.source.getPlayer().getUUID());}
+    public static String status(UUID actor){
+        if(preparing&&actor.equals(preparingActor))return "Откат действий: подготовка и проверка журнала.";
+        if(active!=null&&active.source.getPlayer()!=null&&actor.equals(active.source.getPlayer().getUUID()))return "Откат действий: "+(active.committed?"завершение после фиксации":active.phase==4?"отмена и восстановление резервных копий":"выполнение")+"; блоков обработано "+active.applied+" из "+active.plan.blocks().size()+".";
+        if(PREVIEW_REQUESTS.containsKey(actor))return "Откат действий: готовится предпросмотр.";
+        var preview=PREVIEWS.get(actor);if(preview!=null&&preview.expires>=System.currentTimeMillis())return "Откат действий: ожидает подтверждения; ID="+preview.id+", entry="+preview.checkpoint+".";
+        return "Откат действий: нет активной операции.";
     }
     public static void confirm(CommandSourceStack source,UUID expectedId,long expectedEntry) {
         var p=source.getPlayer();var preview=p==null?null:PREVIEWS.get(p.getUUID());
-        if(preview==null||!preview.id.equals(expectedId)||preview.checkpoint!=expectedEntry){source.sendFailure(Component.literal("Предпросмотр заменён. Выберите запись заново"));return;}
+        if(preview==null||!preview.id.equals(expectedId)||preview.checkpoint!=expectedEntry){CartHistoryNetwork.error(source,"Предпросмотр заменён. Выберите запись заново");return;}
         confirm(source);
     }
     public static void confirm(CommandSourceStack source) {
         ServerPlayer player=source.getPlayer(); if(player==null)return;
         Preview preview=PREVIEWS.remove(player.getUUID());
-        if(preview==null || preview.expires<System.currentTimeMillis()){ source.sendFailure(Component.literal("Предпросмотр отсутствует или истёк"));return; }
-        if(busy() || RollbackCoordinator.hasActiveRollback()){source.sendFailure(Component.literal("Уже выполняется откат"));return;}
-        if(!LoggerConfig.isEnabled())return;
+        if(preview==null || preview.expires<System.currentTimeMillis()){ CartHistoryNetwork.error(source,"Предпросмотр отсутствует или истёк");return; }
+        if(busy() || RollbackCoordinator.hasActiveRollback()){CartHistoryNetwork.error(source,"Уже выполняется откат");return;}
+        if(!LoggerConfig.isEnabled()){CartHistoryNetwork.error(source,"Logger не авторизован");return;}
         Entity current;
         try { current=CreateCartAudit.loaded(preview.id); } catch (IllegalStateException e) { errorNow(source,e); return; }
         try { validateSource(current); } catch (IllegalStateException e) { errorNow(source,e); return; }
@@ -73,7 +93,7 @@ public final class CartRollbackCoordinator {
         preparing=true;CartAuditContext.rollbackActive=true;
         CartStorageAudit.lockMenus(preview.id,source.getServer());
         preparingEntity=current;preparingActor=player.getUUID();long request=++generation;
-        source.sendSystemMessage(Component.literal("Подготовка отката конструкции; ожидаю подтверждения записи журнала…"));
+        CartHistoryNetwork.progress(source,"Подготовка отката конструкции; ожидаю подтверждения записи журнала…");
         try { WORKER.execute(()->{
             try{
                 var storage=LoggerRuntime.storage(source.getLevel());long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
@@ -93,6 +113,7 @@ public final class CartRollbackCoordinator {
         boolean previous=CartAuditContext.restoring(true);
         try{
             do { if(job.step(event.getServer())){active=null;unlock(job.current);return;} } while(++operations<16 && System.nanoTime()<deadline);
+            if(CartHistoryNetwork.viewing(job.source)&&System.nanoTime()-lastProgress>=TimeUnit.SECONDS.toNanos(1)){lastProgress=System.nanoTime();CartHistoryNetwork.progress(job.source,status(job.source.getPlayer().getUUID()));}
         }catch(Exception e){
             if(job.committed){job.phase=6;CreateCartAudit.failed("committed rollback cleanup",e);}
             else if(job.phase==4){active=null;unlock(job.current);errorNow(job.source,new IllegalStateException("Ошибка восстановления резервной копии: "+e.getMessage()));}
@@ -102,7 +123,12 @@ public final class CartRollbackCoordinator {
     public static void cancel(CommandSourceStack source) {
         if(preparing && source.getPlayer()!=null && source.getPlayer().getUUID().equals(preparingActor)){generation++;preparing=false;unlock(preparingEntity);preparingEntity=null;preparingActor=null;}
         if(active!=null && !active.committed && active.phase!=4 && Objects.equals(active.source.getEntity(),source.getEntity())) {active.failure="Отменено администратором";active.phase=4;active.index=active.applied-1;}
-        if(source.getPlayer()!=null) PREVIEWS.remove(source.getPlayer().getUUID());
+        cancelPreview(source);
+    }
+    public static void logout(UUID actor){
+        PREVIEWS.remove(actor);PREVIEW_REQUESTS.remove(actor);
+        if(preparing&&actor.equals(preparingActor)){generation++;preparing=false;unlock(preparingEntity);preparingEntity=null;preparingActor=null;}
+        if(active!=null&&!active.committed&&active.source.getPlayer()!=null&&actor.equals(active.source.getPlayer().getUUID())&&active.phase!=4){active.failure="Администратор вышел";active.phase=4;active.index=active.applied-1;}
     }
     public static void stop() {
         generation++;
@@ -124,7 +150,7 @@ public final class CartRollbackCoordinator {
                 }
                 unlock(active.current);
             }
-        } finally {CartAuditContext.restoring(previous);unlock(preparingEntity);active=null;preparing=false;preparingEntity=null;preparingActor=null;PREVIEWS.clear();LOCKED.clear();CreateCartAudit.clear();}
+        } finally {CartAuditContext.restoring(previous);unlock(preparingEntity);active=null;preparing=false;preparingEntity=null;preparingActor=null;PREVIEWS.clear();PREVIEW_REQUESTS.clear();LOCKED.clear();CreateCartAudit.clear();}
     }
     private static void unlock(Entity e){ CartRestoreLocks.clear();CartAuditContext.rollbackActive=false; if(e!=null&&CreateCartAudit.state(e)!=null)CreateCartAudit.state(e).locked=false;LOCKED.clear(); }
     private static void error(CommandSourceStack s,Exception e){s.getServer().execute(()->errorNow(s,e));}
@@ -255,7 +281,7 @@ public final class CartRollbackCoordinator {
         Job(CommandSourceStack source,CartRollbackPlan plan,StagedCartRestore staged,Entity current){this(source,plan,staged,current,prepareRecipients(plan,source.getServer().registryAccess()));}
         Job(CommandSourceStack source,CartRollbackPlan plan,StagedCartRestore staged,Entity current,List<RecipientData> recipientData){this(source,plan,staged,current,recipientData,prepareAutomation(plan,source.getServer().registryAccess()));}
         Job(CommandSourceStack source,CartRollbackPlan plan,StagedCartRestore staged,Entity current,List<RecipientData> recipientData,List<AutomationData> automationData){this.source=source;this.plan=plan;this.staged=staged;this.current=current;this.recipientData=recipientData;this.automationData=automationData;players=List.copyOf(source.getServer().getPlayerList().getPlayers());}
-        private void reservePlayer(ServerPlayer player){if(reservedPlayers.add(player.getUUID())){CartRestoreLocks.player(player);LOCKED.add(player.getUUID());player.sendSystemMessage(Component.literal("Инвентарь временно защищён на время связанного отката Create."));}}
+        private void reservePlayer(ServerPlayer player){if(reservedPlayers.add(player.getUUID())){CartRestoreLocks.player(player);LOCKED.add(player.getUUID());CartHistoryNetwork.notice(player.createCommandSourceStack(),"Инвентарь временно защищён на время связанного отката Create.");}}
         boolean step(MinecraftServer server){
             if(phase==0){ // Incremental inventory lookup, never a global entity/chunk scan.
                 if(playerIndex<players.size()){
@@ -398,7 +424,7 @@ public final class CartRollbackCoordinator {
                 if(automationApplied>0){automation.get(--automationApplied).compensate();return false;}
                 if(recipientApplied>0){recipients.get(--recipientApplied).compensate();return false;}
                 if(index>=0 && index<backups.size()){var b=backups.get(index--);apply(b.level,b.pos,b.state,b.be,b.slots);return false;}
-                source.sendFailure(Component.literal("Откат остановлен: "+failure+". Применённые блоки возвращены из резервных копий."));return true;
+                CartHistoryNetwork.error(source,"Откат остановлен: "+failure+". Применённые блоки возвращены из резервных копий.");return true;
             }
             if(phase==5){
                 if(creativeCommitVerify<worldCreative.size()){worldCreative.get(creativeCommitVerify++).verifyAfter();return false;}
@@ -425,7 +451,7 @@ public final class CartRollbackCoordinator {
                     if(plan.mixedDrops().contains(undo.id()))entity=level(server,undo.dimension()).getEntity(undo.id());
                     if(entity!=null&&!entity.isRemoved())entity.discard();spawnIndex++;return false;
                 }
-                source.sendSystemMessage(Component.literal("Откат конструкции завершён: "+plan.cartId()+", блоков: "+applied));return true;
+                CartHistoryNetwork.done(source,"Откат конструкции завершён: "+plan.cartId()+", блоков: "+applied);return true;
             }
             throw new IllegalStateException("Неверная фаза отката");
         }

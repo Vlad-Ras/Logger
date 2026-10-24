@@ -56,8 +56,11 @@ public final class CreateMechanismActionsSmoke {
         try {
             int index = 0;
             for (var kind : new CreateContraptionKind[]{CreateContraptionKind.MINECART, CreateContraptionKind.TRAIN, CreateContraptionKind.BEARING}) {
-                var target = new BlockPos(8 + 8 * index++, 128, 16);
-                world.getChunkAt(target); world.setBlock(target.below(), Blocks.STONE.defaultBlockState(), 3);
+                var target = world.getSharedSpawnPos().offset(320 + 8 * index++,96,320);
+                // Native entity queries require a tracked chunk; earlier fixtures must not
+                // accidentally supply its visibility or leave another target in our ray.
+                var visible=CreateFunnelSmoke.class.getDeclaredMethod("visible",ServerLevel.class,BlockPos.class);visible.setAccessible(true);visible.invoke(null,world,target);
+                world.setBlock(target.below(), Blocks.STONE.defaultBlockState(), 3);
                 var entity = entity(world, kind, new ItemStackHandler(1)); var contraption = entity.getContraption();
                 var cargo = (net.neoforged.neoforge.items.IItemHandlerModifiable)contraption.getStorage().getAllItemStorages().get(BlockPos.ZERO);
                 var data = new CompoundTag(); data.putUUID("Owner", OWNER); data.putString("Mode", "USE");

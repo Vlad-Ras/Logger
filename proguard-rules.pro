@@ -26,8 +26,10 @@
     public static void open(...);
     public static void acceptPage(...);
     public static void acceptCart(...);
+    public static void acceptActionResult(...);
     public static void acceptDetails(...);
     public static void acceptInspectTool(...);
+    public static void acceptCaptureTypes(...);
     public static void acceptRollbackPreview(...);
 }
 
@@ -66,5 +68,3 @@
 -keep interface com.roften.avilixlogger.compat.create.mixin.** { *; }
 -keep interface com.roften.avilixlogger.mixin.CartCombinedInventoryAccessor { *; }
 -keep interface com.roften.avilixlogger.compat.backpacked.mixin.** { *; }
-
--keep interface com.roften.avilixlogger.compat.create.CreatePlayerLivingAccess { *; }

@@ -25,7 +25,8 @@ public final class CreateStructuralAudit implements CreateStructuralHooks.Observ
     public static boolean coupled(){var scope=CURRENT.get();return scope!=null&&!scope.carts.isEmpty();}
     public static boolean cartCovered(com.simibubi.create.content.contraptions.minecart.capability.MinecartController controller){var scope=CURRENT.get();return scope!=null&&scope.carts.containsKey(controller);}
     public static Scope beginCoupled(com.simibubi.create.content.contraptions.minecart.capability.MinecartController controller){
-        if(CURRENT.get()!=null||!CreateCartAudit.enabled()||!controller.hasContraptionCoupling(true)&&!controller.hasContraptionCoupling(false))return null;
+        if(CURRENT.get()!=null||!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()
+                ||!CreateCapturePolicy.kindEnabled(CreateContraptionKind.MINECART)||!CreateCartAudit.enabled()||!controller.hasContraptionCoupling(true)&&!controller.hasContraptionCoupling(false))return null;
         try{return captureCoupled(controller,true);}catch(RuntimeException failure){CreateCartAudit.failed("coupled structural before",failure);return null;}
     }
     public static Scope captureCoupled(com.simibubi.create.content.contraptions.minecart.capability.MinecartController controller){return captureCoupled(controller,false);}
@@ -40,7 +41,8 @@ public final class CreateStructuralAudit implements CreateStructuralHooks.Observ
         // Create refuses a train with an unloaded carriage or two portal representations.
         // Skip the expensive world snapshot for an operation that cannot begin.
         if(!train.canDisassemble())return null;
-        if(CURRENT.get()!=null||!CreateCartAudit.enabled())return null;
+        if(CURRENT.get()!=null||!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()
+                ||!CreateCapturePolicy.kindEnabled(CreateContraptionKind.TRAIN)||!CreateCartAudit.enabled())return null;
         try{return captureTrain(train,true);}catch(RuntimeException failure){CreateCartAudit.failed("train before disassembly",failure);return null;}
     }
     public static Scope captureTrain(com.simibubi.create.content.trains.entity.Train train){return captureTrain(train,false);}
@@ -60,8 +62,9 @@ public final class CreateStructuralAudit implements CreateStructuralHooks.Observ
         scope.previousSource=MutationSourceResolver.enter(CreateContraptionSources.kind(first).source(CreateContraptionSources.id(first),"structural_disassemble"));CURRENT.set(scope);return scope;
     }
     public static Scope begin(BlockEntity controller){
-        if(CURRENT.get()!=null||!CreateCartAudit.enabled())return null;
-        try{return controller instanceof CreateControllerAccess access&&access.avilixlogger$controlled().stream().anyMatch(Entity::isAlive)?capture(controller,true):null;}
+        if(CURRENT.get()!=null||!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get()||CreateCapturePolicy.mutedController(controller)||!CreateCartAudit.enabled())return null;
+        try{return controller instanceof CreateControllerAccess access&&access.avilixlogger$controlled().stream()
+                .anyMatch(entity -> entity.isAlive() && CreateCapturePolicy.lifecycle(entity))?capture(controller,true):null;}
         catch(RuntimeException failure){CreateCartAudit.failed("structural before controller",failure);return null;}
     }
     /** Detached fixture exercises the same capture, without authorizing publication. */
@@ -69,11 +72,19 @@ public final class CreateStructuralAudit implements CreateStructuralHooks.Observ
     public static Scope captureRemoval(BlockEntity controller){var scope=capture(controller,false);scope.externalRemoval=true;return scope;}
     @Override public CreateStructuralHooks.Capture removal(Level world,BlockPos pos,net.minecraft.world.level.block.state.BlockState replacement){
         if(CURRENT.get()!=null||CartAuditContext.restoring()||!(world instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
-        var state=level.getBlockState(pos);
-        if(!state.hasBlockEntity()||state.getBlock()==replacement.getBlock())return null;
-        var controller=level.getBlockEntity(pos);
-        if(!(controller instanceof CreateControllerAccess access)||access.avilixlogger$controlled().stream().noneMatch(Entity::isAlive))return null;
+        if(!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateLifecycle.get())return null;
+        var controller=removalController(level,pos,replacement);if(controller==null||CreateCapturePolicy.mutedController(controller)||!CreateCartAudit.enabled())return null;
         var scope=begin(controller);if(scope!=null)scope.externalRemoval=true;return scope;
+    }
+    private static BlockEntity removalController(ServerLevel level,BlockPos pos,net.minecraft.world.level.block.state.BlockState replacement){
+        // An active native controller holds live entity references and therefore is
+        // already instantiated in its loaded chunk. Ordinary blocks need no state /
+        // hasBlockEntity / getBlock probes, nor lazy block-entity creation here.
+        if(!level.hasChunkAt(pos))return null;
+        var controller=level.getChunkAt(pos).getBlockEntities().get(pos);
+        if(!(controller instanceof CreateControllerAccess access)||access.avilixlogger$controlled().stream().noneMatch(Entity::isAlive))return null;
+        if(controller.getBlockState().getBlock()==replacement.getBlock())return null;
+        return controller;
     }
     private static Scope capture(BlockEntity controller,boolean publish){
         if(CURRENT.get()!=null||!(controller.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread()||!(controller instanceof CreateControllerAccess access))throw new IllegalStateException("Нет серверного scope контроллера");
