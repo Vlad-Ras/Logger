@@ -50,7 +50,15 @@ public final class CreateTrainRegistry {
     }
     private static CompoundTag write(Train train,DimensionPalette palette,net.minecraft.core.HolderLookup.Provider registries){
         var angles=new IdentityHashMap<CreateOrientationAccess,Boolean>();for(var carriage:train.carriages)carriage.forEachPresentEntity(entity->{if(entity instanceof CreateOrientationAccess access)angles.put(access,access.avilixlogger$forceAngle());});
-        try{return train.write(palette,registries);}finally{angles.forEach(CreateOrientationAccess::avilixlogger$forceAngle);}
+        try{var result=train.write(palette,registries);orderRepresentations(result);return result;}finally{angles.forEach(CreateOrientationAccess::avilixlogger$forceAngle);}
+    }
+    /** Create serializes a dimension-keyed HashMap as a list; its iteration order has no meaning. */
+    static void orderRepresentations(CompoundTag nativeTrain){
+        for(var raw:nativeTrain.getList("Carriages",Tag.TAG_COMPOUND)){
+            var carriage=(CompoundTag)raw;var positions=carriage.getList("EntityPositioning",Tag.TAG_COMPOUND);
+            var sorted=new ArrayList<Tag>(positions);sorted.sort(Comparator.comparingInt(t->((CompoundTag)t).getInt("Dim")));
+            var result=new ListTag();result.addAll(sorted);carriage.put("EntityPositioning",result);
+        }
     }
     private static void nearest(CompoundTag tag,GlobalStation station){tag.remove("Nearest");var train=station.nearestTrain.get();if(train!=null)tag.putUUID("Nearest",train.id);}
     public static CompoundTag after(CompoundTag before,Train train){
@@ -131,7 +139,7 @@ public final class CreateTrainRegistry {
         }
         private void verifyPayload(){
             if(!carriageRuntime(restored).equals(before.getList("CarriageRuntime",10)))throw new IllegalStateException("Runtime вагона или груза отличается от снимка");
-            var actual=write(restored,new DimensionPalette(new ArrayList<>(before.getList("DimensionPalette",10).stream().map(raw->net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,net.minecraft.resources.ResourceLocation.parse(((CompoundTag)raw).getString("Id")))).toList())),server.registryAccess());if(!actual.equals(before.getCompound("Native")))throw new IllegalStateException("NBT восстановленного поезда отличается от снимка: "+difference(actual,before.getCompound("Native"),"Native"));
+            var actual=write(restored,new DimensionPalette(new ArrayList<>(before.getList("DimensionPalette",10).stream().map(raw->net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,net.minecraft.resources.ResourceLocation.parse(((CompoundTag)raw).getString("Id")))).toList())),server.registryAccess());var expected=before.getCompound("Native").copy();orderRepresentations(expected);if(!actual.equals(expected))throw new IllegalStateException("NBT восстановленного поезда отличается от снимка: "+difference(actual,expected,"Native"));
             if(!((CreateNavigationAccess)restored.navigation).avilixlogger$navigation(palette).equals(before.getCompound("NavigationRuntime")))throw new IllegalStateException("Навигация поезда отличается от снимка");
             if(!((CreateTrainRuntimeAccess)restored).avilixlogger$trainRuntime(server.registryAccess()).equals(before.getCompound("Runtime")))throw new IllegalStateException("Runtime поезда отличается от снимка");
         }

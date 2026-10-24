@@ -25,6 +25,10 @@ public final class CreateTrainStateSmoke {
         }
         var checkpoint=CreateTrainLifecycleAudit.capture(train,world,"fixture_"+mode);
         check(checkpoint.getBoolean("Complete"),"native checkpoint incomplete: "+checkpoint.getString("Failure"));
+        if(mode.equals("state-portal")){
+            var positions=checkpoint.getCompound("Registry").getCompound("Native").getList("Carriages",10).getCompound(0).getList("EntityPositioning",10);
+            var first=positions.get(0);positions.set(0,positions.get(1));positions.set(1,first);
+        }
         var saved=checkpoint.copy();var plan=CreateTrainLifecyclePlan.prepare(checkpoint);check(checkpoint.equals(saved),"worker mutated checkpoint");
         check(plan.carriages()==train.carriages.size()&&plan.projections()==train.carriages.stream().mapToInt(c->c.getPresentDimensions().size()).sum(),"projection count lost");
         var prepared=new CreateTrainRegistry.Prepared(plan.registry(),true);
@@ -48,6 +52,18 @@ public final class CreateTrainStateSmoke {
             var restore=new CreateTrainRecovery.Restore(world.getServer(),plan,prepared);int steps=0;
             while(!restore.stage())check(++steps<100,"native staging did not terminate");
             check(!Create.RAILWAYS.trains.containsKey(plan.id()),"staging published a train early");
+            var endpointField=CreateTrainRecovery.Restore.class.getDeclaredField("endpoint");endpointField.setAccessible(true);
+            var staged=((CreateTrainRegistry.Endpoint)endpointField.get(restore)).restored;
+            restore.ready(); // First establish that the unchanged staged payload is valid.
+            if(mode.equals("state-portal-corrupt-cutoff")){
+                staged.carriages.getFirst().getDimensional(Level.NETHER).cutoff+=.25f;
+                reject(restore::ready,"changed portal cutoff accepted");return;
+            }
+            if(mode.equals("state-portal-corrupt-position")){
+                var projection=staged.carriages.getFirst().getDimensional(Level.NETHER);
+                projection.positionAnchor=projection.positionAnchor.add(1,0,0);
+                reject(restore::ready,"changed portal position accepted");return;
+            }
             restore.ready();restore.install();restore.verify();
             var result=Create.RAILWAYS.trains.get(plan.id());check(result!=null&&result!=train,"registry not replaced");
             check(CreateTrainRegistry.snapshot(result,world).equals(plan.registry()),"serialized train round trip differs");

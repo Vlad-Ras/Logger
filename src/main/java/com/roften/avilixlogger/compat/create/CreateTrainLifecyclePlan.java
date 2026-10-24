@@ -38,7 +38,8 @@ public record CreateTrainLifecyclePlan(UUID id,CompoundTag registry,int carriage
         }
         if(n.hasUUID("Graph")!=r.contains("Graph",10)||n.hasUUID("Graph")&&!n.getUUID("Graph").equals(r.getCompound("Graph").getCompound("Native").getUUID("Id")))throw new IllegalStateException("Нет исходного путевого графа");
         list(r,"Signals",512);if(n.hasUUID("Station")!=r.contains("Station",10))throw new IllegalStateException("Нет снимка станции");
-        return new CreateTrainLifecyclePlan(id,r.copy(),cars.size(),count);
+        var registry=r.copy();CreateTrainRegistry.orderRepresentations(registry.getCompound("Native"));
+        return new CreateTrainLifecyclePlan(id,registry,cars.size(),count);
     }
     private static ListTag list(CompoundTag tag,String key,int limit){if(!(tag.get(key) instanceof ListTag list)||list.size()>limit||!list.isEmpty()&&list.getElementType()!=10)throw new IllegalStateException("Повреждён список поезда: "+key);return list;}
 }
