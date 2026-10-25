@@ -9,6 +9,8 @@ MAX_NESTED_COUNT = 256
 
 def manifest_version(jar):
     try:
+        if jar.getinfo('META-INF/MANIFEST.MF').file_size > MAX_DESCRIPTOR:
+            raise ValueError('oversized manifest')
         raw = jar.read('META-INF/MANIFEST.MF').decode('utf-8-sig')
         logical = raw.replace('\r\n', '\n').replace('\n ', '')
         fields = dict(line.split(': ', 1) for line in logical.splitlines() if ': ' in line)

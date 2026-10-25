@@ -24,10 +24,12 @@ Curios 9.5.1+1.21.1, upstream commit `6b122c8a7e2b514fd94197459ade11f19a0bfb09`:
 - [CuriosEventHandler](https://github.com/TheIllusiveC4/Curios/blob/6b122c8a7e2b514fd94197459ade11f19a0bfb09/neoforge/src/main/java/top/theillusivec4/curios/common/event/CuriosEventHandler.java)
 - [CurioInventoryCapability](https://github.com/TheIllusiveC4/Curios/blob/6b122c8a7e2b514fd94197459ade11f19a0bfb09/neoforge/src/main/java/top/theillusivec4/curios/common/capability/CurioInventoryCapability.java)
 
-Первый CI с настоящим Curios выявил несовместимость полного захвата активатора: лениво создаваемые внешние данные отличались между снимками. Этот отказ не игнорируется. Реальное изменение внешнего инвентаря/эффектов без полного контракта остаётся барьером отката; инициализация штатного пустого держателя проверяется отдельно.
+Первый CI с настоящим Curios выявил несовместимость полного захвата активатора: лениво создаваемые внешние данные отличались между снимками. Причина устранена в границе снимка: Curios может держать пустой десериализованный holder и заполнять штатные слоты при первом capability lookup. Для закреплённой 9.5.1 перед снимком разрешена только нативная инициализация пустого pending holder; отсутствие pending проверяется через один закешированный VarHandle. Непустой pending inventory отклоняется до native reset, а реальные изменения внешнего инвентаря/эффектов без полного контракта остаются барьером отката. Дополнительного тика, переэкипировки, чтения каждого слота в пустом тике или слепой перезаписи attachments нет.
 
 ## Остаток приёмки
 
 Проверка реального серверного набора, всех модовых меню/packet/capability/effect путей, скриптов и production AuthCore/ClickHouse остаётся открытой. Проверка выбранных API на CI с Curios/Create/AE2/Backpacked/FD не засчитывается как прохождение полного модпака. У каждого конкретного пути должны быть точная версия, источник, сценарий, ожидаемые строки/данные и доказательство native проверки либо явный открытый статус.
 
 Требования по нагрузке и скорости — в [SERVER_PERFORMANCE_2.2.0.md](SERVER_PERFORMANCE_2.2.0.md).
+
+Для Curios артефакт `yohfFbgD` проверен по SHA-512 `5981a267686b744e7e3c227f78cbcd5267c14ac6979a28e814695f4589273998563147207fef4a5cdb7cdbdc39797cd95d9e4abadb55869f18e02a38d0654ae5`; сигнатуры и ветка native reset сопоставлены с первичным исходником.
