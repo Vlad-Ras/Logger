@@ -31,6 +31,12 @@ final class CuriosAuditSmoke {
         check(player.getUUID().equals(row.entityUuid)&&"EquipmentTarget".equals(row.entityName),"equipment target identity lost");
         check(CuriosAudit.capture(new CurioChangeEvent(player,"ring",2,item,item.copy()))==null,"unchanged equipment generated an event");
         int old=CaptureTypePolicy.mask();try{CaptureTypePolicy.install(CaptureTypePolicy.changed(old,3,false));check(!CaptureTypePolicy.allows(row.type,row.source,row.extra),"disabled equipment category bypassed");}finally{CaptureTypePolicy.install(old);}
+        var attachment=new top.theillusivec4.curios.common.capability.CurioInventory();
+        var nonempty=new net.minecraft.nbt.CompoundTag();var rows=new net.minecraft.nbt.ListTag();var stored=new net.minecraft.nbt.CompoundTag();stored.putString("Identifier","missing-slot");stored.put("StacksHandler",after.getCompound("Item").copy());rows.add(stored);nonempty.put("Curios",rows);
+        attachment.deserializeNBT(level.registryAccess(),nonempty.copy());
+        player.setData(top.theillusivec4.curios.common.CuriosRegistry.INVENTORY.get(),attachment);
+        rejected=false;try{com.roften.avilixlogger.compat.curios.CuriosCaptureDefaults.prepare(player);}catch(IllegalStateException expected){rejected=true;}
+        check(rejected&&attachment.serializeNBT(level.registryAccess()).equals(nonempty),"Logger migrated or erased pending nonempty Curios data");
         System.out.println("CURIOS_EVENT_PAYLOAD_OK: optional native 9.5.1 event API, detached expanded stacks, slot and target identity, no guessed actor, no-op and capture mask");
     }
     private static String differences(net.minecraft.nbt.CompoundTag before,net.minecraft.nbt.CompoundTag after,String path) {

@@ -39,6 +39,7 @@ jobs:
           mkdir -p build/profile-tools
           javac -d build/profile-tools tools/acceptance/ProfileSummary.java tools/acceptance/ProfileSummaryTest.java
           java -cp build/profile-tools ProfileSummaryTest
+          python3 tools/acceptance/test-inventory-modpack.py
       - name: Native Create regression
         timeout-minutes: 10
         run: |

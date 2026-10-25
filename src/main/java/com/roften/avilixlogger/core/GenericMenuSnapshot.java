@@ -21,7 +21,7 @@ public final class GenericMenuSnapshot {
     public static int[] properties(AbstractContainerMenu menu) {
         if (!(menu instanceof MenuDataAccess access)) return null;
         var slots=access.avilixlogger$dataSlots();
-        if (slots.size()>4096) return null;
+        if (slots.size()>4096) { AdaptiveLogDiagnostics.adapterFailure("menu-properties-limit"); return null; }
         var values=new int[slots.size()];
         for(int i=0;i<values.length;i++)values[i]=slots.get(i).get();
         return values;
