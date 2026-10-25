@@ -23,6 +23,7 @@ public final class WeaponCombatAudit {
             && (LoggerConfig.VALUES.logEntities.get() || LoggerConfig.VALUES.logPlayerLifecycle.get()
                 || CaptureTypePolicy.enabled(4) && (LoggerConfig.VALUES.logProjectileShots.get() || LoggerConfig.VALUES.logProjectileHits.get()));}
     public static void failure() {AdaptiveLogDiagnostics.adapterFailure("scguns");}
+    public static boolean wantsTrace(ServerLevel level){return level.getServer().isSameThread() && traceEnabled();}
     public static void logout(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event){
         if(event.getEntity() instanceof WeaponReloadAccess access)access.avilixlogger$reload(null);
     }
@@ -65,7 +66,7 @@ public final class WeaponCombatAudit {
             if(access.avilixlogger$shot()==null && fire!=null && entity instanceof Projectile projectile && projectile.getOwner()==fire.player)
                 access.avilixlogger$shot(fire.ensure(fire.player.getMainHandItem()));
             var shot=access.avilixlogger$shot();
-            if(shot!=null && fire==null && CaptureTypePolicy.allows(ActionType.PROJECTILE_SHOOT,"mod:scguns",null) && LoggerConfig.VALUES.logProjectileShots.get())
+            if(shot!=null && !shot.fromMechanism() && fire==null && CaptureTypePolicy.allows(ActionType.PROJECTILE_SHOOT,"mod:scguns",null) && LoggerConfig.VALUES.logProjectileShots.get())
                 append(level,entry(shot,ActionType.PROJECTILE_SHOOT,"projectile_spawn",null,entity));
         }catch(RuntimeException failure){failure();}
     }
@@ -121,7 +122,7 @@ public final class WeaponCombatAudit {
         if(target!=null)EntityLogIdentity.capture(row,target);
         var data=WeaponCombatTrace.payload(shot,phase,target);trajectory(data,projectile);
         row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,data);row.deferSnapshot(LogEntry.SnapshotField.ITEM,shot.weapon());
-        row.extra="scguns "+phase+"; shooter="+shot.shooter()+"; shot="+shot.id()+"; weapon="+shot.weaponId();return row;
+        row.extra="scguns "+phase+(shot.fromMechanism()?"; mechanism=turret":"; shooter="+shot.shooter())+"; shot="+shot.id()+"; weapon="+shot.weaponId();return row;
     }
     private static void trajectory(CompoundTag data,Entity projectile) {
         if(projectile==null)return;var t=new CompoundTag();t.putUUID("UUID",projectile.getUUID());
@@ -158,13 +159,15 @@ public final class WeaponCombatAudit {
         }catch(RuntimeException failure){failure();}finally {RELOAD.remove();}}
     }
     public static void reloadState(Player player,boolean before,boolean after) {
-        if(before==after || !(player instanceof ServerPlayer p) || !p.server.isSameThread() || !enabled() || !CaptureTypePolicy.enabled(4))return;
+        if(!(player instanceof ServerPlayer p) || !p.server.isSameThread())return;
+        // Release our retained stack even when capture was disabled during the reload.
+        var access=p instanceof WeaponReloadAccess a?a:null;
+        var session=access==null?null:access.avilixlogger$reload();
+        if(!after && access!=null)access.avilixlogger$reload(null);
+        if(before==after || !enabled() || !CaptureTypePolicy.enabled(4))return;
         try {
             var gun=p.getMainHandItem();var item=NbtSerde.snapshotItemStack(gun,p.registryAccess());
-            var access=p instanceof WeaponReloadAccess a?a:null;
-            var session=access==null?null:access.avilixlogger$reload();
             if(after && item!=null){session=new ReloadSession(gun,item,ammo(gun));if(access!=null)access.avilixlogger$reload(session);}
-            if(!after && access!=null)access.avilixlogger$reload(null);
             if(item==null)item=new CompoundTag();
             var evidence=session==null?item:session.weapon;
             var observed=session==null || session.stack==gun?item:evidence;

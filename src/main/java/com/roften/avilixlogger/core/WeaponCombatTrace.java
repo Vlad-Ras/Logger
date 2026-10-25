@@ -40,26 +40,46 @@ public final class WeaponCombatTrace {
         public String display() {return String.format(Locale.ROOT,"%s: %.5f %.5f %.5f · yaw %.3f · pitch %.3f · eyeY %.5f",dim,x,y,z,yaw,pitch,eyeY);}
     }
 
-    public record Shot(UUID id,long time,UUID actor,String actorName,UUID shooter,String shooterName,String shooterType,Pose origin,CompoundTag weapon) {
+    public record Shot(UUID id,long time,UUID actor,String actorName,UUID shooter,String shooterName,String shooterType,Pose origin,CompoundTag weapon,CompoundTag mechanism) {
+        public Shot(UUID id,long time,UUID actor,String actorName,UUID shooter,String shooterName,String shooterType,Pose origin,CompoundTag weapon) {
+            this(id,time,actor,actorName,shooter,shooterName,shooterType,origin,weapon,null);
+        }
         public Shot {
-            Objects.requireNonNull(id);Objects.requireNonNull(shooter);Objects.requireNonNull(origin);
+            Objects.requireNonNull(id);Objects.requireNonNull(origin);
+            if(mechanism==null)Objects.requireNonNull(shooter);
+            else {
+                if(actor!=null || shooter!=null || !mechanism.getString("Kind").equals("turret"))throw new IllegalArgumentException("Invalid mechanism actor");
+                for(String key:List.of("X","Y","Z"))if(!mechanism.contains(key,Tag.TAG_INT))throw new IllegalArgumentException("Missing mechanism position");
+                for(String key:List.of("Dimension","Block")){
+                    String value=mechanism.getString(key);
+                    if(value.isBlank() || !value.contains(":") || ResourceLocation.tryParse(value)==null)throw new IllegalArgumentException("Invalid mechanism identity");
+                }
+                if(mechanism.contains("Owner") && !mechanism.hasUUID("Owner"))throw new IllegalArgumentException("Invalid mechanism owner");
+                mechanism=mechanism.copy();
+            }
             actorName=Objects.requireNonNullElse(actorName,"SYSTEM");shooterName=Objects.requireNonNullElse(shooterName,"");
             Objects.requireNonNull(shooterType);weapon=Objects.requireNonNull(weapon).copy();
         }
         @Override public CompoundTag weapon(){return weapon.copy();}
+        @Override public CompoundTag mechanism(){return mechanism==null?null:mechanism.copy();}
+        public boolean fromMechanism(){return mechanism!=null;}
         public String weaponId(){return weapon.getString("id");}
         public CompoundTag tag() {
-            var t=new CompoundTag();t.putInt("Version",1);t.putUUID("Id",id);t.putLong("Time",time);
-            if(actor!=null)t.putUUID("Actor",actor);t.putString("ActorName",actorName);t.putUUID("Shooter",shooter);
+            var t=new CompoundTag();t.putInt("Version",fromMechanism()?2:1);t.putUUID("Id",id);t.putLong("Time",time);
+            if(actor!=null)t.putUUID("Actor",actor);t.putString("ActorName",actorName);if(shooter!=null)t.putUUID("Shooter",shooter);
+            if(mechanism!=null)t.put("Mechanism",mechanism.copy());
             t.putString("ShooterName",shooterName);t.putString("ShooterType",shooterType);t.put("Origin",origin.tag());t.put("Weapon",weapon.copy());return t;
         }
         public static Shot read(CompoundTag t) {
             try {
-                if(t.getInt("Version")!=1 || !t.hasUUID("Id") || !t.hasUUID("Shooter") || !t.contains("Time",Tag.TAG_LONG)
+                int version=t.getInt("Version");
+                if((version!=1 && version!=2) || !t.hasUUID("Id") || !t.contains("Time",Tag.TAG_LONG)
                         || !t.contains("Weapon",Tag.TAG_COMPOUND))return null;
+                if(version==1 && (!t.hasUUID("Shooter") || t.contains("Mechanism")))return null;
+                if(version==2 && (!t.contains("Mechanism",Tag.TAG_COMPOUND) || t.contains("Shooter") || t.contains("Actor")))return null;
                 var pose=Pose.read(t.getCompound("Origin"));if(pose==null)return null;
                 return new Shot(t.getUUID("Id"),t.getLong("Time"),t.hasUUID("Actor")?t.getUUID("Actor"):null,t.getString("ActorName"),
-                        t.getUUID("Shooter"),t.getString("ShooterName"),t.getString("ShooterType"),pose,t.getCompound("Weapon"));
+                        version==1?t.getUUID("Shooter"):null,t.getString("ShooterName"),t.getString("ShooterType"),pose,t.getCompound("Weapon"),version==2?t.getCompound("Mechanism"):null);
             } catch(RuntimeException invalid) {return null;}
         }
     }
@@ -89,7 +109,7 @@ public final class WeaponCombatTrace {
     public static List<Component> describe(LogEntry row) {
         var t=context(row);if(t==null)return List.of();var out=new ArrayList<Component>();
         String phase=switch(t.getString("Phase")){
-            case "shot" -> "выстрел";case "projectile_spawn" -> "создан снаряд";case "damage" -> "нанесён урон";
+            case "shot" -> "выстрел";case "turret_shot" -> "выстрел турели";case "projectile_spawn" -> "создан снаряд";case "damage" -> "нанесён урон";
             case "block_hit" -> "попадание в блок";case "kill" -> "убийство";case "death" -> "смерть";
             case "reload_start" -> "начата перезарядка";case "reload_stop" -> "перезарядка остановлена";
             case "ammo_transfer" -> "изменение боезапаса";case "unload" -> "выгрузка боезапаса";
@@ -97,12 +117,19 @@ public final class WeaponCombatTrace {
         };
         out.add(Component.literal("Scorched Guns · "+phase));
         var shot=Shot.read(t.getCompound("Shot"));
-        if(shot!=null)out.add(Component.literal("Стрелок: "+shot.shooterName()+" · "+shot.shooter()+" · выстрел "+shot.id()+" · "+shot.time()));
+        if(shot!=null){
+            out.add(Component.literal((shot.fromMechanism()?"Источник: ":"Стрелок: ")+shot.shooterName()+(shot.shooter()==null?"":" · "+shot.shooter())+" · выстрел "+shot.id()+" · "+shot.time()));
+            if(shot.fromMechanism()){
+                var mechanism=shot.mechanism();
+                out.add(Component.literal("Блок турели: "+mechanism.getString("Dimension")+" "+mechanism.getInt("X")+" "+mechanism.getInt("Y")+" "+mechanism.getInt("Z")));
+                if(mechanism.hasUUID("Owner"))out.add(Component.literal("Владелец турели: "+mechanism.getString("OwnerName")+" · "+mechanism.getUUID("Owner")));
+            }
+        }
         String weapon=shot==null?t.getCompound("WeaponAfter").getString("id"):shot.weaponId();
         if(!weapon.isBlank())out.add(Component.literal(shot==null?"Оружие: ":"Оружие при выстреле: ").append(weaponLabel(weapon)).append(" ["+weapon+"]"));
         if(t.hasUUID("ReloadId"))out.add(Component.literal("Перезарядка: "+t.getUUID("ReloadId")));
         var source=pose(row,"source");var target=pose(row,"target");
-        if(source!=null){out.add(Component.literal("Место стрелка: "+source.display()));if(row.id>0){out.add(link(row.id,"source","[На место стрелка]"));out.add(link(row.id,"view","[Восстановить точку взгляда]"));}}
+        if(source!=null){boolean machine=shot!=null&&shot.fromMechanism();out.add(Component.literal((machine?"Точка выстрела: ":"Место стрелка: ")+source.display()));if(row.id>0){out.add(link(row.id,"source",machine?"[К точке выстрела]":"[На место стрелка]"));out.add(link(row.id,"view","[Восстановить точку взгляда]"));}}
         if(target!=null){out.add(Component.literal("Место цели: "+target.display()));if(row.id>0)out.add(link(row.id,"target","[К цели]"));}
         if(t.contains("Damage"))out.add(Component.literal("Нанесённый урон: "+t.getFloat("Damage")));
         if(t.contains("AmmoBefore"))out.add(Component.literal("Боезапас: "+t.getInt("AmmoBefore")+" → "+t.getInt("AmmoAfter")));

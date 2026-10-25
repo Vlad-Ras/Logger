@@ -133,18 +133,19 @@ public final class ScgunsNativeSmoke {
             check(preview.applied==0 && preview.skippedReasons.getOrDefault("not_rollbackable",0)==2,"weapon audit entered partial inventory/entity rollback");
             check(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(level.getServer()),"fixture requires a non-authorized stand; never supply production credentials");
             check(WeaponCombatAudit.beginFire(shooter)==null,"production capture bypassed AuthCore");
+            ScgunsCoverageNativeSmoke.run(level);
             System.out.println("SCGUNS_NATIVE_OK: supplied 1.5 hooks applied; real accepted/cooldown/cancelled/empty gun paths; 26-pellet shotgun and entity-free beam; native player damage/death and ammo transfer; entity save/load; immutable gun/source/target precision and orientation; death/kill actors; exact command links; malformed evidence; capture mask and rollback refusal; AuthCore remained disabled");
         } finally {NeoForge.EVENT_BUS.unregister(post);NeoForge.EVENT_BUS.unregister(pre);NeoForge.EVENT_BUS.unregister(join);}
     }
-    private static ServerPlayer player(ServerLevel level,String name){
+    static ServerPlayer player(ServerLevel level,String name){
         var profile=new GameProfile(UUID.randomUUID(),name);var player=new ServerPlayer(level.getServer(),level,profile,ClientInformation.createDefault());
         player.connection=new net.minecraft.server.network.ServerGamePacketListenerImpl(level.getServer(),new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND),player,net.minecraft.server.network.CommonListenerCookie.createInitial(profile,false)){
             @Override public void send(net.minecraft.network.protocol.Packet<?> packet){}
             @Override public void send(net.minecraft.network.protocol.Packet<?> packet,net.minecraft.network.PacketSendListener callback){}
         };return player;
     }
-    private static ItemStack item(String id){return item(id,1);}
-    private static ItemStack item(String id,int count){var item=BuiltInRegistries.ITEM.get(ResourceLocation.parse("scguns:"+id));check(item!=Items.AIR,"missing native item "+id);return new ItemStack(item,count);}
-    private static void ammo(ItemStack stack,int count){var data=new CompoundTag();data.putInt("AmmoCount",count);stack.set(DataComponents.CUSTOM_DATA,CustomData.of(data));}
-    private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
+    static ItemStack item(String id){return item(id,1);}
+    static ItemStack item(String id,int count){var item=BuiltInRegistries.ITEM.get(ResourceLocation.parse("scguns:"+id));check(item!=Items.AIR,"missing native item "+id);return new ItemStack(item,count);}
+    static void ammo(ItemStack stack,int count){var data=new CompoundTag();data.putInt("AmmoCount",count);stack.set(DataComponents.CUSTOM_DATA,CustomData.of(data));}
+    static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
 }

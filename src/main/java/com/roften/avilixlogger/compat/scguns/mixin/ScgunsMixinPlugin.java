@@ -22,7 +22,7 @@ public final class ScgunsMixinPlugin implements IMixinConfigPlugin {
                     var node=new ClassNode();new ClassReader(input).accept(node,ClassReader.SKIP_FRAMES);return node;
                 }
             });
-            for(String name:List.of("ServerGunFireMixin","ScgunsProjectileTraceMixin","VanillaProjectileTraceMixin","ReloadTrackerMixin","ReloadRequestMixin","PlayerReloadTraceMixin","GunLoadedStateMixin","MovementReloadStateMixin","AnimatedReloadStateMixin"))
+            for(String name:List.of("ServerGunFireMixin","ScgunsProjectileTraceMixin","VanillaProjectileTraceMixin","ReloadTrackerMixin","ReloadRequestMixin","PlayerReloadTraceMixin","GunLoadedStateMixin","MovementReloadStateMixin","AnimatedReloadStateMixin","TurretFireMixin"))
                 checker.check(pkg.replace('.','/')+'/'+name);
             ScgunsSupport.publish(true);
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/Scguns").info("Scorched Guns 1.5 audit contracts verified");

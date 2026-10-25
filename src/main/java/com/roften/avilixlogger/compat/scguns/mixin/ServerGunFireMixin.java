@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class ServerGunFireMixin {
     @WrapOperation(method="handleShoot",at=@At(value="INVOKE",target="Lcom/mrcrayfish/framework/api/sync/SyncedDataKey;setValue(Lnet/minecraft/world/entity/Entity;Ljava/lang/Object;)V"),remap=false)
     private static void avilixlogger$stopReload(SyncedDataKey key,Entity entity,Object value,Operation<Void> original){
-        var before=ReloadStateAudit.before(key,entity);original.call(key,entity,value);ReloadStateAudit.after(key,entity,before);
+        var before=ReloadStateAudit.before(key,entity);original.call(key,entity,value);ReloadStateAudit.after(key,entity,before,value);
     }
     // Scguns applies wrapped/clamped packet yaw/pitch before creating projectiles or beams.
     @Inject(method="handleShoot",at=@At(value="INVOKE",target="Lnet/minecraft/server/level/ServerPlayer;setXRot(F)V",shift=At.Shift.AFTER),remap=false)

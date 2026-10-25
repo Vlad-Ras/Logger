@@ -62,6 +62,12 @@ public final class ClickHouseNativeSmoke {
             weapon.beAfter="{Kind:'WeaponCombat',Version:1,Provider:'scguns',Phase:'test',ActorPose:{Dimension:'minecraft:overworld',X:-2.125d,Y:70.25d,Z:9.875d,Yaw:29.25f,Pitch:-23.5f,EyeY:71.87d}}";
             weapons.add(weapon);
         }
+        var mechanism=new net.minecraft.nbt.CompoundTag();mechanism.putString("Kind","turret");mechanism.putString("Block","scguns:shotgun_turret");mechanism.putString("Dimension",block.dim);
+        mechanism.putInt("X",-3);mechanism.putInt("Y",70);mechanism.putInt("Z",9);mechanism.putUUID("Owner",UUID.randomUUID());mechanism.putString("OwnerName","NativeTurretOwner");
+        var turretWeapon=new net.minecraft.nbt.CompoundTag();turretWeapon.putString("id","scguns:shotgun_turret");turretWeapon.putInt("count",1);
+        var turretShot=new WeaponCombatTrace.Shot(UUID.randomUUID(),System.currentTimeMillis(),null,"Турель",null,"scguns:shotgun_turret","scguns:shotgun_turret",
+                new WeaponCombatTrace.Pose(block.dim,-2.125,70.25,9.875,29.25f,-23.5f,70.25),turretWeapon,mechanism);
+        var turret=WeaponCombatAudit.entry(turretShot,ActionType.WEAPON_KILL,"kill",null,null);turret.source=weaponPrefix+"turret";turret.materializeSnapshots();weapons.add(turret);
 
         ClickHouseLogStorage db = null;
         try {
@@ -94,7 +100,7 @@ public final class ClickHouseNativeSmoke {
             db = new ClickHouseLogStorage();
             verifyDetails(db.queryReverse(detail), block, item);
             verifyWeapons(db,weapons);
-            System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; weapon shot/hit/kill/reload/player-death poses survive detail pruning and exact ID lookup");
+            System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
             LoggerConfig.SPEC.acceptConfig(null);
@@ -124,6 +130,10 @@ public final class ClickHouseNativeSmoke {
             var q=new LogQuery();q.requireDetails=true;q.sourcePrefix="mod:scguns:";q.exactId=weapon.id;q.untilTs=Long.MAX_VALUE;q.limit=1;
             var rows=db.query(q);check(rows.size()==1 && rows.getFirst().id==weapon.id && weapon.beAfter.equals(rows.getFirst().beAfter),"native weapon evidence lost for "+weapon.type);
             var pose=WeaponCombatTrace.pose(rows.getFirst(),"source");check(pose!=null && pose.x()==-2.125 && pose.yaw()==29.25f && pose.pitch()==-23.5f,"native precision/orientation lost");
+            if(weapon.actorUuid==null){
+                var shot=WeaponCombatTrace.Shot.read(WeaponCombatTrace.context(rows.getFirst()).getCompound("Shot"));
+                check(rows.getFirst().actorUuid==null&&shot!=null&&shot.fromMechanism()&&shot.actor()==null&&shot.mechanism().getString("OwnerName").equals("NativeTurretOwner"),"native turret owner/actor semantics changed");
+            }
         }
     }
 

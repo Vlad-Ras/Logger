@@ -27,6 +27,6 @@ public abstract class ReloadTrackerMixin {
     }
     @WrapOperation(method={"onPlayerTick","loaded"},at=@At(value="INVOKE",target="Lcom/mrcrayfish/framework/api/sync/SyncedDataKey;setValue(Lnet/minecraft/world/entity/Entity;Ljava/lang/Object;)V"),remap=false)
     private static void avilixlogger$state(SyncedDataKey key,Entity entity,Object value,Operation<Void> original) {
-        var before=ReloadStateAudit.before(key,entity);original.call(key,entity,value);ReloadStateAudit.after(key,entity,before);
+        var before=ReloadStateAudit.before(key,entity);original.call(key,entity,value);ReloadStateAudit.after(key,entity,before,value);
     }
 }

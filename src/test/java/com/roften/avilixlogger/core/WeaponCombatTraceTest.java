@@ -33,11 +33,32 @@ public final class WeaponCombatTraceTest {
         var broken=shot.tag();broken.remove("Id");check(WeaponCombatTrace.Shot.read(broken)==null,"unidentified shot accepted");
         broken=shot.tag();broken.putInt("Version",99);check(WeaponCombatTrace.Shot.read(broken)==null,"future evidence version misread");
         check(WeaponCombatTrace.describe(row).stream().anyMatch(c->c.getStyle().getClickEvent()!=null&&c.getStyle().getClickEvent().getValue().equals("/log combatpos 9001 view")),"stored row did not expose exact viewpoint link");
+        var mechanism=new CompoundTag();mechanism.putString("Kind","turret");mechanism.putString("Block","scguns:basic_turret");mechanism.putString("Dimension",pose.dim());
+        mechanism.putInt("X",-13);mechanism.putInt("Y",70);mechanism.putInt("Z",9);mechanism.putUUID("Owner",actor);mechanism.putString("OwnerName","Owner");
+        var machine=new WeaponCombatTrace.Shot(UUID.randomUUID(),1234L,null,"Турель",null,"scguns:basic_turret","scguns:basic_turret",pose,weapon,mechanism);
+        mechanism.putString("OwnerName","Changed");var exported=machine.mechanism();exported.remove("Owner");
+        check(machine.mechanism().hasUUID("Owner")&&machine.mechanism().getString("OwnerName").equals("Owner"),"turret ownership evidence remained mutable");
+        var loadedMachine=WeaponCombatTrace.Shot.read(machine.tag());
+        check(loadedMachine!=null&&loadedMachine.fromMechanism()&&loadedMachine.actor()==null&&loadedMachine.shooter()==null&&loadedMachine.mechanism().equals(machine.mechanism()),"mechanism round trip fabricated a human shooter");
+        var machineRow=WeaponCombatAudit.entry(loadedMachine,ActionType.WEAPON_KILL,"kill",null,null);machineRow.id=9002;machineRow.materializeSnapshots();
+        var machineReplay=GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(machineRow),LogEntry.class);
+        check(machineReplay.actorUuid==null&&WeaponCombatTrace.pose(machineReplay,"source").equals(pose),"turret journal lost source or attributed owner as actor");
+        check(WeaponCombatTrace.describe(machineReplay).stream().anyMatch(c->c.getString().contains("Владелец турели: Owner")),"turret owner absent from details");
+        check(WeaponCombatTrace.describe(machineReplay).stream().noneMatch(c->c.getString().contains("null")),"turret details exposed fabricated null shooter");
+        for(String field:List.of("X","Y","Z","Block","Dimension","Kind")){
+            var invalid=machine.tag();invalid.getCompound("Mechanism").remove(field);check(WeaponCombatTrace.Shot.read(invalid)==null,"missing mechanism "+field+" accepted");
+        }
+        for(String field:List.of("Actor","Shooter")){
+            var invalid=machine.tag();invalid.putUUID(field,actor);check(WeaponCombatTrace.Shot.read(invalid)==null,"mechanism accepted human "+field);
+        }
+        var invalidOwner=machine.tag();invalidOwner.getCompound("Mechanism").putString("Owner","bad");check(WeaponCombatTrace.Shot.read(invalidOwner)==null,"malformed mechanism owner accepted");
+        var noOwner=machine.tag();noOwner.getCompound("Mechanism").remove("Owner");check(WeaponCombatTrace.Shot.read(noOwner)!=null,"ownerless turret rejected");
+        var disguised=machine.tag();disguised.putInt("Version",1);disguised.putUUID("Shooter",actor);check(WeaponCombatTrace.Shot.read(disguised)==null,"v1 silently stripped mechanism identity");
         int mask=CaptureTypePolicy.mask();try{
             CaptureTypePolicy.install(CaptureTypePolicy.changed(0,3,false));check(!CaptureTypePolicy.allows(ActionType.WEAPON_KILL,"mod:scguns",null),"kills bypass entities mask");
             CaptureTypePolicy.install(CaptureTypePolicy.changed(0,4,false));check(!CaptureTypePolicy.allows(ActionType.WEAPON_RELOAD,"mod:scguns",null),"reload bypass items mask");
         }finally{CaptureTypePolicy.install(mask);}
-        System.out.println("WEAPON_EVIDENCE_OK: immutable shot, persisted precision/angles, negative coordinates, viewpoint, malformed data and category masks");
+        System.out.println("WEAPON_EVIDENCE_OK: immutable player/turret shot and owner, v1/v2 journal round trips, precision/angles, negative coordinates, viewpoint, malformed data, human attribution refusal and category masks");
     }
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
 }

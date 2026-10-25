@@ -16,9 +16,18 @@ public final class ReloadStateAudit {
         catch(RuntimeException failure){WeaponCombatAudit.failure();}return null;
     }
     @SuppressWarnings("unchecked")
-    public static void after(SyncedDataKey key,Entity entity,Boolean before) {
-        if(before==null)return;
-        try {if(key.getValue(entity) instanceof Boolean value)WeaponCombatAudit.reloadState((Player)entity,before,value);}
+    public static void after(SyncedDataKey key,Entity entity,Boolean before,Object requested) {
+        if(!(entity instanceof ServerPlayer p) || !p.server.isSameThread())return;
+        // The original write has returned. No synced-data read or snapshot is needed
+        // to release Logger's own state when capture is disabled.
+        try {
+            if(before==null){
+                if(Boolean.FALSE.equals(requested) && key.id().getNamespace().equals("scguns") && key.id().getPath().equals("reloading")
+                        && p instanceof WeaponReloadAccess access)access.avilixlogger$reload(null);
+                return;
+            }
+            if(key.getValue(entity) instanceof Boolean value)WeaponCombatAudit.reloadState((Player)entity,before,value);
+        }
         catch(RuntimeException failure){WeaponCombatAudit.failure();}
     }
 }

@@ -13,7 +13,8 @@
     "PlayerReloadTraceMixin",
     "GunLoadedStateMixin",
     "MovementReloadStateMixin",
-    "AnimatedReloadStateMixin"
+    "AnimatedReloadStateMixin",
+    "TurretFireMixin"
   ],
   "client": [],
   "injectors": {
