@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 /** Real target bytecode plus injected missing methods, fields and invocation sites. */
 public final class CreatePreflightTest {
     public static void main(String[] args) throws Exception {
+        coerceSignatures();
         var loader = CreatePreflightTest.class.getClassLoader();
         var config = JsonParser.parseReader(new InputStreamReader(loader.getResourceAsStream("avilixlogger_create_trains.mixins.json"))).getAsJsonObject();
         int failed = 0;
@@ -60,6 +61,24 @@ public final class CreatePreflightTest {
         }).check("com/roften/avilixlogger/compat/create/mixin/BearingControllerAccessMixin");}catch(Exception expected){inheritedRejected=true;}
         if(!inheritedRejected)throw new AssertionError("Inherited shadow accepted although Mixin requires a declared target field");
         System.out.println("CREATE_PREFLIGHT_OK");
+    }
+    private static void coerceSignatures()throws Exception {
+        for(int fault=0;fault<5;fault++) {
+            var mixin=new ClassNode();mixin.name="test/Mixin";
+            var annotation=new org.objectweb.asm.tree.AnnotationNode("Lorg/spongepowered/asm/mixin/Mixin;");
+            annotation.values=new java.util.ArrayList<>(java.util.List.of("targets",java.util.List.of("test.Target")));mixin.invisibleAnnotations=java.util.List.of(annotation);
+            var handler=new org.objectweb.asm.tree.MethodNode(0,"handler","(Ljava/lang/Object;Lcom/llamalad7/mixinextras/injector/wrapoperation/Operation;)"+(fault==3?"I":"V"),null,null);
+            var wrapper=new org.objectweb.asm.tree.AnnotationNode("Lcom/llamalad7/mixinextras/injector/wrapmethod/WrapMethod;");
+            wrapper.values=new java.util.ArrayList<>(java.util.List.of("method",java.util.List.of("convert")));handler.invisibleAnnotations=java.util.List.of(wrapper);
+            if(fault!=1) {
+                @SuppressWarnings("unchecked") java.util.List<org.objectweb.asm.tree.AnnotationNode>[] parameters=new java.util.List[2];
+                parameters[0]=java.util.List.of(new org.objectweb.asm.tree.AnnotationNode("Lorg/spongepowered/asm/mixin/injection/Coerce;"));handler.invisibleParameterAnnotations=parameters;
+            }
+            mixin.methods.add(handler);var target=new ClassNode();target.name="test/Target";
+            target.methods.add(new org.objectweb.asm.tree.MethodNode(0,"convert",fault==2?"(I)V":fault==4?"(Ljava/lang/String;I)V":"(Ljava/lang/String;)V",null,null));
+            boolean passed=true;try{new Preflight(name->name.equals(mixin.name)?mixin:target).check(mixin.name);}catch(IllegalStateException expected){passed=false;}
+            if(passed!=(fault==0))throw new AssertionError("Coerce contract accepted invalid signature or rejected reference: "+fault);
+        }
     }
     private static ClassNode raw(ClassLoader loader, String name) throws Exception {
         try (var in = loader.getResourceAsStream(name + ".class")) {

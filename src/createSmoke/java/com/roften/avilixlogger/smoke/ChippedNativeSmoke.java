@@ -21,6 +21,7 @@ public final class ChippedNativeSmoke {
         finally { event.getServer().halt(false); }
     }
     private static void run(ServerLevel level)throws Exception {
+        preflightFaults();
         var type=Class.forName("earth.terrarium.chipped.common.menus.WorkbenchMenu");
         check(Arrays.stream(type.getDeclaredMethods()).anyMatch(m->m.getName().contains("avilixlogger$craft")),"verified optional wrapper did not apply");
         var player=new ServerPlayer(level.getServer(),level,new com.mojang.authlib.GameProfile(UUID.randomUUID(),"ChippedActor"),ClientInformation.createDefault());
@@ -34,12 +35,20 @@ public final class ChippedNativeSmoke {
             @SuppressWarnings("unchecked") var results=(List<ItemStack>)type.getMethod("results").invoke(menu);
             var output=results.stream().filter(s->!s.is(Items.OAK_PLANKS)).findFirst().orElseThrow(()->new AssertionError("native Chipped recipes unavailable")).copyWithCount(1);
             var before=EntityContainerSerde.snapshot(inv,level.registryAccess());
-            type.getMethod("craft",ItemStack.class,boolean.class).invoke(menu,output,all);
+            if(all) {
+                var packetClass=Class.forName("earth.terrarium.chipped.common.network.ServerboundCraftPacket");
+                var packet=packetClass.getConstructor(ItemStack.class,boolean.class).newInstance(output,true);
+                var endpoint=packetClass.getMethod("type").invoke(packet);
+                var api=Class.forName("com.teamresourceful.resourcefullib.common.network.base.ServerboundPacketType");
+                var payload=Class.forName("com.teamresourceful.resourcefullib.common.network.Packet");
+                @SuppressWarnings("unchecked") var handler=(java.util.function.Consumer<net.minecraft.world.entity.player.Player>)api.getMethod("handle",payload).invoke(endpoint,packet);
+                handler.accept(player);
+            } else type.getMethod("craft",ItemStack.class,boolean.class).invoke(menu,output,false);
             long produced=0;for(int i=0;i<inv.getContainerSize();i++)if(ItemStack.isSameItemSameComponents(inv.getItem(i),output))produced+=inv.getItem(i).getCount();
             check(produced==(all?1031:1024)&&inv.getItem(11).getCount()==3,"native replaceAll or expanded count changed");
             var after=EntityContainerSerde.snapshot(inv,level.registryAccess());
             var row=ChippedCraftAudit.capture(player,before,after,output,produced,all);
-            check(row!=null&&row.type==ActionType.ITEM_TRANSFORM&&player.getUUID().equals(row.actorUuid)&&row.count==produced,"conversion payload lost actor/count/type");
+            check(row!=null&&row.type==ActionType.ITEM_TRANSFORM&&player.getUUID().equals(row.actorUuid)&&player.getUUID().equals(row.entityUuid)&&row.count==produced,"conversion payload lost actor/target/count/type");
             var preview=RollbackEngine.previewPrepared(new RollbackEngine.PreparedRollback(List.of(),List.of(),List.of(row),0));
             check(preview.applied==0&&preview.skippedReasons.getOrDefault("not_rollbackable",0)==1,"conversion entered partial craft rollback");
             inv.clearContent();row.materializeSnapshots();
@@ -51,7 +60,27 @@ public final class ChippedNativeSmoke {
             check(ChippedCraftAudit.begin(null,ItemStack.EMPTY,false)==null,"disabled capture touched player");
             check(!CaptureTypePolicy.allows(ActionType.ITEM_TRANSFORM,"mod:chipped:workbench",null),"conversion bypassed items mask");
         }finally{CaptureTypePolicy.install(mask);}
-        System.out.println("CHIPPED_NATIVE_OK: actual workbench, optional wrapper, 1024-count selected/all conversions, unchanged resources, detached inventory proof, no-op and capture mask; no AuthCore bypass");
+        System.out.println("CHIPPED_NATIVE_OK: actual workbench and packet consumer, optional wrapper, 1024-count selected/all conversions, unchanged resources, detached inventory proof, no-op, capture mask, preflight faults and rollback refusal; no AuthCore bypass");
+    }
+    private static void preflightFaults()throws Exception {
+        String mixin="com/roften/avilixlogger/compat/chipped/mixin/WorkbenchMenuMixin";
+        for(int fault=0;fault<3;fault++) {
+            final int selected=fault;boolean rejected=false;
+            try {
+                new com.roften.avilixlogger.compat.create.mixin.CreateMixinPlugin.Preflight(name->{
+                    try(var input=Objects.requireNonNull(ChippedNativeSmoke.class.getClassLoader().getResourceAsStream(name+".class"))) {
+                        var node=new org.objectweb.asm.tree.ClassNode();new org.objectweb.asm.ClassReader(input).accept(node,org.objectweb.asm.ClassReader.SKIP_FRAMES);
+                        if(name.equals("earth/terrarium/chipped/common/menus/WorkbenchMenu")) {
+                            if(selected==0)throw new IllegalStateException("injected missing target");
+                            if(selected==1)node.fields.removeIf(f->f.name.equals("inventory"));
+                            if(selected==2)node.methods.stream().filter(m->m.name.equals("craft")).forEach(m->m.desc="()V");
+                        }
+                        return node;
+                    }
+                }).check(mixin);
+            }catch(Exception expected){rejected=true;}
+            check(rejected,"optional preflight accepted injected fault "+selected);
+        }
     }
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
 }

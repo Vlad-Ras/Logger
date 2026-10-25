@@ -431,3 +431,15 @@ tasks.register('testCreatePreflight', JavaExec) {
     classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
     mainClass = 'com.roften.avilixlogger.core.CreatePreflightTest'
 }
+
+tasks.register('testExactModpackPreflight', JavaExec) {
+    group = 'verification'
+    description = 'Checks Logger mixin contracts against local operator JAR bytecode without executing those mods.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'com.roften.avilixlogger.core.ExactModpackPreflightTest'
+    doFirst {
+        if (!project.hasProperty('exactModpackDir')) throw new GradleException('Specify -PexactModpackDir=/absolute/path/to/mods')
+        args project.property('exactModpackDir')
+    }
+}

@@ -43,6 +43,7 @@ public final class ChippedCraftAudit {
         var item=NbtSerde.snapshotItemStack(output,player.registryAccess());if(item==null)return null;
         var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.ITEM_TRANSFORM;
         row.actorUuid=CauseContext.actorUuid(player);row.actorName=CauseContext.actorName(player);
+        row.entityUuid=player.getUUID();row.entityType="minecraft:player";row.entityName=EntityLogIdentity.name(player);
         row.dim=player.serverLevel().dimension().location().toString();var pos=player.blockPosition();
         row.x=pos.getX();row.y=pos.getY();row.z=pos.getZ();row.source="mod:chipped:workbench";
         row.count=(int)Math.min(Integer.MAX_VALUE,produced);

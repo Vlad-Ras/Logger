@@ -94,7 +94,7 @@ public final class CreateMixinPlugin implements IMixinConfigPlugin {
                                         .filter(t -> !t.getDescriptor().equals("Lcom/llamalad7/mixinextras/injector/wrapoperation/Operation;"))
                                         .toArray(Type[]::new);
                                 String descriptor = Type.getMethodDescriptor(Type.getReturnType(method.desc), parameters);
-                                require(candidates.stream().anyMatch(m -> m.desc.equals(descriptor)), name + ": wrapper signature " + target + '.' + selector + descriptor);
+                                require(candidates.stream().anyMatch(m -> wrapperMatches(method,m)), name + ": wrapper signature " + target + '.' + selector + descriptor);
                             } else if(a.desc.endsWith("/Inject;")) {
                                 var parameters=Type.getArgumentTypes(method.desc);
                                 int callback=0;
@@ -126,6 +126,28 @@ public final class CreateMixinPlugin implements IMixinConfigPlugin {
                     }
                 }
             }
+        }
+        private static boolean wrapperMatches(MethodNode handler,MethodNode target) {
+            if(!Type.getReturnType(handler.desc).equals(Type.getReturnType(target.desc)))return false;
+            var declared=Type.getArgumentTypes(handler.desc);var actual=Type.getArgumentTypes(target.desc);int index=0;
+            for(int i=0;i<declared.length;i++) {
+                if(declared[i].getDescriptor().equals("Lcom/llamalad7/mixinextras/injector/wrapoperation/Operation;"))continue;
+                if(index>=actual.length)return false;
+                Type supplied=actual[index++];
+                if(declared[i].equals(supplied))continue;
+                // Mixin explicitly permits @Coerce Object for a native reference parameter.
+                // Unannotated Object, primitives, arity and return types remain strict.
+                if(!declared[i].getDescriptor().equals("Ljava/lang/Object;")
+                        || supplied.getSort()!=Type.OBJECT && supplied.getSort()!=Type.ARRAY
+                        || !coerced(handler,i))return false;
+            }
+            return index==actual.length;
+        }
+        private static boolean coerced(MethodNode method,int parameter) {
+            for(var list:java.util.Arrays.asList(method.visibleParameterAnnotations,method.invisibleParameterAnnotations))
+                if(list!=null && parameter<list.length && list[parameter]!=null)
+                    for(var annotation:list[parameter])if(annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Coerce;"))return true;
+            return false;
         }
         private boolean field(String owner, String name, String desc) throws Exception {
             var node = read(owner);
