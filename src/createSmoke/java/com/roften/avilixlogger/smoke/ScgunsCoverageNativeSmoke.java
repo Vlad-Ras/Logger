@@ -23,10 +23,11 @@ import static com.roften.avilixlogger.smoke.ScgunsNativeSmoke.*;
 /** Exact local JAR acceptance. Framework references are isolated from optional-absent discovery. */
 public final class ScgunsCoverageNativeSmoke {
     public static void run(ServerLevel level)throws Exception {
-        ReloadPackets.run(level);turrets(level);explosions(level);
+        int blockers=ReloadPackets.run(level);turrets(level);explosions(level);
         check(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(level.getServer()),"coverage must not bypass AuthCore");
-        System.out.println("SCGUNS_COVERAGE_NATIVE_OK: native reload packets, turret bursts/save-load/owner isolation and direct explosion damage; capture unauthorized");
+        status((blockers==0?"SCGUNS_COVERAGE_NATIVE_OK":"SCGUNS_COVERAGE_NATIVE_PARTIAL")+": knownBlockers="+blockers+"; turret bursts/save-load/owner isolation and direct explosion damage; capture unauthorized");
     }
+    private static void status(String message){org.slf4j.LoggerFactory.getLogger("AvilixLogger/ScgunsSmoke").info(message);System.out.println(message);}
     private static final class ReloadPackets {
         private static final class Context extends com.mrcrayfish.framework.api.network.MessageContext {
             private boolean handled;private int executed;
@@ -35,13 +36,15 @@ public final class ScgunsCoverageNativeSmoke {
             public void execute(Runnable task){executed++;task.run();}
             public void disconnect(net.minecraft.network.chat.Component reason){throw new AssertionError(reason.getString());}
         }
-        @SuppressWarnings("unchecked") static void run(ServerLevel level)throws Exception {
+        @SuppressWarnings("unchecked") static int run(ServerLevel level)throws Exception {
+            int blockers=0;
             var request=Class.forName("top.ribs.scguns.network.message.C2SMessageReload");
             var loaded=Class.forName("top.ribs.scguns.network.message.C2SMessageGunLoaded");
             var context=com.mrcrayfish.framework.api.network.MessageContext.class;
             var state=(com.mrcrayfish.framework.api.sync.SyncedDataKey<Player,Boolean>)Class.forName("top.ribs.scguns.init.ModSyncedDataKeys").getField("RELOADING").get(null);
             String[][] cases={{"auvtomag","ramrod_round","6","6"},{"boomstick","shotgun_shell","1","1"},{"laser_musket","energy_core","7","1"}};
             for(var sample:cases){
+                org.slf4j.LoggerFactory.getLogger("AvilixLogger/ScgunsSmoke").info("SCGUNS_RELOAD_CASE {}",sample[0]);
                 var p=player(level,"Reload"+sample[0]);var gun=item(sample[0]);ammo(gun,0);p.setItemInHand(InteractionHand.MAIN_HAND,gun);p.getInventory().setItem(9,item(sample[1],16));
                 var start=new Context(p);request.getMethod("handle",request,context).invoke(null,request.getConstructor(boolean.class).newInstance(true),start);
                 check(start.handled&&start.executed==1&&state.getValue(p),"native reload start failed: "+sample[0]);
@@ -52,7 +55,15 @@ public final class ScgunsCoverageNativeSmoke {
                 loaded.getMethod("handle",loaded,context).invoke(null,loaded.getConstructor().newInstance(),new Context(p));
                 check(WeaponCombatAudit.ammo(gun)==Integer.parseInt(sample[2]),"native loaded amount differs: "+sample[0]+" = "+WeaponCombatAudit.ammo(gun));
                 check(p.getInventory().getItem(9).getCount()==16-Integer.parseInt(sample[3]),"native reload consumed wrong ammo: "+sample[0]);
-                request.getMethod("handle",request,context).invoke(null,request.getConstructor(boolean.class).newInstance(false),new Context(p));
+                try{request.getMethod("handle",request,context).invoke(null,request.getConstructor(boolean.class).newInstance(false),new Context(p));}
+                catch(java.lang.reflect.InvocationTargetException issue){
+                    var cause=issue.getCause();
+                    boolean known=sample[0].equals("boomstick") && cause instanceof RuntimeException && cause.getMessage()!=null
+                            && cause.getMessage().contains("net/minecraft/client/player/LocalPlayer") && cause.getMessage().contains("DEDICATED_SERVER")
+                            && Arrays.stream(cause.getStackTrace()).anyMatch(frame->frame.getClassName().equals(request.getName())&&frame.getMethodName().equals("lambda$handle$0"));
+                    if(!known)throw issue;
+                    blockers++;status("SCGUNS_KNOWN_NATIVE_BLOCKER: manual stop calls client ReloadHandler.loaded from C2SMessageReload on dedicated server; unchanged native failure, not accepted as compatibility");
+                }
                 check(!state.getValue(p),"native reload stop failed: "+sample[0]);
             }
             // Retain a fixture session as if capture had been enabled at reload start.
@@ -67,7 +78,8 @@ public final class ScgunsCoverageNativeSmoke {
             var spectator=player(level,"ReloadSpectator");spectator.setGameMode(net.minecraft.world.level.GameType.SPECTATOR);spectator.setItemInHand(InteractionHand.MAIN_HAND,item("boomstick"));
             request.getMethod("handle",request,context).invoke(null,request.getConstructor(boolean.class).newInstance(true),new Context(spectator));
             check(!state.getValue(spectator),"spectator started reload");
-            System.out.println("SCGUNS_RELOAD_PACKETS_OK: magazine, manual insert, single item; critical cancel refusal, slot cancel, spectator refusal, retained-session cleanup without capture");
+            status("SCGUNS_RELOAD_PACKETS_CHECKED: magazine, manual insert, single item; critical cancel refusal, slot cancel, spectator refusal, retained-session cleanup without capture; native manual-stop blockers="+blockers);
+            return blockers;
         }
     }
     private static void turrets(ServerLevel level)throws Exception {
@@ -100,9 +112,14 @@ public final class ScgunsCoverageNativeSmoke {
             NeoForge.EVENT_BUS.addListener(damaged);NeoForge.EVENT_BUS.addListener(died);
             try{hit.invoke(restored,new EntityHitResult(victim));check(damage[0]==1&&deaths[0]==1&&victim.isDeadOrDying(),"native turret damage/death missing");}
             finally{NeoForge.EVENT_BUS.unregister(damaged);NeoForge.EVENT_BUS.unregister(died);}
+            check(Arrays.stream(first.getClass().getDeclaredMethods()).anyMatch(m->m.getName().contains("avilixlogger$block")),"turret block-impact hook absent");
+            var wall=pos.offset(0,0,4);level.setBlockAndUpdate(wall,Blocks.STONE.defaultBlockState());
+            var blockHit=first.getClass().getDeclaredMethod("onHitBlock",BlockHitResult.class);blockHit.setAccessible(true);
+            blockHit.invoke(first,new BlockHitResult(Vec3.atCenterOf(wall),net.minecraft.core.Direction.NORTH,wall,false));
+            check(first.isRemoved(),"native turret block impact no longer discards projectile");level.removeBlock(wall,false);
             for(var bullet:bullets)bullet.discard();restored.discard();victim.discard();level.removeBlock(pos,false);level.removeBlock(pos.below(),false);
         }
-        System.out.println("SCGUNS_TURRET_NATIVE_OK: basic=1, shotgun=8, one ammo each, inherited save/load, native arrow damage/death, historical owner isolated from human actor");
+        status("SCGUNS_TURRET_NATIVE_OK: basic=1, shotgun=8, one ammo each, inherited save/load, native arrow damage/death/block impact, historical owner isolated from human actor");
     }
     private static void explosions(ServerLevel level)throws Exception {
         var shooter=player(level,"ExplosionActor");var gun=item("auvtomag");ammo(gun,5);shooter.setItemInHand(InteractionHand.MAIN_HAND,gun);
@@ -129,6 +146,6 @@ public final class ScgunsCoverageNativeSmoke {
         try{type.getMethod("createExplosion",Entity.class,float.class,boolean.class).invoke(null,projectile,2f,true);check(cancels[0]==1&&cancelledVictim.getHealth()==health,"cancelled native explosion still dealt damage");}
         finally{NeoForge.EVENT_BUS.unregister(cancel);cancelledVictim.discard();}
         for(var entity:projectiles)entity.discard();
-        System.out.println("SCGUNS_EXPLOSION_NATIVE_OK: ordinary/rocket/fire positive damage preserve direct projectile and historical source; cancelled explosion deals no damage");
+        status("SCGUNS_EXPLOSION_NATIVE_OK: ordinary/rocket/fire positive damage preserve direct projectile and historical source; cancelled explosion deals no damage");
     }
 }

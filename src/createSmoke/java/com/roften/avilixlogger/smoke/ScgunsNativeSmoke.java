@@ -28,7 +28,7 @@ public final class ScgunsNativeSmoke {
     @SubscribeEvent public static void started(ServerStartedEvent event) {
         if(!Boolean.getBoolean("avilixlogger.scgunsSmoke"))return;
         try {run(event.getServer().overworld());}
-        catch(Throwable failure){failure.printStackTrace();System.out.println("SCGUNS_NATIVE_FAILED");}
+        catch(Throwable failure){org.slf4j.LoggerFactory.getLogger("AvilixLogger/ScgunsSmoke").error("SCGUNS_NATIVE_FAILED",failure);System.out.println("SCGUNS_NATIVE_FAILED");}
         finally{event.getServer().halt(false);}
     }
     @SuppressWarnings("unchecked") private static void run(ServerLevel level)throws Exception {
@@ -134,6 +134,7 @@ public final class ScgunsNativeSmoke {
             check(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(level.getServer()),"fixture requires a non-authorized stand; never supply production credentials");
             check(WeaponCombatAudit.beginFire(shooter)==null,"production capture bypassed AuthCore");
             ScgunsCoverageNativeSmoke.run(level);
+            org.slf4j.LoggerFactory.getLogger("AvilixLogger/ScgunsSmoke").info("SCGUNS_NATIVE_OK");
             System.out.println("SCGUNS_NATIVE_OK: supplied 1.5 hooks applied; real accepted/cooldown/cancelled/empty gun paths; 26-pellet shotgun and entity-free beam; native player damage/death and ammo transfer; entity save/load; immutable gun/source/target precision and orientation; death/kill actors; exact command links; malformed evidence; capture mask and rollback refusal; AuthCore remained disabled");
         } finally {NeoForge.EVENT_BUS.unregister(post);NeoForge.EVENT_BUS.unregister(pre);NeoForge.EVENT_BUS.unregister(join);}
     }

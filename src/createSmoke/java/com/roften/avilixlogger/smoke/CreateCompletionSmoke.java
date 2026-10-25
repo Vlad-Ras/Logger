@@ -232,6 +232,9 @@ public final class CreateCompletionSmoke {
             tested++;
             drops.forEach(net.minecraft.world.entity.Entity::discard);drops.clear();
             source=CreateContraptionKind.OTHER.source(UUID.randomUUID(),"falling_block");
+            // Keep the fixture airborne: random terrain below the TNT can otherwise
+            // select vanilla landing/placement before the timeout branch being tested.
+            world.setBlock(pos.below(),Blocks.AIR.defaultBlockState(),3);
             world.setBlock(pos,Blocks.ANVIL.defaultBlockState(),3);
             previous=MutationSourceResolver.enter(source);
             net.minecraft.world.entity.item.FallingBlockEntity falling;

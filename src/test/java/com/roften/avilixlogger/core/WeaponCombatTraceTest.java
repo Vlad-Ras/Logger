@@ -43,6 +43,7 @@ public final class WeaponCombatTraceTest {
         var machineRow=WeaponCombatAudit.entry(loadedMachine,ActionType.WEAPON_KILL,"kill",null,null);machineRow.id=9002;machineRow.materializeSnapshots();
         var machineReplay=GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(machineRow),LogEntry.class);
         check(machineReplay.actorUuid==null&&WeaponCombatTrace.pose(machineReplay,"source").equals(pose),"turret journal lost source or attributed owner as actor");
+        check(machineReplay.extra.contains("; turret_owner="+actor)&&machineReplay.extra.contains("; turret_owner_name=Owner"),"turret owner lost from searchable summary");
         check(WeaponCombatTrace.describe(machineReplay).stream().anyMatch(c->c.getString().contains("Владелец турели: Owner")),"turret owner absent from details");
         check(WeaponCombatTrace.describe(machineReplay).stream().noneMatch(c->c.getString().contains("null")),"turret details exposed fabricated null shooter");
         for(String field:List.of("X","Y","Z","Block","Dimension","Kind")){

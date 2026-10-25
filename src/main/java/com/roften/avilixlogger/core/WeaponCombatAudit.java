@@ -122,7 +122,12 @@ public final class WeaponCombatAudit {
         if(target!=null)EntityLogIdentity.capture(row,target);
         var data=WeaponCombatTrace.payload(shot,phase,target);trajectory(data,projectile);
         row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,data);row.deferSnapshot(LogEntry.SnapshotField.ITEM,shot.weapon());
-        row.extra="scguns "+phase+(shot.fromMechanism()?"; mechanism=turret":"; shooter="+shot.shooter())+"; shot="+shot.id()+"; weapon="+shot.weaponId();return row;
+        row.extra="scguns "+phase+(shot.fromMechanism()?"; mechanism=turret":"; shooter="+shot.shooter())+"; shot="+shot.id()+"; weapon="+shot.weaponId();
+        if(shot.fromMechanism()){
+            var mechanism=shot.mechanism();
+            if(mechanism.hasUUID("Owner"))row.extra+="; turret_owner="+mechanism.getUUID("Owner")+"; turret_owner_name="+mechanism.getString("OwnerName");
+        }
+        return row;
     }
     private static void trajectory(CompoundTag data,Entity projectile) {
         if(projectile==null)return;var t=new CompoundTag();t.putUUID("UUID",projectile.getUUID());
