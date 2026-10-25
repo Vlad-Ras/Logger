@@ -917,6 +917,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ITEM_DROP,
                     com.roften.avilixlogger.core.ActionType.ITEM_PICKUP,
                     com.roften.avilixlogger.core.ActionType.ITEM_CRAFT,
+                    com.roften.avilixlogger.core.ActionType.ITEM_TRANSFORM,
                     com.roften.avilixlogger.core.ActionType.ITEM_SMELT,
                     com.roften.avilixlogger.core.ActionType.ITEM_USE,
                     com.roften.avilixlogger.core.ActionType.ITEM_USE_START,

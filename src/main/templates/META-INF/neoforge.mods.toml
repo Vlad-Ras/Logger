@@ -68,6 +68,9 @@ config="avilixlogger_ae2.mixins.json"
 [[mixins]]
 config="avilixlogger_backpacked.mixins.json"
 
+[[mixins]]
+config="avilixlogger_chipped.mixins.json"
+
 [[dependencies.${mod_id}]]
 modId="backpacked"
 type="optional"
