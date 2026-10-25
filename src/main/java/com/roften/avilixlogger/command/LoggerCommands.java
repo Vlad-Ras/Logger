@@ -78,6 +78,7 @@ public final class LoggerCommands {
             .executes(LoggerCommands::lookupDefaultRoot)
 
             .then(CartCommands.node())
+            .then(CombatPositionCommand.node())
             .then(BackpackCommands.node())
             .then(literal("perf")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.command.admin", 2))
@@ -1662,6 +1663,8 @@ public final class LoggerCommands {
             case "item_drop", "drop" -> ActionType.ITEM_DROP;
             case "item_pickup", "pickup" -> ActionType.ITEM_PICKUP;
             case "craft", "item_craft" -> ActionType.ITEM_CRAFT;
+            case "weapon_kill", "gun_kill" -> ActionType.WEAPON_KILL;
+            case "weapon_reload", "reload" -> ActionType.WEAPON_RELOAD;
             case "transform", "item_transform" -> ActionType.ITEM_TRANSFORM;
             case "smelt", "item_smelt" -> ActionType.ITEM_SMELT;
             case "item_use", "use_item" -> ActionType.ITEM_USE;
@@ -1694,8 +1697,8 @@ public final class LoggerCommands {
         return switch (m) {
             case "grief", "build" -> EnumSet.of(ActionType.BLOCK_BREAK, ActionType.BLOCK_PLACE, ActionType.BLOCK_INTERACT);
             case "theft", "steal" -> EnumSet.of(ActionType.CONTAINER_OPEN, ActionType.CONTAINER_PUT, ActionType.CONTAINER_TAKE, ActionType.ITEM_PICKUP, ActionType.ITEM_DROP, ActionType.GUI_OPEN);
-            case "combat", "pvp" -> EnumSet.of(ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
-            case "items", "item" -> EnumSet.of(ActionType.ITEM_DROP, ActionType.ITEM_PICKUP, ActionType.ITEM_CRAFT, ActionType.ITEM_TRANSFORM, ActionType.ITEM_SMELT, ActionType.ITEM_USE, ActionType.ITEM_USE_START, ActionType.ITEM_USE_STOP, ActionType.ITEM_CONSUME, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
+            case "combat", "pvp" -> EnumSet.of(ActionType.WEAPON_KILL, ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
+            case "items", "item" -> EnumSet.of(ActionType.WEAPON_RELOAD, ActionType.ITEM_DROP, ActionType.ITEM_PICKUP, ActionType.ITEM_CRAFT, ActionType.ITEM_TRANSFORM, ActionType.ITEM_SMELT, ActionType.ITEM_USE, ActionType.ITEM_USE_START, ActionType.ITEM_USE_STOP, ActionType.ITEM_CONSUME, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
             case "gui", "menus", "interfaces" -> EnumSet.of(ActionType.GUI_CHANGE, ActionType.GUI_OPEN, ActionType.CONTAINER_OPEN, ActionType.ENTITY_CONTAINER_OPEN);
             case "planes", "plane", "aircraft" -> EnumSet.of(
                     ActionType.PLANE_PLACE, ActionType.PLANE_REMOVE, ActionType.PLANE_MOUNT, ActionType.PLANE_PICKUP, ActionType.ENTITY_OWNER_SET,

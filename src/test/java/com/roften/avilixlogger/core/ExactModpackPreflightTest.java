@@ -50,6 +50,7 @@ public final class ExactModpackPreflightTest {
         test.group("avilixlogger_create_trains.mixins.json","com/simibubi/create/content/contraptions/Contraption");
         test.group("avilixlogger_backpacked.mixins.json","com/mrcrayfish/backpacked/inventory/BackpackInventory");
         test.group("avilixlogger_ae2.mixins.json","appeng/menu/AEBaseMenu");
+        test.group("avilixlogger_scguns.mixins.json","top/ribs/scguns/entity/projectile/ProjectileEntity");
         test.group("avilixlogger_chipped.mixins.json","earth/terrarium/chipped/common/menus/WorkbenchMenu");
         test.group("avilixlogger_airplanes.mixins.json","immersive_aircraft/entity/VehicleEntity");
         if(test.exactReads.isEmpty())throw new AssertionError("No supplied target bytecode was checked");

@@ -7,6 +7,7 @@ public final class LogSearchPredicate {
     private LogSearchPredicate() {}
     public static boolean matches(LogEntry e, LogQuery q) {
         if(e == null) return false;
+        if(q.exactId>0 && e.id!=q.exactId)return false;
         if(q.constructionId != null && !q.constructionId.equals(CreateContraptionKind.id(e.source))) return false;
         if(q.sourcePrefix != null && (e.source == null || !e.source.startsWith(q.sourcePrefix))) return false;
         if(q.cartId != null && !q.cartId.equals(CartAuditContext.id(e.source))) return false;

@@ -12,6 +12,7 @@ public final class AsyncPipelineTest {
         CreateContraptionKindTest.run();
         CaptureTypePolicyTest.run();
         OperatorAccessTest.run();
+        WeaponCombatTraceTest.run();
         HotPathMemoryTest.run();
         DiagnosticCountersTest.run();
         HotPathQueueStandaloneTest.run();

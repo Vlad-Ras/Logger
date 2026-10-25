@@ -103,5 +103,8 @@ public enum ActionType {
     ENTITY_EQUIPMENT_CHANGE, GUI_CHANGE,
 
     // Observed modded inventory conversion; requires its own complete rollback contract.
-    ITEM_TRANSFORM
+    ITEM_TRANSFORM,
+
+    // Append-only: confirmed weapon kills and authoritative reload transitions.
+    WEAPON_KILL, WEAPON_RELOAD
 }

@@ -77,14 +77,14 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ENTITY_MOUNT,
                 ActionType.ENTITY_DISMOUNT,
                 ActionType.ENTITY_INTERACT,
-                ActionType.ENTITY_ATTACK,
+                ActionType.ENTITY_ATTACK, ActionType.WEAPON_KILL,
                 ActionType.PROJECTILE_SHOOT,
                 ActionType.PROJECTILE_HIT,
                 ActionType.ENTITY_OWNER_SET, ActionType.ENTITY_EQUIPMENT_CHANGE);
         map(TableKind.ITEMS,
                 ActionType.ITEM_DROP,
                 ActionType.ITEM_PICKUP,
-                ActionType.ITEM_CRAFT, ActionType.ITEM_TRANSFORM,
+                ActionType.ITEM_CRAFT, ActionType.ITEM_TRANSFORM, ActionType.WEAPON_RELOAD,
                 ActionType.ITEM_SMELT,
                 ActionType.ITEM_USE,
                 ActionType.ITEM_USE_START,
@@ -298,17 +298,20 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     ", container_slots_before String" + largeCodec() +
                     ", container_slots_after String" + largeCodec();
             case ENTITIES -> commonColumns() +
+                    ", be_after String" + largeCodec() +
                     ", entity_type LowCardinality(String)" +
                     ", entity_uuid String" +
                     ", entity_nbt String" + largeCodec() +
                     ", item_stack String" + largeCodec() +
                     ", count Int32";
             case ITEMS -> commonColumns() +
+                    ", be_after String" + largeCodec() +
                     ", item_stack String" + largeCodec() +
                     ", count Int32" +
                     ", player_inv_before String" + largeCodec() +
                     ", player_inv_after String" + largeCodec();
             case PLAYERS -> commonColumns() +
+                    ", be_after String" + largeCodec() +
                     ", entity_uuid String" +
                     ", entity_nbt String" + largeCodec() +
                     ", player_inv_before String" + largeCodec() +
@@ -369,6 +372,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         for (TableKind kind : splitKinds()) {
             String table = qualifiedSplitTable(kind);
             addCommonCompatColumns(table);
+            if(kind==TableKind.ENTITIES || kind==TableKind.ITEMS || kind==TableKind.PLAYERS)
+                tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS be_after String DEFAULT ''" + largeCodec());
             switch (kind) {
                 case BLOCKS -> addBlockCompatColumns(table);
                 case CONTAINERS -> {
@@ -662,6 +667,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private boolean shouldStoreDetails(LogEntry e) {
         if (e == null) return false;
+        // Historical weapon positions must survive non-rollback detail pruning.
+        if(e.source!=null && e.source.startsWith("mod:scguns:") && e.beAfter!=null)return true;
         if ("full".equals(detailMode) || "debug".equals(detailMode)) return true;
         if ("minimal".equals(detailMode)) return isRollbackCritical(e) && storeRollbackDetails;
         if (isRollbackCritical(e)) return storeRollbackDetails;
@@ -699,9 +706,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             switch (kind) {
                 case BLOCKS -> addBlock(o, e);
                 case CONTAINERS -> { addBlock(o, e); addEntity(o, e, false); addItem(o, e); addContainer(o, e); }
-                case ENTITIES -> { addEntity(o, e, true); addItem(o, e); }
-                case ITEMS -> { addItem(o, e); addPlayerInventory(o, e); }
-                case PLAYERS -> { addPlayerEntity(o, e); addPlayerInventory(o, e); }
+                case ENTITIES -> { o.addProperty("be_after",safeString(e.beAfter)); addEntity(o, e, true); addItem(o, e); }
+                case ITEMS -> { o.addProperty("be_after",safeString(e.beAfter)); addItem(o, e); addPlayerInventory(o, e); }
+                case PLAYERS -> { o.addProperty("be_after",safeString(e.beAfter)); addPlayerEntity(o, e); addPlayerInventory(o, e); }
                 case CHAT -> o.addProperty("message", extractMessage(e));
                 case COMPAT -> { addBlock(o, e); addEntity(o, e, true); addItem(o, e); addPlayerInventory(o, e); addContainer(o, e); }
                 default -> throw new IllegalArgumentException("Unexpected table kind: " + kind);
@@ -1020,7 +1027,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private String selectExpr(TableKind kind, String column) {
         boolean has = switch (column) {
-            case "block_before", "be_before", "block_after", "be_after" -> kind == TableKind.BLOCKS || kind == TableKind.CONTAINERS || kind == TableKind.COMPAT;
+            case "be_after" -> kind != TableKind.CHAT;
+            case "block_before", "be_before", "block_after" -> kind == TableKind.BLOCKS || kind == TableKind.CONTAINERS || kind == TableKind.COMPAT;
             case "entity_type" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.COMPAT;
             case "entity_uuid" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
             case "entity_nbt" -> kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
@@ -1068,6 +1076,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         appendPositionWhere(sql, q);
         appendFeedOptionalFilters(sql, q);
 
+        if(q.exactId>0)sql.append(" AND id = ").append(q.exactId);
         if (reverse) {
             if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
         } else {
@@ -1109,6 +1118,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         appendPositionWhere(sql, q);
         appendSplitOptionalFilters(sql, q, kind);
 
+        if(q.exactId>0)sql.append(" AND id = ").append(q.exactId);
         if (reverse) {
             if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
         } else {
@@ -1322,6 +1332,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     .append(" AND z BETWEEN ").append(Math.min(min.getZ(), max.getZ())).append(" AND ").append(Math.max(min.getZ(), max.getZ()));
         }
 
+        if(q.exactId>0)sql.append(" AND id = ").append(q.exactId);
         if (reverse) {
             if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
             sql.append(" ORDER BY id DESC");
@@ -1768,10 +1779,10 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             case BLOCK_BREAK -> targetBlock(e.blockBefore, e.extra);
             case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> targetBlock(e.blockAfter, e.extra);
             case CONTAINER_PUT, CONTAINER_TAKE, ME_PUT, ME_TAKE, ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_CELL_CHANGE,
-                 ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_SMELT,
+                 ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, WEAPON_RELOAD, ITEM_SMELT,
                  ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 ENTITY_INTERACT, ENTITY_ATTACK, ENTITY_EQUIPMENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
+                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
             case CHAT_MESSAGE -> new TargetInfo("chat", "", safeString(e.extra));
             case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, TRAIN_CONTROL_START, TRAIN_CONTROL_STOP ->

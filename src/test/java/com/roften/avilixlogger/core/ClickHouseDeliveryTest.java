@@ -104,6 +104,19 @@ final class ClickHouseDeliveryTest {
             check(!selects.isEmpty()&&selects.stream().allMatch(sql->sql.contains("startsWith(source, 'create:cart:')")),"GUI cart category broadened source prefix");
             check(handlerFailure.get()==null,"Backpack HTTP contract violation: "+handlerFailure.get());
             System.out.println("Backpack HTTP checks passed: persisted recovery snapshots and mandatory GUI/feed/fallback ID filters.");
+            for(var type:List.of(ActionType.PROJECTILE_SHOOT,ActionType.PROJECTILE_HIT,ActionType.WEAPON_KILL,ActionType.WEAPON_RELOAD,ActionType.PLAYER_DEATH)){
+                var weapon=row("weapon-"+type);weapon.type=type;weapon.dim="minecraft:overworld";weapon.source="mod:scguns:"+UUID.randomUUID();
+                weapon.beAfter="{Kind:'WeaponCombat',Version:1,Provider:'scguns',Phase:'test',ActorPose:{Dimension:'minecraft:overworld',X:-2.125d,Y:70.25d,Z:9.875d,Yaw:29.25f,Pitch:-23.5f,EyeY:71.87d}}";
+                database.appendBatch("weapon-"+type,List.of(weapon));
+                String insert=requests.values().stream().filter(body->body.startsWith("INSERT")&&!body.substring(0,body.indexOf('\n')).contains("_feed")&&body.contains(weapon.source)).findFirst().orElseThrow();
+                var weaponEncoded=com.google.gson.JsonParser.parseString(insert.substring(insert.indexOf('\n')+1).trim()).getAsJsonObject();
+                check(weaponEncoded.get("be_after").getAsString().equals(weapon.beAfter),"weapon evidence discarded from "+type);
+                var weaponQuery=new LogQuery();weaponQuery.type=type;weaponQuery.requireDetails=true;weaponQuery.sourcePrefix="mod:scguns:";weaponQuery.exactId=weapon.id;weaponQuery.limit=1;
+                lookupResponse.set(weaponEncoded+"\n");selects.clear();var read=database.query(weaponQuery);
+                check(read.size()==1 && read.getFirst().beAfter.equals(weapon.beAfter),"weapon details round trip lost "+type);
+                check(selects.stream().anyMatch(sql->sql.contains("be_after AS be_after") && sql.contains("id = "+weapon.id)),"exact weapon query omitted evidence/cursors");
+            }
+            System.out.println("Weapon HTTP checks passed: shot/hit/kill/reload/death evidence survives disabled non-rollback details and exact ID lookup.");
             UUID autoCart=UUID.randomUUID();var automation=row("cart_automation");automation.type=ActionType.CART_TRANSFER;automation.dim="minecraft:overworld";automation.source=CartAuditContext.prefix(autoCart)+"automation_transfer:1";
             automation.beBefore="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:100}}]}";
             automation.beAfter="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:850}}]}";

@@ -64,6 +64,8 @@
 -keep interface com.roften.avilixlogger.compat.create.Create*RuntimeAccess { *; }
 -keep interface com.roften.avilixlogger.compat.create.CreateCooldownEntryAccess { *; }
 -keep interface com.roften.avilixlogger.core.CreateOriginDataAccess { *; }
+-keep interface com.roften.avilixlogger.core.WeaponTraceAccess { *; }
+-keep interface com.roften.avilixlogger.core.WeaponReloadAccess { *; }
 # Accessor interfaces are casts into classes woven after release obfuscation.
 -keep interface com.roften.avilixlogger.compat.create.mixin.** { *; }
 -keep interface com.roften.avilixlogger.mixin.CartCombinedInventoryAccessor { *; }

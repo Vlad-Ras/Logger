@@ -712,6 +712,22 @@ public final class LogViewerScreen extends Screen {
             return super.mouseClicked(mouseX, mouseY, button);
         }
 
+        // Historical combat links use the same wrapping, scale and scroll as the drawn text.
+        int detailLeft=rightPanelX(),detailRight=this.width-10;
+        int detailY=Math.max(detailsPanelTop,listTop())+14,detailBottom=this.height-30;
+        if(button==0 && !showRawTab && mouseX>=detailLeft+3 && mouseX<detailRight-6 && mouseY>=detailY && mouseY<detailBottom){
+            int splitW=Math.max(10,Math.round(Math.max(10,detailRight-detailLeft-8)/Math.max(0.25f,logTextScale())));
+            var lines=detailLayout.get(this.font,detailLines,splitW);
+            int visible=(int)((mouseY-detailY)/detailLineH());
+            int index=detailsScroll+visible;
+            if(visible<(detailBottom-detailY)/detailLineH() && index>=0 && index<lines.size()){
+                int relX=Math.round((float)(mouseX-detailLeft-3)/Math.max(0.25f,logTextScale()));
+                Style style=this.font.getSplitter().componentStyleAtWidth(lines.get(index),relX);
+                if(style!=null && style.getClickEvent()!=null && style.getClickEvent().getAction()==ClickEvent.Action.RUN_COMMAND
+                        && style.getClickEvent().getValue().startsWith("/log combatpos "))return this.handleComponentClicked(style);
+            }
+        }
+
         // Row selection
         int listLeft = listLeftX();
         int listTop = listTop();

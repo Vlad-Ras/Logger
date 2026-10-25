@@ -1237,6 +1237,7 @@ public final class LoggerEventHandlers {
         }
         String message=playerDeath?e.extra.substring("death_message:".length()):event.getSource().getLocalizedDeathMessage(victim).getString();
         e.extra=DeathLogDetails.capture(victim,event.getSource(),message);
+        WeaponCombatAudit.death(e,victim,event.getSource());
         LoggerRuntime.storage(level).append(e);
     }
 
@@ -1843,7 +1844,7 @@ public final class LoggerEventHandlers {
     }
 
     private static void logProjectileShootIfNeeded(ServerLevel level, Projectile projectile) {
-        if (level == null || projectile == null) return;
+        if (level == null || projectile == null || WeaponCombatAudit.traced(projectile)) return;
         if (!isEnabled(LoggerConfig.VALUES.logProjectileShots)) return;
 
         ActorInfo actor = projectileActor(level, projectile);
@@ -1890,7 +1891,7 @@ public final class LoggerEventHandlers {
     }
 
     private static void logProjectileHitIfNeeded(ServerLevel level, Projectile projectile, Entity target, String hitKind, float damage) {
-        if (level == null || projectile == null) return;
+        if (level == null || projectile == null || WeaponCombatAudit.traced(projectile)) return;
         if (!isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
 
         ActorInfo actor = projectileActor(level, projectile);

@@ -63,6 +63,9 @@ public final class LogQuery {
      */
     public boolean requireDetails;
 
+    /** Optional exact persisted record; kept through every query fallback. */
+    public long exactId;
+
     /** Internal paging: id cursor (exclusive). */
     public long afterId;
     public long beforeId;
@@ -96,6 +99,7 @@ public final class LogQuery {
         q.type = this.type;
         q.types = this.types != null ? this.types.clone() : null;
         q.requireDetails = this.requireDetails;
+        q.exactId = this.exactId;
         q.afterId = this.afterId;
         q.beforeId = this.beforeId;
         return q;

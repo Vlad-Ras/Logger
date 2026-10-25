@@ -28,6 +28,7 @@ public final class ClickHouseNativeSmoke {
         config.set(List.of("clickhouse", "database"), "avilixlogger_ci");
         config.set(List.of("clickhouse", "schemaMode"), "split");
         config.set(List.of("clickhouse", "storeRollbackDetails"), true);
+        config.set(List.of("clickhouse", "storeNonRollbackDetails"), false);
         var ctor = Class.forName("net.neoforged.fml.config.LoadedConfig")
                 .getDeclaredConstructor(CommentedConfig.class, Path.class, net.neoforged.fml.config.ModConfig.class);
         ctor.setAccessible(true);
@@ -53,11 +54,21 @@ public final class ClickHouseNativeSmoke {
         item.z = block.z;
         item.itemStackNbt = "{id:\"minecraft:diamond\",count:3}";
         item.count = 3;
+        var weapons=new java.util.ArrayList<LogEntry>();
+        String weaponPrefix="mod:scguns:native:"+UUID.randomUUID()+":";
+        for(var type:List.of(ActionType.PROJECTILE_SHOOT,ActionType.PROJECTILE_HIT,ActionType.WEAPON_KILL,ActionType.WEAPON_RELOAD,ActionType.PLAYER_DEATH)){
+            var weapon=AsyncPipelineTest.row("native-weapon-"+type);weapon.type=type;weapon.dim=block.dim;weapon.source=weaponPrefix+type;
+            weapon.actorUuid=UUID.randomUUID();weapon.actorName="NativeWeaponActor";
+            weapon.beAfter="{Kind:'WeaponCombat',Version:1,Provider:'scguns',Phase:'test',ActorPose:{Dimension:'minecraft:overworld',X:-2.125d,Y:70.25d,Z:9.875d,Yaw:29.25f,Pitch:-23.5f,EyeY:71.87d}}";
+            weapons.add(weapon);
+        }
 
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();
             db.appendBatch("native-" + UUID.randomUUID(), List.of(block, item));
+            db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
+            verifyWeapons(db,weapons);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
             var detail = new LogQuery();
@@ -77,10 +88,19 @@ public final class ClickHouseNativeSmoke {
             db.shutdown();
             db = new ClickHouseLogStorage();
             verifyDetails(db.queryReverse(detail), block, item);
-            System.out.println("CLICKHOUSE_NATIVE_OK: schema, two categories, exact details, GUI feed, acknowledged insert, restart and persisted reads");
+            verifyWeapons(db,weapons);
+            System.out.println("CLICKHOUSE_NATIVE_OK: schema, exact details, GUI feed, acknowledged insert, restart; weapon shot/hit/kill/reload/player-death poses survive detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
             LoggerConfig.SPEC.acceptConfig(null);
+        }
+    }
+
+    private static void verifyWeapons(ClickHouseLogStorage db,List<LogEntry> weapons){
+        for(var weapon:weapons){
+            var q=new LogQuery();q.requireDetails=true;q.sourcePrefix="mod:scguns:";q.exactId=weapon.id;q.untilTs=Long.MAX_VALUE;q.limit=1;
+            var rows=db.query(q);check(rows.size()==1 && rows.getFirst().id==weapon.id && weapon.beAfter.equals(rows.getFirst().beAfter),"native weapon evidence lost for "+weapon.type);
+            var pose=WeaponCombatTrace.pose(rows.getFirst(),"source");check(pose!=null && pose.x()==-2.125 && pose.yaw()==29.25f && pose.pitch()==-23.5f,"native precision/orientation lost");
         }
     }
 

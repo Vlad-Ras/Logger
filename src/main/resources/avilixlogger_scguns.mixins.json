@@ -1,0 +1,22 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.scguns.mixin",
+  "plugin": "com.roften.avilixlogger.compat.scguns.mixin.ScgunsMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ServerGunFireMixin",
+    "ScgunsProjectileTraceMixin",
+    "VanillaProjectileTraceMixin",
+    "ReloadTrackerMixin",
+    "ReloadRequestMixin",
+    "PlayerReloadTraceMixin",
+    "GunLoadedStateMixin",
+    "MovementReloadStateMixin",
+    "AnimatedReloadStateMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -88,3 +88,49 @@ jobs:
             *smoke.log
             run/crash-reports/*.txt
           if-no-files-found: ignore
+
+  weapon-storage:
+    name: Weapon evidence on real ClickHouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_USER: avilix_ci
+          CLICKHOUSE_PASSWORD: local_ci_only
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+    env:
+      AVILIX_CI_CLICKHOUSE_URL: http://127.0.0.1:8123
+      AVILIX_CI_CLICKHOUSE_USER: avilix_ci
+      AVILIX_CI_CLICKHOUSE_PASSWORD: local_ci_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Require ready actual ClickHouse, not a mock
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --show-error -u "$AVILIX_CI_CLICKHOUSE_USER:$AVILIX_CI_CLICKHOUSE_PASSWORD" "$AVILIX_CI_CLICKHOUSE_URL/ping" >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Real schema + insert + feed + details + new connection
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew testNativeClickHouse --no-daemon --console=plain 2>&1 | tee native-clickhouse.log
+          grep -q 'CLICKHOUSE_NATIVE_OK' native-clickhouse.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weapon-clickhouse-native-acceptance
+          path: native-clickhouse.log
+          if-no-files-found: ignore

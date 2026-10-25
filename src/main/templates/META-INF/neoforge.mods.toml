@@ -164,3 +164,6 @@ side="BOTH"
     versionRange="[0,)"
     ordering="AFTER"
     side="BOTH"
+
+[[mixins]]
+config="avilixlogger_scguns.mixins.json"

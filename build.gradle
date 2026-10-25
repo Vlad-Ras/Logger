@@ -98,6 +98,7 @@ neoForge {
                 gameDirectory = project.file('run-create-absent')
             }
             if (project.hasProperty('backpackSmoke')) systemProperty 'avilixlogger.backpackSmoke', 'true'
+            if (project.hasProperty('scgunsSmoke')) systemProperty 'avilixlogger.scgunsSmoke', 'true'
             if (project.hasProperty('chippedSmoke')) systemProperty 'avilixlogger.chippedSmoke', 'true'
             if (project.hasProperty('backpackAbsent')) systemProperty 'avilixlogger.backpackAbsent', 'true'
             if (project.hasProperty('actorSmoke')) systemProperty 'avilixlogger.actorSmoke', 'true'
@@ -145,7 +146,7 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
-            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke')) sourceSet(sourceSets.createSmoke)
+            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke')) sourceSet(sourceSets.createSmoke)
         }
     }
 }
@@ -165,6 +166,8 @@ configurations {
 
 dependencies {
     // Exact operator-supplied artifacts stay local, optional and never bundled or uploaded.
+    if (project.hasProperty('scgunsSmokeMods'))
+        localRuntime files(fileTree(dir: project.property('scgunsSmokeMods'), include: '*.jar'))
     if (project.hasProperty('chippedSmokeMods'))
         localRuntime files(fileTree(dir: project.property('chippedSmokeMods'), include: '*.jar'))
     if (project.hasProperty('actorSmoke') && !project.hasProperty('aircraftAbsent')) {

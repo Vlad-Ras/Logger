@@ -51,6 +51,11 @@ public final class AvilixLoggerMod {
         tryInitClient(modEventBus);
 
         // Server/game events
+        if(com.roften.avilixlogger.compat.scguns.ScgunsSupport.available()){
+            NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.core.WeaponCombatAudit::logout);
+            NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.HIGHEST,com.roften.avilixlogger.core.WeaponCombatAudit::joined);
+            NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.core.WeaponCombatAudit::damage);
+        }
         NeoForge.EVENT_BUS.register(new LoggerEventHandlers());
         if (net.neoforged.fml.ModList.get().isLoaded("curios")) {
             try { com.roften.avilixlogger.compat.curios.CuriosAudit.install(); }
@@ -133,6 +138,7 @@ public final class AvilixLoggerMod {
         LoggerEventHandlers.shutdownBackground();
         ChatLogPager.shutdown();
         LoggerNetwork.shutdown();
+        com.roften.avilixlogger.command.CombatPositionCommand.stop();
         RollbackCoordinator.shutdown();
         if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTrainRecovery.stop();com.roften.avilixlogger.compat.create.CreateTrainLifecycleAudit.clear();com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();com.roften.avilixlogger.compat.create.CreateDeployerTransaction.clearRetained();}
         LoggerRuntime.shutdown();

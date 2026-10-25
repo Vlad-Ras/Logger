@@ -905,6 +905,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ENTITY_DISMOUNT,
                     com.roften.avilixlogger.core.ActionType.ENTITY_INTERACT,
                     com.roften.avilixlogger.core.ActionType.ENTITY_ATTACK,
+                    com.roften.avilixlogger.core.ActionType.WEAPON_KILL,
                     com.roften.avilixlogger.core.ActionType.ENTITY_EQUIPMENT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT,
@@ -918,6 +919,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ITEM_PICKUP,
                     com.roften.avilixlogger.core.ActionType.ITEM_CRAFT,
                     com.roften.avilixlogger.core.ActionType.ITEM_TRANSFORM,
+                    com.roften.avilixlogger.core.ActionType.WEAPON_RELOAD,
                     com.roften.avilixlogger.core.ActionType.ITEM_SMELT,
                     com.roften.avilixlogger.core.ActionType.ITEM_USE,
                     com.roften.avilixlogger.core.ActionType.ITEM_USE_START,
@@ -1141,6 +1143,7 @@ public final class LoggerNetwork {
         List<Component> out = new ArrayList<>();
         out.add(Component.literal("Подробности").withStyle(net.minecraft.ChatFormatting.GOLD));
         out.addAll(com.roften.avilixlogger.core.DeathLogDetails.describe(first));
+        out.addAll(com.roften.avilixlogger.core.WeaponCombatTrace.describe(first));
         out.addAll(com.roften.avilixlogger.core.SignLogDetails.describe(level,first));
 
         if (chronological != null) {

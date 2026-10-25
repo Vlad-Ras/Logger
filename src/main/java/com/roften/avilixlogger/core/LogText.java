@@ -295,6 +295,8 @@ public final class LogText {
             case ITEM_PICKUP -> "подобрал";
             case ITEM_DROP -> "выбросил";
             case ITEM_CRAFT -> "скрафтил";
+            case WEAPON_RELOAD -> "перезарядка / боезапас";
+            case WEAPON_KILL -> "убил из оружия";
             case ITEM_TRANSFORM -> "преобразовал предметы";
             case ITEM_SMELT -> "переплавил";
             case ITEM_USE -> "использовал";
@@ -351,7 +353,7 @@ public final class LogText {
             case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, CONTAINER_OPEN, BLOCK_ENTITY_NBT_CHANGE -> blockNameComponent(level, e.blockAfter);
 
             // container/item diffs
-            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
+            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, WEAPON_RELOAD, ITEM_TRANSFORM, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
                     itemNameComponent(level, e.itemStackNbt);
             case ME_PUT, ME_TAKE -> {
                 MutableComponent item = itemNameComponent(level, e.itemStackNbt);
@@ -392,7 +394,7 @@ public final class LogText {
                 MutableComponent src = itemNameComponent(level, e.itemStackNbt);
                 yield src != null ? src : Component.literal(e.entityType != null ? e.entityType : "projectile");
             }
-            case PROJECTILE_HIT -> EntityLogIdentity.label(e);
+            case PROJECTILE_HIT, WEAPON_KILL -> EntityLogIdentity.label(e);
 
             // entities / planes / etc (оставь как у тебя было — ниже максимально безопасный вариант)
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN, ENTITY_INTERACT, ENTITY_ATTACK,
