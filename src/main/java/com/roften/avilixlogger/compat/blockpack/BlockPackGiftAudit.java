@@ -13,7 +13,7 @@ public final class BlockPackGiftAudit {
     private BlockPackGiftAudit(){}
     public record Actor(UUID id,String name,String dim,int x,int y,int z){}
     public static Action begin(IPayloadContext context){
-        if(!CaptureTypePolicy.enabled(2) || !LoggerConfig.isEnabled() || CartAuditContext.restoring())return null;
+        if(!CaptureTypePolicy.enabled(2) || !LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get() || CartAuditContext.restoring())return null;
         try {
             if(!(context.player() instanceof ServerPlayer p) || !p.server.isSameThread())return null;
             var pos=p.blockPosition();var actor=new Actor(CauseContext.actorUuid(p),CauseContext.actorName(p),p.serverLevel().dimension().location().toString(),pos.getX(),pos.getY(),pos.getZ());
@@ -25,7 +25,7 @@ public final class BlockPackGiftAudit {
     }
     public static void changed(boolean before,boolean after){
         if(before==after)return;var action=CURRENT.get();
-        if(action==null || !action.level.getServer().isSameThread() || !CaptureTypePolicy.enabled(2) || !LoggerConfig.isEnabled())return;
+        if(action==null || !action.level.getServer().isSameThread() || !CaptureTypePolicy.enabled(2) || !LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get())return;
         try{LoggerRuntime.storage(action.level).append(capture(action.actor,before,after));}
         catch(RuntimeException failure){AdaptiveLogDiagnostics.adapterFailure("blockpack-gifts");}
     }
