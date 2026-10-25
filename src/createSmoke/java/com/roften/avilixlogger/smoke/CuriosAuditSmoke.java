@@ -16,7 +16,7 @@ final class CuriosAuditSmoke {
         com.roften.avilixlogger.compat.curios.CuriosCaptureDefaults.prepare(player);
         var initialized=player.serializeAttachments(level.registryAccess());
         top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player);
-        check(java.util.Objects.equals(initialized,player.serializeAttachments(level.registryAccess())),"native Curios lookup changed prepared attachment state");
+        check(java.util.Objects.equals(initialized,player.serializeAttachments(level.registryAccess())),"native Curios lookup changed prepared attachment state: "+differences(initialized,player.serializeAttachments(level.registryAccess()),"Attachments"));
         var external=com.roften.avilixlogger.compat.create.CreateExternalPlayerState.capture(player);
         var modified=external.copy();modified.getCompound("Unknown").putString("curios:inventory","changed");
         boolean rejected=false;try{com.roften.avilixlogger.compat.create.CreateExternalPlayerState.validatePair(external,modified);}catch(IllegalStateException expected){rejected=true;}
@@ -32,6 +32,15 @@ final class CuriosAuditSmoke {
         check(CuriosAudit.capture(new CurioChangeEvent(player,"ring",2,item,item.copy()))==null,"unchanged equipment generated an event");
         int old=CaptureTypePolicy.mask();try{CaptureTypePolicy.install(CaptureTypePolicy.changed(old,3,false));check(!CaptureTypePolicy.allows(row.type,row.source,row.extra),"disabled equipment category bypassed");}finally{CaptureTypePolicy.install(old);}
         System.out.println("CURIOS_EVENT_PAYLOAD_OK: optional native 9.5.1 event API, detached expanded stacks, slot and target identity, no guessed actor, no-op and capture mask");
+    }
+    private static String differences(net.minecraft.nbt.CompoundTag before,net.minecraft.nbt.CompoundTag after,String path) {
+        if(before==null||after==null)return path+" presence";
+        var keys=new java.util.TreeSet<String>();keys.addAll(before.getAllKeys());keys.addAll(after.getAllKeys());
+        for(String key:keys)if(!java.util.Objects.equals(before.get(key),after.get(key))) {
+            if(before.get(key) instanceof net.minecraft.nbt.CompoundTag a&&after.get(key) instanceof net.minecraft.nbt.CompoundTag b)return differences(a,b,path+"."+key);
+            return path+"."+key;
+        }
+        return path;
     }
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
 }

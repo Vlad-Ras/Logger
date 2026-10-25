@@ -34,6 +34,11 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew compileJava compileCreateSmokeJava testAsyncPipeline testCreatePreflight verifyMixinSafety --console=plain --no-daemon 2>&1 | tee compile.log
+      - name: Profile attribution tools
+        run: |
+          mkdir -p build/profile-tools
+          javac -d build/profile-tools tools/acceptance/ProfileSummary.java tools/acceptance/ProfileSummaryTest.java
+          java -cp build/profile-tools ProfileSummaryTest
       - name: Native Create regression
         timeout-minutes: 10
         run: |

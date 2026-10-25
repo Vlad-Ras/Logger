@@ -9,17 +9,39 @@ public final class ProfileSummary {
     private double cpuSum,tickSumNanos,maxTickNanos;private long cpuSamples;
     private Instant first,last,lastHeapTime;
     private final Map<String,Long> allocatedClasses=new HashMap<>();
-    private static boolean loggerStack(RecordedEvent event){
-        var stack=event.getStackTrace();if(stack==null)return false;
-        for(var frame:stack.getFrames())if(frame.getMethod().getType().getName().startsWith("com.roften.avilixlogger."))return true;
-        return false;
+    enum Ownership { LOGGER_SELF, LOGGER_CALLED, WRAPPED_SIMULATION, UNATTRIBUTED }
+    record Frame(String type,String method) {}
+    /** The ordinary mod tick below a Logger wrapper is not work initiated by Logger. */
+    static Ownership ownership(List<Frame> frames) {
+        for(int i=0;i<frames.size();i++) {
+            var frame=frames.get(i);
+            boolean injected=frame.method().contains("avilixlogger$");
+            if(!injected&&!frame.type().startsWith("com.roften.avilixlogger."))continue;
+            if(i==0)return Ownership.LOGGER_SELF;
+            if(injected&&(frame.method().endsWith("avilixlogger$withSource")||frame.method().endsWith("avilixlogger$withPassengerSource")))
+                return Ownership.WRAPPED_SIMULATION;
+            return Ownership.LOGGER_CALLED;
+        }
+        return Ownership.UNATTRIBUTED;
+    }
+    private static Ownership ownership(RecordedEvent event) {
+        var stack=event.getStackTrace();if(stack==null)return Ownership.UNATTRIBUTED;
+        var frames=new ArrayList<Frame>();
+        for(var frame:stack.getFrames())frames.add(new Frame(frame.getMethod().getType().getName(),frame.getMethod().getName()));
+        return ownership(frames);
+    }
+    private static boolean loggerStack(RecordedEvent event){return ownership(event)!=Ownership.UNATTRIBUTED;}
+    private final long[] serverExecutionByOwner=new long[Ownership.values().length];
+    private static boolean serverThread(RecordedEvent event) {
+        var thread=event.hasField("sampledThread")?event.getThread("sampledThread"):event.getThread();
+        return thread!=null&&"Server thread".equals(thread.getJavaName());
     }
     private static long weight(RecordedEvent event){return event.hasField("weight")?event.getLong("weight"):0;}
     private void accept(RecordedEvent event){
         events++;var start=event.getStartTime();var end=event.getEndTime();if(first==null||start.isBefore(first))first=start;if(last==null||end.isAfter(last))last=end;
         switch(event.getEventType().getName()){
             case "jdk.ObjectAllocationSample"->{long bytes=weight(event);allocationBytes+=bytes;allocationSamples++;if(loggerStack(event)){loggerAllocationBytes+=bytes;loggerAllocationSamples++;String name=event.getClass("objectClass").getName();if(allocatedClasses.size()>=4096&&!allocatedClasses.containsKey(name))name="[other classes]";allocatedClasses.merge(name,bytes,Long::sum);}}
-            case "jdk.ExecutionSample"->{executionSamples++;if(loggerStack(event))loggerExecutionSamples++;}
+            case "jdk.ExecutionSample"->{executionSamples++;var owner=ownership(event);if(owner!=Ownership.UNATTRIBUTED)loggerExecutionSamples++;if(serverThread(event))serverExecutionByOwner[owner.ordinal()]++;}
             case "jdk.GCHeapSummary"->{if(event.getString("when").equals("After GC")){long used=event.getLong("heapUsed");if(lastHeapTime==null||start.isAfter(lastHeapTime)){heapAfterGc=used;lastHeapTime=start;}maxHeapAfterGc=Math.max(maxHeapAfterGc,used);}}
             case "jdk.GCPhasePause"->{long nanos=event.getDuration().toNanos();gcCount++;gcPauseNanos+=nanos;maxGcPauseNanos=Math.max(maxGcPauseNanos,nanos);}
             case "jdk.CPULoad"->{cpuSum+=event.getFloat("jvmUser")+event.getFloat("jvmSystem");cpuSamples++;}
@@ -41,9 +63,10 @@ public final class ProfileSummary {
         if(args.length!=1)throw new IllegalArgumentException("Usage: java ProfileSummary.java recording.jfr");
         var summary=new ProfileSummary();var file=Path.of(args[0]);try(var recording=new RecordingFile(file)){while(recording.hasMoreEvents())summary.accept(recording.readEvent());}
         double seconds=summary.first==null?0:Duration.between(summary.first,summary.last).toNanos()/1e9;
-        var out=new LinkedHashMap<String,String>();out.put("schema","1");out.put("recording",quote(file.getFileName().toString()));out.put("observed_seconds",number(seconds));out.put("events",Long.toString(summary.events));
+        var out=new LinkedHashMap<String,String>();out.put("schema","2");out.put("recording",quote(file.getFileName().toString()));out.put("observed_seconds",number(seconds));out.put("events",Long.toString(summary.events));
         out.put("allocation_sample_weight_bytes",Long.toString(summary.allocationBytes));out.put("allocation_samples",Long.toString(summary.allocationSamples));out.put("logger_stack_allocation_sample_weight_bytes",Long.toString(summary.loggerAllocationBytes));out.put("logger_stack_allocation_samples",Long.toString(summary.loggerAllocationSamples));
         out.put("execution_samples",Long.toString(summary.executionSamples));out.put("logger_stack_execution_samples",Long.toString(summary.loggerExecutionSamples));
+        for(var owner:Ownership.values())out.put("server_execution_samples_"+owner.name().toLowerCase(Locale.ROOT),Long.toString(summary.serverExecutionByOwner[owner.ordinal()]));
         out.put("last_heap_after_gc_bytes",summary.heapAfterGc<0?"null":Long.toString(summary.heapAfterGc));out.put("max_heap_after_gc_bytes",summary.maxHeapAfterGc<0?"null":Long.toString(summary.maxHeapAfterGc));
         out.put("gc_pauses",Long.toString(summary.gcCount));out.put("gc_pause_total_ms",number(summary.gcPauseNanos/1e6));out.put("gc_pause_max_ms",number(summary.maxGcPauseNanos/1e6));out.put("jvm_cpu_fraction_mean",summary.cpuSamples==0?"null":number(summary.cpuSum/summary.cpuSamples));
         out.put("server_tick_samples",Long.toString(summary.tickSamples));out.put("server_tick_reported_average_ms",summary.tickSamples==0?"null":number(summary.tickSumNanos/summary.tickSamples/1e6));out.put("server_tick_max_reported_average_ms",summary.tickSamples==0?"null":number(summary.maxTickNanos/1e6));
