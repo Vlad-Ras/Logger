@@ -19,6 +19,7 @@ public final class WeaponCombatTraceTest {
         var replay=GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row),LogEntry.class);
         check(WeaponCombatTrace.pose(replay,"source").equals(pose)&&replay.actorUuid.equals(actor),"journal round trip changed source pose/actor");
         check(row.x==-13&&row.y==70&&row.z==9,"negative summary coordinates truncated instead of floored");
+        check(WeaponCombatTrace.weaponLabel(replay)!=null&&WeaponCombatTrace.weaponLabel(replay).getString().contains("scguns:auvtomag"),"lightweight feed lost the weapon used at the shot");
         check(WeaponCombatTrace.pose(replay,"target")==null,"missing target fabricated zero coordinates");
         var view=pose.viewpoint(1.62);check(Math.abs(view.y()+1.62-pose.eyeY())<1e-9&&view.yaw()==pose.yaw()&&view.pitch()==pose.pitch(),"viewpoint lost eye/aim precision");
         for(String field:List.of("X","Y","Z","Yaw","Pitch","EyeY","Dimension")){

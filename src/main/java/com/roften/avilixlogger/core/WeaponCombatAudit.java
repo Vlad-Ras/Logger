@@ -27,7 +27,12 @@ public final class WeaponCombatAudit {
         if(event.getEntity() instanceof WeaponReloadAccess access)access.avilixlogger$reload(null);
     }
     public static void acceptedFire(){var fire=FIRE.get();if(fire!=null)fire.accepted();}
-    public static void aimedFire(){var fire=FIRE.get();if(fire!=null)try{fire.pose=WeaponCombatTrace.Pose.capture(fire.player);}catch(RuntimeException failure){failure();}}
+    public static void aimedFire(){
+        var fire=FIRE.get();if(fire==null)return;
+        fire.shot=null;
+        try{fire.pose=WeaponCombatTrace.Pose.capture(fire.player);}
+        catch(RuntimeException failure){fire.pose=null;failure();}
+    }
 
     public static Fire beginFire(ServerPlayer player) {
         if(player==null || !player.server.isSameThread() || !traceEnabled())return null;
@@ -38,7 +43,7 @@ public final class WeaponCombatAudit {
         private final ServerPlayer player;private WeaponCombatTrace.Pose pose;private final Fire parent;
         private WeaponCombatTrace.Shot shot;private boolean accepted;
         private Fire(ServerPlayer p,WeaponCombatTrace.Pose pose,Fire parent){this.player=p;this.pose=pose;this.parent=parent;}
-        private WeaponCombatTrace.Shot ensure(ItemStack weapon){if(shot==null)shot=WeaponCombatTrace.capture(player,weapon,pose);return shot;}
+        private WeaponCombatTrace.Shot ensure(ItemStack weapon){if(pose==null)return null;if(shot==null)shot=WeaponCombatTrace.capture(player,weapon,pose);return shot;}
         public void accepted(){try {accepted=true;ensure(player.getMainHandItem());}catch(RuntimeException failure){failure();}}
         public void close(){try {
             if(accepted && shot!=null && CaptureTypePolicy.allows(ActionType.PROJECTILE_SHOOT,"mod:scguns",null) && LoggerConfig.VALUES.logProjectileShots.get())
@@ -116,7 +121,7 @@ public final class WeaponCombatAudit {
         if(target!=null)EntityLogIdentity.capture(row,target);
         var data=WeaponCombatTrace.payload(shot,phase,target);trajectory(data,projectile);
         row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,data);row.deferSnapshot(LogEntry.SnapshotField.ITEM,shot.weapon());
-        row.extra="scguns "+phase+"; shooter="+shot.shooter()+"; shot="+shot.id();return row;
+        row.extra="scguns "+phase+"; shooter="+shot.shooter()+"; shot="+shot.id()+"; weapon="+shot.weaponId();return row;
     }
     private static void trajectory(CompoundTag data,Entity projectile) {
         if(projectile==null)return;var t=new CompoundTag();t.putUUID("UUID",projectile.getUUID());

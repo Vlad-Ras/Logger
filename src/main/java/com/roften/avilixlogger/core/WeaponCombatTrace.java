@@ -47,6 +47,7 @@ public final class WeaponCombatTrace {
             Objects.requireNonNull(shooterType);weapon=Objects.requireNonNull(weapon).copy();
         }
         @Override public CompoundTag weapon(){return weapon.copy();}
+        public String weaponId(){return weapon.getString("id");}
         public CompoundTag tag() {
             var t=new CompoundTag();t.putInt("Version",1);t.putUUID("Id",id);t.putLong("Time",time);
             if(actor!=null)t.putUUID("Actor",actor);t.putString("ActorName",actorName);t.putUUID("Shooter",shooter);
@@ -87,15 +88,35 @@ public final class WeaponCombatTrace {
     }
     public static List<Component> describe(LogEntry row) {
         var t=context(row);if(t==null)return List.of();var out=new ArrayList<Component>();
-        out.add(Component.literal("Scorched Guns · "+t.getString("Phase")));
+        String phase=switch(t.getString("Phase")){
+            case "shot" -> "выстрел";case "projectile_spawn" -> "создан снаряд";case "damage" -> "нанесён урон";
+            case "block_hit" -> "попадание в блок";case "kill" -> "убийство";case "death" -> "смерть";
+            case "reload_start" -> "начата перезарядка";case "reload_stop" -> "перезарядка остановлена";
+            case "ammo_transfer" -> "изменение боезапаса";case "unload" -> "выгрузка боезапаса";
+            case "ammo_operation" -> "операция с боезапасом";default -> t.getString("Phase");
+        };
+        out.add(Component.literal("Scorched Guns · "+phase));
         var shot=Shot.read(t.getCompound("Shot"));
         if(shot!=null)out.add(Component.literal("Стрелок: "+shot.shooterName()+" · "+shot.shooter()+" · выстрел "+shot.id()+" · "+shot.time()));
+        String weapon=shot==null?t.getCompound("WeaponAfter").getString("id"):shot.weaponId();
+        if(!weapon.isBlank())out.add(Component.literal(shot==null?"Оружие: ":"Оружие при выстреле: ").append(weaponLabel(weapon)).append(" ["+weapon+"]"));
+        if(t.hasUUID("ReloadId"))out.add(Component.literal("Перезарядка: "+t.getUUID("ReloadId")));
         var source=pose(row,"source");var target=pose(row,"target");
         if(source!=null){out.add(Component.literal("Место стрелка: "+source.display()));if(row.id>0){out.add(link(row.id,"source","[На место стрелка]"));out.add(link(row.id,"view","[Восстановить точку взгляда]"));}}
         if(target!=null){out.add(Component.literal("Место цели: "+target.display()));if(row.id>0)out.add(link(row.id,"target","[К цели]"));}
         if(t.contains("Damage"))out.add(Component.literal("Нанесённый урон: "+t.getFloat("Damage")));
         if(t.contains("AmmoBefore"))out.add(Component.literal("Боезапас: "+t.getInt("AmmoBefore")+" → "+t.getInt("AmmoAfter")));
         return List.copyOf(out);
+    }
+    /** Lightweight feed text carries the captured gun ID without parsing a full weapon on the server. */
+    public static Component weaponLabel(LogEntry row){
+        String extra=row.extra;if(extra==null)return null;int start=extra.indexOf("; weapon=");if(start<0)return null;
+        start+="; weapon=".length();int end=extra.indexOf(';',start);String id=extra.substring(start,end<0?extra.length():end);
+        return ResourceLocation.tryParse(id)==null?null:weaponLabel(id);
+    }
+    private static Component weaponLabel(String id){
+        var key=ResourceLocation.tryParse(id);if(key==null)return Component.literal(id);
+        return Component.translatableWithFallback("item."+key.getNamespace()+'.'+key.getPath().replace('/','.'),id);
     }
     private static Component link(long id,String side,String label) {
         return Component.literal(label).withStyle(s->s.withColor(net.minecraft.ChatFormatting.AQUA).withUnderlined(true)

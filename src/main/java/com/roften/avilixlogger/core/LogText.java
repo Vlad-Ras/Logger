@@ -105,6 +105,11 @@ public final class LogText {
             c.append(Component.literal(" "));
         }
 
+        if(e.type==ActionType.WEAPON_KILL){
+            var weapon=WeaponCombatTrace.weaponLabel(e);
+            if(weapon!=null)c.append(Component.literal("из ")).append(weapon).append(Component.literal(" "));
+        }
+
         // Coordinates (clickable tp)
         c.append(Component.literal("(").withStyle(ChatFormatting.DARK_GRAY));
         c.append(coordComponent(e));
@@ -296,7 +301,7 @@ public final class LogText {
             case ITEM_DROP -> "выбросил";
             case ITEM_CRAFT -> "скрафтил";
             case WEAPON_RELOAD -> "перезарядка / боезапас";
-            case WEAPON_KILL -> "убил из оружия";
+            case WEAPON_KILL -> "убил";
             case ITEM_TRANSFORM -> "преобразовал предметы";
             case ITEM_SMELT -> "переплавил";
             case ITEM_USE -> "использовал";
