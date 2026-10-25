@@ -13,6 +13,14 @@ import java.util.UUID;
 final class CuriosAuditSmoke {
     static void run(ServerLevel level) {
         var player=new ServerPlayer(level.getServer(),level,new com.mojang.authlib.GameProfile(UUID.randomUUID(),"EquipmentTarget"),ClientInformation.createDefault());
+        com.roften.avilixlogger.compat.curios.CuriosCaptureDefaults.prepare(player);
+        var initialized=player.serializeAttachments(level.registryAccess());
+        top.theillusivec4.curios.api.CuriosApi.getCuriosInventory(player);
+        check(java.util.Objects.equals(initialized,player.serializeAttachments(level.registryAccess())),"native Curios lookup changed prepared attachment state");
+        var external=com.roften.avilixlogger.compat.create.CreateExternalPlayerState.capture(player);
+        var modified=external.copy();modified.getCompound("Unknown").putString("curios:inventory","changed");
+        boolean rejected=false;try{com.roften.avilixlogger.compat.create.CreateExternalPlayerState.validatePair(external,modified);}catch(IllegalStateException expected){rejected=true;}
+        check(rejected,"Curios attachment changes were hidden from joint rollback validation");
         var item=new ItemStack(Items.DIAMOND,1024);item.set(DataComponents.CUSTOM_NAME,Component.literal("Ring payload"));
         var row=CuriosAudit.capture(new CurioChangeEvent(player,"ring",2,ItemStack.EMPTY,item));
         check(row!=null&&row.type==ActionType.ENTITY_EQUIPMENT_CHANGE&&row.actorUuid==null&&"SYSTEM".equals(row.actorName),"observed wearer promoted to actor");

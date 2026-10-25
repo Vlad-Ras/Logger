@@ -886,10 +886,10 @@ public final class LoggerEventHandlers {
         // changes caused by an import/export bus while someone merely had its GUI open.
         if (isAe2Menu(event.getContainer())) return;
         if (ctx == null) return;
-        if (!ctx.dim.equals(level.dimension().location().toString())) return;
+        if (!ctx.dim.equals(level.dimension().location().toString()) || !WorldSnapshotAccess.readable(level,ctx.pos)) return;
 
         CompoundTag afterSlotsTag = ContainerSlotSnapshot.snapshotTag(level, ctx.pos);
-        CompoundTag afterBeTag = NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(ctx.pos));
+        CompoundTag afterBeTag = NbtSerde.snapshotBlockEntityAt(level,ctx.pos);
         final BlockState capturedState = level.getBlockState(ctx.pos);
         final String blockId = BuiltInRegistries.BLOCK.getKey(capturedState.getBlock()).toString();
         final var registryAccess = level.registryAccess();
@@ -933,10 +933,11 @@ public final class LoggerEventHandlers {
      * are unchanged. The fallback is what makes pure rearrangements in arbitrary mod menus visible.
      */
     /** Captures only changes inside this actual click, never the entire time a GUI was open. */
-    public static MenuAction beginMenuAction(ServerPlayer player) {
+    public static MenuAction beginMenuAction(ServerPlayer player) { return beginMenuAction(player,"player:container_click"); }
+    public static MenuAction beginMenuAction(ServerPlayer player,String actionSource) {
         if (!CaptureTypePolicy.enabled(2) || !LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()
                 || isAe2Menu(player.containerMenu) || player.containerMenu.slots.size() > 4096) return null;
-        try { return new MenuAction(player); } catch (Throwable failure) { return null; }
+        try { return new MenuAction(player,actionSource); } catch (Throwable failure) { return null; }
     }
 
     public static final class MenuAction {
@@ -949,13 +950,18 @@ public final class LoggerEventHandlers {
         private final CompoundTag before;
         private final CompoundTag beforeBe;
         private final BlockPos pos;
-        private MenuAction(ServerPlayer player) {
+        private final int[] beforeProperties;
+        private final String actionSource;
+        private MenuAction(ServerPlayer player,String actionSource) {
+            this.actionSource=actionSource;
             this.player = player; menu = player.containerMenu; level = player.serverLevel();
             block = OPEN_CONTAINER.get(player.getUUID()); entity = OPEN_ENTITY_CONTAINER.get(player.getUUID());
             generic = OPEN_GENERIC_MENU.get(player.getUUID());
             pos = block != null ? block.pos : entity != null && level.getEntity(entity.entityUuid) != null
                     ? level.getEntity(entity.entityUuid).blockPosition().immutable() : player.blockPosition().immutable();
-            before = snapshot(); beforeBe = block == null ? null : NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(block.pos));
+            if(block!=null && !WorldSnapshotAccess.readable(level,block.pos))throw new IllegalStateException("Container chunk unloaded");
+            beforeProperties=GenericMenuSnapshot.properties(menu);
+            before = snapshot(); beforeBe = block == null ? null : NbtSerde.snapshotBlockEntityAt(level,block.pos);
             CompoundTag prior = block != null ? block.beforeSlots : entity != null ? entity.beforeInv : generic != null ? generic.beforeSlots : null;
             emit(prior, before, block == null ? null : block.beforeBe, beforeBe, false);
         }
@@ -969,31 +975,46 @@ public final class LoggerEventHandlers {
             try { finishCaptured(); } catch (Throwable ignored) {}
         }
         private void finishCaptured() {
+            if(block!=null && !WorldSnapshotAccess.readable(level,block.pos))return;
+            emitProperties(GenericMenuSnapshot.properties(menu));
             CompoundTag after = snapshot();
-            CompoundTag afterBe = block == null ? null : NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(block.pos));
+            CompoundTag afterBe = block == null ? null : NbtSerde.snapshotBlockEntityAt(level,block.pos);
             emit(before, after, beforeBe, afterBe, true);
             if (block != null) { block.beforeSlots = after; block.beforeBe = afterBe; }
             if (entity != null) entity.beforeInv = after;
             if (generic != null) generic.beforeSlots = after;
+        }
+        private void emitProperties(int[] after) {
+            if(beforeProperties==null || after==null || java.util.Arrays.equals(beforeProperties,after))return;
+            var beforeTag=new CompoundTag();beforeTag.putIntArray("Properties",beforeProperties);
+            var afterTag=new CompoundTag();afterTag.putIntArray("Properties",after);
+            var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.GUI_CHANGE;
+            row.actorUuid=CauseContext.actorUuid(player);row.actorName=CauseContext.actorName(player);
+            row.dim=level.dimension().location().toString();row.x=pos.getX();row.y=pos.getY();row.z=pos.getZ();row.source=actionSource;
+            row.extra="menu="+menu.getClass().getName()+"; synchronized properties; audit only";
+            row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,beforeTag);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,afterTag);
+            LoggerRuntime.storage(level).append(row);
         }
         private void emit(CompoundTag before, CompoundTag after, CompoundTag beforeBe, CompoundTag afterBe, boolean direct) {
             if (before == null || after == null || java.util.Objects.equals(before, after)
                     && java.util.Objects.equals(beforeBe, afterBe)) return;
             final UUID actor = direct ? CauseContext.actorUuid(player) : null;
             final String name = direct ? CauseContext.actorName(player) : "SYSTEM[container interval]";
-            final String source = direct ? "player:container_click" : "system:container_interval";
+            final String source = direct ? actionSource : "system:container_interval";
             final String dim = level.dimension().location().toString();
             final long timestamp = System.currentTimeMillis();
             final var access = level.registryAccess();
             final var storage = LoggerRuntime.storage(level);
             final var state = block == null ? null : level.getBlockState(block.pos);
+            final boolean blockContainer=block!=null;
+            final BlockPos actionPos=pos;
             AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after, beforeBe, afterBe), () -> {
                 String blockState = state == null ? null : NbtSerde.writeBlockState(state);
-                emitContainerChanges(before, after, access, storage, dim, pos, actor, name, source, blockState, timestamp);
-                if (block != null) {
+                emitContainerChanges(before, after, access, storage, dim, actionPos, actor, name, source, blockState, timestamp);
+                if (blockContainer) {
                     LogEntry row = new LogEntry(); row.ts = timestamp; row.dim = dim; row.type = ActionType.BLOCK_ENTITY_NBT_CHANGE;
                     row.actorUuid = actor; row.actorName = name; row.source = source;
-                    row.x = pos.getX(); row.y = pos.getY(); row.z = pos.getZ(); row.blockAfter = blockState;
+                    row.x = actionPos.getX(); row.y = actionPos.getY(); row.z = actionPos.getZ(); row.blockAfter = blockState;
                     row.containerSlotsBefore = NbtSerde.toSnbt(before); row.containerSlotsAfter = NbtSerde.toSnbt(after);
                     row.beBefore = NbtSerde.toSnbt(beforeBe); row.beAfter = NbtSerde.toSnbt(afterBe);
                     row.extra = direct ? "synchronous menu action" : "unconfirmed changes between menu actions";

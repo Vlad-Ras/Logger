@@ -90,6 +90,11 @@ public final class NbtSerde {
         return toSnbt(snapshotBlockEntity(level, be));
     }
 
+    /** Checks loaded state before looking up a block entity; never creates a chunk ticket. */
+    public static CompoundTag snapshotBlockEntityAt(ServerLevel level,BlockPos pos) {
+        return WorldSnapshotAccess.readable(level,pos) ? snapshotBlockEntity(level,level.getBlockEntity(pos)) : null;
+    }
+
     /** Captures detached NBT on the world thread; SNBT encoding can run on a worker. */
     public static CompoundTag snapshotBlockEntity(ServerLevel level, BlockEntity be) {
         long started = HotPathMetrics.beginSnapshot();
@@ -143,7 +148,7 @@ public final class NbtSerde {
     }
 
     private static CompoundTag snapshotEntityPayload(ServerLevel level, Entity ent) {
-        if (ent == null) return null;
+        if (ent == null || level == null || !level.getServer().isSameThread()) return null;
         CompoundTag tag = new CompoundTag();
         try {
             ResourceLocation key = BuiltInRegistries.ENTITY_TYPE.getKey(ent.getType());

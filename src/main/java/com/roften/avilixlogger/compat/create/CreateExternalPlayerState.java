@@ -43,7 +43,11 @@ public final class CreateExternalPlayerState {
         validate(before);validate(after);
         if(!before.getCompound("Unknown").equals(after.getCompound("Unknown"))||before.contains("Backpacked")!=after.contains("Backpacked")
                 ||before.contains("Backpacked")&&!before.getCompound("Backpacked").getString("Framework").equals(after.getCompound("Backpacked").getString("Framework")))
-            throw new IllegalStateException("Изменены внешние данные без контракта");
+            throw new IllegalStateException("Изменены внешние данные без контракта: "+changedKeys(before.getCompound("Unknown"),after.getCompound("Unknown")));
+    }
+    private static String changedKeys(CompoundTag before,CompoundTag after) {
+        var keys=new TreeSet<String>();keys.addAll(before.getAllKeys());keys.addAll(after.getAllKeys());
+        return keys.stream().filter(k->!Objects.equals(before.get(k),after.get(k))).limit(8).map(k->k.substring(0,Math.min(k.length(),128))).collect(java.util.stream.Collectors.joining(", "));
     }
     /** Changed cells are atomic; unrelated progress, backpack slots and other keys survive. */
     public static CompoundTag merge(CompoundTag live,CompoundTag from,CompoundTag to) {

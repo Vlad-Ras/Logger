@@ -9,6 +9,7 @@ final class OptimizationIntegrityTest {
         dropLocationsAndTime();
         exactDuplicateIdentity();
         separateContainerActions();
+        detachedMenuWorker();
     }
     private static LogEntry delta(String item, int count) {
         LogEntry row = row("container delta"); row.type = ActionType.CONTAINER_PUT;
@@ -56,6 +57,17 @@ final class OptimizationIntegrityTest {
         check(out.size() == 2 && out.get(0).id == 100 && out.get(1).id == 101
                 && out.get(0).count == 1 && out.get(1).count == 1 && out.get(1).ts == 1100,
                 "SQL batching merged distinct container actions, timestamps or sources");
+    }
+    private static void detachedMenuWorker() {
+        int found=0;
+        for(var method:LoggerEventHandlers.MenuAction.class.getDeclaredMethods())if(method.getName().startsWith("lambda$emit$")) {
+            check(java.lang.reflect.Modifier.isStatic(method.getModifiers()),"menu worker retains live player/menu scope");found++;
+            for(var type:method.getParameterTypes())check(!net.minecraft.world.entity.Entity.class.isAssignableFrom(type)
+                    && !net.minecraft.world.level.Level.class.isAssignableFrom(type)
+                    && !net.minecraft.world.inventory.AbstractContainerMenu.class.isAssignableFrom(type),"menu worker receives live game state");
+        }
+        check(found==1,"detached menu encoder closure was not verified");
+        System.out.println("MENU_WORKER_ISOLATION_OK: no live menu, player or level captured by background delta encoding");
     }
     public static void main(String[] args) throws Exception { run(); System.out.println("Optimization integrity checks passed."); }
 }

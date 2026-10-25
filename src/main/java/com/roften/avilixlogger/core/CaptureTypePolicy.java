@@ -53,6 +53,7 @@ public final class CaptureTypePolicy {
                     ME_PUT, ME_TAKE, ME_UPGRADE_CHANGE, ME_FILTER_CHANGE,
                     ME_SETTING_CHANGE, ME_CELL_CHANGE -> enabled(2);
             case GUI_OPEN -> enabled(2) && enabled(3);
+            case GUI_CHANGE -> enabled(2);
             case ENTITY_SPAWN, ENTITY_DEATH, ENTITY_MOUNT, ENTITY_DISMOUNT,
                     ENTITY_INTERACT, ENTITY_ATTACK, ENTITY_EQUIPMENT_CHANGE, PLAYER_DEATH,
                     PLAYER_DIMENSION_CHANGE, PLAYER_RESPAWN -> enabled(3);

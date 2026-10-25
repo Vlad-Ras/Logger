@@ -100,5 +100,5 @@ public enum ActionType {
     CREATE_DEPLOYER_ACTION,
 
     // Append-only: observed optional equipment changes; no implicit rollback of mod effects.
-    ENTITY_EQUIPMENT_CHANGE
+    ENTITY_EQUIPMENT_CHANGE, GUI_CHANGE
 }

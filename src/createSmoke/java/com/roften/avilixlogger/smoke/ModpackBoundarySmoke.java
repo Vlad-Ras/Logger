@@ -34,6 +34,10 @@ final class ModpackBoundarySmoke {
         var absent=new CountingBlock(unloaded);absent.setLevel(level);
         check(NbtSerde.snapshotBlockEntity(level,absent)==null&&absent.calls==0,"unloaded mod serializer invoked");
         check(ContainerSlotSnapshot.snapshotTag(level,unloaded)==null&&!level.hasChunkAt(unloaded),"audit forced a chunk load");
+        check(NbtSerde.snapshotBlockEntityAt(level,unloaded)==null&&!level.hasChunkAt(unloaded),"block lookup forced a chunk load");
+        var item=new net.minecraft.world.entity.item.ItemEntity(level,0,80,0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE));
+        check(java.util.concurrent.CompletableFuture.supplyAsync(()->NbtSerde.snapshotEntity(level,item)).join()==null,"entity serializer ran off-thread");
+        GenericMenuPropertiesSmoke.run(level);
         int old=CaptureTypePolicy.mask();
         try {
             CaptureTypePolicy.install(CaptureTypePolicy.changed(old,2,false));

@@ -15,6 +15,7 @@
     "LavaReactionSourceMixin",
     "ChunkGenerationSourceMixin",
     "ContainerClickCauseMixin",
+    "MenuDataAccessor",
     "CartWorldInteractionLockMixin",
     "CartItemHandlerLockMixin",
     "CartFluidHandlerLockMixin",

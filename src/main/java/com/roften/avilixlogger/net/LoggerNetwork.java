@@ -884,6 +884,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE
             );
             case 2 -> java.util.EnumSet.of(
+                    com.roften.avilixlogger.core.ActionType.GUI_CHANGE,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_OPEN,
                     com.roften.avilixlogger.core.ActionType.ENTITY_CONTAINER_OPEN,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_PUT,

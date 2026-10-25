@@ -70,7 +70,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ME_UPGRADE_CHANGE,
                 ActionType.ME_FILTER_CHANGE,
                 ActionType.ME_SETTING_CHANGE,
-                ActionType.ME_CELL_CHANGE);
+                ActionType.ME_CELL_CHANGE, ActionType.GUI_CHANGE);
         map(TableKind.ENTITIES,
                 ActionType.ENTITY_DEATH,
                 ActionType.ENTITY_SPAWN,

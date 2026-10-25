@@ -322,6 +322,7 @@ public final class LogText {
             case PLAYER_DIMENSION_CHANGE -> "сменил измерение";
             case PLAYER_RESPAWN -> "возродился";
             case GUI_OPEN -> "открыл интерфейс";
+            case GUI_CHANGE -> "изменил настройки интерфейса";
             case ENTITY_EQUIPMENT_CHANGE -> "изменилось снаряжение";
             case CHAT_MESSAGE -> "написал";
 
@@ -399,6 +400,7 @@ public final class LogText {
             }
 
             // player events / chat / gui
+            case GUI_CHANGE -> Component.literal(e.extra == null ? "интерфейс" : e.extra);
             case GUI_OPEN -> Component.literal(e.extra != null ? e.extra.replaceFirst("^gui_open\\s+", "") : "интерфейс");
             case PLAYER_DEATH, PLAYER_JOIN, PLAYER_LEAVE, PLAYER_DIMENSION_CHANGE, PLAYER_RESPAWN -> null;
             case CHAT_MESSAGE -> Component.literal(e.extra != null ? e.extra : "");

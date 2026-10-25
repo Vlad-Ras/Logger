@@ -17,8 +17,18 @@ public final class GenericMenuSnapshot {
         return NbtSerde.toSnbt(snapshot(menu, provider));
     }
 
+    /** Read only during the actual menu action, never by background polling. */
+    public static int[] properties(AbstractContainerMenu menu) {
+        if (!(menu instanceof MenuDataAccess access)) return null;
+        var slots=access.avilixlogger$dataSlots();
+        if (slots.size()>4096) return null;
+        var values=new int[slots.size()];
+        for(int i=0;i<values.length;i++)values[i]=slots.get(i).get();
+        return values;
+    }
+
     public static CompoundTag snapshot(AbstractContainerMenu menu, HolderLookup.Provider provider) {
-        if (menu == null || provider == null || menu.slots == null || menu.slots.isEmpty()) return null;
+        if (menu == null || provider == null || menu.slots == null || menu.slots.isEmpty() || menu.slots.size() > 4096) return null;
         try {
             CompoundTag root = new CompoundTag();
             root.putInt("Size", menu.slots.size());

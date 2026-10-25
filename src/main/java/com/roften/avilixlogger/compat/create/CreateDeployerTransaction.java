@@ -59,6 +59,7 @@ public final class CreateDeployerTransaction implements CreateDeployerHooks.Obse
     }
     public static Use using(String action){return new Use(CURRENT.get(),action);}
     private static void preparePlayer(net.minecraft.world.entity.player.Player player){
+        if(net.neoforged.fml.ModList.get().isLoaded("curios"))com.roften.avilixlogger.compat.curios.CuriosCaptureDefaults.prepare(player);
         if(net.neoforged.fml.ModList.get().isLoaded("backpacked"))com.roften.avilixlogger.compat.backpacked.BackpackDeployerContract.prepare(player);
     }
     private static ListTag inventory(DeployerFakePlayer player){

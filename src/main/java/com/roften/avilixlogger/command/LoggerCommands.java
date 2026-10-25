@@ -1669,6 +1669,8 @@ public final class LoggerCommands {
             case "item_consume", "consume", "drink", "eat" -> ActionType.ITEM_CONSUME;
             case "projectile_shoot", "shoot", "shot", "bow", "crossbow", "arrow" -> ActionType.PROJECTILE_SHOOT;
             case "projectile_hit", "hit", "arrow_hit", "impact" -> ActionType.PROJECTILE_HIT;
+            case "gui_change", "menu_change" -> ActionType.GUI_CHANGE;
+            case "equipment", "equipment_change" -> ActionType.ENTITY_EQUIPMENT_CHANGE;
             case "gui", "gui_open", "menu", "interface" -> ActionType.GUI_OPEN;
             case "player_death" -> ActionType.PLAYER_DEATH;
             case "join", "player_join" -> ActionType.PLAYER_JOIN;
@@ -1693,7 +1695,7 @@ public final class LoggerCommands {
             case "theft", "steal" -> EnumSet.of(ActionType.CONTAINER_OPEN, ActionType.CONTAINER_PUT, ActionType.CONTAINER_TAKE, ActionType.ITEM_PICKUP, ActionType.ITEM_DROP, ActionType.GUI_OPEN);
             case "combat", "pvp" -> EnumSet.of(ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
             case "items", "item" -> EnumSet.of(ActionType.ITEM_DROP, ActionType.ITEM_PICKUP, ActionType.ITEM_CRAFT, ActionType.ITEM_SMELT, ActionType.ITEM_USE, ActionType.ITEM_USE_START, ActionType.ITEM_USE_STOP, ActionType.ITEM_CONSUME, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
-            case "gui", "menus", "interfaces" -> EnumSet.of(ActionType.GUI_OPEN, ActionType.CONTAINER_OPEN, ActionType.ENTITY_CONTAINER_OPEN);
+            case "gui", "menus", "interfaces" -> EnumSet.of(ActionType.GUI_CHANGE, ActionType.GUI_OPEN, ActionType.CONTAINER_OPEN, ActionType.ENTITY_CONTAINER_OPEN);
             case "planes", "plane", "aircraft" -> EnumSet.of(
                     ActionType.PLANE_PLACE, ActionType.PLANE_REMOVE, ActionType.PLANE_MOUNT, ActionType.PLANE_PICKUP, ActionType.ENTITY_OWNER_SET,
                     ActionType.ENTITY_SPAWN, ActionType.ENTITY_DEATH, ActionType.ENTITY_MOUNT, ActionType.ENTITY_DISMOUNT, ActionType.ENTITY_INTERACT
