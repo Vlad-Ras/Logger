@@ -93,9 +93,16 @@ public final class ScgunsCoverageNativeSmoke {
             var historical=((WeaponTraceAccess)restored).avilixlogger$shot();type.getMethod("setOwner",ServerPlayer.class).invoke(turret,player(level,"ChangedOwner"));owner.setPos(900,140,900);
             check(historical!=null&&historical.fromMechanism()&&historical.actor()==null&&historical.shooter()==null&&historical.mechanism().getUUID("Owner").equals(owner.getUUID())&&historical.id().equals(shot.id()),"turret save/load/current owner altered history");
             var row=WeaponCombatAudit.entry(historical,ActionType.WEAPON_KILL,"kill",victim,restored);row.materializeSnapshots();check(row.actorUuid==null&&WeaponCombatTrace.pose(row,"source").equals(shot.origin()),"turret attributed owner as personal shooter");
+            var hit=restored.getClass().getDeclaredMethod("onHitEntity",EntityHitResult.class);hit.setAccessible(true);
+            victim.setHealth(.1f);int[] damage={0},deaths={0};
+            Consumer<LivingDamageEvent.Post> damaged=e->{if(e.getEntity()==victim&&e.getNewDamage()>0){check(e.getSource().getDirectEntity()==restored,"turret damage lost arrow source");damage[0]++;}};
+            Consumer<net.neoforged.neoforge.event.entity.living.LivingDeathEvent> died=e->{if(e.getEntity()==victim){check(e.getSource().getDirectEntity()==restored,"turret death lost arrow source");deaths[0]++;}};
+            NeoForge.EVENT_BUS.addListener(damaged);NeoForge.EVENT_BUS.addListener(died);
+            try{hit.invoke(restored,new EntityHitResult(victim));check(damage[0]==1&&deaths[0]==1&&victim.isDeadOrDying(),"native turret damage/death missing");}
+            finally{NeoForge.EVENT_BUS.unregister(damaged);NeoForge.EVENT_BUS.unregister(died);}
             for(var bullet:bullets)bullet.discard();restored.discard();victim.discard();level.removeBlock(pos,false);level.removeBlock(pos.below(),false);
         }
-        System.out.println("SCGUNS_TURRET_NATIVE_OK: basic=1, shotgun=8, one ammo each, inherited save/load, historical owner isolated from human actor");
+        System.out.println("SCGUNS_TURRET_NATIVE_OK: basic=1, shotgun=8, one ammo each, inherited save/load, native arrow damage/death, historical owner isolated from human actor");
     }
     private static void explosions(ServerLevel level)throws Exception {
         var shooter=player(level,"ExplosionActor");var gun=item("auvtomag");ammo(gun,5);shooter.setItemInHand(InteractionHand.MAIN_HAND,gun);
@@ -116,7 +123,12 @@ public final class ScgunsCoverageNativeSmoke {
                 var row=WeaponCombatAudit.entry(((WeaponTraceAccess)projectile).avilixlogger$shot(),ActionType.PROJECTILE_HIT,"damage",victim,projectile);row.materializeSnapshots();check(WeaponCombatTrace.pose(row,"source").equals(shot.origin()),"explosion followed projectile instead of original shooter");
             }finally{NeoForge.EVENT_BUS.unregister(damage);victim.discard();}
         }
+        var cancelledVictim=EntityType.COW.create(level);check(cancelledVictim!=null,"cancelled explosion target missing");cancelledVictim.setPos(projectile.position().add(.7,0,0));level.addFreshEntity(cancelledVictim);float health=cancelledVictim.getHealth();int[] cancels={0};
+        Consumer<net.neoforged.neoforge.event.level.ExplosionEvent.Start> cancel=e->{if(e.getExplosion().getDirectSourceEntity()==projectile){e.setCanceled(true);cancels[0]++;}};
+        NeoForge.EVENT_BUS.addListener(cancel);
+        try{type.getMethod("createExplosion",Entity.class,float.class,boolean.class).invoke(null,projectile,2f,true);check(cancels[0]==1&&cancelledVictim.getHealth()==health,"cancelled native explosion still dealt damage");}
+        finally{NeoForge.EVENT_BUS.unregister(cancel);cancelledVictim.discard();}
         for(var entity:projectiles)entity.discard();
-        System.out.println("SCGUNS_EXPLOSION_NATIVE_OK: ordinary/rocket/fire positive damage preserve direct projectile and historical source");
+        System.out.println("SCGUNS_EXPLOSION_NATIVE_OK: ordinary/rocket/fire positive damage preserve direct projectile and historical source; cancelled explosion deals no damage");
     }
 }

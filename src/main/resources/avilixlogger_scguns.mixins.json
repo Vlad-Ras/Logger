@@ -14,7 +14,8 @@
     "GunLoadedStateMixin",
     "MovementReloadStateMixin",
     "AnimatedReloadStateMixin",
-    "TurretFireMixin"
+    "TurretFireMixin",
+    "TurretProjectileImpactMixin"
   ],
   "client": [],
   "injectors": {
