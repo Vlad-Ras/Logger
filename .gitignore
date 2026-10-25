@@ -24,6 +24,7 @@ runs
 run-data
 run-local-create
 run-create-absent
+run-blockpack
 logs
 
 repo

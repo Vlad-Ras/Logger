@@ -117,6 +117,17 @@ final class ClickHouseDeliveryTest {
                 check(selects.stream().anyMatch(sql->sql.contains("be_after AS be_after") && sql.contains("id = "+weapon.id)),"exact weapon query omitted evidence/cursors");
             }
             System.out.println("Weapon HTTP checks passed: shot/hit/kill/reload/death evidence survives disabled non-rollback details and exact ID lookup.");
+            for(boolean gift:List.of(false,true)){
+                var settings=gift?com.roften.avilixlogger.compat.blockpack.BlockPackGiftAudit.capture(new com.roften.avilixlogger.compat.blockpack.BlockPackGiftAudit.Actor(UUID.randomUUID(),"GiftActor","minecraft:overworld",1,2,3),true,false):row("menu properties");
+                if(!gift){settings.type=ActionType.GUI_CHANGE;settings.source="player:container_button";settings.beBefore="{Properties:[I;0,2]}";settings.beAfter="{Properties:[I;1,3]}";}
+                settings.materializeSnapshots();database.appendBatch("settings-evidence-"+gift,List.of(settings));
+                String insert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_containers")&&body.contains(settings.source)).findFirst().orElseThrow();
+                var settingsEncoded=com.google.gson.JsonParser.parseString(insert.substring(insert.indexOf('\n')+1).trim()).getAsJsonObject();
+                check(settingsEncoded.get("be_before").getAsString().equals(settings.beBefore)&&settingsEncoded.get("be_after").getAsString().equals(settings.beAfter),"settings meaning pruned as optional detail");
+                var q=new LogQuery();q.type=ActionType.GUI_CHANGE;q.requireDetails=true;q.exactId=settings.id;q.limit=1;lookupResponse.set(settingsEncoded+"\n");
+                var rows=database.query(q);check(rows.size()==1&&rows.getFirst().beBefore.equals(settings.beBefore)&&rows.getFirst().beAfter.equals(settings.beAfter),"settings exact ID lookup lost before/after");
+            }
+            System.out.println("GUI_SETTING_HTTP_OK: menu DataSlot and BlockPack global gift values survive optional-detail pruning and exact ID lookup");
             UUID autoCart=UUID.randomUUID();var automation=row("cart_automation");automation.type=ActionType.CART_TRANSFER;automation.dim="minecraft:overworld";automation.source=CartAuditContext.prefix(autoCart)+"automation_transfer:1";
             automation.beBefore="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:100}}]}";
             automation.beAfter="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:850}}]}";

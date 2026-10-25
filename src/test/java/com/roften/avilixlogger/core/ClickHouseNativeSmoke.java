@@ -68,6 +68,7 @@ public final class ClickHouseNativeSmoke {
         var turretShot=new WeaponCombatTrace.Shot(UUID.randomUUID(),System.currentTimeMillis(),null,"Турель",null,"scguns:shotgun_turret","scguns:shotgun_turret",
                 new WeaponCombatTrace.Pose(block.dim,-2.125,70.25,9.875,29.25f,-23.5f,70.25),turretWeapon,mechanism);
         var turret=WeaponCombatAudit.entry(turretShot,ActionType.WEAPON_KILL,"kill",null,null);turret.source=weaponPrefix+"turret";turret.materializeSnapshots();weapons.add(turret);
+        var setting=com.roften.avilixlogger.compat.blockpack.BlockPackGiftAudit.capture(new com.roften.avilixlogger.compat.blockpack.BlockPackGiftAudit.Actor(UUID.randomUUID(),"NativeGiftActor",block.dim,7,80,9),true,false);setting.materializeSnapshots();
 
         ClickHouseLogStorage db = null;
         try {
@@ -79,6 +80,7 @@ public final class ClickHouseNativeSmoke {
             seedOldWeaponSchema(endpoint,user,password);
             db = new ClickHouseLogStorage();
             db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
+            db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             verifyWeapons(db,weapons);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
@@ -100,6 +102,7 @@ public final class ClickHouseNativeSmoke {
             db = new ClickHouseLogStorage();
             verifyDetails(db.queryReverse(detail), block, item);
             verifyWeapons(db,weapons);
+            verifySetting(db,setting);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
@@ -135,6 +138,12 @@ public final class ClickHouseNativeSmoke {
                 check(rows.getFirst().actorUuid==null&&shot!=null&&shot.fromMechanism()&&shot.actor()==null&&shot.mechanism().getString("OwnerName").equals("NativeTurretOwner"),"native turret owner/actor semantics changed");
             }
         }
+    }
+
+    private static void verifySetting(ClickHouseLogStorage db,LogEntry setting){
+        var q=new LogQuery();q.requireDetails=true;q.exactId=setting.id;q.limit=1;q.untilTs=Long.MAX_VALUE;
+        var rows=db.query(q);check(rows.size()==1&&setting.actorUuid.equals(rows.getFirst().actorUuid)&&setting.beBefore.equals(rows.getFirst().beBefore)&&setting.beAfter.equals(rows.getFirst().beAfter),"native setting before/after or actor lost with optional details disabled");
+        System.out.println("GUI_SETTING_CLICKHOUSE_OK: global gift setting and actor survive optional detail pruning and exact ID lookup");
     }
 
     private static void verifyDetails(List<LogEntry> rows, LogEntry block, LogEntry item) {

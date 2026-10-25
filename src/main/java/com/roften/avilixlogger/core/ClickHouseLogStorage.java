@@ -669,6 +669,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (e == null) return false;
         // Historical weapon positions must survive non-rollback detail pruning.
         if(e.source!=null && e.source.startsWith("mod:scguns:") && e.beAfter!=null)return true;
+        // The before/after values are the meaning of a settings event, even though it is audit-only.
+        if(e.type==ActionType.GUI_CHANGE && e.beBefore!=null && e.beAfter!=null)return true;
         if ("full".equals(detailMode) || "debug".equals(detailMode)) return true;
         if ("minimal".equals(detailMode)) return isRollbackCritical(e) && storeRollbackDetails;
         if (isRollbackCritical(e)) return storeRollbackDetails;
