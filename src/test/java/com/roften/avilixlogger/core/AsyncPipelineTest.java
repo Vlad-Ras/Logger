@@ -13,6 +13,7 @@ public final class AsyncPipelineTest {
         CaptureTypePolicyTest.run();
         OperatorAccessTest.run();
         HotPathMemoryTest.run();
+        DiagnosticCountersTest.run();
         HotPathQueueStandaloneTest.run();
         com.roften.avilixlogger.compat.create.CreatePlayerProgressOrderTest.run();
         DetailFormattingTest.run();

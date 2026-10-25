@@ -98,18 +98,15 @@ public final class NbtSerde {
     }
 
     private static CompoundTag snapshotBlockEntityPayload(ServerLevel level, BlockEntity be) {
-        if (be == null) return null;
-
-        // Hot path for MC 1.21.x: avoid the reflection-heavy invokeBlockEntitySave chain.
-        // Reflection fallback stays below for compatibility with mapping/API edge cases.
+        if (be == null || !WorldSnapshotAccess.readable(level, be.getBlockPos())) return null;
         try {
+            // A mod serializer may resolve capabilities or update its own caches. Execute it once.
             CompoundTag tag = be.saveWithFullMetadata(level.registryAccess());
-            if (tag != null) return tag.copy();
-        } catch (Throwable ignored) {
+            return tag == null ? null : tag.copy();
+        } catch (Throwable failure) {
+            AdaptiveLogDiagnostics.adapterFailure("block-entity-save");
+            return null; // Never retry the same mod through alternate reflective entry points.
         }
-
-        CompoundTag tag = invokeBlockEntitySave(level, be);
-        return tag == null ? null : tag.copy();
     }
 
     /** Restore a block entity snapshot (must already exist at pos after state set). */
@@ -773,95 +770,6 @@ public final class NbtSerde {
             if (!stack.isEmpty()) stack.setCount(count);
             return stack;
         } catch (Throwable ignored) { return ItemStack.EMPTY; }
-    }
-
-    private static CompoundTag invokeBlockEntitySave(ServerLevel level, BlockEntity be) {
-        // NOTE: In Mojang/NeoForge mappings many BE save methods are NOT public (protected/package-private).
-        // Using Class#getMethod() only finds public members, which results in empty/minimal tags for containers.
-        // We therefore try both public and declared methods (walking the class hierarchy) and force accessibility.
-
-        // 1) Newer mappings sometimes expose a no-arg saveWithFullMetadata().
-        try {
-            Method m = findAnyMethod(be.getClass(), "saveWithFullMetadata");
-            Object r = m.invoke(be);
-            if (r instanceof CompoundTag t) return t;
-        } catch (NoSuchMethodException ignored) {
-        } catch (Throwable ignored) {
-        }
-
-        // Preferred: saveWithFullMetadata(HolderLookup.Provider)
-        try {
-            Method m = findAnyMethod(be.getClass(), "saveWithFullMetadata", HolderLookup.Provider.class);
-            Object r = m.invoke(be, level.registryAccess());
-            if (r instanceof CompoundTag t) return t;
-        } catch (NoSuchMethodException ignored) {
-        } catch (IllegalAccessException | InvocationTargetException ignored) {
-        }
-
-        // 2) Some versions use saveWithId(..) to include the BE type id.
-        try {
-            Method m = findAnyMethod(be.getClass(), "saveWithId", HolderLookup.Provider.class);
-            Object r = m.invoke(be, level.registryAccess());
-            if (r instanceof CompoundTag t) return t;
-        } catch (NoSuchMethodException ignored) {
-        } catch (Throwable ignored) {
-        }
-
-        try {
-            Method m = findAnyMethod(be.getClass(), "saveWithId");
-            Object r = m.invoke(be);
-            if (r instanceof CompoundTag t) return t;
-        } catch (NoSuchMethodException ignored) {
-        } catch (Throwable ignored) {
-        }
-
-        // Alternative: saveWithoutMetadata(HolderLookup.Provider)
-        try {
-            Method m = findAnyMethod(be.getClass(), "saveWithoutMetadata", HolderLookup.Provider.class);
-            Object r = m.invoke(be, level.registryAccess());
-            if (r instanceof CompoundTag t) return t;
-        } catch (Throwable ignored) {}
-
-        // Alternative: saveWithoutMetadata() no-arg
-        try {
-            Method m = findAnyMethod(be.getClass(), "saveWithoutMetadata");
-            Object r = m.invoke(be);
-            if (r instanceof CompoundTag t) return t;
-        } catch (NoSuchMethodException ignored) {
-        } catch (Throwable ignored) {
-        }
-
-        // 3) Last-ditch: build a tag and call saveAdditional(..) if present.
-        try {
-            CompoundTag tag = new CompoundTag();
-            tag.putString("id", net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()).toString());
-            tag.putInt("x", be.getBlockPos().getX());
-            tag.putInt("y", be.getBlockPos().getY());
-            tag.putInt("z", be.getBlockPos().getZ());
-
-            try {
-                Method m = findAnyMethod(be.getClass(), "saveAdditional", CompoundTag.class, HolderLookup.Provider.class);
-                m.invoke(be, tag, level.registryAccess());
-                return tag;
-            } catch (NoSuchMethodException ignored) {
-            }
-
-            try {
-                Method m = findAnyMethod(be.getClass(), "saveAdditional", CompoundTag.class);
-                m.invoke(be, tag);
-                return tag;
-            } catch (NoSuchMethodException ignored) {
-            }
-        } catch (Throwable ignored) {
-        }
-
-        // Last resort: minimal snapshot
-        CompoundTag tag = new CompoundTag();
-        tag.putString("id", net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType()).toString());
-        tag.putInt("x", be.getBlockPos().getX());
-        tag.putInt("y", be.getBlockPos().getY());
-        tag.putInt("z", be.getBlockPos().getZ());
-        return tag;
     }
 
     /** Finds a method even if it's protected/package-private by walking the class hierarchy. */

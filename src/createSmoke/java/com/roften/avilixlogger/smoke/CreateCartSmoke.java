@@ -24,6 +24,7 @@ public final class CreateCartSmoke {
         try {
             var world=event.getServer().overworld();
             AuditDetailsSmoke.run(world);
+            ModpackBoundarySmoke.run(world);
             CreateContraptionKindsSmoke.run(world);
             CreateCompletionSmoke.run(world);
             CreateMechanismActionsSmoke.run(world);

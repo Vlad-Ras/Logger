@@ -934,7 +934,7 @@ public final class LoggerEventHandlers {
      */
     /** Captures only changes inside this actual click, never the entire time a GUI was open. */
     public static MenuAction beginMenuAction(ServerPlayer player) {
-        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()
+        if (!CaptureTypePolicy.enabled(2) || !LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()
                 || isAe2Menu(player.containerMenu) || player.containerMenu.slots.size() > 4096) return null;
         try { return new MenuAction(player); } catch (Throwable failure) { return null; }
     }

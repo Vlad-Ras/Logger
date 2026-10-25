@@ -80,7 +80,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ENTITY_ATTACK,
                 ActionType.PROJECTILE_SHOOT,
                 ActionType.PROJECTILE_HIT,
-                ActionType.ENTITY_OWNER_SET);
+                ActionType.ENTITY_OWNER_SET, ActionType.ENTITY_EQUIPMENT_CHANGE);
         map(TableKind.ITEMS,
                 ActionType.ITEM_DROP,
                 ActionType.ITEM_PICKUP,
@@ -1771,7 +1771,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                  ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT,
                  ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 ENTITY_INTERACT, ENTITY_ATTACK, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
+                 ENTITY_INTERACT, ENTITY_ATTACK, ENTITY_EQUIPMENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
             case CHAT_MESSAGE -> new TargetInfo("chat", "", safeString(e.extra));
             case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, TRAIN_CONTROL_START, TRAIN_CONTROL_STOP ->

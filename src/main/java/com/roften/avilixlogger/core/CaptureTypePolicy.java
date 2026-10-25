@@ -54,7 +54,7 @@ public final class CaptureTypePolicy {
                     ME_SETTING_CHANGE, ME_CELL_CHANGE -> enabled(2);
             case GUI_OPEN -> enabled(2) && enabled(3);
             case ENTITY_SPAWN, ENTITY_DEATH, ENTITY_MOUNT, ENTITY_DISMOUNT,
-                    ENTITY_INTERACT, ENTITY_ATTACK, PLAYER_DEATH,
+                    ENTITY_INTERACT, ENTITY_ATTACK, ENTITY_EQUIPMENT_CHANGE, PLAYER_DEATH,
                     PLAYER_DIMENSION_CHANGE, PLAYER_RESPAWN -> enabled(3);
             case PROJECTILE_SHOOT, PROJECTILE_HIT -> enabled(3) && enabled(4);
             case ITEM_DROP, ITEM_PICKUP, ITEM_CRAFT, ITEM_SMELT,

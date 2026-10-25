@@ -16,7 +16,7 @@ public abstract class ContainerClickCauseMixin {
     @Shadow public ServerPlayer player;
     @WrapMethod(method="handleContainerClick")
     private void avilixlogger$cause(ServerboundContainerClickPacket packet,Operation<Void> original){
-        if(!player.server.isSameThread() || !LoggerConfig.isEnabled()){original.call(packet);return;}
+        if(!player.server.isSameThread() || packet.getContainerId()!=player.containerMenu.containerId || !LoggerConfig.isEnabled()){original.call(packet);return;}
         if(com.roften.avilixlogger.core.CartRestoreLocks.menuLocked(player.containerMenu)){player.containerMenu.broadcastFullState();return;}
         if(com.roften.avilixlogger.core.CartAuditContext.rollbackActive)for(var slot:player.containerMenu.slots) {
             if(slot.container instanceof net.minecraft.world.entity.Entity entity && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID())){player.containerMenu.broadcastFullState();return;}

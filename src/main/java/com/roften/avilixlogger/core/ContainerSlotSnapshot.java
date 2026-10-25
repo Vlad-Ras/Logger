@@ -36,7 +36,7 @@ public final class ContainerSlotSnapshot {
     }
 
     public static CompoundTag snapshotTag(ServerLevel level, BlockPos pos) {
-        if (level == null || pos == null) return null;
+        if (!WorldSnapshotAccess.readable(level, pos)) return null;
 
         BlockState state = level.getBlockState(pos);
         return snapshotTag(level, pos, state, state.hasBlockEntity() ? level.getBlockEntity(pos) : null);
@@ -44,6 +44,7 @@ public final class ContainerSlotSnapshot {
 
     /** Reuses the already captured world lookup; capabilities still resolve afresh per snapshot. */
     public static CompoundTag snapshotTag(ServerLevel level, BlockPos pos, BlockState state, BlockEntity be) {
+        if (!WorldSnapshotAccess.readable(level, pos)) return null;
         // 1) Prefer capability (modded storages)
         if (be != null) {
             CompoundTag cap = snapshotFromCapability(level, pos, state, be);

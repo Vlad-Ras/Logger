@@ -97,5 +97,8 @@ public enum ActionType {
     BACKPACK_UPGRADE_USE, BACKPACK_STATE, BACKPACK_RECOVER, BACKPACK_RETURN,
 
     // Append-only: confirmed contraption deployer effects and held-item changes.
-    CREATE_DEPLOYER_ACTION
+    CREATE_DEPLOYER_ACTION,
+
+    // Append-only: observed optional equipment changes; no implicit rollback of mod effects.
+    ENTITY_EQUIPMENT_CHANGE
 }

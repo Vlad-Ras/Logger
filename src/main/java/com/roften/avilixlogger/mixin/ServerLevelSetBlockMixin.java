@@ -62,7 +62,7 @@ public abstract class ServerLevelSetBlockMixin {
     @WrapMethod(method = "destroyBlock(Lnet/minecraft/core/BlockPos;ZLnet/minecraft/world/entity/Entity;I)Z")
     private boolean avilixlogger$destroyController(BlockPos pos, boolean drops, net.minecraft.world.entity.Entity entity,
                                                     int recursionLeft, Operation<Boolean> original) {
-        if (!((Object)this instanceof ServerLevel) || CartAuditContext.restoring()) return original.call(pos,drops,entity,recursionLeft);
+        if (!((Object)this instanceof ServerLevel level) || !level.getServer().isSameThread() || CartAuditContext.restoring()) return original.call(pos,drops,entity,recursionLeft);
         if(CartRestoreLocks.blockLocked((Level)(Object)this,pos))return false;
         try(var removal=CreateStructuralHooks.removal((Level)(Object)this,pos,net.minecraft.world.level.block.Blocks.AIR.defaultBlockState())){
             boolean changed=original.call(pos,drops,entity,recursionLeft);
@@ -78,7 +78,7 @@ public abstract class ServerLevelSetBlockMixin {
     @WrapMethod(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z")
     private boolean avilixlogger$setBlock(BlockPos pos, BlockState newState, int flags, int recursionLeft,
                                          Operation<Boolean> original) {
-        if (!((Object)this instanceof ServerLevel) || CartAuditContext.restoring()) return original.call(pos,newState,flags,recursionLeft);
+        if (!((Object)this instanceof ServerLevel level) || !level.getServer().isSameThread() || CartAuditContext.restoring()) return original.call(pos,newState,flags,recursionLeft);
         if (CartRestoreLocks.blockLocked((Level)(Object)this,pos)) return false;
         try(var removal=CreateStructuralHooks.removal((Level)(Object)this,pos,newState)){
             boolean structural=CreateStructuralHooks.before((Level)(Object)this,pos);
@@ -99,7 +99,7 @@ public abstract class ServerLevelSetBlockMixin {
                     || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(1)) return null;
             if (Boolean.TRUE.equals(AVILIXLOGGER$REENTRY_GUARD.get())) return null;
 
-            if (!((Object) this instanceof ServerLevel level)) return null;
+            if (!((Object) this instanceof ServerLevel level) || !WorldSnapshotAccess.readable(level,pos)) return null;
 
             CartAuditContext.Stamp cart = CartAuditContext.current();
             CauseContext.Cause cause = CauseContext.peek();

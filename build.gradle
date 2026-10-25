@@ -173,6 +173,9 @@ dependencies {
         if (!foodVersions.containsKey(foodVersion)) throw new GradleException("Unsupported FD smoke version: ${foodVersion}")
         localRuntime "maven.modrinth:farmers-delight:${foodVersions[foodVersion]}"
     }
+    compileOnly 'maven.modrinth:curios:yohfFbgD' // Curios 9.5.1, NeoForge 1.21.1, never bundled.
+    if (project.hasProperty('createSmoke') && !project.hasProperty('createAbsent'))
+        localRuntime 'maven.modrinth:curios:yohfFbgD'
     // Optional integration: never ship AE2 classes inside the logger JAR.
     def compatAe2Version = project.findProperty('compatAe2Version') ?: '19.2.12'
     compileOnly "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"

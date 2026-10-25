@@ -52,6 +52,12 @@ public final class AvilixLoggerMod {
 
         // Server/game events
         NeoForge.EVENT_BUS.register(new LoggerEventHandlers());
+        if (net.neoforged.fml.ModList.get().isLoaded("curios")) {
+            try { com.roften.avilixlogger.compat.curios.CuriosAudit.install(); }
+            catch (LinkageError | RuntimeException failure) {
+                LOGGER.warn("[AvilixLogger] Curios audit disabled: incompatible optional API",failure);
+            }
+        }
         NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
         NeoForge.EVENT_BUS.addListener(this::onServerStarting);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);

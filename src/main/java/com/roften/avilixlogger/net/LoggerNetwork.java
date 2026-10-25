@@ -904,6 +904,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ENTITY_DISMOUNT,
                     com.roften.avilixlogger.core.ActionType.ENTITY_INTERACT,
                     com.roften.avilixlogger.core.ActionType.ENTITY_ATTACK,
+                    com.roften.avilixlogger.core.ActionType.ENTITY_EQUIPMENT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT,
                     com.roften.avilixlogger.core.ActionType.PLAYER_DEATH,
