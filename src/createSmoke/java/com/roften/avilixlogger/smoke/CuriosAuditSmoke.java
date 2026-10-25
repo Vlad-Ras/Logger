@@ -38,6 +38,10 @@ final class CuriosAuditSmoke {
         var keys=new java.util.TreeSet<String>();keys.addAll(before.getAllKeys());keys.addAll(after.getAllKeys());
         for(String key:keys)if(!java.util.Objects.equals(before.get(key),after.get(key))) {
             if(before.get(key) instanceof net.minecraft.nbt.CompoundTag a&&after.get(key) instanceof net.minecraft.nbt.CompoundTag b)return differences(a,b,path+"."+key);
+            if(before.get(key) instanceof net.minecraft.nbt.ListTag a&&after.get(key) instanceof net.minecraft.nbt.ListTag b) {
+                if(a.size()!=b.size())return path+"."+key+".size("+a.size()+" -> "+b.size()+")";
+                for(int i=0;i<a.size();i++)if(a.get(i) instanceof net.minecraft.nbt.CompoundTag aa&&b.get(i) instanceof net.minecraft.nbt.CompoundTag bb&&!aa.equals(bb))return differences(aa,bb,path+"."+key+"["+i+"]");
+            }
             return path+"."+key;
         }
         return path;
