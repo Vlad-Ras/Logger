@@ -67,6 +67,11 @@ public final class ClickHouseNativeSmoke {
         try {
             db = new ClickHouseLogStorage();
             db.appendBatch("native-" + UUID.randomUUID(), List.of(block, item));
+            db.shutdown();db=null;
+            // Reproduce an existing split installation that predates weapon evidence columns.
+            // This fixture touches only the explicitly named isolated CI database on loopback.
+            seedOldWeaponSchema(endpoint,user,password);
+            db = new ClickHouseLogStorage();
             db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
             verifyWeapons(db,weapons);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
@@ -89,10 +94,28 @@ public final class ClickHouseNativeSmoke {
             db = new ClickHouseLogStorage();
             verifyDetails(db.queryReverse(detail), block, item);
             verifyWeapons(db,weapons);
-            System.out.println("CLICKHOUSE_NATIVE_OK: schema, exact details, GUI feed, acknowledged insert, restart; weapon shot/hit/kill/reload/player-death poses survive detail pruning and exact ID lookup");
+            System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; weapon shot/hit/kill/reload/player-death poses survive detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
             LoggerConfig.SPEC.acceptConfig(null);
+        }
+    }
+
+    private static void seedOldWeaponSchema(String endpoint,String user,String password)throws Exception{
+        var url=java.net.URI.create(endpoint).toURL();
+        if(!java.util.Set.of("127.0.0.1","localhost","[::1]").contains(url.getHost()))
+            throw new IllegalArgumentException("Schema migration fixture requires isolated loopback ClickHouse");
+        for(String table:List.of("entities","items","players")){
+            var connection=(java.net.HttpURLConnection)url.openConnection(java.net.Proxy.NO_PROXY);
+            connection.setConnectTimeout(10000);connection.setReadTimeout(10000);connection.setRequestMethod("POST");connection.setDoOutput(true);
+            connection.setRequestProperty("Authorization","Basic "+java.util.Base64.getEncoder().encodeToString((user+":"+password).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            try{
+                try(var output=connection.getOutputStream()){
+                    output.write(("ALTER TABLE avilixlogger_ci.avilixlogger_"+table+" DROP COLUMN IF EXISTS be_after").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                check(connection.getResponseCode()==200,"Cannot prepare old "+table+" schema");
+                try(var input=connection.getInputStream()){input.readAllBytes();}
+            }finally{connection.disconnect();}
         }
     }
 
