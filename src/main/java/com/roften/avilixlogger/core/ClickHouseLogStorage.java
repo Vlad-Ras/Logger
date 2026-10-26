@@ -679,6 +679,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private static boolean isRollbackCritical(LogEntry e) {
         if (e == null || e.type == null) return false;
+        // Successful state mutations (wrenches, levers, mod settings) are restorable.
+        // Observation-only interactions with just an after snapshot remain optional.
+        if (e.type == ActionType.BLOCK_INTERACT && e.blockBefore != null && e.blockAfter != null) return true;
         if (e.type.name().startsWith("CART_") || e.type.name().startsWith("BACKPACK_")) return true;
         return switch (e.type) {
             case BLOCK_BREAK, BLOCK_PLACE, BLOCK_ENTITY_NBT_CHANGE,

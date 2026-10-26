@@ -29,6 +29,7 @@ public final class ClickHouseNativeSmoke {
         config.set(List.of("clickhouse", "schemaMode"), "split");
         config.set(List.of("clickhouse", "storeRollbackDetails"), true);
         config.set(List.of("clickhouse", "storeNonRollbackDetails"), false);
+        config.set(List.of("clickhouse", "detailMode"), "minimal");
         var ctor = Class.forName("net.neoforged.fml.config.LoadedConfig")
                 .getDeclaredConstructor(CommentedConfig.class, Path.class, net.neoforged.fml.config.ModConfig.class);
         ctor.setAccessible(true);
@@ -69,6 +70,9 @@ public final class ClickHouseNativeSmoke {
                 new WeaponCombatTrace.Pose(block.dim,-2.125,70.25,9.875,29.25f,-23.5f,70.25),turretWeapon,mechanism);
         var turret=WeaponCombatAudit.entry(turretShot,ActionType.WEAPON_KILL,"kill",null,null);turret.source=weaponPrefix+"turret";turret.materializeSnapshots();weapons.add(turret);
         var setting=com.roften.avilixlogger.compat.blockpack.BlockPackGiftAudit.capture(new com.roften.avilixlogger.compat.blockpack.BlockPackGiftAudit.Actor(UUID.randomUUID(),"NativeGiftActor",block.dim,7,80,9),true,false);setting.materializeSnapshots();
+        var interaction=AsyncPipelineTest.row("native-block-interaction");interaction.type=ActionType.BLOCK_INTERACT;interaction.dim=block.dim;interaction.source="player:native_wrench_setting";
+        interaction.actorUuid=UUID.randomUUID();interaction.actorName="NativeStateActor";interaction.x=-37;interaction.y=103;interaction.z=61;
+        interaction.blockBefore="{Name:'minecraft:oak_trapdoor',Properties:{open:'false'}}";interaction.blockAfter="{Name:'minecraft:oak_trapdoor',Properties:{open:'true'}}";
 
         ClickHouseLogStorage db = null;
         try {
@@ -81,6 +85,7 @@ public final class ClickHouseNativeSmoke {
             db = new ClickHouseLogStorage();
             db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
+            db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
             verifyWeapons(db,weapons);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
@@ -103,6 +108,7 @@ public final class ClickHouseNativeSmoke {
             verifyDetails(db.queryReverse(detail), block, item);
             verifyWeapons(db,weapons);
             verifySetting(db,setting);
+            verifyInteraction(db,interaction);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
@@ -140,6 +146,14 @@ public final class ClickHouseNativeSmoke {
         }
     }
 
+    private static void verifyInteraction(ClickHouseLogStorage db,LogEntry interaction){
+        var q=new LogQuery();q.requireDetails=true;q.exactId=interaction.id;q.limit=1;q.untilTs=Long.MAX_VALUE;
+        var rows=db.query(q);check(rows.size()==1,"native restorable interaction missing by exact ID");var row=rows.getFirst();
+        check(interaction.actorUuid.equals(row.actorUuid)&&row.x==-37&&row.y==103&&row.z==61&&interaction.blockBefore.equals(row.blockBefore)&&interaction.blockAfter.equals(row.blockAfter),"native interaction lost actor, position or state values");
+        check(BlockChangeDetails.changes(row).stream().anyMatch(s->s.contains("open")),"native interaction property unavailable in details");
+        q.requireDetails=false;check(db.query(q).stream().anyMatch(e->e.id==interaction.id),"native interaction absent from feed");
+        System.out.println("BLOCK_INTERACTION_CLICKHOUSE_OK: minimal mode preserves restorable states, actor, coordinates, exact ID/feed and property details");
+    }
     private static void verifySetting(ClickHouseLogStorage db,LogEntry setting){
         var q=new LogQuery();q.requireDetails=true;q.exactId=setting.id;q.limit=1;q.untilTs=Long.MAX_VALUE;
         var rows=db.query(q);check(rows.size()==1&&setting.actorUuid.equals(rows.getFirst().actorUuid)&&setting.beBefore.equals(rows.getFirst().beBefore)&&setting.beAfter.equals(rows.getFirst().beAfter),"native setting before/after or actor lost with optional details disabled");

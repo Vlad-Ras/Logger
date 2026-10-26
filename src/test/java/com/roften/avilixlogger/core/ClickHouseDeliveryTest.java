@@ -128,6 +128,18 @@ final class ClickHouseDeliveryTest {
                 var rows=database.query(q);check(rows.size()==1&&rows.getFirst().beBefore.equals(settings.beBefore)&&rows.getFirst().beAfter.equals(settings.beAfter),"settings exact ID lookup lost before/after");
             }
             System.out.println("GUI_SETTING_HTTP_OK: menu DataSlot and BlockPack global gift values survive optional-detail pruning and exact ID lookup");
+            var interaction=row("wrench-setting");interaction.type=ActionType.BLOCK_INTERACT;interaction.source="player:state_change_test";
+            interaction.blockBefore="{Name:'minecraft:oak_trapdoor',Properties:{open:'false'}}";interaction.blockAfter="{Name:'minecraft:oak_trapdoor',Properties:{open:'true'}}";
+            database.appendBatch("block-interaction-evidence",List.of(interaction));
+            String interactionInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_blocks")&&body.contains(interaction.source)).findFirst().orElseThrow();
+            var interactionEncoded=com.google.gson.JsonParser.parseString(interactionInsert.substring(interactionInsert.indexOf('\n')+1).trim()).getAsJsonObject();
+            check(interactionEncoded.get("block_before").getAsString().equals(interaction.blockBefore)&&interactionEncoded.get("block_after").getAsString().equals(interaction.blockAfter),"restorable block interaction pruned as optional");
+            var iq=new LogQuery();iq.type=ActionType.BLOCK_INTERACT;iq.requireDetails=true;iq.exactId=interaction.id;iq.limit=1;lookupResponse.set(interactionEncoded+"\n");
+            var interactionRead=database.query(iq);check(interactionRead.size()==1&&BlockChangeDetails.changes(interactionRead.getFirst()).stream().anyMatch(s->s.contains("open")),"stored block setting unavailable by exact ID/details");
+            var observation=row("observation-only");observation.type=ActionType.BLOCK_INTERACT;observation.source="player:observation_only_test";observation.blockAfter=interaction.blockAfter;
+            database.appendBatch("block-interaction-observation",List.of(observation));
+            check(requests.values().stream().noneMatch(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_blocks")&&body.contains(observation.source)),"after-only observation became mandatory full detail");
+            System.out.println("BLOCK_INTERACTION_HTTP_OK: restorable before/after and property details survive optional pruning; after-only observation stays optional");
             UUID autoCart=UUID.randomUUID();var automation=row("cart_automation");automation.type=ActionType.CART_TRANSFER;automation.dim="minecraft:overworld";automation.source=CartAuditContext.prefix(autoCart)+"automation_transfer:1";
             automation.beBefore="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:100}}]}";
             automation.beAfter="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:850}}]}";
