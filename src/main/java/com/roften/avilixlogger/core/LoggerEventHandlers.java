@@ -665,9 +665,13 @@ public final class LoggerEventHandlers {
 
                 trackedMenu = true;
 
-                CompoundTag beforeSlots = ContainerSlotSnapshot.snapshotTag(level, pending.pos);
-                if (beforeSlots != null || pending.beforeBe != null) {
-                    OPEN_CONTAINER.put(sp.getUUID(), new ContainerCtx(dim, pending.pos, beforeSlots, pending.beforeBe));
+                BlockPos storagePos = ContainerSlotSnapshot.menuStoragePos(level, event.getContainer(), pending.pos);
+                if (storagePos != null) {
+                    CompoundTag beforeSlots = ContainerSlotSnapshot.snapshotTag(level, storagePos);
+                    CompoundTag beforeBe = storagePos.equals(pending.pos) ? pending.beforeBe : NbtSerde.snapshotBlockEntityAt(level, storagePos);
+                    if (beforeSlots != null || beforeBe != null) {
+                        OPEN_CONTAINER.put(sp.getUUID(), new ContainerCtx(dim, storagePos, beforeSlots, beforeBe));
+                    }
                 }
             }
             }

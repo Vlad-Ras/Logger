@@ -40,7 +40,8 @@ public final class BlockPackNativeSmoke {
     private static void run(ServerLevel level)throws Exception{
         var player=ScgunsNativeSmoke.player(level,"BlockPackActor");player.setPos(.5,100,.5);
         check(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(level.getServer()),"native fixture must remain unauthorized");
-        gifts(level,player);workbench(level,player);fillable(level,player);box(level,player);glass(level,player);preflightFaults();
+        BlockMenuStorageSmoke.run(level);
+        gifts(level,player);workbench(level,player);fillable(level,player);box(level,player);boxClusters(level,player);glass(level,player);preflightFaults();
         check(BlockPackGiftAudit.begin(null)==null,"capture bypassed AuthCore");
     }
     private static void gifts(ServerLevel level,ServerPlayer player)throws Exception{
@@ -113,6 +114,57 @@ public final class BlockPackNativeSmoke {
         var restored=BlockEntity.loadStatic(pos,be.getBlockState(),saved,level.registryAccess());check(restored instanceof Container&&((Container)restored).getItem(53).getCount()==7,"native cardboard NBT lost hidden slot");
         actual.removed(player);inventory.clearContent();level.removeBlock(pos,false);
         status("BLOCKPACK_BOX_NATIVE_OK: 9 visible versus 54 stored slots, full detached snapshots, normal count and hidden-slot strict restore/native save-load; oversized request refused and compensated");
+    }
+    private static void boxClusters(ServerLevel level,ServerPlayer player)throws Exception{
+        var type=Class.forName("com.blockfactory.blockpack.block.CardboardBoxBlock");
+        var facing=(net.minecraft.world.level.block.state.properties.DirectionProperty)type.getField("FACING").get(null);
+        var clusterAt=type.getMethod("clusterAt",LevelAccessor.class,BlockPos.class,net.minecraft.world.level.block.state.BlockState.class);
+        var use=type.getDeclaredMethod("useWithoutItem",net.minecraft.world.level.block.state.BlockState.class,Level.class,BlockPos.class,net.minecraft.world.entity.player.Player.class,BlockHitResult.class);use.setAccessible(true);
+        int menus=0,redirects=0;
+        for(var direction:List.of(Direction.NORTH,Direction.SOUTH,Direction.EAST,Direction.WEST))for(int n:List.of(1,2,3)){
+            var root=new BlockPos(24,100,24);var positions=new ArrayList<BlockPos>();
+            for(int x=0;x<n;x++)for(int y=0;y<n;y++)for(int z=0;z<n;z++)positions.add(root.relative(direction.getClockWise(),x).above(y).relative(direction.getOpposite(),z));
+            for(var pos:positions)level.setBlockAndUpdate(pos,block("cardboard_box").defaultBlockState().setValue(facing,direction));
+            var rootBe=level.getBlockEntity(root);var inventory=(Container)rootBe;
+            for(var pos:positions)((Container)level.getBlockEntity(pos)).setItem(0,new ItemStack(Items.IRON_INGOT,5));
+            inventory.setItem(0,new ItemStack(Items.DIAMOND,37));inventory.setItem(53,new ItemStack(Items.EMERALD,7));
+            var before=ContainerSlotSnapshot.snapshotTag(level,root);var unrelated=new HashMap<BlockPos,CompoundTag>();
+            for(var pos:positions)if(!pos.equals(root))unrelated.put(pos,ContainerSlotSnapshot.snapshotTag(level,pos));
+            for(var clicked:positions){
+                var cluster=clusterAt.invoke(null,level,clicked,level.getBlockState(clicked));
+                check((int)cluster.getClass().getMethod("n").invoke(cluster)==n&&cluster.getClass().getMethod("origin").invoke(cluster).equals(root),"native cluster selected unexpected root/size");
+                var clickedBefore=ContainerSlotSnapshot.snapshotTag(level,clicked);
+                use.invoke(block("cardboard_box"),level.getBlockState(clicked),level,clicked,player,new BlockHitResult(Vec3.atCenterOf(clicked),direction,clicked,false));
+                check(player.containerMenu instanceof ChestMenu,"native box click did not open chest menu");var menu=(ChestMenu)player.containerMenu;
+                int rows=n==1?1:n==2?4:6;
+                check(menu.getRowCount()==rows&&menu.slots.size()==rows*9+36&&menu.getContainer()==inventory,"native cluster menu backing/rows mismatch");
+                var located=ContainerSlotSnapshot.menuStoragePos(level,menu,clicked);check(root.equals(located),"Logger followed clicked box instead of native menu root");
+                var selectedBefore=ContainerSlotSnapshot.snapshotTag(level,located);
+                var taken=menu.getSlot(0).remove(4);menu.getSlot(0).onTake(player,taken);
+                check(taken.is(Items.DIAMOND)&&taken.getCount()==4&&inventory.getItem(0).getCount()==33,"cluster menu edited wrong inventory");
+                var after=ContainerSlotSnapshot.snapshotTag(level,located);var deltas=InventoryDiffUtil.diff(selectedBefore,after,level.registryAccess());
+                check(deltas.size()==1&&deltas.getFirst().deltaCount()==-4&&deltas.getFirst().representative().is(Items.DIAMOND),"root snapshot lost native menu withdrawal");
+                if(!clicked.equals(root)){check(clickedBefore.equals(ContainerSlotSnapshot.snapshotTag(level,clicked)),"non-root storage changed with root menu");redirects++;}
+                check(ContainerSlotSnapshot.apply(level,located,before)&&before.equals(ContainerSlotSnapshot.snapshotTag(level,root)),"cluster root strict restore failed");
+                for(var entry:unrelated.entrySet())check(entry.getValue().equals(ContainerSlotSnapshot.snapshotTag(level,entry.getKey())),"root restore overwrote another box's independent slots");
+                var saved=NbtSerde.snapshotBlockEntity(level,rootBe);var loaded=BlockEntity.loadStatic(root,rootBe.getBlockState(),saved,level.registryAccess());
+                check(loaded instanceof Container&&((Container)loaded).getItem(0).getCount()==37&&((Container)loaded).getItem(53).getCount()==7,"cluster native save/load lost root or hidden slot");
+                player.closeContainer();menus++;
+            }
+            // Reducing the actual structure hides rows; it must not delete stored slots.
+            for(int reduced=n-1;reduced>=1;reduced--){
+                var keep=new HashSet<BlockPos>();for(int x=0;x<reduced;x++)for(int y=0;y<reduced;y++)for(int z=0;z<reduced;z++)keep.add(root.relative(direction.getClockWise(),x).above(y).relative(direction.getOpposite(),z));
+                for(var pos:positions)if(!keep.contains(pos)&&level.getBlockEntity(pos) instanceof Container c){c.clearContent();level.removeBlock(pos,false);}
+                use.invoke(block("cardboard_box"),level.getBlockState(root),level,root,player,new BlockHitResult(Vec3.atCenterOf(root),direction,root,false));
+                check(player.containerMenu instanceof ChestMenu menu&&menu.getRowCount()==(reduced==1?1:4),"cluster resize did not change native visible rows");
+                check(before.equals(ContainerSlotSnapshot.snapshotTag(level,root)),"cluster resize discarded hidden root slots");player.closeContainer();
+            }
+            var generic=ChestMenu.oneRow(93,player.getInventory(),new SimpleContainer(9));check(root.equals(ContainerSlotSnapshot.menuStoragePos(level,generic,root)),"generic storage locator changed");generic.removed(player);
+            rootBe.setRemoved();var stale=ChestMenu.oneRow(94,player.getInventory(),inventory);check(ContainerSlotSnapshot.menuStoragePos(level,stale,root)==null,"removed block entity accepted as restore target");stale.removed(player);rootBe.clearRemoved();
+            for(var pos:positions)if(level.getBlockEntity(pos) instanceof Container c){c.clearContent();level.removeBlock(pos,false);}
+        }
+        check(menus==144&&redirects==132,"cluster coverage count changed");
+        status("BLOCKPACK_CLUSTER_NATIVE_OK: 144 native opens, 132 redirected roots, four horizontal facings, 1/2/3 cubes and 1/4/6 rows; exact withdrawals, strict restore, independent inventories, save/load, shrink and stale target refusal");
     }
     private static void glass(ServerLevel level,ServerPlayer player)throws Exception{
         var method=Class.forName("com.blockfactory.blockpack.event.GlassUpgradeHandler").getMethod("tryUpgrade",Level.class,BlockPos.class,net.minecraft.world.level.block.state.BlockState.class,net.minecraft.world.entity.Entity.class);

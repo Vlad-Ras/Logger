@@ -30,6 +30,20 @@ public final class ContainerSlotSnapshot {
     private static final Direction[] SIDES = Direction.values();
     private ContainerSlotSnapshot() {}
 
+    /** A menu can use a different block's inventory (for example a BlockPack cluster root).
+     * Read the container already selected by the native menu, without resolving a cluster again.
+     * Null refuses a stale/cross-world block entity; compound and generic menus keep their locator.
+     */
+    public static BlockPos menuStoragePos(ServerLevel level, net.minecraft.world.inventory.AbstractContainerMenu menu, BlockPos clicked) {
+        if (menu instanceof net.minecraft.world.inventory.ChestMenu chest && chest.getContainer() instanceof BlockEntity be) {
+            BlockPos actual = be.getBlockPos();
+            if (be.isRemoved() || be.getLevel() != level || !WorldSnapshotAccess.readable(level, actual)
+                    || level.getBlockEntity(actual) != be) return null;
+            return actual.immutable();
+        }
+        return clicked;
+    }
+
     /** Snapshot for a block storage at pos. Returns SNBT string or null if nothing could be snapshotted. */
     public static String snapshot(ServerLevel level, BlockPos pos) {
         return NbtSerde.toSnbt(snapshotTag(level, pos));
