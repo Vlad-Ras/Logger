@@ -108,9 +108,11 @@ final class BlockPackStateNativeSmoke {
             var result=player.gameMode.useItemOn(player,level,stack,InteractionHand.MAIN_HAND,new BlockHitResult(Vec3.atCenterOf(pos),direction,pos,false));
             check(result.consumesAction()&&stack.getCount()==1&&level.getBlockState(adjacent).is(aquarium),"native aquarium placement failed: "+direction+" result="+result+" count="+stack.getCount()+" adjacent="+level.getBlockState(adjacent));
             var after=level.getBlockState(pos);check(!before.equals(after),"aquarium neighbor connection absent");
-            var forward=(BooleanProperty)aquarium.getClass().getField(direction.name()).get(null);
-            var opposite=(BooleanProperty)aquarium.getClass().getField(direction.getOpposite().name()).get(null);
-            check(after.getValue(forward)&&level.getBlockState(adjacent).getValue(opposite),"aquarium connection is not bidirectional");
+            // Native propFor maps UP to DOWN and DOWN to UP; keep the supplied mod's field semantics.
+            var nativeField=direction.getAxis()==Direction.Axis.Y?direction.getOpposite():direction;
+            var forward=(BooleanProperty)aquarium.getClass().getField(nativeField.name()).get(null);
+            var opposite=(BooleanProperty)aquarium.getClass().getField(nativeField.getOpposite().name()).get(null);
+            check(after.getValue(forward)&&level.getBlockState(adjacent).getValue(opposite),"aquarium native connection mismatch: "+direction+" center="+after+" adjacent="+level.getBlockState(adjacent));
             BlockStateEvidenceSmoke.changed(level,pos,before,after,null);
             check(player.gameMode.destroyBlock(adjacent)&&!level.getBlockState(pos).getValue(forward),"native aquarium removal left connection");
             BlockStateEvidenceSmoke.changed(level,pos,after,level.getBlockState(pos),null);level.removeBlock(pos,false);
@@ -120,7 +122,7 @@ final class BlockPackStateNativeSmoke {
         var wet=level.getBlockState(pos);check(wet.getValue(BlockStateProperties.WATERLOGGED),"waterlogged property absent");
         check(((BucketPickup)aquarium).pickupBlock(player,level,pos,wet).is(Items.WATER_BUCKET)&&!level.getBlockState(pos).getValue(BlockStateProperties.WATERLOGGED),"native aquarium pickup lost water/property");
         BlockStateEvidenceSmoke.changed(level,pos,wet,level.getBlockState(pos),null);level.removeBlock(pos,false);
-        LOG.info("BLOCKPACK_AQUARIUM_NATIVE_OK: six native placements/removals, bidirectional connections, exact consumption, liquid insertion/pickup and detached property evidence");
+        LOG.info("BLOCKPACK_AQUARIUM_NATIVE_OK: six native placements/removals, bidirectional native connections (vertical field mapping preserved), exact consumption, liquid insertion/pickup and detached property evidence");
     }
     private static void decoration(ServerLevel level,ServerPlayer player)throws Exception {
         var pos=new BlockPos(84,100,0);player.setPos(84.5,100,3.5);player.setItemInHand(InteractionHand.MAIN_HAND,ItemStack.EMPTY);
