@@ -100,14 +100,16 @@ final class BlockPackStateNativeSmoke {
     }
     private static void aquarium(ServerLevel level,ServerPlayer player)throws Exception {
         var aquarium=block("AquariumBlock");var pos=new BlockPos(72,100,0);player.setPos(72.5,100,3.5);
+        // A previous interrupted stand must not leave a neighbor occupying the placement target.
+        for(var direction:Direction.values())level.removeBlock(pos.relative(direction),false);level.removeBlock(pos,false);
         for(var direction:Direction.values()){
             level.setBlockAndUpdate(pos,aquarium.defaultBlockState());var adjacent=pos.relative(direction);
             var before=level.getBlockState(pos);var stack=new ItemStack(aquarium.asItem(),2);player.setItemInHand(InteractionHand.MAIN_HAND,stack);
             var result=player.gameMode.useItemOn(player,level,stack,InteractionHand.MAIN_HAND,new BlockHitResult(Vec3.atCenterOf(pos),direction,pos,false));
-            check(result.consumesAction()&&stack.getCount()==1&&level.getBlockState(adjacent).is(aquarium),"native aquarium placement failed");
+            check(result.consumesAction()&&stack.getCount()==1&&level.getBlockState(adjacent).is(aquarium),"native aquarium placement failed: "+direction+" result="+result+" count="+stack.getCount()+" adjacent="+level.getBlockState(adjacent));
             var after=level.getBlockState(pos);check(!before.equals(after),"aquarium neighbor connection absent");
-            var forward=(BooleanProperty)after.getProperties().stream().filter(p->p.getName().equals(direction.getName())).findFirst().orElseThrow();
-            var opposite=(BooleanProperty)after.getProperties().stream().filter(p->p.getName().equals(direction.getOpposite().getName())).findFirst().orElseThrow();
+            var forward=(BooleanProperty)aquarium.getClass().getField(direction.name()).get(null);
+            var opposite=(BooleanProperty)aquarium.getClass().getField(direction.getOpposite().name()).get(null);
             check(after.getValue(forward)&&level.getBlockState(adjacent).getValue(opposite),"aquarium connection is not bidirectional");
             BlockStateEvidenceSmoke.changed(level,pos,before,after,null);
             check(player.gameMode.destroyBlock(adjacent)&&!level.getBlockState(pos).getValue(forward),"native aquarium removal left connection");
