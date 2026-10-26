@@ -152,7 +152,12 @@ final class ClickHouseDeliveryTest {
                 check(read.size()==1&&read.getFirst().count==receipt.count&&read.getFirst().beAfter.equals(receipt.beAfter)&&!ItemTransactionAudit.describe(read.getFirst()).isEmpty(),"receipt exact-ID lookup lost quantity or human details");
             }
             var conversion=row("chipped-conversion-proof");conversion.type=ActionType.ITEM_TRANSFORM;conversion.source="mod:chipped:workbench";conversion.playerInvBefore="{Items:[{Slot:0,id:'minecraft:stone',count:2}]}";conversion.playerInvAfter="{Items:[{Slot:0,id:'chipped:carved_stone',count:2}]}";
-            database.appendBatch("conversion-required-detail",List.of(conversion));check(requests.values().stream().anyMatch(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_items")&&body.contains(conversion.source)&&body.contains("player_inv_before")),"conversion inventory receipt pruned as optional");
+            database.appendBatch("conversion-required-detail",List.of(conversion));
+            String conversionInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_items")&&body.contains(conversion.source)).findFirst().orElseThrow();
+            var converted=com.google.gson.JsonParser.parseString(conversionInsert.substring(conversionInsert.indexOf('\n')+1).trim()).getAsJsonObject();
+            check(converted.get("player_inv_before").getAsString().equals(conversion.playerInvBefore)&&converted.get("player_inv_after").getAsString().equals(conversion.playerInvAfter),"conversion inventory receipt pruned as optional");
+            var cq=new LogQuery();cq.type=ActionType.ITEM_TRANSFORM;cq.requireDetails=true;cq.exactId=conversion.id;cq.limit=1;lookupResponse.set(converted+"\n");var conversionRows=database.query(cq);
+            check(conversionRows.size()==1&&conversionRows.getFirst().playerInvBefore.equals(conversion.playerInvBefore)&&conversionRows.getFirst().playerInvAfter.equals(conversion.playerInvAfter),"conversion exact-ID lookup lost before/after inventory");
             System.out.println("ITEM_RECEIPT_HTTP_OK: gift/trade payload, costs, actor/target, item quantity and exact ID/details survive optional pruning; conversion inventory states retained");
             UUID autoCart=UUID.randomUUID();var automation=row("cart_automation");automation.type=ActionType.CART_TRANSFER;automation.dim="minecraft:overworld";automation.source=CartAuditContext.prefix(autoCart)+"automation_transfer:1";
             automation.beBefore="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:100}}]}";
