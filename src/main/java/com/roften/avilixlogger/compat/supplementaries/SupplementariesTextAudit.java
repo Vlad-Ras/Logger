@@ -21,7 +21,7 @@ public final class SupplementariesTextAudit {
         try{var scope=new Scope(player,pos.immutable(),CURRENT.get());CURRENT.set(scope);return scope;}
         catch(RuntimeException|LinkageError failure){AdaptiveLogDiagnostics.adapterFailure("supplementaries-text-scope");return null;}
     }
-    /** Called inside native acceptClientMessages, after wax/editor/distance checks, once per packet. */
+    /** Called inside native acceptClientMessages, after its wax/claim checks, once per packet. */
     public static void beforeNativeText(){var scope=CURRENT.get();if(scope!=null)scope.before();}
     public static boolean active(){return CURRENT.get()!=null;}
     public static final class Scope implements AutoCloseable {
