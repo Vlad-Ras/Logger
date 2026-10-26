@@ -41,6 +41,8 @@ public final class BlockPackNativeSmoke {
         var player=ScgunsNativeSmoke.player(level,"BlockPackActor");player.setPos(.5,100,.5);
         check(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(level.getServer()),"native fixture must remain unauthorized");
         BlockMenuStorageSmoke.run(level);
+        BlockStateEvidenceSmoke.run(level);
+        BlockPackStateNativeSmoke.run(level);
         gifts(level,player);workbench(level,player);fillable(level,player);box(level,player);boxClusters(level,player);glass(level,player);preflightFaults();
         check(BlockPackGiftAudit.begin(null)==null,"capture bypassed AuthCore");
     }

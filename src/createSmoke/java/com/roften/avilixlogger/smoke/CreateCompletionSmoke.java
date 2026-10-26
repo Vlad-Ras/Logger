@@ -20,6 +20,7 @@ public final class CreateCompletionSmoke {
     public static void run(ServerLevel world) throws Exception {
         check(CreateSupport.available(),CreateSupport.diagnostic());
         BlockMenuStorageSmoke.run(world);
+        BlockStateEvidenceSmoke.run(world);
         actorEffects(world);
         CreateFunnelSmoke.run(world);
         CreateLinkedTransferSmoke.run(world);
