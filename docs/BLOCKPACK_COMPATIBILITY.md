@@ -68,6 +68,28 @@ Native fixture открывает каждую коробку кубов 1×1×1
 
 [Повторная серверная матрица / ClickHouse](https://github.com/Vlad-Ras/Logger/actions/runs/40311641678), [GUI](https://github.com/Vlad-Ras/Logger/actions/runs/40311641991). Все четыре серверных профиля, настоящая ClickHouse и GUI завершились успешно на этой ревизии. После проверенного кода изменена только документация.
 
+## Ключ и состояния блоков
+
+В предоставленном WrenchItem хранится одна выбранная позиция, свойство и время использования. Отдельного массового выбора/операции в этой реализации нет. Проверяется серия штатных действий, а не выдуманный массовый packet.
+
+Найдена общая ошибка ClickHouse: BLOCK_INTERACT с before/after поддерживается RollbackEngine, но отсутствовал в rollback-critical классификации. При штатном storeNonRollbackDetails=false снимки не попадали в detail table, а feed получал has_details=0. Теперь BLOCK_INTERACT с обеими сторонами блока хранится по правилу storeRollbackDetails, включая minimal. Одностороннее наблюдение остаётся optional; явное отключение rollback details учитывается. Проверка выполняется у фонового writer, новых захватов мира/сериализаторов/тиков нет. Старые строки, детали которых уже были отброшены, этим правилом не дополняются.
+
+HTTP regression проверяет balanced с отключёнными optional details: insert обеих сторон, чтение по точному ID, показ конкретного свойства и отсутствие mandatory detail для after-only observation. Настоящая ClickHouse в minimal проверяет before/after, UUID, точные координаты, ID/feed, сведения о свойстве и повторное открытие хранилища. Маркеры BLOCK_INTERACTION_HTTP_OK и BLOCK_INTERACTION_CLICKHOUSE_OK.
+
+Новый BlockStateEvidenceSmoke входит также в обычную CI-матрицу без BlockPack: отделённые состояния проходят SetBlockCapture.entry, compressed journal и BlockChangeDetails. Координата изменения проверяется отдельно от позиции игрока/клика; без actor сохраняется SYSTEM. Это тест ядра строк, не обход AuthCore.
+
+На выбранном patched JAR новый native-прогон прошёл 69 переключений значений по 14 свойствам пяти представителей: oak_stairs (facing/half/shape), acacia_stacked_logs (facing/height), blaze_powder_sack (facing/open), neon_sign (facing/sign/x_bit/y_bit), paper_lantern_red_big (face/facing/open). Проверены boolean/integer/enum и исключение waterlogged; настоящий LeftClickBlock выбирает свойство и отменяет разрушение, повторный выбор учитывает 300 мс. Отказы: отсутствующий/просроченный выбор, другое измерение, дистанция, блок без свойств. Штатные useItem/useItemOn сохраняют player cause; отдельный useOn кликает по другому камню, а ядро строки сохраняет адрес выбранного блока. Настоящая публикация при этом выключена AuthCore.
+
+Аквариум: настоящая установка/разрушение соседа во всех шести направлениях, двусторонние native-связи, точный расход предмета, вставка и извлечение воды через LiquidBlockContainer/BucketPickup. В этой реализации propFor(UP) выбирает поле DOWN, propFor(DOWN) — UP; тест учитывает эту native-семантику, Logger не переименовывает значения connect_*. Это не утверждение об ошибке внешнего мода.
+
+Фонарь: настоящий клик переключает состояние при том же BE; kick и SwingStart сохраняются native NBT save/load. Flag/WeatherVane проходят BE round trip и не имеют серверного ticker. Отдельный поток журналирования косметических взмахов/опрос не добавлен; автоматическое соприкосновение сущностей с фонарём отдельно не принято.
+
+Маркеры BLOCKPACK_WRENCH_NATIVE_OK, BLOCKPACK_AQUARIUM_NATIVE_OK, BLOCKPACK_DECORATION_NATIVE_OK, BLOCK_STATE_EVIDENCE_NATIVE_OK и все прежние BlockPack-маркеры получены, включая 144 открытия групп. BLOCKPACK_NATIVE_FAILED/MixinApplyError/MixinTransformerError отсутствуют. AuthCore не обходился: accepted=0, adapterFailures=[]. Native-механика, actor scope и ядра строк проверяются раздельно с авторизованной публикацией.
+
+Исходный pre-fix ClickHouseLogStorage из 492165b5ba873d2483996cac7a786165f6084d24 отдельно скомпилирован в изолированный каталог: probe воспроизвёл неверную классификацию paired BLOCK_INTERACT; текущий код подтвердил исправленную и optional after-only. Основные compiled classes и чужие JAR при этом не заменялись.
+
+Код/тесты: a955fd7bc1f33fe522d3b427a0bbdd3a70281137, дерево d2919384149c310268bc023e2625b7d2c9754d0b. Локально прошли compileJava, compileCreateSmokeJava, testAsyncPipeline, testExactModpackPreflight (157 контрактов / 103 предоставленных target-класса), verifyMixinSafety, native runServer и инструменты инвентаризации/сравнения профилей. [Итоговая матрица и настоящая ClickHouse](https://github.com/Vlad-Ras/Logger/actions/runs/40357477062), [GUI](https://github.com/Vlad-Ras/Logger/actions/runs/40357477018). Все четыре серверных профиля, настоящая ClickHouse и GUI завершились успешно на указанной ревизии. После неё изменена только документация.
+
 ## Открытые границы
 
-Не объявлены проверенными все 1200+ блоков/рецептов, неоднозначные/перекрывающиеся группы коробок или смена/удаление корня при открытом меню, aquarium/lantern/flag/weather-vane, массовый wrench, join gifts/trader/автоматизация или весь модпак. Общий snapshot/штатное событие не заменяет отдельную native-приёмку. Нет новых MSPT/heap/allocations, клиентского профиля или подтверждения устранения 60 000 мкс/тик на ферме Create. Native-блокер manual stop Scguns остаётся открытым. Релизный JAR не подготовлен.
+Не объявлены проверенными все 1200+ блоков/рецептов, неоднозначные/перекрывающиеся группы коробок или смена/удаление корня при открытом меню, непринятые варианты/совместные действия блоков, join gifts/trader/автоматизация или весь модпак. Общий snapshot/штатное событие не заменяет отдельную native-приёмку. Нет новых MSPT/heap/allocations, клиентского профиля или подтверждения устранения 60 000 мкс/тик на ферме Create. Native-блокер manual stop Scguns остаётся открытым. Релизный JAR не подготовлен.
