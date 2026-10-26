@@ -140,6 +140,13 @@ final class ClickHouseDeliveryTest {
             database.appendBatch("block-interaction-observation",List.of(observation));
             check(requests.values().stream().noneMatch(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_blocks")&&body.contains(observation.source)),"after-only observation became mandatory full detail");
             System.out.println("BLOCK_INTERACTION_HTTP_OK: restorable before/after and property details survive optional pruning; after-only observation stays optional");
+            var textEdit=SupplementariesTextAuditTest.record();database.appendBatch("supplementaries-text-required",List.of(textEdit));
+            String textInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_blocks")&&body.contains(textEdit.source)).findFirst().orElseThrow();
+            var textStored=com.google.gson.JsonParser.parseString(textInsert.substring(textInsert.indexOf('\n')+1).trim()).getAsJsonObject();
+            check(textStored.get("be_before").getAsString().equals(textEdit.beBefore)&&textStored.get("be_after").getAsString().equals(textEdit.beAfter),"text holder before/after pruned as optional");
+            var tq=new LogQuery();tq.type=textEdit.type;tq.requireDetails=true;tq.exactId=textEdit.id;tq.limit=1;lookupResponse.set(textStored+"\n");var textRead=database.query(tq);
+            check(textRead.size()==1&&textEdit.actorUuid.equals(textRead.getFirst().actorUuid)&&textRead.getFirst().x==-37&&textRead.getFirst().beBefore.equals(textEdit.beBefore)&&textRead.getFirst().beAfter.equals(textEdit.beAfter),"text holder exact-ID lookup lost editor, coordinates or complete text");
+            System.out.println("SUPPLEMENTARIES_TEXT_HTTP_OK: editor, coordinates and both complete holder states survive optional-detail pruning and exact ID lookup");
             var transactionBuyer=new ItemTransactionAudit.Party(UUID.randomUUID(),"ReceiptBuyer","minecraft:player","minecraft:overworld",-3,80,4);
             var transactionSeller=new ItemTransactionAudit.Party(UUID.randomUUID(),"ReceiptSeller","bf_blockpack:wandering_trader","minecraft:overworld",19,75,-22);
             var receipts=List.of(ItemTransactionAudit.gift(transactionBuyer,ItemTransactionAuditTest.stack("bf_blockpack:guide_book",1),1,null,true),ItemTransactionAudit.trade(transactionBuyer,transactionSeller,ItemTransactionAuditTest.stack("minecraft:emerald",3),ItemTransactionAuditTest.stack("minecraft:diamond",1),ItemTransactionAuditTest.stack("bf_blockpack:workbench",2),1));

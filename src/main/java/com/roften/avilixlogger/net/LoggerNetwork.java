@@ -1147,6 +1147,7 @@ public final class LoggerNetwork {
         out.addAll(com.roften.avilixlogger.core.DeathLogDetails.describe(first));
         out.addAll(com.roften.avilixlogger.core.WeaponCombatTrace.describe(first));
         out.addAll(com.roften.avilixlogger.core.SignLogDetails.describe(level,first));
+        out.addAll(com.roften.avilixlogger.compat.supplementaries.SupplementariesTextAudit.describe(level,first));
 
         if (chronological != null) {
             out.add(Component.literal("Timeline:").withStyle(net.minecraft.ChatFormatting.YELLOW));

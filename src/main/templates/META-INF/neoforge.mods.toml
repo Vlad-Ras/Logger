@@ -170,3 +170,5 @@ config="avilixlogger_scguns.mixins.json"
 
 [[mixins]]
 config="avilixlogger_blockpack.mixins.json"
+[[mixins]]
+config="avilixlogger_supplementaries.mixins.json"

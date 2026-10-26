@@ -79,6 +79,7 @@ public final class ClickHouseNativeSmoke {
         var receipts=List.of(ItemTransactionAudit.gift(buyer,ItemTransactionAuditTest.stack("bf_blockpack:guide_book",1),1,null,true),ItemTransactionAudit.trade(buyer,seller,ItemTransactionAuditTest.stack("minecraft:emerald",3),ItemTransactionAuditTest.stack("minecraft:diamond",1),ItemTransactionAuditTest.stack("bf_blockpack:workbench",2),2));for(var receipt:receipts)receipt.materializeSnapshots();
         var conversion=AsyncPipelineTest.row("native-conversion");conversion.type=ActionType.ITEM_TRANSFORM;conversion.dim=block.dim;conversion.source="mod:chipped:workbench";
         conversion.playerInvBefore="{Items:[{Slot:0,id:'minecraft:stone',count:2}]}";conversion.playerInvAfter="{Items:[{Slot:0,id:'chipped:carved_stone',count:2}]}";
+        var textEdit=SupplementariesTextAuditTest.record();
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();
@@ -91,7 +92,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
-            verifyReceipts(db,receipts);verifyConversion(db,conversion);
+            verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);
             verifyWeapons(db,weapons);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
@@ -115,7 +116,7 @@ public final class ClickHouseNativeSmoke {
             verifyWeapons(db,weapons);
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
-            verifyReceipts(db,receipts);verifyConversion(db,conversion);
+            verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
@@ -153,6 +154,13 @@ public final class ClickHouseNativeSmoke {
         }
     }
 
+    private static void verifyTextEdit(ClickHouseLogStorage db,LogEntry text)throws Exception{
+        if(text.id==0)db.appendBatch("native-supplementaries-text-"+UUID.randomUUID(),List.of(text));
+        var q=new LogQuery();q.type=text.type;q.requireDetails=true;q.exactId=text.id;q.untilTs=Long.MAX_VALUE;q.limit=1;var rows=db.query(q);
+        check(rows.size()==1,"native text holder edit missing by exact ID");var row=rows.getFirst();check(text.actorUuid.equals(row.actorUuid)&&text.actorName.equals(row.actorName)&&row.x==-37&&row.y==103&&row.z==61&&text.beBefore.equals(row.beBefore)&&text.beAfter.equals(row.beAfter),"native text holder edit lost author, position or full before/after");
+        q.requireDetails=false;check(db.query(q).stream().anyMatch(e->e.id==text.id),"native text holder edit missing from feed");
+        System.out.println("SUPPLEMENTARIES_TEXT_CLICKHOUSE_OK: exact author, block position, both full holder states and ID/feed survive minimal mode and reopened connection");
+    }
     private static void verifyConversion(ClickHouseLogStorage db,LogEntry conversion)throws Exception{
         if(conversion.id==0)db.appendBatch("native-conversion-"+UUID.randomUUID(),List.of(conversion));
         var q=new LogQuery();q.type=ActionType.ITEM_TRANSFORM;q.requireDetails=true;q.exactId=conversion.id;q.untilTs=Long.MAX_VALUE;q.limit=1;var rows=db.query(q);

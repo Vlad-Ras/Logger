@@ -1,0 +1,10 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.supplementaries.mixin",
+  "plugin": "com.roften.avilixlogger.compat.supplementaries.mixin.SupplementariesMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["TextPacketMixin", "TextHolderMixin"],
+  "client": [],
+  "injectors": {"defaultRequire": 1}
+}

@@ -53,6 +53,7 @@ public final class ExactModpackPreflightTest {
         test.group("avilixlogger_scguns.mixins.json","top/ribs/scguns/entity/projectile/ProjectileEntity");
         test.group("avilixlogger_chipped.mixins.json","earth/terrarium/chipped/common/menus/WorkbenchMenu");
         test.group("avilixlogger_blockpack.mixins.json","com/blockfactory/blockpack/event/GiftSavedData");
+        test.group("avilixlogger_supplementaries.mixins.json","net/mehvahdjukaar/supplementaries/common/block/TextHolder");
         test.group("avilixlogger_airplanes.mixins.json","immersive_aircraft/entity/VehicleEntity");
         if(test.exactReads.isEmpty())throw new AssertionError("No supplied target bytecode was checked");
         System.out.println("EXACT_MODPACK_PREFLIGHT_OK: "+test.exactReads.size()+" supplied target classes; no mod execution; raw contracts do not prove transformed mixin conflicts or gameplay coverage");
