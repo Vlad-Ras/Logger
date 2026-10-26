@@ -25,8 +25,9 @@ public abstract class SignTextAuditMixin {
         var sign=(SignBlockEntity)(Object)this;
         if(com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(sign.getLevel(),sign.getBlockPos()))return false;
         if(sign.getText(front)==text)return original.call(text,front);
-        var before=SignTextAudit.before(sign);
+        net.minecraft.nbt.CompoundTag before=null;
+        try{before=SignTextAudit.before(sign);}catch(RuntimeException|LinkageError failure){com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("sign-text-before");}
         boolean changed=original.call(text,front);
-        if(changed)try{SignTextAudit.after(sign,before);}catch(RuntimeException failure){com.roften.avilixlogger.AvilixLoggerMod.LOGGER.error("[AvilixLogger] Sign edit capture failed",failure);}return changed;
+        if(changed)try{SignTextAudit.after(sign,before);}catch(RuntimeException|LinkageError failure){com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("sign-text-after");}return changed;
     }
 }

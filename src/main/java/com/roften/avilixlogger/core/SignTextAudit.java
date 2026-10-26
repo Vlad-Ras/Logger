@@ -8,11 +8,12 @@ import net.minecraft.world.level.block.entity.SignBlockEntity;
 /** Captures edits when they happen, including direct mod calls to the native sign setter. */
 public final class SignTextAudit {
     private SignTextAudit(){}
+    public static boolean enabled(){return CaptureTypePolicy.enabled(1)&&CaptureTypePolicy.enabled(2)&&LoggerConfig.isEnabled()&&LoggerConfig.VALUES.logBlocks.get()&&!CartAuditContext.restoring();}
     public static CompoundTag before(SignBlockEntity sign){
         if(!(sign.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread()||CartAuditContext.restoring())return null;
         boolean structural=CreateStructuralHooks.before(level,sign.getBlockPos());
         boolean deployer=CreateDeployerHooks.before(level,sign.getBlockPos());
-        if(structural||deployer||!LoggerConfig.isEnabled()||!LoggerConfig.VALUES.logBlocks.get())return null;
+        if(structural||deployer||!enabled())return null;
         return NbtSerde.snapshotBlockEntity(level,sign);
     }
     public static boolean changed(CompoundTag before,CompoundTag after){
@@ -24,7 +25,7 @@ public final class SignTextAudit {
         return false;
     }
     public static void after(SignBlockEntity sign,CompoundTag before){
-        if(before==null||!(sign.getLevel() instanceof ServerLevel level))return;
+        if(before==null||!enabled()||!(sign.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return;
         var row=row(level,sign,before,NbtSerde.snapshotBlockEntity(level,sign));if(row!=null)LoggerRuntime.storage(level).append(row);
     }
     /** Builds a detached record without authorizing publication; supplied tags transfer ownership. */
