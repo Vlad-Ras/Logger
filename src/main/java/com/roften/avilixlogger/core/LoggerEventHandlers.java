@@ -1269,6 +1269,7 @@ public final class LoggerEventHandlers {
     public void onItemToss(ItemTossEvent event) {
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isEnabled()) return;
+        if (com.roften.avilixlogger.compat.blockpack.BlockPackJoinGiftAudit.active()) return;
         Player pl = event.getPlayer();
         if (!(pl instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
@@ -1309,6 +1310,7 @@ public final class LoggerEventHandlers {
 
         // 1) ItemEntity spawn: player drops and exact construction effects.
         if (ent instanceof ItemEntity itemEnt) {
+            if (com.roften.avilixlogger.compat.blockpack.BlockPackJoinGiftAudit.active()) return;
             var createOrigin=CreateEntityOrigin.context();
             if(createOrigin!=null) {
                 if (!CaptureTypePolicy.enabled(3)) return;
@@ -1638,6 +1640,9 @@ public final class LoggerEventHandlers {
         e.extra = "smelt " + BuiltInRegistries.ITEM.getKey(smelted.getItem()) + " x" + smelted.getCount();
         LoggerRuntime.storage(level).append(e);
     }
+
+    @SubscribeEvent
+    public void onMerchantTrade(net.neoforged.neoforge.event.entity.player.TradeWithVillagerEvent event) { ItemTransactionAudit.onTrade(event); }
 
     @SubscribeEvent
     public void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {

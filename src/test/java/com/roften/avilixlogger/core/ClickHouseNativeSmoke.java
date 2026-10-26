@@ -74,6 +74,9 @@ public final class ClickHouseNativeSmoke {
         interaction.actorUuid=UUID.randomUUID();interaction.actorName="NativeStateActor";interaction.x=-37;interaction.y=103;interaction.z=61;
         interaction.blockBefore="{Name:'minecraft:oak_trapdoor',Properties:{open:'false'}}";interaction.blockAfter="{Name:'minecraft:oak_trapdoor',Properties:{open:'true'}}";
 
+        var buyer=new ItemTransactionAudit.Party(UUID.randomUUID(),"NativeReceiptBuyer","minecraft:player",block.dim,-3,80,4);
+        var seller=new ItemTransactionAudit.Party(UUID.randomUUID(),"NativeReceiptSeller","bf_blockpack:wandering_trader",block.dim,19,75,-22);
+        var receipts=List.of(ItemTransactionAudit.gift(buyer,ItemTransactionAuditTest.stack("bf_blockpack:guide_book",1),1,null,true),ItemTransactionAudit.trade(buyer,seller,ItemTransactionAuditTest.stack("minecraft:emerald",3),ItemTransactionAuditTest.stack("minecraft:diamond",1),ItemTransactionAuditTest.stack("bf_blockpack:workbench",2),2));for(var receipt:receipts)receipt.materializeSnapshots();
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();
@@ -86,6 +89,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
+            verifyReceipts(db,receipts);
             verifyWeapons(db,weapons);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
@@ -109,6 +113,7 @@ public final class ClickHouseNativeSmoke {
             verifyWeapons(db,weapons);
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
+            verifyReceipts(db,receipts);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
@@ -146,6 +151,12 @@ public final class ClickHouseNativeSmoke {
         }
     }
 
+    private static void verifyReceipts(ClickHouseLogStorage db,List<LogEntry> receipts)throws Exception{
+        if(receipts.getFirst().id==0)db.appendBatch("native-item-receipts-"+UUID.randomUUID(),receipts);
+        for(var receipt:receipts){var q=new LogQuery();q.type=receipt.type;q.requireDetails=true;q.exactId=receipt.id;q.untilTs=Long.MAX_VALUE;q.limit=1;var rows=db.query(q);check(rows.size()==1,"native receipt missing by exact ID");var row=rows.getFirst();
+            check(java.util.Objects.equals(row.actorUuid,receipt.actorUuid)&&row.count==receipt.count&&row.beAfter.equals(receipt.beAfter)&&row.itemStackNbt.equals(receipt.itemStackNbt)&&row.x==receipt.x&&row.z==receipt.z&&!ItemTransactionAudit.describe(row).isEmpty(),"native receipt lost actor/recipient, costs/delivery, position or details");q.requireDetails=false;check(db.query(q).stream().anyMatch(e->e.id==receipt.id),"native receipt missing in item feed");}
+        System.out.println("ITEM_RECEIPT_CLICKHOUSE_OK: gift/trade metadata, quantities, exact target, actor, costs, feed and details survive minimal mode and reopened connection");
+    }
     private static void verifyInteraction(ClickHouseLogStorage db,LogEntry interaction){
         var q=new LogQuery();q.requireDetails=true;q.exactId=interaction.id;q.limit=1;q.untilTs=Long.MAX_VALUE;
         var rows=db.query(q);check(rows.size()==1,"native restorable interaction missing by exact ID");var row=rows.getFirst();

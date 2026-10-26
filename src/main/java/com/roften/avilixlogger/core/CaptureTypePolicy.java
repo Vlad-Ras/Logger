@@ -58,7 +58,7 @@ public final class CaptureTypePolicy {
                     ENTITY_INTERACT, ENTITY_ATTACK, ENTITY_EQUIPMENT_CHANGE, WEAPON_KILL, PLAYER_DEATH,
                     PLAYER_DIMENSION_CHANGE, PLAYER_RESPAWN -> enabled(3);
             case PROJECTILE_SHOOT, PROJECTILE_HIT -> enabled(3) && enabled(4);
-            case WEAPON_RELOAD, ITEM_DROP, ITEM_PICKUP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_SMELT,
+            case ITEM_GIFT, ITEM_TRADE, WEAPON_RELOAD, ITEM_DROP, ITEM_PICKUP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_SMELT,
                     ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME -> enabled(4);
             default -> true;
         };

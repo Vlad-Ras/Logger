@@ -184,6 +184,7 @@ public final class LogText {
                 || t == ActionType.ITEM_PICKUP
                 || t == ActionType.ITEM_DROP
                 || t == ActionType.ITEM_CRAFT
+                || t == ActionType.ITEM_GIFT || t == ActionType.ITEM_TRADE
                 || t == ActionType.ITEM_TRANSFORM
                 || t == ActionType.ITEM_SMELT
                 || t == ActionType.ITEM_USE
@@ -203,7 +204,7 @@ public final class LogText {
             case BLOCK_INTERACT, BLOCK_USE, CONTAINER_OPEN -> ChatFormatting.GOLD;
             case BLOCK_ENTITY_NBT_CHANGE -> ChatFormatting.YELLOW;
 
-            case CONTAINER_PUT, ITEM_PICKUP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_SMELT, ITEM_CONSUME, ITEM_USE_START, PROJECTILE_SHOOT -> ChatFormatting.GREEN;
+            case CONTAINER_PUT, ITEM_PICKUP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, ITEM_SMELT, ITEM_CONSUME, ITEM_USE_START, PROJECTILE_SHOOT -> ChatFormatting.GREEN;
             case CONTAINER_TAKE, ITEM_DROP, ITEM_USE_STOP -> ChatFormatting.RED;
             case ME_PUT, BACKPACK_PUT -> ChatFormatting.GREEN;
             case ME_TAKE, BACKPACK_TAKE, BACKPACK_DESTROY -> ChatFormatting.RED;
@@ -302,6 +303,8 @@ public final class LogText {
             case ITEM_CRAFT -> "скрафтил";
             case WEAPON_RELOAD -> "перезарядка / боезапас";
             case WEAPON_KILL -> "убил";
+            case ITEM_GIFT -> "выдача подарка";
+            case ITEM_TRADE -> "обменял у торговца";
             case ITEM_TRANSFORM -> "преобразовал предметы";
             case ITEM_SMELT -> "переплавил";
             case ITEM_USE -> "использовал";
@@ -358,7 +361,7 @@ public final class LogText {
             case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, CONTAINER_OPEN, BLOCK_ENTITY_NBT_CHANGE -> blockNameComponent(level, e.blockAfter);
 
             // container/item diffs
-            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, WEAPON_RELOAD, ITEM_TRANSFORM, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
+            case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, WEAPON_RELOAD, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
                     itemNameComponent(level, e.itemStackNbt);
             case ME_PUT, ME_TAKE -> {
                 MutableComponent item = itemNameComponent(level, e.itemStackNbt);

@@ -106,5 +106,8 @@ public enum ActionType {
     ITEM_TRANSFORM,
 
     // Append-only: confirmed weapon kills and authoritative reload transitions.
-    WEAPON_KILL, WEAPON_RELOAD
+    WEAPON_KILL, WEAPON_RELOAD,
+
+    // Append-only: receipts for automatic gifts and confirmed native trades; audit only.
+    ITEM_GIFT, ITEM_TRADE
 }

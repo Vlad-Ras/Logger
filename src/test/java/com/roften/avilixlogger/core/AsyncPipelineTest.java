@@ -14,6 +14,7 @@ public final class AsyncPipelineTest {
         OperatorAccessTest.run();
         WeaponCombatTraceTest.run();
         BlockPackGiftAuditTest.run();
+        ItemTransactionAuditTest.run();
         HotPathMemoryTest.run();
         DiagnosticCountersTest.run();
         HotPathQueueStandaloneTest.run();

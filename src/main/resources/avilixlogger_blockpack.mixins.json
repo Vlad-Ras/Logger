@@ -4,7 +4,7 @@
   "package": "com.roften.avilixlogger.compat.blockpack.mixin",
   "plugin": "com.roften.avilixlogger.compat.blockpack.mixin.BlockPackMixinPlugin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": ["GiftPacketMixin", "GiftStateMixin"],
+  "mixins": ["GiftPacketMixin", "GiftStateMixin", "GiftDeliveryMixin"],
   "client": [],
   "injectors": {"defaultRequire": 1}
 }

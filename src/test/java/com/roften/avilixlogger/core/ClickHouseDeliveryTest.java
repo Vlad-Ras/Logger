@@ -140,6 +140,20 @@ final class ClickHouseDeliveryTest {
             database.appendBatch("block-interaction-observation",List.of(observation));
             check(requests.values().stream().noneMatch(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_blocks")&&body.contains(observation.source)),"after-only observation became mandatory full detail");
             System.out.println("BLOCK_INTERACTION_HTTP_OK: restorable before/after and property details survive optional pruning; after-only observation stays optional");
+            var transactionBuyer=new ItemTransactionAudit.Party(UUID.randomUUID(),"ReceiptBuyer","minecraft:player","minecraft:overworld",-3,80,4);
+            var transactionSeller=new ItemTransactionAudit.Party(UUID.randomUUID(),"ReceiptSeller","bf_blockpack:wandering_trader","minecraft:overworld",19,75,-22);
+            var receipts=List.of(ItemTransactionAudit.gift(transactionBuyer,ItemTransactionAuditTest.stack("bf_blockpack:guide_book",1),1,null,true),ItemTransactionAudit.trade(transactionBuyer,transactionSeller,ItemTransactionAuditTest.stack("minecraft:emerald",3),ItemTransactionAuditTest.stack("minecraft:diamond",1),ItemTransactionAuditTest.stack("bf_blockpack:workbench",2),1));
+            for(var receipt:receipts){
+                receipt.materializeSnapshots();database.appendBatch("item-receipt-"+receipt.type,List.of(receipt));
+                String insert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_items")&&body.contains(receipt.source)).findFirst().orElseThrow();
+                var stored=com.google.gson.JsonParser.parseString(insert.substring(insert.indexOf('\n')+1).trim()).getAsJsonObject();
+                check(stored.get("be_after").getAsString().equals(receipt.beAfter)&&stored.get("item_stack").getAsString().equals(receipt.itemStackNbt),"item receipt semantics pruned as optional detail");
+                var rq=new LogQuery();rq.type=receipt.type;rq.requireDetails=true;rq.exactId=receipt.id;rq.limit=1;lookupResponse.set(stored+"\n");var read=database.query(rq);
+                check(read.size()==1&&read.getFirst().count==receipt.count&&read.getFirst().beAfter.equals(receipt.beAfter)&&!ItemTransactionAudit.describe(read.getFirst()).isEmpty(),"receipt exact-ID lookup lost quantity or human details");
+            }
+            var conversion=row("chipped-conversion-proof");conversion.type=ActionType.ITEM_TRANSFORM;conversion.source="mod:chipped:workbench";conversion.playerInvBefore="{Items:[{Slot:0,id:'minecraft:stone',count:2}]}";conversion.playerInvAfter="{Items:[{Slot:0,id:'chipped:carved_stone',count:2}]}";
+            database.appendBatch("conversion-required-detail",List.of(conversion));check(requests.values().stream().anyMatch(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_items")&&body.contains(conversion.source)&&body.contains("player_inv_before")),"conversion inventory receipt pruned as optional");
+            System.out.println("ITEM_RECEIPT_HTTP_OK: gift/trade payload, costs, actor/target, item quantity and exact ID/details survive optional pruning; conversion inventory states retained");
             UUID autoCart=UUID.randomUUID();var automation=row("cart_automation");automation.type=ActionType.CART_TRANSFER;automation.dim="minecraft:overworld";automation.source=CartAuditContext.prefix(autoCart)+"automation_transfer:1";
             automation.beBefore="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:100}}]}";
             automation.beAfter="{Kind:'automation',Slots:[{Kind:'fluid',Fluid:{id:'minecraft:water',amount:850}}]}";

@@ -919,6 +919,8 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ITEM_PICKUP,
                     com.roften.avilixlogger.core.ActionType.ITEM_CRAFT,
                     com.roften.avilixlogger.core.ActionType.ITEM_TRANSFORM,
+                    com.roften.avilixlogger.core.ActionType.ITEM_GIFT,
+                    com.roften.avilixlogger.core.ActionType.ITEM_TRADE,
                     com.roften.avilixlogger.core.ActionType.WEAPON_RELOAD,
                     com.roften.avilixlogger.core.ActionType.ITEM_SMELT,
                     com.roften.avilixlogger.core.ActionType.ITEM_USE,
@@ -1194,6 +1196,7 @@ public final class LoggerNetwork {
         var deployerDetails=com.roften.avilixlogger.core.CreateDeployerDetails.describe(level,first);
         if(!deployerDetails.isEmpty()){out.addAll(deployerDetails);return List.copyOf(out);}
         out.addAll(com.roften.avilixlogger.core.BlockChangeDetails.describe(first));
+        out.addAll(com.roften.avilixlogger.core.ItemTransactionAudit.describe(first));
         var cartDetails=com.roften.avilixlogger.core.CartLogDetails.describe(level,first);
         if(!cartDetails.isEmpty()){out.addAll(cartDetails);return List.copyOf(out);}
         if(first.entityUuid!=null||first.entityName!=null){

@@ -21,6 +21,7 @@ public final class CreateCompletionSmoke {
         check(CreateSupport.available(),CreateSupport.diagnostic());
         BlockMenuStorageSmoke.run(world);
         BlockStateEvidenceSmoke.run(world);
+        MerchantTransactionSmoke.run(world,net.minecraft.world.entity.EntityType.WANDERING_TRADER.create(world),net.minecraft.world.item.Items.BREAD);
         actorEffects(world);
         CreateFunnelSmoke.run(world);
         CreateLinkedTransferSmoke.run(world);
