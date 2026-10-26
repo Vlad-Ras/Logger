@@ -19,19 +19,19 @@ public final class BlockMenuStorageSmoke {
         var menu=(ChestMenu)be.createMenu(95,player.getInventory(),player);
         check(root.equals(ContainerSlotSnapshot.menuStoragePos(level,menu,clicked)),"native chest backing locator lost");
         check(root.equals(ContainerSlotSnapshot.menuStoragePos(level,menu,root)),"single chest locator changed");
-        var generic=ChestMenu.oneRow(96,player.getInventory(),new SimpleContainer(9));
+        var generic=ChestMenu.oneRow(96,player.getInventory());
         check(clicked.equals(ContainerSlotSnapshot.menuStoragePos(level,generic,clicked)),"generic locator changed");
         var combined=ChestMenu.sixRows(97,player.getInventory(),new CompoundContainer(be,new SimpleContainer(27)));
         check(clicked.equals(ContainerSlotSnapshot.menuStoragePos(level,combined,clicked)),"compound locator changed");
         var detached=new ChestBlockEntity(root,be.getBlockState());detached.setLevel(level);
-        var stale=ChestMenu.oneRow(98,player.getInventory(),detached);
+        var stale=new ChestMenu(net.minecraft.world.inventory.MenuType.GENERIC_9x1,98,player.getInventory(),detached,1);
         check(ContainerSlotSnapshot.menuStoragePos(level,stale,clicked)==null,"replaced BE accepted as storage");
         detached.setLevel(level.getServer().getLevel(net.minecraft.world.level.Level.NETHER));
         check(ContainerSlotSnapshot.menuStoragePos(level,stale,clicked)==null,"foreign-world BE accepted as storage");
         var accepted=new java.util.concurrent.atomic.AtomicBoolean(true);
         var worker=new Thread(()->accepted.set(ContainerSlotSnapshot.menuStoragePos(level,menu,clicked)!=null),"menu-storage-off-thread");
         worker.start();worker.join(3000);check(!worker.isAlive()&&!accepted.get(),"storage world access escaped server thread");
-        menu.removed(player);generic.removed(player);combined.removed(player);stale.removed(player);level.removeBlock(root,false);
+        detached.setLevel(level);menu.removed(player);generic.removed(player);combined.removed(player);stale.removed(player);level.removeBlock(root,false);
         org.slf4j.LoggerFactory.getLogger("AvilixLogger/MenuStorageSmoke").info("BLOCK_MENU_STORAGE_NATIVE_OK: concrete vanilla backing, generic/compound fallback, replaced/foreign-world/off-thread refusal");
     }
 }

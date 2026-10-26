@@ -159,8 +159,8 @@ public final class BlockPackNativeSmoke {
                 check(player.containerMenu instanceof ChestMenu menu&&menu.getRowCount()==(reduced==1?1:4),"cluster resize did not change native visible rows");
                 check(before.equals(ContainerSlotSnapshot.snapshotTag(level,root)),"cluster resize discarded hidden root slots");player.closeContainer();
             }
-            var generic=ChestMenu.oneRow(93,player.getInventory(),new SimpleContainer(9));check(root.equals(ContainerSlotSnapshot.menuStoragePos(level,generic,root)),"generic storage locator changed");generic.removed(player);
-            rootBe.setRemoved();var stale=ChestMenu.oneRow(94,player.getInventory(),inventory);check(ContainerSlotSnapshot.menuStoragePos(level,stale,root)==null,"removed block entity accepted as restore target");stale.removed(player);rootBe.clearRemoved();
+            var generic=ChestMenu.oneRow(93,player.getInventory());check(root.equals(ContainerSlotSnapshot.menuStoragePos(level,generic,root)),"generic storage locator changed");generic.removed(player);
+            rootBe.setRemoved();var stale=new ChestMenu(MenuType.GENERIC_9x1,94,player.getInventory(),inventory,1);check(ContainerSlotSnapshot.menuStoragePos(level,stale,root)==null,"removed block entity accepted as restore target");stale.removed(player);rootBe.clearRemoved();
             for(var pos:positions)if(level.getBlockEntity(pos) instanceof Container c){c.clearContent();level.removeBlock(pos,false);}
         }
         check(menus==144&&redirects==132,"cluster coverage count changed");
