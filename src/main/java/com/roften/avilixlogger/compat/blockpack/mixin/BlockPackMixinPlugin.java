@@ -22,10 +22,10 @@ public final class BlockPackMixinPlugin implements IMixinConfigPlugin {
                     var node=new ClassNode();new ClassReader(input).accept(node,ClassReader.SKIP_FRAMES);return node;
                 }
             });
-            for(String name:List.of("GiftPacketMixin","GiftStateMixin","GiftDeliveryMixin"))checker.check(pkg.replace('.','/')+'/'+name);
+            for(String name:List.of("GiftPacketMixin","GiftStateMixin","GiftDeliveryMixin","GiftTossMixin"))checker.check(pkg.replace('.','/')+'/'+name);
             available=true;
         } catch(Exception|LinkageError failure) {
-            org.slf4j.LoggerFactory.getLogger("AvilixLogger/BlockPack").warn("BlockPack settings integration disabled: {}",failure.toString());
+            org.slf4j.LoggerFactory.getLogger("AvilixLogger/BlockPack").warn("BlockPack audit integration disabled: {}",failure.toString());
         }
     }
     public String getRefMapperConfig(){return null;}

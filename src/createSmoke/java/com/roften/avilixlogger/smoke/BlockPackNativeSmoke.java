@@ -178,12 +178,13 @@ public final class BlockPackNativeSmoke {
         level.removeBlock(pos,false);status("BLOCKPACK_NO_AUTO_GLASS_NATIVE_OK: "+tested+" native upgrade attempts return false and preserve vanilla blocks");
     }
     private static void preflightFaults()throws Exception{
-        for(String mixin:List.of("GiftStateMixin","GiftPacketMixin","GiftDeliveryMixin")){
+        for(String mixin:List.of("GiftStateMixin","GiftPacketMixin","GiftDeliveryMixin","GiftTossMixin")){
             boolean rejected=false;try{new com.roften.avilixlogger.compat.create.mixin.CreateMixinPlugin.Preflight(name->{
                 try(var input=Objects.requireNonNull(BlockPackNativeSmoke.class.getClassLoader().getResourceAsStream(name+".class"))){var node=new org.objectweb.asm.tree.ClassNode();new org.objectweb.asm.ClassReader(input).accept(node,org.objectweb.asm.ClassReader.SKIP_FRAMES);
                     if(name.equals("com/blockfactory/blockpack/event/GiftSavedData"))node.fields.removeIf(f->f.name.equals("giftEnabled"));
                     if(name.equals("com/blockfactory/blockpack/event/PlayerJoinHandler"))node.methods.removeIf(m->m.name.equals("giveOrDrop"));
-                    if(name.equals("com/blockfactory/blockpack/neoforge/BlockPackNeoForge"))node.methods.removeIf(m->m.name.equals("lambda$registerPayloads$1"));return node;}
+                    if(name.equals("com/blockfactory/blockpack/neoforge/BlockPackNeoForge"))node.methods.removeIf(m->m.name.equals("lambda$registerPayloads$1"));
+                    if(name.equals("net/neoforged/neoforge/common/CommonHooks"))node.methods.removeIf(m->m.name.equals("onPlayerTossEvent"));return node;}
             }).check("com/roften/avilixlogger/compat/blockpack/mixin/"+mixin);}catch(Exception expected){rejected=true;}check(rejected,"preflight accepted broken "+mixin);
         }
     }

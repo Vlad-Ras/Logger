@@ -28,5 +28,5 @@ public abstract class GiftDeliveryMixin {
         return result;
     }
     @WrapOperation(method="giveOrDrop(Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/world/item/ItemStack;)V",at=@At(value="INVOKE",target="Lnet/minecraft/server/level/ServerPlayer;drop(Lnet/minecraft/world/item/ItemStack;Z)Lnet/minecraft/world/entity/item/ItemEntity;"),require=1)
-    private static ItemEntity avilixlogger$drop(ServerPlayer player,ItemStack stack,boolean random,Operation<ItemEntity> original){var result=original.call(player,stack,random);var capture=BlockPackJoinGiftAudit.current();if(capture!=null)capture.dropped(result);return result;}
+    private static ItemEntity avilixlogger$drop(ServerPlayer player,ItemStack stack,boolean random,Operation<ItemEntity> original){var capture=BlockPackJoinGiftAudit.current();var result=original.call(player,stack,random);if(capture!=null)capture.dropped(result);return result;}
 }

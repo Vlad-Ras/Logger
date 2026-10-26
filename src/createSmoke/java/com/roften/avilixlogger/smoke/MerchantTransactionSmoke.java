@@ -17,7 +17,9 @@ final class MerchantTransactionSmoke {
     static void run(ServerLevel level,AbstractVillager merchant,Item output)throws Exception{
         var buyer=ScgunsNativeSmoke.player(level,"TradeReceiptBuyer");buyer.setPos(-3.5,100,2.5);merchant.setPos(108.5,100,-2.5);
         var offer=new MerchantOffer(new ItemCost(Items.EMERALD,3),Optional.of(new ItemCost(Items.DIAMOND,1)),new ItemStack(output,2),4,0,0.0f);
-        offer.addToSpecialPriceDiff(-1);check(offer.getCostA().getCount()==2,"native offer discount not applied");var offers=new MerchantOffers();offers.add(offer);merchant.overrideOffers(offers);merchant.setTradingPlayer(buyer);
+        offer.addToSpecialPriceDiff(-1);check(offer.getCostA().getCount()==2,"native offer discount not applied");
+        // AbstractVillager.overrideOffers is a no-op on the server; populate its actual offer list.
+        var offers=merchant.getOffers();offers.clear();offers.add(offer);merchant.setTradingPlayer(buyer);
         var menu=new MerchantMenu(73,buyer.getInventory(),merchant);buyer.containerMenu=menu;
         var rows=new ArrayList<LogEntry>();var observedCosts=new ArrayList<Integer>();
         Consumer<TradeWithVillagerEvent> listener=event->{if(event.getEntity()!=buyer||event.getAbstractVillager()!=merchant)return;

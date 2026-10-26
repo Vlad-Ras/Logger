@@ -24,13 +24,15 @@ public final class BlockPackJoinGiftAudit {
     public static boolean active(){return CURRENT.get()!=null;}
     public static final class Scope implements AutoCloseable {
         private final ServerPlayer player;private final ItemTransactionAudit.Party recipient;private final CompoundTag requested;private final Scope previous;
-        private int inserted;private boolean sawAdd,valid=true,closed;private ItemTransactionAudit.Drop drop;
+        private int inserted;private boolean sawAdd,valid=true,closed,spawnAccepted;private java.util.UUID spawned;private ItemTransactionAudit.Drop drop;
         Scope(ServerPlayer player,ItemTransactionAudit.Party recipient,CompoundTag requested,Scope previous){this.player=player;this.recipient=recipient;this.requested=requested;this.previous=previous;}
         public void invalid(){valid=false;}
         public void added(int offered,long before,long after){sawAdd=true;if(offered!=requested.getInt("count")||after<before||after-before>offered){valid=false;return;}inserted=(int)(after-before);}
+        /** Native addFreshEntity's result, including rejection by other mods; never load a chunk for audit. */
+        public void spawned(net.minecraft.world.entity.Entity entity,boolean accepted){spawned=entity.getUUID();spawnAccepted=accepted;}
         public void dropped(ItemEntity entity){
             if(!ItemTransactionAudit.enabled())return;
-            try {boolean accepted=entity!=null&&!entity.isRemoved()&&entity.level()==player.level()&&player.serverLevel().getEntity(entity.getUUID())==entity;
+            try {boolean accepted=entity!=null&&entity.getUUID().equals(spawned)&&spawnAccepted;
                 drop=entity==null?new ItemTransactionAudit.Drop(null,false,null,recipient.dim(),recipient.x(),recipient.y(),recipient.z()):new ItemTransactionAudit.Drop(entity.getUUID(),accepted,ItemTransactionAudit.item(entity.getItem(),player.registryAccess()),entity.level().dimension().location().toString(),entity.getX(),entity.getY(),entity.getZ());
             }catch(RuntimeException|LinkageError failure){valid=false;AdaptiveLogDiagnostics.adapterFailure("blockpack-gift-drop");}
         }
