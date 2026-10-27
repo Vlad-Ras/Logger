@@ -67,6 +67,13 @@ final class DiskLogJournal {
         return pending(Integer.MAX_VALUE);
     }
 
+    /** Visibility needs existence, not an oldest-file selection over the entire backlog. */
+    boolean hasPending() throws IOException {
+        try (var files = Files.newDirectoryStream(directory, "*.jsonl")) {
+            return files.iterator().hasNext();
+        }
+    }
+
     /** Delivery needs only the oldest window, even after a long database outage. */
     List<Path> pending(int limit) throws IOException {
         if (limit < 1) throw new IllegalArgumentException("Invalid journal window");

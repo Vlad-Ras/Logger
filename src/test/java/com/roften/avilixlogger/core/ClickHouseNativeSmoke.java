@@ -81,6 +81,7 @@ public final class ClickHouseNativeSmoke {
         conversion.playerInvBefore="{Items:[{Slot:0,id:'minecraft:stone',count:2}]}";conversion.playerInvAfter="{Items:[{Slot:0,id:'chipped:carved_stone',count:2}]}";
         var textEdit=SupplementariesTextAuditTest.record();
         var display=SupplementariesAutomationAuditTest.record();
+        List<LogEntry> pressureRows=List.of();
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();
@@ -95,6 +96,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
             verifyWeapons(db,weapons);
+            pressureRows=journalPressure(db);verifyJournalPressure(db,pressureRows);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
             var detail = new LogQuery();
@@ -118,6 +120,7 @@ public final class ClickHouseNativeSmoke {
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
+            verifyJournalPressure(db,pressureRows);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
@@ -125,6 +128,29 @@ public final class ClickHouseNativeSmoke {
         }
     }
 
+    private static List<LogEntry> journalPressure(ClickHouseLogStorage database)throws Exception{
+        var directory=java.nio.file.Files.createTempDirectory("avilix-real-journal-pressure");PendingLogStorage pending=null;Thread producer=null;
+        var rows=new java.util.ArrayList<LogEntry>();for(int i=0;i<3;i++){var row=SupplementariesAutomationAuditTest.record();row.extra="native journal pressure "+i;rows.add(row);}
+        try{
+            pending=new PendingLogStorage(directory,2,1024*1024,1000,60_000);var target=pending;
+            var task=new java.util.concurrent.FutureTask<Void>(()->{for(var row:rows)target.append(row);return null;});
+            producer=new Thread(task,"real-clickhouse-pressure-producer");producer.setDaemon(true);producer.start();task.get(5,java.util.concurrent.TimeUnit.SECONDS);
+            pending.shutdown();pending=null;
+            // A final partial batch is durable even when the sender is stopped. Replay real files.
+            pending=new PendingLogStorage(directory,2,1024*1024,1000,60_000);pending.setDelegate(database);
+            check(pending.awaitVisible(System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(15)),"real journal replay did not become visible");
+            check(!new DiskLogJournal(directory).hasPending(),"real acknowledgment did not remove journal files");return List.copyOf(rows);
+        }finally{
+            if(pending!=null)pending.shutdown();if(producer!=null)producer.join(5000);
+            try(var paths=java.nio.file.Files.walk(directory)){for(var file:paths.sorted(java.util.Comparator.reverseOrder()).toList())java.nio.file.Files.deleteIfExists(file);}
+        }
+    }
+    private static void verifyJournalPressure(ClickHouseLogStorage db,List<LogEntry> rows){
+        check(rows.size()==3,"real pressure fixture did not submit all rows");
+        for(var expected:rows){var q=new LogQuery();q.type=expected.type;q.exactId=expected.id;q.untilTs=Long.MAX_VALUE;q.requireDetails=true;q.limit=2;var read=db.query(q);
+            check(read.size()==1&&read.getFirst().id==expected.id&&expected.beBefore.equals(read.getFirst().beBefore)&&expected.beAfter.equals(read.getFirst().beAfter)&&expected.extra.equals(read.getFirst().extra)&&read.getFirst().actorUuid==null&&expected.actorName.equals(read.getFirst().actorName),"real journal pressure/replay lost or duplicated payload/attribution by exact ID");}
+        System.out.println("JOURNAL_PRESSURE_CLICKHOUSE_OK: saturated partial batch, durable shutdown/restart replay, acknowledged visibility, exact IDs/full payload/actor survive real ClickHouse and database reopen");
+    }
     private static void seedOldWeaponSchema(String endpoint,String user,String password)throws Exception{
         var url=java.net.URI.create(endpoint).toURL();
         if(!java.util.Set.of("127.0.0.1","localhost","[::1]").contains(url.getHost()))

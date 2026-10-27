@@ -15,6 +15,7 @@ public final class PendingLogStorage implements LogStorage {
     private final Thread journalWriter;
     private final Thread sender;
     private final Object wakeup = new Object();
+    private long wakeupVersion;
     private volatile BatchLogStorage delegate;
     private volatile boolean initialized;
     private volatile boolean sending = true;
@@ -71,14 +72,16 @@ public final class PendingLogStorage implements LogStorage {
         long bytes = 0;
         while (!queue.exhausted() || !batch.isEmpty()) {
             try {
-                var work = queue.poll(batch.isEmpty() ? flushMillis : Math.max(0, flushMillis - (System.currentTimeMillis() - started)));
+                long elapsed = batch.isEmpty() ? 0 : java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+                var work = batch.isEmpty() ? queue.poll(flushMillis) : queue.pollForBatch(Math.max(0, flushMillis - elapsed));
                 if (work != null) {
-                    if (batch.isEmpty()) started = System.currentTimeMillis();
+                    if (batch.isEmpty()) started = System.nanoTime();
                     batch.add(work);
                     bytes += work.bytes();
                 }
                 if (!batch.isEmpty() && (batch.size() >= batchSize || bytes >= 4L * 1024 * 1024
-                        || System.currentTimeMillis() - started >= flushMillis || queue.exhausted())) {
+                        || java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) >= flushMillis
+                        || (work == null && queue.hasWaitingProducers()) || queue.exhausted())) {
                     List<LogEntry> rows = batch.stream().map(WeightedQueue.Work::value).toList();
                     // Retry this exact batch on disk failure; never release its reservations early.
                     String token = journal.newToken();
@@ -97,11 +100,12 @@ public final class PendingLogStorage implements LogStorage {
     private void sendJournal() {
         long retryMillis = 250;
         while (sending) {
+            long observed = wakeupVersion();
             BatchLogStorage current = delegate;
-            if (!initialized || current == null) { pause(250); continue; }
+            if (!initialized || current == null) { pauseIfUnchanged(250, observed); continue; }
             try {
                 List<Path> pending = journal.pending(64);
-                if (pending.isEmpty()) { pause(250); continue; }
+                if (pending.isEmpty()) { pauseIfUnchanged(250, observed); continue; }
                 for (Path file : pending) {
                     if (!sending) break;
                     List<LogEntry> rows = DiskLogJournal.read(file);
@@ -111,7 +115,7 @@ public final class PendingLogStorage implements LogStorage {
                 }
             } catch (Exception failure) {
                 AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Delivery delayed; journal retained for retry: {}", failure.toString());
-                pause(retryMillis);
+                retryPause(retryMillis);
                 retryMillis = Math.min(10_000, retryMillis * 2);
             }
         }
@@ -123,7 +127,26 @@ public final class PendingLogStorage implements LogStorage {
         journalFailure = failure;
     }
 
-    private void signal() { synchronized (wakeup) { wakeup.notifyAll(); } }
+    private void signal() { synchronized (wakeup) { wakeupVersion++; wakeup.notifyAll(); } }
+    private long wakeupVersion() { synchronized (wakeup) { return wakeupVersion; } }
+    private void pauseIfUnchanged(long millis, long observed) {
+        synchronized (wakeup) {
+            if (!sending || wakeupVersion != observed) return;
+            try { wakeup.wait(millis); } catch (InterruptedException ignored) {}
+        }
+    }
+    /** New journal batches must not turn an unavailable DB into a retry/log storm. */
+    private void retryPause(long millis) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(millis);
+        synchronized (wakeup) {
+            while (sending) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) return;
+                try { java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(wakeup, remaining); }
+                catch (InterruptedException ignored) {}
+            }
+        }
+    }
     private void pause(long millis) {
         synchronized (wakeup) {
             try { wakeup.wait(millis); } catch (InterruptedException ignored) {}
@@ -141,7 +164,7 @@ public final class PendingLogStorage implements LogStorage {
     @Override public boolean awaitVisible(long deadline) throws InterruptedException {
         if (!queue.awaitEmpty(deadline)) return false;
         while (System.nanoTime() < deadline) {
-            try { if (initialized && delegate != null && journal.pending(1).isEmpty()) return true; }
+            try { if (initialized && delegate != null && !journal.hasPending()) return true; }
             catch (java.io.IOException e) { throw new IllegalStateException("Журнал недоступен",e); }
             Thread.sleep(25);
         }

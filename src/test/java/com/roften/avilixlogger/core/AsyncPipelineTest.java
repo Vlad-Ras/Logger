@@ -21,6 +21,7 @@ public final class AsyncPipelineTest {
         HotPathMemoryTest.run();
         DiagnosticCountersTest.run();
         HotPathQueueStandaloneTest.run();
+        WeightedQueueBatchTest.run();
         com.roften.avilixlogger.compat.create.CreatePlayerProgressOrderTest.run();
         DetailFormattingTest.run();
         orderedHandoffAndBackpressure();
@@ -36,6 +37,7 @@ public final class AsyncPipelineTest {
         TickHotPathTest.run();
         CauseContextHotPathTest.run();
         JournalPipelineTest.run();
+        JournalPressureTest.run();
         preparedSnapshots();
         CartAuditTest.run();
         CreateLinkedTransferPlanTest.run();

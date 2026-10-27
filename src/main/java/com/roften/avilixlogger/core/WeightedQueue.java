@@ -17,6 +17,8 @@ final class WeightedQueue<T> {
     private long bytes;
     private int outstanding;
     private long waits;
+    private int waitingProducers;
+    private int batchWaiters;
     private boolean closed;
 
     WeightedQueue(int capacity, long maxBytes) {
@@ -29,11 +31,14 @@ final class WeightedQueue<T> {
         lock.lock();
         try {
             // A single unusually large snapshot must still be logged. It runs alone.
-            if (!closed && full(weight)) waits++;
             if (!closed && full(weight)) {
+                waits++;
+                waitingProducers++;
+                // Only a batching consumer can free its own held partial batch. Wake it now.
+                if (batchWaiters > 0) ready.signalAll();
                 long started = System.nanoTime();
                 try { while (!closed && full(weight)) space.awaitUninterruptibly(); }
-                finally { HotPathMetrics.waited(System.nanoTime()-started); }
+                finally { waitingProducers--; HotPathMetrics.waited(System.nanoTime()-started); }
             }
             if (closed) throw new IllegalStateException("Logger queue is closed");
             entries.addLast(new Work<>(value, weight));
@@ -48,10 +53,23 @@ final class WeightedQueue<T> {
     }
 
     Work<T> poll(long timeoutMillis) throws InterruptedException {
+        return poll(timeoutMillis, false);
+    }
+
+    /** Only for a consumer already holding a partial batch: null requests an early flush. */
+    Work<T> pollForBatch(long timeoutMillis) throws InterruptedException {
+        return poll(timeoutMillis, true);
+    }
+
+    private Work<T> poll(long timeoutMillis, boolean flushOnPressure) throws InterruptedException {
         long remaining = TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
         lock.lockInterruptibly();
         try {
-            while (entries.isEmpty() && !closed && remaining > 0) remaining = ready.awaitNanos(remaining);
+            while (entries.isEmpty() && !closed && remaining > 0 && (!flushOnPressure || waitingProducers == 0)) {
+                if (flushOnPressure) batchWaiters++;
+                try { remaining = ready.awaitNanos(remaining); }
+                finally { if (flushOnPressure) batchWaiters--; }
+            }
             return entries.pollFirst();
         } finally { lock.unlock(); }
     }
@@ -93,6 +111,11 @@ final class WeightedQueue<T> {
     long backpressureCount() {
         lock.lock();
         try { return waits; } finally { lock.unlock(); }
+    }
+
+    boolean hasWaitingProducers() {
+        lock.lock();
+        try { return waitingProducers > 0; } finally { lock.unlock(); }
     }
 
     /** Shutdown must not discard work merely because a caller was interrupted. */
