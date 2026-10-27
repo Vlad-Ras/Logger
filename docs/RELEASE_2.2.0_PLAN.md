@@ -1,5 +1,7 @@
 # Подготовка AvilixLogger 2.2.0
 
+27.10.2026: [AE2 — четыре режима кодирования шаблонов, поставщик block/part, буфер возврата и оба press slots](AE2_PATTERN_COMPATIBILITY_2.2.0.md). Полные физические предметы сохраняются в minimal detail mode; новый native пакет — 56 строк. Это выбранные контракты, без объявления готовности удалённого Pattern Access Terminal, autocrafting jobs, виртуального ME rollback или production AuthCore.
+
 27.10.2026: [расширен пакет AE2 device settings](AE2_DEVICE_SETTINGS_COMPATIBILITY_2.2.0.md): полные пары фильтров/улучшений/ячеек/настроек, native priority и long reporting threshold, девять устройств плюс priority submenu. Сохранены AuthCore, ограниченная очередь и обязательные details в minimal mode; production отправляет строки по одной. Общая приёмка AE2/модпака и A/B/A фермы остаются открытыми; релизный JAR не создавался.
 
 ## Приоритеты пользователя — 25.10.2026

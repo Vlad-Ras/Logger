@@ -1,5 +1,7 @@
 # AE2: полные изменения фильтров, улучшений, ячеек и настроек
 
+Следующий этап 27.10.2026: [настройки четырёх режимов Pattern Encoding Terminal, сохранение компонентов физических слотов в minimal mode, два варианта Pattern Provider и оба слота пресса](AE2_PATTERN_COMPATIBILITY_2.2.0.md). Дополнительный native пакет — 56 строк; удалённый Pattern Access Terminal остаётся отдельной задачей.
+
 27.10.2026. Проверенный код `ca0d64d35ff37f1d2d255f5909640ea65d778b5b`, tree `e136ce8d01a76fc9709c8a1cffe64c1ec25c1874`. Основа — `455dfafde8b94e7593b9e5e74df08f7ed186cd3e`; ветка — `work/2.2.0-ae2-device-settings-20261027`. [Границы меню](AE2_MENU_COMPATIBILITY_2.2.0.md) и [точные transfers](AE2_TRANSFER_COMPATIBILITY_2.2.0.md) сохранены. Релизный JAR не создавался.
 
 ## Исправления данных
