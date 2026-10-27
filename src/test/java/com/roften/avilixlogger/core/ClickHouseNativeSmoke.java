@@ -81,7 +81,7 @@ public final class ClickHouseNativeSmoke {
         conversion.playerInvBefore="{Items:[{Slot:0,id:'minecraft:stone',count:2}]}";conversion.playerInvAfter="{Items:[{Slot:0,id:'chipped:carved_stone',count:2}]}";
         var textEdit=SupplementariesTextAuditTest.record();
         var display=SupplementariesAutomationAuditTest.record();
-        var meTransfers=List.of(Ae2TransferDetailsTest.record("i",Long.MAX_VALUE), Ae2TransferDetailsTest.record("f",1234567890123L), Ae2TransferDetailsTest.record("g",918273645L), Ae2TransferDetailsTest.device());
+        var meTransfers=List.of(Ae2TransferDetailsTest.record("i",Long.MAX_VALUE), Ae2TransferDetailsTest.record("f",1234567890123L), Ae2TransferDetailsTest.record("g",918273645L), Ae2TransferDetailsTest.device(), Ae2TransferDetailsTest.remote());
         for(var transfer:meTransfers)transfer.materializeSnapshots();
         var meConfigurations=List.of(Ae2ConfigurationDetailsTest.record(ActionType.ME_FILTER_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_UPGRADE_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_CELL_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_SETTING_CHANGE));
         for(var change:meConfigurations)change.materializeSnapshots();
@@ -163,6 +163,7 @@ public final class ClickHouseNativeSmoke {
             var details=db.query(q);check(details.size()==1,"ME transfer missing/duplicated by exact ID");var read=details.getFirst();
             check(expected.beAfter.equals(read.beAfter)&&java.util.Objects.equals(expected.itemStackNbt,read.itemStackNbt)&&expected.extra.equals(read.extra)
                     &&Ae2TransferDetails.context(read)!=null&&Ae2TransferDetails.summary(read).amount()==Ae2TransferDetails.summary(expected).amount()
+                    &&java.util.Objects.equals(expected.actorUuid,read.actorUuid)&&java.util.Objects.equals(expected.actorName,read.actorName)
                     &&expected.source.equals(read.source)&&expected.dim.equals(read.dim)&&expected.x==read.x&&expected.y==read.y&&expected.z==read.z,"ME full resource key/long/source/address lost in minimal details");
             q.requireDetails=false;var feed=db.query(q);check(feed.size()==1&&Ae2TransferDetails.summary(feed.getFirst())!=null
                     &&Ae2TransferDetails.summary(feed.getFirst()).equals(Ae2TransferDetails.summary(expected)),"ME feed lost exact type/resource/long amount");
@@ -171,6 +172,8 @@ public final class ClickHouseNativeSmoke {
         System.out.println("AE2_TRANSFER_CLICKHOUSE_OK: minimal-mode exact full key/components, long amount, typed feed, source/address and ID survive database reopen");
         check(rows.stream().anyMatch(r -> Ae2TransferDetails.context(r).getString("Domain").equals("device-slot")), "physical slot fixture missing");
         System.out.println("AE2_DEVICE_CLICKHOUSE_OK: physical slot components/domain/count, exact ID, source/address and feed survive minimal mode and reopened connection");
+        check(rows.stream().anyMatch(r -> r.source.startsWith("ae2:PatternAccessTermMenu:terminal=")), "remote fixture missing");
+        System.out.println("AE2_REMOTE_CLICKHOUSE_OK: full pattern/components/delta, actor, provider coordinates, original terminal/source/slot and exact ID/feed survive minimal mode and reopened connection");
     }
     private static void verifyMeConfigurations(ClickHouseLogStorage db,List<LogEntry> rows)throws Exception{
         if(rows.getFirst().id==0)db.appendBatch("native-me-config-"+UUID.randomUUID(),rows);

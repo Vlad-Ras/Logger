@@ -11,7 +11,9 @@
     "ConfigButtonPacketMixin",
     "SetStockAmountMenuMixin",
     "PriorityMenuMixin",
-    "StorageLevelEmitterMenuMixin"
+    "StorageLevelEmitterMenuMixin",
+    "PatternTrackerAccess",
+    "PatternAccessTermMenuMixin"
   ],
   "client": [],
   "injectors": { "defaultRequire": 0 }

@@ -9,17 +9,19 @@ import java.util.*;
 final class Ae2ContractsTest {
     static void run() throws Exception {
         Ae2MixinPlugin.verify(Ae2ContractsTest::read);
-        var faults = Map.of(
-                "appeng/menu/AEBaseMenu", "receiveClientAction",
-                "appeng/core/network/serverbound/ConfigButtonPacket", "handleOnServer",
-                "appeng/menu/implementations/SetStockAmountMenu", "confirm",
-                "appeng/api/storage/StorageHelper", "poweredInsert",
-                "appeng/me/storage/NetworkStorage", "insert",
-                "appeng/menu/implementations/PriorityMenu", "setPriority",
-                "appeng/menu/implementations/StorageLevelEmitterMenu", "setValue",
-                "appeng/parts/encoding/PatternEncodingLogic", "getMode",
-                "appeng/helpers/IPatternTerminalMenuHost", "getLogic");
-        for (var fault : faults.entrySet()) {
+        var faults = List.of(
+                Map.entry("appeng/menu/AEBaseMenu", "receiveClientAction"),
+                Map.entry("appeng/core/network/serverbound/ConfigButtonPacket", "handleOnServer"),
+                Map.entry("appeng/menu/implementations/SetStockAmountMenu", "confirm"),
+                Map.entry("appeng/api/storage/StorageHelper", "poweredInsert"),
+                Map.entry("appeng/me/storage/NetworkStorage", "insert"),
+                Map.entry("appeng/menu/implementations/PriorityMenu", "setPriority"),
+                Map.entry("appeng/menu/implementations/StorageLevelEmitterMenu", "setValue"),
+                Map.entry("appeng/parts/encoding/PatternEncodingLogic", "getMode"),
+                Map.entry("appeng/helpers/IPatternTerminalMenuHost", "getLogic"),
+                Map.entry("appeng/menu/implementations/PatternAccessTermMenu", "doAction"),
+                Map.entry("appeng/menu/implementations/PatternAccessTermMenu", "quickMovePattern"));
+        for (var fault : faults) {
             boolean refused = false;
             try {
                 Ae2MixinPlugin.verify(name -> {
@@ -40,7 +42,30 @@ final class Ae2ContractsTest {
             });
         } catch (IllegalStateException expected) { refused = true; }
         if (!refused) throw new AssertionError("AE2 preflight accepted missing stock host");
-        System.out.println("AE2_CONTRACTS_OK: seven optional hooks, pattern logic API and missing methods/stock field refusal, raw bytecode only");
+        for (String field : List.of("container", "serverId", "server")) {
+            refused = false;
+            try { Ae2MixinPlugin.verify(name -> {
+                var node = read(name);
+                if (name.equals("appeng/menu/implementations/PatternAccessTermMenu$ContainerTracker")) node.fields.removeIf(f -> f.name.equals(field));
+                return node;
+            }); } catch (IllegalStateException expected) { refused = true; }
+            if (!refused) throw new AssertionError("AE2 preflight accepted missing tracker " + field);
+        }
+        for (String method : List.of("doAction", "quickMovePattern")) {
+            refused = false;
+            try { Ae2MixinPlugin.verify(name -> {
+                var node = read(name);
+                if (name.equals("appeng/menu/implementations/PatternAccessTermMenu")) {
+                    var body = node.methods.stream().filter(m -> m.name.equals(method)).findFirst().orElseThrow();
+                    for (var instruction : body.instructions) if (instruction instanceof org.objectweb.asm.tree.FieldInsnNode field && field.name.equals("server")) {
+                        body.instructions.remove(instruction); break;
+                    }
+                }
+                return node;
+            }); } catch (IllegalStateException expected) { refused = true; }
+            if (!refused) throw new AssertionError("AE2 preflight accepted changed remote inventory reads " + method);
+        }
+        System.out.println("AE2_CONTRACTS_OK: nine optional hooks, pattern logic/remote inventory API and missing methods/stock field refusal, raw bytecode only");
     }
 
     private static ClassNode read(String name) throws Exception {

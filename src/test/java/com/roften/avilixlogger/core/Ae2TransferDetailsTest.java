@@ -14,6 +14,10 @@ final class Ae2TransferDetailsTest {
         var components = new CompoundTag(); components.putString("test:data", "native pattern " + "x".repeat(3000)); item.put("components", components);
         Ae2TransferDetails.device(row, "ae2:processing_pattern", 3, item); row.count = 3; return row;
     }
+    static LogEntry remote() {
+        var row = device(); row.source = "ae2:PatternAccessTermMenu:terminal=minecraft:overworld@180,100,180:provider=-9223372036854775807:ENCODED_PATTERN:slot=7";
+        row.actorUuid = UUID.randomUUID(); row.actorName = "RemotePatternOwner"; return row;
+    }
     static LogEntry record(String kind, long amount) {
         var row = AsyncPipelineTest.row("ae2-transfer-test");
         row.type = ActionType.ME_PUT; row.source = "ae2:InterfaceBlockEntity"; row.dim = "minecraft:overworld";
@@ -80,8 +84,15 @@ final class Ae2TransferDetailsTest {
             check(fromDisk.id == replay.id && fromDisk.beAfter.equals(replay.beAfter) && Ae2TransferDetails.summary(fromDisk).amount() == Long.MAX_VALUE, "disk journal changed ME key/quantity/ID");
             LogIdGenerator.ensure(device); var deviceDisk = DiskLogJournal.read(journal.write(journal.newToken(), List.of(device))).getFirst();
             check(deviceDisk.id == device.id && deviceDisk.itemStackNbt.equals(device.itemStackNbt) && Ae2TransferDetails.context(deviceDisk).getString("Domain").equals("device-slot"), "journal lost physical slot components/domain");
+            var remote = remote(); remote.materializeSnapshots(); LogIdGenerator.ensure(remote);
+            var remoteReplay = GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(remote), LogEntry.class);
+            var remoteDisk = DiskLogJournal.read(journal.write(journal.newToken(), List.of(remoteReplay))).getFirst();
+            check(remoteDisk.id == remote.id && remoteDisk.source.equals(remote.source) && remoteDisk.actorUuid.equals(remote.actorUuid)
+                    && remoteDisk.actorName.equals(remote.actorName) && remoteDisk.itemStackNbt.equals(remote.itemStackNbt) && remoteDisk.beAfter.equals(remote.beAfter)
+                    && remoteDisk.x == remote.x && remoteDisk.y == remote.y && remoteDisk.z == remote.z, "journal lost remote provider/terminal/slot/actor/components");
         } finally { try (var files = java.nio.file.Files.walk(directory)) { for (var path : files.sorted(Comparator.reverseOrder()).toList()) java.nio.file.Files.delete(path); } }
         System.out.println("AE2_TRANSFER_EVIDENCE_OK: exact long, item/fluid/generic units, legacy/malformed refusal, bounded weight, worker-only SNBT and full key replay");
         System.out.println("AE2_DEVICE_EVIDENCE_OK: exact physical slot delta/components/domain and journal ID replay; no network transfer claimed");
+        System.out.println("AE2_REMOTE_EVIDENCE_OK: original terminal, provider coordinates, remote slot/ID, actor and full pattern survive Gzip and disk journal");
     }
 }

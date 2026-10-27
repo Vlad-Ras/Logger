@@ -239,6 +239,19 @@ public final class Ae2Audit {
     }
 
     private record MenuTarget(ServerLevel level, BlockPos pos) {}
+    public static String menuAddress(AEBaseMenu menu) {
+        if (!onServerThread(menu)) return null;
+        var target = menuTarget(menu, (ServerPlayer)menu.getPlayer());
+        return target == null ? null : target.level().dimension().location() + "@" + target.pos().getX() + ',' + target.pos().getY() + ',' + target.pos().getZ();
+    }
+
+    /** The inspector collector never appends; production must still pass enabled(). */
+    public static void remoteChange(ServerPlayer player, BlockEntity host, String source, ItemStack before, ItemStack after,
+                                     java.util.List<LogEntry> collector) {
+        if (player == null || !(host.getLevel() instanceof ServerLevel level) || level.getServer() != player.server
+                || !level.getServer().isSameThread() || collector == null && !enabled() || ItemStack.matches(before, after)) return;
+        physicalChange(new MenuTarget(level, host.getBlockPos()), player, source, before, after, collector);
+    }
     private static MenuTarget menuTarget(AEBaseMenu menu, ServerPlayer player) {
         Object host = menu.getTarget();
         BlockEntity be = host instanceof BlockEntity block ? block : host instanceof AEBasePart part ? part.getBlockEntity() : null;

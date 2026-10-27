@@ -15,7 +15,8 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
     public static void verify(CreateMixinPlugin.Classes classes) throws Exception {
         var checker = new CreateMixinPlugin.Preflight(classes);
         for (String name : List.of("NetworkStorageMixin", "StorageHelperMixin", "AEBaseMenuMixin",
-                "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin"))
+                "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin",
+                "PatternTrackerAccess", "PatternAccessTermMenuMixin"))
             checker.check("com/roften/avilixlogger/compat/ae2/mixin/" + name);
         var logic = classes.read("appeng/parts/encoding/PatternEncodingLogic");
         for (String contract : List.of("getMode()Lappeng/parts/encoding/EncodingMode;", "isSubstitution()Z", "isFluidSubstitution()Z",
@@ -25,6 +26,17 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         var host = classes.read("appeng/helpers/IPatternTerminalMenuHost");
         if (host.methods.stream().noneMatch(m -> m.name.equals("getLogic") && m.desc.equals("()Lappeng/parts/encoding/PatternEncodingLogic;")))
             throw new IllegalStateException("Missing AE2 pattern menu host logic");
+        var remote = classes.read("appeng/menu/implementations/PatternAccessTermMenu");
+        for (String method : List.of("doAction", "quickMovePattern")) {
+            var body = remote.methods.stream().filter(m -> m.name.equals(method)).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("Missing declared remote override " + method));
+            int reads = 0;
+            for (var instruction : body.instructions) if (instruction instanceof org.objectweb.asm.tree.FieldInsnNode field
+                    && field.getOpcode() == org.objectweb.asm.Opcodes.GETFIELD
+                    && field.owner.equals("appeng/menu/implementations/PatternAccessTermMenu$ContainerTracker")
+                    && field.name.equals("server") && field.desc.equals("Lappeng/api/inventories/InternalInventory;")) reads++;
+            if (reads != (method.equals("doAction") ? 5 : 1)) throw new IllegalStateException("Unsupported remote inventory reads: " + method + '/' + reads);
+        }
     }
 
     public void onLoad(String pkg) {
