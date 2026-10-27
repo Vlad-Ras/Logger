@@ -17,11 +17,12 @@ import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import java.lang.invoke.*;
 import java.lang.reflect.Proxy;
 import java.util.*;
-import static com.roften.avilixlogger.smoke.ScgunsNativeSmoke.check;
+
 
 /** Supplied JARs only, isolated world, real callbacks and async filtering; no production authorization bypass. */
 @EventBusSubscriber(modid="avilixlogger")
 public final class SupplementariesTextSmoke {
+    private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
     private static final org.slf4j.Logger LOG=org.slf4j.LoggerFactory.getLogger("AvilixLogger/SupplementariesSmoke");
     @SubscribeEvent public static void started(ServerStartedEvent event){
         if(!Boolean.getBoolean("avilixlogger.supplementariesSmoke"))return;
@@ -88,7 +89,7 @@ public final class SupplementariesTextSmoke {
             }finally{CartRestoreLocks.clear();CartAuditContext.rollbackActive=false;level.removePlayerImmediately(player,net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);level.removeBlock(pos,false);}
         }
         var missing=new BlockPos(10_000_000,100,10_000_000);check(!level.hasChunkAt(missing),"unloaded test target already loaded");var player=player(level,"UnloadedTextEditor");callback(packet(packetType,missing,new String[][]{{"unloaded"}}),player,List.of(List.of(FilteredText.passThrough("unloaded"))));check(!level.hasChunkAt(missing),"text packet force-loaded a chunk");
-        if(CreateSupport.available())SupplementariesDisplaySmoke.run(level);else LOG.info("SUPPLEMENTARIES_WITHOUT_CREATE_NATIVE_OK: native packet providers and holder comparator remain available without optional display classes");faults();check(tested==3,"not all native text providers checked");LOG.info("SUPPLEMENTARIES_TEXT_NATIVE_OK: three actual providers, unloaded target refusal, both optional hooks and injected contract faults");
+        if(CreateSupport.available())Class.forName("com.roften.avilixlogger.smoke.SupplementariesDisplaySmoke").getMethod("run",ServerLevel.class).invoke(null,level);else LOG.info("SUPPLEMENTARIES_WITHOUT_CREATE_NATIVE_OK: native packet providers and holder comparator remain available without optional display classes");faults();check(tested==3,"not all native text providers checked");LOG.info("SUPPLEMENTARIES_TEXT_NATIVE_OK: three actual providers, unloaded target refusal, both optional hooks and injected contract faults");
     }
     private static void faults()throws Exception{
         for(String mixin:List.of("TextPacketMixin","TextHolderMixin")){boolean rejected=false;try{new com.roften.avilixlogger.compat.create.mixin.CreateMixinPlugin.Preflight(name->{try(var in=Objects.requireNonNull(SupplementariesTextSmoke.class.getClassLoader().getResourceAsStream(name+".class"))){var node=new org.objectweb.asm.tree.ClassNode();new org.objectweb.asm.ClassReader(in).accept(node,org.objectweb.asm.ClassReader.SKIP_FRAMES);if(name.endsWith("ServerBoundSetTextHolderPacket"))node.methods.removeIf(m->m.name.equals("updateSignText"));if(name.endsWith("/TextHolder"))node.methods.removeIf(m->m.name.equals("acceptClientMessages"));return node;}}).check("com/roften/avilixlogger/compat/supplementaries/mixin/"+mixin);}catch(Exception expected){rejected=true;}check(rejected,"preflight accepted broken "+mixin);}
