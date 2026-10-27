@@ -4,7 +4,7 @@
   "package": "com.roften.avilixlogger.compat.supplementaries.mixin",
   "plugin": "com.roften.avilixlogger.compat.supplementaries.mixin.SupplementariesMixinPlugin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": ["TextPacketMixin", "TextHolderMixin"],
+  "mixins": ["TextPacketMixin", "TextHolderMixin", "DisplayTextMixin", "DisplayBookMixin"],
   "client": [],
   "injectors": {"defaultRequire": 1}
 }

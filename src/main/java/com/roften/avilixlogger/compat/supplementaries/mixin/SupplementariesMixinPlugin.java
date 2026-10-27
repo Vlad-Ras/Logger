@@ -10,7 +10,7 @@ import java.util.*;
 
 /** Verify the pinned native contract without loading or initializing the target. */
 public final class SupplementariesMixinPlugin implements IMixinConfigPlugin {
-    private boolean available;
+    private boolean available,automation;
     public void onLoad(String pkg) {
         var list=LoadingModList.get();var file=list==null?null:list.getModFileById("supplementaries");
         if(file==null)return;
@@ -24,12 +24,21 @@ public final class SupplementariesMixinPlugin implements IMixinConfigPlugin {
             });
             for(String name:List.of("TextPacketMixin","TextHolderMixin"))checker.check(pkg.replace('.','/')+'/'+name);
             available=true;
+            var create=list.getModFileById("create");
+            if(create!=null&&create.getMods().stream().anyMatch(m->m.getModId().equals("create")&&m.getVersion().toString().equals("6.0.10"))){
+                try{
+                    for(String name:List.of("DisplayTextMixin","DisplayBookMixin"))checker.check(pkg.replace('.','/')+'/'+name);
+                    automation=true;
+                }catch(Exception|LinkageError failure){
+                    org.slf4j.LoggerFactory.getLogger("AvilixLogger/Supplementaries").warn("Supplementaries display audit integration disabled: {}",failure.toString());
+                }
+            }
         } catch(Exception|LinkageError failure) {
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/Supplementaries").warn("Supplementaries audit integration disabled: {}",failure.toString());
         }
     }
     public String getRefMapperConfig(){return null;}
-    public boolean shouldApplyMixin(String target,String mixin){return available;}
+    public boolean shouldApplyMixin(String target,String mixin){return mixin.endsWith("DisplayTextMixin")||mixin.endsWith("DisplayBookMixin")?available&&automation:available;}
     public void acceptTargets(Set<String> mine,Set<String> other){}
     public List<String> getMixins(){return null;}
     public void preApply(String target,ClassNode node,String mixin,IMixinInfo info){}
