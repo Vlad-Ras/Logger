@@ -70,10 +70,13 @@ public final class SupplementariesTextAudit {
         row.deferBlockBefore(state);row.deferBlockAfter(state);row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);return row;
     }
     public static List<Component> describe(ServerLevel level,LogEntry row){
-        if(row.type!=ActionType.BLOCK_ENTITY_NBT_CHANGE||!"mod:supplementaries:text_edit".equals(row.source)||row.beBefore==null||row.beAfter==null||row.beBefore.length()>1_048_576||row.beAfter.length()>1_048_576)return List.of();
-        var before=holders(NbtSerde.fromSnbt(row.beBefore));var after=holders(NbtSerde.fromSnbt(row.beAfter));if(before.isEmpty()||!before.keySet().equals(after.keySet()))return List.of();var out=new ArrayList<Component>();
-        for(String key:before.keySet()){out.add(Component.literal("Текст Supplementaries: "+key));lines(out,level,"До",before.get(key).get("message"));lines(out,level,"После",after.get(key).get("message"));
+        boolean display=SupplementariesAutomationAudit.SOURCE.equals(row.source);
+        if(row.type!=ActionType.BLOCK_ENTITY_NBT_CHANGE||(!"mod:supplementaries:text_edit".equals(row.source)&&!display)||row.beBefore==null||row.beAfter==null||row.beBefore.length()>1_048_576||row.beAfter.length()>1_048_576)return List.of();
+        var beforeTag=NbtSerde.fromSnbt(row.beBefore);var afterTag=NbtSerde.fromSnbt(row.beAfter);
+        var before=holders(beforeTag);var after=holders(afterTag);var out=new ArrayList<Component>();
+        if(before.keySet().equals(after.keySet()))for(String key:before.keySet()){out.add(Component.literal("Текст Supplementaries: "+key));lines(out,level,"До",before.get(key).get("message"));lines(out,level,"После",after.get(key).get("message"));
             if(!Objects.equals(filtered(before.get(key)),filtered(after.get(key)))){lines(out,level,"До (фильтр)",filtered(before.get(key)));lines(out,level,"После (фильтр)",filtered(after.get(key)));}}
+        if(display)SupplementariesDisplayDetails.append(out,level,beforeTag,afterTag);
         return List.copyOf(out);
     }
     private static void lines(List<Component> out,ServerLevel level,String label,Tag raw){

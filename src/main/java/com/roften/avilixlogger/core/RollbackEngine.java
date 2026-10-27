@@ -193,12 +193,15 @@ public final class RollbackEngine {
     public static RollbackReport applyPreparedBlockBatch(ServerLevel level, List<PreparedBlockSnapshot> blocks) {
         RollbackReport report = new RollbackReport();
         if (level == null || blocks == null || blocks.isEmpty()) return report;
+        if (!level.getServer().isSameThread()) { report.onSkipped("wrong_thread"); return report; }
         java.util.LinkedHashMap<BlockPos, BlockSnapshot> snapshots = new java.util.LinkedHashMap<>();
         for (PreparedBlockSnapshot block : blocks) {
             if (block == null) continue;
             snapshots.put(block.pos(), new BlockSnapshot(block));
         }
-        applyConsolidatedBlocks(level, snapshots, report, true);
+        boolean restoring = CartAuditContext.restoring(true);
+        try { applyConsolidatedBlocks(level, snapshots, report, true); }
+        finally { CartAuditContext.restoring(restoring); }
         return report;
     }
 
@@ -206,7 +209,10 @@ public final class RollbackEngine {
     public static RollbackReport applyPreparedEntry(ServerLevel level, LogEntry entry) {
         RollbackReport report = new RollbackReport();
         if (level == null || entry == null) return report;
-        applyRollback(level, entry, report, true);
+        if (!level.getServer().isSameThread()) { report.onSkipped("wrong_thread"); return report; }
+        boolean restoring = CartAuditContext.restoring(true);
+        try { applyRollback(level, entry, report, true); }
+        finally { CartAuditContext.restoring(restoring); }
         return report;
     }
 
@@ -367,6 +373,17 @@ public final class RollbackEngine {
             if (snap.beBeforeSnbt != null && snap.beTag == null) {
                 report.onSkipped("invalid_block_entity_nbt");
                 continue;
+            }
+            // Refuse mismatched history before setBlock can remove a live inventory or emit drops.
+            if (snap.beTag != null) {
+                BlockState targetState = state == null ? level.getBlockState(pos) : state;
+                boolean valid = targetState.hasBlockEntity();
+                if (valid && snap.beTag.contains("id")) {
+                    var id = net.minecraft.resources.ResourceLocation.tryParse(snap.beTag.getString("id"));
+                    var type = id == null ? null : net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getOptional(id).orElse(null);
+                    valid = type != null && type.isValid(targetState);
+                }
+                if (!valid) { report.onSkipped("block_entity_type_mismatch"); continue; }
             }
             if (snap.containerSlotsBeforeSnbt != null && !ContainerSlotSnapshot.isValid(snap.slotsTag)) {
                 report.onSkipped("invalid_container_snapshot");

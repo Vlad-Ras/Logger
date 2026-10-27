@@ -16,6 +16,7 @@ public final class AsyncPipelineTest {
         BlockPackGiftAuditTest.run();
         ItemTransactionAuditTest.run();
         SupplementariesTextAuditTest.run();
+        SupplementariesAutomationAuditTest.run();
         HotPathMemoryTest.run();
         DiagnosticCountersTest.run();
         HotPathQueueStandaloneTest.run();

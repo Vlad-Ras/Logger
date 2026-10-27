@@ -9,6 +9,7 @@
     "ServerCommandListenerMixin",
     "ServerPlayerGameModeCauseMixin",
     "BlockEntityTickSourceMixin",
+    "BlockEntityPersistentDataMixin",
     "EntityTickSourceMixin",
     "SimulationSourceMixin",
     "LiquidReactionSourceMixin",

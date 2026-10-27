@@ -74,15 +74,16 @@ public final class SupplementariesAutomationAudit {
         }
         public void finish(boolean completed){
             if(closed)return;
+            boolean released=false;
             try{
                 if(before==null||!SupplementariesTextAudit.enabled()||!(target.getLevel() instanceof ServerLevel level))return;
                 var pos=target.getBlockPos();
                 if(!WorldSnapshotAccess.readable(level,pos)||level.getBlockEntity(pos)!=target){AdaptiveLogDiagnostics.adapterFailure("supplementaries-display-replaced");return;}
                 var after=NbtSerde.snapshotBlockEntity(level,target);
                 var row=row(level.dimension().location().toString(),pos,mechanism,state,target.getBlockState(),before,after,completed);
-                close();if(row!=null)LoggerRuntime.storage(level).append(row);
+                close();released=true;if(row!=null)LoggerRuntime.storage(level).append(row);
             }catch(RuntimeException|LinkageError failure){AdaptiveLogDiagnostics.adapterFailure("supplementaries-display-after");}
-            finally{close();}
+            finally{if(!released)close();}
         }
         public void close(){
             if(closed)return;closed=true;

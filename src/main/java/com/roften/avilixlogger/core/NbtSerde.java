@@ -129,6 +129,10 @@ public final class NbtSerde {
         tag.putInt("y", pos.getY());
         tag.putInt("z", pos.getZ());
 
+        // NeoForge loadAdditional merges this optional field: absence leaves current data intact.
+        // A full historical snapshot must remove later display reservations/persistent mod data.
+        if (!tag.contains("NeoForgeData", Tag.TAG_COMPOUND) && be instanceof BlockEntityPersistentDataAccess access)
+            access.avilixlogger$restorePersistentData(null);
         if (!invokeBlockEntityLoad(level, be, tag)) return false;
         be.setChanged();
         BlockState state = level.getBlockState(pos);

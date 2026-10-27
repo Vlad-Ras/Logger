@@ -29,7 +29,7 @@ public final class SupplementariesTextSmoke {
         catch(Throwable failure){LOG.error("SUPPLEMENTARIES_NATIVE_FAILED",failure);}
         finally{event.getServer().halt(false);}
     }
-    private static ServerPlayer player(ServerLevel level,String name){
+    static ServerPlayer player(ServerLevel level,String name){
         var profile=new com.mojang.authlib.GameProfile(UUID.randomUUID(),name);var player=new ServerPlayer(level.getServer(),level,profile,ClientInformation.createDefault());
         player.connection=new net.minecraft.server.network.ServerGamePacketListenerImpl(level.getServer(),new net.minecraft.network.Connection(net.minecraft.network.protocol.PacketFlow.SERVERBOUND),player,net.minecraft.server.network.CommonListenerCookie.createInitial(profile,false)){
             // An in-memory connected transport keeps the native text filter alive; no AuthCore or permission change.
@@ -38,7 +38,7 @@ public final class SupplementariesTextSmoke {
             @Override public void send(net.minecraft.network.protocol.Packet<?> packet,net.minecraft.network.PacketSendListener callback){}
         };return player;
     }
-    private static Object call(Object receiver,String method,Class<?> returns,Class<?>[] parameters,Object...args)throws Throwable{
+    static Object call(Object receiver,String method,Class<?> returns,Class<?>[] parameters,Object...args)throws Throwable{
         // Looking up all TextHolder methods would resolve client-only renderer signatures on a dedicated server.
         var handle=MethodHandles.publicLookup().findVirtual(receiver.getClass(),method,MethodType.methodType(returns,parameters));var all=new ArrayList<Object>();all.add(receiver);all.addAll(Arrays.asList(args));return handle.invokeWithArguments(all);
     }
@@ -88,7 +88,7 @@ public final class SupplementariesTextSmoke {
             }finally{CartRestoreLocks.clear();CartAuditContext.rollbackActive=false;level.removePlayerImmediately(player,net.minecraft.world.entity.Entity.RemovalReason.DISCARDED);level.removeBlock(pos,false);}
         }
         var missing=new BlockPos(10_000_000,100,10_000_000);check(!level.hasChunkAt(missing),"unloaded test target already loaded");var player=player(level,"UnloadedTextEditor");callback(packet(packetType,missing,new String[][]{{"unloaded"}}),player,List.of(List.of(FilteredText.passThrough("unloaded"))));check(!level.hasChunkAt(missing),"text packet force-loaded a chunk");
-        faults();check(tested==3,"not all native text providers checked");LOG.info("SUPPLEMENTARIES_TEXT_NATIVE_OK: three actual providers, unloaded target refusal, both optional hooks and injected contract faults");
+        SupplementariesDisplaySmoke.run(level);faults();check(tested==3,"not all native text providers checked");LOG.info("SUPPLEMENTARIES_TEXT_NATIVE_OK: three actual providers, unloaded target refusal, both optional hooks and injected contract faults");
     }
     private static void faults()throws Exception{
         for(String mixin:List.of("TextPacketMixin","TextHolderMixin")){boolean rejected=false;try{new com.roften.avilixlogger.compat.create.mixin.CreateMixinPlugin.Preflight(name->{try(var in=Objects.requireNonNull(SupplementariesTextSmoke.class.getClassLoader().getResourceAsStream(name+".class"))){var node=new org.objectweb.asm.tree.ClassNode();new org.objectweb.asm.ClassReader(in).accept(node,org.objectweb.asm.ClassReader.SKIP_FRAMES);if(name.endsWith("ServerBoundSetTextHolderPacket"))node.methods.removeIf(m->m.name.equals("updateSignText"));if(name.endsWith("/TextHolder"))node.methods.removeIf(m->m.name.equals("acceptClientMessages"));return node;}}).check("com/roften/avilixlogger/compat/supplementaries/mixin/"+mixin);}catch(Exception expected){rejected=true;}check(rejected,"preflight accepted broken "+mixin);}
