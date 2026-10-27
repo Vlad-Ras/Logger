@@ -56,3 +56,8 @@ Curios 9.5.1+1.21.1, upstream commit `6b122c8a7e2b514fd94197459ade11f19a0bfb09`:
 Следующий укрупнённый этап 27.10.2026: [автоматизация текста/книг Supplementaries от Create, реальное меню доски с книгами и картой, полное ядро отката и таблички Amendments](SUPPLEMENTARIES_DISPLAY_COMPATIBILITY.md). Найдены и исправлены сохранение поздних NeoForgeData при загрузке старого снимка, отсутствие restoring scope у общего ядра и поздний отказ неверного BE type. Проверка native/kernel не подменяет production AuthCore/ClickHouse/GUI приёмку.
 
 27.10.2026: [фоновая отбраковка detached NBT для sign/Supplementaries и MenuAction](ASYNC_SNAPSHOT_DELTAS_2.2.0.md) сохраняет payload/атрибуцию и прежние правила no-op, не меняет AuthCore/категории и не добавляет тиков. Подтверждение направления совместимости и performance всего модпака по-прежнему требует отдельной приёмки.
+
+
+## Дополнение: насыщение journal queue, 27.10.2026
+
+[Исправлены удержание неполной пачки до таймера, отмена retry backoff обычными уведомлениями и lost wakeup sender](JOURNAL_PRESSURE_2.2.0.md). Проверка видимости больше не выбирает старейший файл из всего backlog. Подтверждены disk/replay, настоящая ClickHouse, четыре CI-профиля и GUI. Ограничения памяти и durable acknowledgement сохранены; длительная ресурсная перегрузка и production приёмка остаются открытыми.

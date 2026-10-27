@@ -641,3 +641,8 @@ Native загрузка кинетического BE выполняется с 
 Это не закрывает весь модпак: остальные выбранные механики, production AuthCore/ClickHouse/GUI/rollback job, native manual stop Scguns 1.5, queue backpressure и реальные A/B/A heap/MSPT замеры остаются в приёмке. Релизный JAR 2.2.0 не создавался.
 
 27.10.2026: [убраны синхронные сравнения уже отделённых NBT из sign/Supplementaries capture и MenuAction](ASYNC_SNAPSHOT_DELTAS_2.2.0.md). Очередь остаётся ограниченной, no-op учитывается до окончания фоновой проверки; redesign backpressure и измерения всей фермы/модпака не закрыты.
+
+
+## Дополнение: насыщение journal queue, 27.10.2026
+
+[Исправлены удержание неполной пачки до таймера, отмена retry backoff обычными уведомлениями и lost wakeup sender](JOURNAL_PRESSURE_2.2.0.md). Проверка видимости больше не выбирает старейший файл из всего backlog. Подтверждены disk/replay, настоящая ClickHouse, четыре CI-профиля и GUI. Ограничения памяти и durable acknowledgement сохранены; длительная ресурсная перегрузка и production приёмка остаются открытыми.
