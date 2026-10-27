@@ -51,7 +51,7 @@ base {
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
 sourceSets.create("createSmoke")
-if (project.hasProperty('ae2Smoke')) sourceSets.createSmoke.java.include('**/Ae2NativeSmoke.java')
+if (project.hasProperty('ae2Smoke')) sourceSets.createSmoke.java.include('**/Ae2NativeSmoke.java', '**/Ae2TransferNativeSmoke.java')
 if (project.hasProperty('ae2Absent')) sourceSets.createSmoke.java.include('**/Ae2AbsentSmoke.java')
 if (project.hasProperty('createAbsent')) sourceSets.createSmoke.java.include('**/CreateAbsentSmoke.java')
 if (project.hasProperty('supplementariesCreateAbsent')) sourceSets.createSmoke.java.include('**/SupplementariesTextSmoke.java', '**/AuditDetailsSmoke.java', '**/SnapshotDeltaNativeSmoke.java')

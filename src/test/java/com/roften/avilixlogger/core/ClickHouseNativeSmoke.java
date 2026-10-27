@@ -81,6 +81,8 @@ public final class ClickHouseNativeSmoke {
         conversion.playerInvBefore="{Items:[{Slot:0,id:'minecraft:stone',count:2}]}";conversion.playerInvAfter="{Items:[{Slot:0,id:'chipped:carved_stone',count:2}]}";
         var textEdit=SupplementariesTextAuditTest.record();
         var display=SupplementariesAutomationAuditTest.record();
+        var meTransfers=List.of(Ae2TransferDetailsTest.record("i",Long.MAX_VALUE), Ae2TransferDetailsTest.record("f",1234567890123L), Ae2TransferDetailsTest.record("g",918273645L));
+        for(var transfer:meTransfers)transfer.materializeSnapshots();
         List<LogEntry> pressureRows=List.of();
         ClickHouseLogStorage db = null;
         try {
@@ -95,7 +97,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
-            verifyWeapons(db,weapons);
+            verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers);
             pressureRows=journalPressure(db);verifyJournalPressure(db,pressureRows);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
@@ -120,7 +122,7 @@ public final class ClickHouseNativeSmoke {
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
-            verifyJournalPressure(db,pressureRows);
+            verifyJournalPressure(db,pressureRows); verifyMeTransfers(db,meTransfers);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
@@ -151,6 +153,20 @@ public final class ClickHouseNativeSmoke {
             check(read.size()==1&&read.getFirst().id==expected.id&&expected.beBefore.equals(read.getFirst().beBefore)&&expected.beAfter.equals(read.getFirst().beAfter)&&expected.extra.equals(read.getFirst().extra)&&read.getFirst().actorUuid==null&&expected.actorName.equals(read.getFirst().actorName)&&expected.source.equals(read.getFirst().source)&&expected.dim.equals(read.getFirst().dim)&&expected.x==read.getFirst().x&&expected.y==read.getFirst().y&&expected.z==read.getFirst().z&&expected.blockBefore.equals(read.getFirst().blockBefore)&&expected.blockAfter.equals(read.getFirst().blockAfter),"real journal pressure/replay lost or duplicated payload/attribution by exact ID");
             q.requireDetails=false;check(db.query(q).size()==1,"real journal replay duplicated/lost exact ID in GUI feed");}
         System.out.println("JOURNAL_PRESSURE_CLICKHOUSE_OK: saturated partial batch, durable shutdown/restart replay, acknowledged visibility, exact IDs/full payload/actor survive real ClickHouse and database reopen");
+    }
+    private static void verifyMeTransfers(ClickHouseLogStorage db,List<LogEntry> rows) throws Exception {
+        if(rows.getFirst().id==0)db.appendBatch("native-me-"+UUID.randomUUID(),rows);
+        for(var expected:rows){
+            var q=new LogQuery();q.type=expected.type;q.exactId=expected.id;q.untilTs=Long.MAX_VALUE;q.requireDetails=true;q.limit=2;
+            var details=db.query(q);check(details.size()==1,"ME transfer missing/duplicated by exact ID");var read=details.getFirst();
+            check(expected.beAfter.equals(read.beAfter)&&java.util.Objects.equals(expected.itemStackNbt,read.itemStackNbt)&&expected.extra.equals(read.extra)
+                    &&Ae2TransferDetails.context(read)!=null&&Ae2TransferDetails.summary(read).amount()==Ae2TransferDetails.summary(expected).amount()
+                    &&expected.source.equals(read.source)&&expected.dim.equals(read.dim)&&expected.x==read.x&&expected.y==read.y&&expected.z==read.z,"ME full resource key/long/source/address lost in minimal details");
+            q.requireDetails=false;var feed=db.query(q);check(feed.size()==1&&Ae2TransferDetails.summary(feed.getFirst())!=null
+                    &&Ae2TransferDetails.summary(feed.getFirst()).equals(Ae2TransferDetails.summary(expected)),"ME feed lost exact type/resource/long amount");
+            check(Ae2TransferDetails.summary(feed.getFirst()).amountLabel().contains(Long.toString(Ae2TransferDetails.summary(expected).amount())),"ME feed rendered truncated amount");
+        }
+        System.out.println("AE2_TRANSFER_CLICKHOUSE_OK: minimal-mode exact full key/components, long amount, typed feed, source/address and ID survive database reopen");
     }
     private static void seedOldWeaponSchema(String endpoint,String user,String password)throws Exception{
         var url=java.net.URI.create(endpoint).toURL();

@@ -87,7 +87,8 @@ public final class LogText {
             c.append(subj.withStyle(subjectColor(e.type)));
             // Count directly in the main line for item actions
             if (isItemType(e.type) && e.count > 0) {
-                c.append(Component.literal(" x" + e.count).withStyle(ChatFormatting.GRAY));
+                var me = Ae2TransferDetails.summary(e);
+                c.append(Component.literal(" x" + (me == null ? e.count : me.amount())).withStyle(ChatFormatting.GRAY));
             }
 
             // For container put/take, show where the change happened.
@@ -364,6 +365,8 @@ public final class LogText {
             case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, WEAPON_RELOAD, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
                     itemNameComponent(level, e.itemStackNbt);
             case ME_PUT, ME_TAKE -> {
+                var me = Ae2TransferDetails.summary(e);
+                if (me != null && !me.kind().equals("i")) yield Component.literal(me.label());
                 MutableComponent item = itemNameComponent(level, e.itemStackNbt);
                 yield item != null ? item : Component.literal(e.extra != null ? e.extra : "ресурс МЭ");
             }

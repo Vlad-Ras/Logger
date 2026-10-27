@@ -68,52 +68,70 @@ public final class Ae2Audit {
     public static void transfer(AEKey key, long amount, Actionable mode, IActionSource source, boolean insert) {
         if (mode != Actionable.MODULATE || amount <= 0 || key == null || source == null || !enabled()) return;
         try {
-            ServerPlayer player = source.player().filter(ServerPlayer.class::isInstance)
-                    .map(ServerPlayer.class::cast).orElse(null);
-            IActionHost machine = source.machine().orElse(null);
-            BlockEntity machineBlock = blockEntity(machine);
-            if (player == null && machineBlock == null) return; // No honest actor or position to record.
-
-            ServerLevel level = machineBlock != null && machineBlock.getLevel() instanceof ServerLevel sl
-                    ? sl : player != null && player.level() instanceof ServerLevel sl ? sl : null;
-            if (level == null) return;
-            BlockPos pos = machineBlock != null ? machineBlock.getBlockPos() : targetPos(player);
-            String origin = machine != null ? machineName(machine) : "terminal";
-            LogEntry e = entry(level, pos, player, insert ? ActionType.ME_PUT : ActionType.ME_TAKE,
-                    "ae2:" + origin);
-            if (key instanceof AEItemKey item) {
-                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(item.toStack(), level.registryAccess()));
-                e.count = (int) Math.min(Integer.MAX_VALUE, amount);
-                e.extra = "resource=" + key.getId() + "; amount=" + amount;
-            } else {
-                e.extra = key.getDisplayName().getString() + " [" + key.getId() + "] " + amount + " mB";
-            }
-            LoggerRuntime.storage(level).append(e);
-        } catch (Throwable ignored) {
-            // Audit must not prevent an AE2 transfer if a third-party key refuses to serialize.
+            Transfer captured = captureTransfer(key, amount, mode, source, insert);
+            if (captured != null) LoggerRuntime.storage(captured.level()).append(captured.row());
+        } catch (Throwable failure) {
+            com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("ae2-transfer");
         }
     }
 
-    private static BlockEntity blockEntity(IActionHost machine) {
-        if (machine instanceof BlockEntity be) return be;
-        if (machine instanceof AEBasePart part) return part.getBlockEntity();
-        // InterfaceLogic uses a lambda IActionHost backed by a grid node. The node owner
-        // identifies the actual interface or bus; otherwise its automated transfers vanish.
-        try {
-            IGridNode node = machine == null ? null : machine.getActionableNode();
-            Object owner = node == null ? null : node.getOwner();
-            if (owner instanceof BlockEntity be) return be;
-            if (owner instanceof AEBasePart part) return part.getBlockEntity();
-        } catch (Throwable ignored) {}
-        return null;
+    /** Native data kernel only: no append or authorization change. Production must pass enabled(). */
+    public static LogEntry transferRow(AEKey key, long amount, Actionable mode, IActionSource source, boolean insert) {
+        Transfer captured = captureTransfer(key, amount, mode, source, insert);
+        return captured == null ? null : captured.row();
     }
 
-    private static String machineName(IActionHost machine) {
+    private record Transfer(ServerLevel level, LogEntry row) {}
+    private static Transfer captureTransfer(AEKey key, long amount, Actionable mode, IActionSource source, boolean insert) {
+        if (mode != Actionable.MODULATE || amount <= 0 || key == null || source == null) return null;
+        var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null || !server.isSameThread()) return null;
+        ServerPlayer player = source.player().filter(ServerPlayer.class::isInstance).map(ServerPlayer.class::cast).orElse(null);
+        IActionHost machine = source.machine().orElse(null);
+        Origin origin = origin(machine);
+        BlockEntity machineBlock = origin == null ? null : origin.block();
+        if (player == null && machineBlock == null) return null;
+        ServerLevel level;
+        if (machineBlock != null) level = machineBlock.getLevel() instanceof ServerLevel sl ? sl : null;
+        else level = player != null && player.level() instanceof ServerLevel sl ? sl : null;
+        if (level == null || level.getServer() != server) return null;
+        BlockPos pos = machineBlock == null ? targetPos(player) : machineBlock.getBlockPos();
+        LogEntry row = entry(level, pos, player, insert ? ActionType.ME_PUT : ActionType.ME_TAKE,
+                "ae2:" + (origin == null ? "terminal" : origin.name()));
+        var type = key.getType();
+        String kind = key instanceof AEItemKey ? "i" : key instanceof appeng.api.stacks.AEFluidKey ? "f" : "g";
+        net.minecraft.nbt.CompoundTag keyTag = null;
+        if (key instanceof AEItemKey item) {
+            var snapshot = NbtSerde.snapshotItemStack(item.toStack(), level.registryAccess());
+            if (snapshot == null) throw new IllegalStateException("AE2 item snapshot unavailable");
+            row.deferSnapshot(LogEntry.SnapshotField.ITEM, snapshot);
+            row.count = (int) Math.min(Integer.MAX_VALUE, amount);
+        } else {
+            keyTag = key.toTagGeneric(level.registryAccess()).copy();
+        }
+        com.roften.avilixlogger.core.Ae2TransferDetails.attach(row, kind, key.getId().toString(), type.getId().toString(),
+                amount, type.getUnitSymbol(), type.getAmountPerUnit(), keyTag);
+        return new Transfer(level, row);
+    }
+
+    private record Origin(BlockEntity block, String name) {}
+    private static Origin origin(IActionHost machine) {
+        if (machine == null) return null;
         try {
-            IGridNode node = machine.getActionableNode();
-            if (node != null && node.getOwner() != null) return node.getOwner().getClass().getSimpleName();
-        } catch (Throwable ignored) {}
-        return machine.getClass().getSimpleName();
+            Object owner = machine;
+            if (!(owner instanceof BlockEntity) && !(owner instanceof AEBasePart)) {
+                IGridNode node = machine.getActionableNode();
+                owner = node == null ? null : node.getOwner();
+            }
+            if (owner instanceof BlockEntity be) return new Origin(be, owner.getClass().getSimpleName());
+            if (owner instanceof AEBasePart part) {
+                BlockEntity be = part.getBlockEntity();
+                if (be != null) return new Origin(be, owner.getClass().getSimpleName() + ":" + part.getSide());
+            }
+        } catch (RuntimeException | LinkageError failure) {
+            com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("ae2-transfer-origin");
+        }
+        return new Origin(null, machine.getClass().getSimpleName());
     }
 
     private static BlockPos targetPos(ServerPlayer player) {
@@ -140,8 +158,8 @@ public final class Ae2Audit {
         e.type = type;
         e.source = source;
         if (player != null) {
-            e.actorUuid = player.getUUID();
-            e.actorName = player.getName().getString();
+            e.actorUuid = com.roften.avilixlogger.core.CauseContext.actorUuid(player);
+            e.actorName = com.roften.avilixlogger.core.CauseContext.actorName(player);
         }
         return e;
     }

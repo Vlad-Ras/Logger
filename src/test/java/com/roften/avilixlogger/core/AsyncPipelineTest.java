@@ -39,6 +39,7 @@ public final class AsyncPipelineTest {
         JournalPipelineTest.run();
         JournalPressureTest.run();
         Ae2ContractsTest.run();
+        Ae2TransferDetailsTest.run();
         preparedSnapshots();
         CartAuditTest.run();
         CreateLinkedTransferPlanTest.run();

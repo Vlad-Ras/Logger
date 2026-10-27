@@ -126,6 +126,7 @@ public final class Ae2NativeSmoke {
         cleared(menu);
         target.update = () -> {};
         stock(level, player);
+        Ae2TransferNativeSmoke.run(level, player);
         LOG.info("AE2_MENU_SCOPE_NATIVE_OK: native filter/client action/setting packets, nested exceptions, original-menu close, detached snapshots, disabled/off-thread no reads; five wrapper fault contracts");
     }
 

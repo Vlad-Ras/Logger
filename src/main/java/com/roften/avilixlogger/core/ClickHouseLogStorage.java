@@ -670,6 +670,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if ((e.type==ActionType.ITEM_GIFT||e.type==ActionType.ITEM_TRADE)&&e.beAfter!=null)return true;
         // Conversion inventory states are the meaning of the transaction, although audit-only.
         if(e.type==ActionType.ITEM_TRANSFORM&&e.playerInvBefore!=null&&e.playerInvAfter!=null)return true;
+        // The exact ME resource key is the transaction evidence, including fluid components.
+        if ((e.type==ActionType.ME_PUT || e.type==ActionType.ME_TAKE) && e.beAfter!=null && Ae2TransferDetails.summary(e)!=null) return true;
         // Historical weapon positions must survive non-rollback detail pruning.
         if(e.source!=null && e.source.startsWith("mod:scguns:") && e.beAfter!=null)return true;
         // The before/after values are the meaning of a settings event, even though it is audit-only.
@@ -1786,7 +1788,12 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         return switch (e.type) {
             case BLOCK_BREAK -> targetBlock(e.blockBefore, e.extra);
             case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> targetBlock(e.blockAfter, e.extra);
-            case CONTAINER_PUT, CONTAINER_TAKE, ME_PUT, ME_TAKE, ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_CELL_CHANGE,
+            case ME_PUT, ME_TAKE -> {
+                var transfer = Ae2TransferDetails.summary(e);
+                yield transfer == null ? targetItem(e.itemStackNbt, e.count, e.extra)
+                        : new TargetInfo(transfer.kind().equals("i") ? "item" : transfer.kind().equals("f") ? "fluid" : "resource", transfer.resource(), transfer.label());
+            }
+            case CONTAINER_PUT, CONTAINER_TAKE, ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_CELL_CHANGE,
                  ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, WEAPON_RELOAD, ITEM_SMELT,
                  ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
