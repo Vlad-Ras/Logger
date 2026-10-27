@@ -104,15 +104,18 @@ public final class SupplementariesAutomationAudit {
     }
     /** Detached kernel, not authorization. Caller transfers snapshot ownership. */
     public static LogEntry row(String dimension,BlockPos target,BlockPos mechanism,BlockState beforeState,BlockState afterState,CompoundTag before,CompoundTag after,boolean completed){
-        var row=pendingRow(dimension,target,mechanism,beforeState,afterState,before,after,completed);return row==null?null:row.resolve();
+        if(target==null||mechanism==null||beforeState==null||afterState==null||!changed(before,after))return null;return captureRow(dimension,target,mechanism,beforeState,afterState,before,after,completed,false);
     }
     /** Candidate for the ordered event worker. All snapshot tags have detached from the world. */
     public static LogEntry pendingRow(String dimension,BlockPos target,BlockPos mechanism,BlockState beforeState,BlockState afterState,CompoundTag before,CompoundTag after,boolean completed){
+        return captureRow(dimension,target,mechanism,beforeState,afterState,before,after,completed,true);
+    }
+    private static LogEntry captureRow(String dimension,BlockPos target,BlockPos mechanism,BlockState beforeState,BlockState afterState,CompoundTag before,CompoundTag after,boolean completed,boolean deferred){
         if(target==null||mechanism==null||beforeState==null||afterState==null||before==null||after==null)return null;
         var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.BLOCK_ENTITY_NBT_CHANGE;row.dim=dimension;
         row.x=target.getX();row.y=target.getY();row.z=target.getZ();row.actorName="SYSTEM[create:display_link]";row.source=SOURCE;
         row.extra="supplementaries_display;mechanism=create:display_link@"+mechanism.getX()+","+mechanism.getY()+","+mechanism.getZ()+";dimension="+dimension+";completed="+completed;
         row.deferBlockBefore(beforeState);row.deferBlockAfter(afterState);
-        row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);row.deferSnapshotDelta(SnapshotDeltaPolicy.SUPPLEMENTARIES_DISPLAY);return row;
+        row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);if(deferred)row.deferSnapshotDelta(SnapshotDeltaPolicy.SUPPLEMENTARIES_DISPLAY);return row;
     }
 }

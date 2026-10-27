@@ -30,10 +30,13 @@ public final class SignTextAudit {
     }
     /** Builds a detached record without authorizing publication; supplied tags transfer ownership. */
     public static LogEntry row(ServerLevel level,SignBlockEntity sign,CompoundTag before,CompoundTag after){
-        var row=pendingRow(level,sign,before,after);return row==null?null:row.resolve();
+        if(!changed(before,after))return null;return captureRow(level,sign,before,after,false);
     }
     /** Capture live attribution now; compare detached tags on the ordered event worker. */
     public static LogEntry pendingRow(ServerLevel level,SignBlockEntity sign,CompoundTag before,CompoundTag after){
+        return captureRow(level,sign,before,after,true);
+    }
+    private static LogEntry captureRow(ServerLevel level,SignBlockEntity sign,CompoundTag before,CompoundTag after,boolean deferred){
         if(before==null||after==null)return null;
         var row=new LogEntry();row.ts=System.currentTimeMillis();row.dim=level.dimension().location().toString();row.type=ActionType.BLOCK_ENTITY_NBT_CHANGE;
         var pos=sign.getBlockPos();row.x=pos.getX();row.y=pos.getY();row.z=pos.getZ();
@@ -42,7 +45,7 @@ public final class SignTextAudit {
         if(row.actorName==null)row.actorName="SYSTEM";
         row.deferBlockBefore(sign.getBlockState());row.deferBlockAfter(sign.getBlockState());
         row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);row.extra="sign_text_edit";
-        row.deferSnapshotDelta(SnapshotDeltaPolicy.SIGN_TEXT);
+        if(deferred)row.deferSnapshotDelta(SnapshotDeltaPolicy.SIGN_TEXT);
         return row;
     }
 }

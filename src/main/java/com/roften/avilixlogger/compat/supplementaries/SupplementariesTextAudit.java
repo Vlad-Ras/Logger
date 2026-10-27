@@ -65,13 +65,16 @@ public final class SupplementariesTextAudit {
     }
     /** Detached kernel, not an authorization path. Snapshot tags transfer ownership. */
     public static LogEntry row(UUID editor,String name,String dim,BlockPos pos,BlockState state,CompoundTag before,CompoundTag after,boolean completed){
-        var row=pendingRow(editor,name,dim,pos,state,before,after,completed);return row==null?null:row.resolve();
+        if(editor==null||pos==null||state==null||!changed(before,after))return null;return captureRow(editor,name,dim,pos,state,before,after,completed,false);
     }
     /** Detached candidate for the ordered event worker, before SNBT encoding. */
     public static LogEntry pendingRow(UUID editor,String name,String dim,BlockPos pos,BlockState state,CompoundTag before,CompoundTag after,boolean completed){
+        return captureRow(editor,name,dim,pos,state,before,after,completed,true);
+    }
+    private static LogEntry captureRow(UUID editor,String name,String dim,BlockPos pos,BlockState state,CompoundTag before,CompoundTag after,boolean completed,boolean deferred){
         if(editor==null||pos==null||state==null||before==null||after==null)return null;
         var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.BLOCK_ENTITY_NBT_CHANGE;row.dim=dim;row.x=pos.getX();row.y=pos.getY();row.z=pos.getZ();row.actorUuid=editor;row.actorName=name;row.source="mod:supplementaries:text_edit";row.extra="supplementaries_text_edit;completed="+completed;
-        row.deferBlockBefore(state);row.deferBlockAfter(state);row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);row.deferSnapshotDelta(SnapshotDeltaPolicy.SUPPLEMENTARIES_TEXT);return row;
+        row.deferBlockBefore(state);row.deferBlockAfter(state);row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);if(deferred)row.deferSnapshotDelta(SnapshotDeltaPolicy.SUPPLEMENTARIES_TEXT);return row;
     }
     public static List<Component> describe(ServerLevel level,LogEntry row){
         boolean display=SupplementariesAutomationAudit.SOURCE.equals(row.source);
