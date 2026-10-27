@@ -58,3 +58,9 @@ Supplementaries packet scope начинается в уже существующ
 Новый адаптер использует native выбранные BE/holder/book; не повторяет target getter и reservation checks. Read-only predictor исключает собственные NBT snapshots для заведомого no-op, учитывая raw/filter и native resolved reset книги. При antique ink или остановке по reservation возможна консервативная пара снимков. Нет tick polling, owner registry или capability поиска; одна свободная Frame на потоке очищает все live ссылки, nested close проверен отдельно. SNBT остаётся у worker.
 
 Общее ядро отката теперь выставляет restoring на время записи и компенсации, предотвращая аудит собственного восстановления. Проверка BE type до изменения блока предотвращает лишние native onRemove и потерю/дублирование инвентаря при несовместимой истории. Это не обещание подавить произвольные эффекты всех сторонних модов и не численный MSPT/heap результат. [Состав, доказательства и ограничения](SUPPLEMENTARIES_DISPLAY_COMPATIBILITY.md).
+
+## Дополнение: detached NBT comparison на worker
+
+[Сравнение ordinary sign, Supplementaries packet/display и MenuAction перенесено из producer](ASYNC_SNAPSHOT_DELTAS_2.2.0.md). Text/display кандидаты используют прежнюю FIFO event queue, отбрасываются до SNBT и сохраняют in-flight byte accounting/visibility/shutdown; меню сохраняет свой прежний CPU callback. Новые правила не получают live мир/игрока/меню. Отсутствие NBT comparisons/encoding на producer проверено thread probes и native detached pipeline.
+
+Объём no-op кандидатов в очереди может увеличиться; перенос не устраняет блокирующее противодавление и не является MSPT benchmark. Native snapshots, ранний read-only predictor и оценка веса остаются на серверном потоке. Численная приёмка фермы/полного модпака открыта.

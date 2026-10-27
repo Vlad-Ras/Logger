@@ -639,3 +639,5 @@ Native загрузка кинетического BE выполняется с 
 [Проверены оба native Create display target, книги/карты и реальное меню доски, worker-подготовка и tick-ядро отката, standing/hanging sign с Amendments](SUPPLEMENTARIES_DISPLAY_COMPATIBILITY.md). Исправлены restoring scope общего ядра, предварительная проверка BE type и удаление поздних NeoForgeData при откате к снимку без этого поля. Отдельно пройден Supplementaries без Create/Ponder/Flywheel; положительная production авторизация не обходилась.
 
 Это не закрывает весь модпак: остальные выбранные механики, production AuthCore/ClickHouse/GUI/rollback job, native manual stop Scguns 1.5, queue backpressure и реальные A/B/A heap/MSPT замеры остаются в приёмке. Релизный JAR 2.2.0 не создавался.
+
+27.10.2026: [убраны синхронные сравнения уже отделённых NBT из sign/Supplementaries capture и MenuAction](ASYNC_SNAPSHOT_DELTAS_2.2.0.md). Очередь остаётся ограниченной, no-op учитывается до окончания фоновой проверки; redesign backpressure и измерения всей фермы/модпака не закрыты.
