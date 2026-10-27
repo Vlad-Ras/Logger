@@ -1,5 +1,7 @@
 # AE2: шаблоны, физические слоты устройств и пресс
 
+28.10.2026: [добавлен отдельный захват Pattern Access Terminal doAction/quickMovePattern](AE2_REMOTE_PATTERN_COMPATIBILITY_2.2.0.md). Тринадцать native строк проверяют настоящий provider address, terminal/source/slot, partial failure и fallback через 128 полных кандидатов без удержания их снимков. Discovery настоящей grid, addons и положительный production AuthCore остаются в приёмке; ниже описан предыдущий этап.
+
 27.10.2026. Проверенный код `6ff9c65caa3894b37979e77807d26dd0a3f3696e`, tree `b81f469df1114b4347035fc418a5954d2541ba75`. Основа — `7f233cdfb9d7254e36e1177ab5cb430969235c90`; ветка — `work/2.2.0-ae2-patterns-20261027`. [Предыдущие device settings](AE2_DEVICE_SETTINGS_COMPATIBILITY_2.2.0.md), [ME transfers](AE2_TRANSFER_COMPATIBILITY_2.2.0.md) и границы захвата меню сохранены. Релизный JAR не создавался.
 
 ## Исправления

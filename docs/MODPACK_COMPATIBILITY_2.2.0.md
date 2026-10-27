@@ -1,5 +1,7 @@
 # Совместимость серверного модпака: текущая работа
 
+28.10.2026: [выбранные remote actions Pattern Access Terminal](AE2_REMOTE_PATTERN_COMPATIBILITY_2.2.0.md) получают точный provider address, полный pattern, terminal/source/slot и actor. Native 13 строк, partial failure и 128 full candidates; девять/десять optional hook групп по версии и 112 supplied targets. Это не discovery/синхронизация всей grid, не полный transformed модпак и не положительная production AuthCore публикация.
+
 27.10.2026: [AE2 pattern/device пакет](AE2_PATTERN_COMPATIBILITY_2.2.0.md) добавляет mode/substitution/recipe settings, устраняет потерю компонентов физических слотов в minimal mode и включает оба press slots. Native четыре режима кодирования, Pattern Provider block/part, return buffer и Inscriber дали 56 строк. Удалённый Pattern Access Terminal и исполнение autocrafting остаются в приёмке.
 
 27.10.2026: [AE2 — полные before/after фильтров, улучшений, ячеек и настроек; priority и reporting threshold](AE2_DEVICE_SETTINGS_COMPATIBILITY_2.2.0.md). Проверены девять конкретных устройств и priority submenu, 52 отделённые строки и отдельно stock 8 → 32. Обе стороны обязательны в minimal detail mode. Это выбранные native/data/storage контракты; production AuthCore, виртуальный ME rollback и полный transformed модпак остаются в приёмке.
