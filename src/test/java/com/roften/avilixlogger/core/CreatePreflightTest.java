@@ -10,6 +10,14 @@ import java.io.InputStreamReader;
 public final class CreatePreflightTest {
     public static void main(String[] args) throws Exception {
         coerceSignatures();
+        var persistentMixin="com/roften/avilixlogger/mixin/BlockEntityPersistentDataMixin";
+        var classLoader=CreatePreflightTest.class.getClassLoader();
+        new Preflight(n->raw(classLoader,n)).check(persistentMixin);
+        boolean absentPersistentField=false;
+        try{new Preflight(n->{var node=raw(classLoader,n);if(n.equals("net/minecraft/world/level/block/entity/BlockEntity"))node.fields.removeIf(f->f.name.equals("customPersistentData"));return node;}).check(persistentMixin);}
+        catch(Exception expected){absentPersistentField=true;}
+        if(!absentPersistentField)throw new AssertionError("Missing persistent data field accepted");
+        System.out.println("BLOCK_ENTITY_PERSISTENT_PREFLIGHT_OK: full-snapshot field shadow and missing-field refusal");
         var loader = CreatePreflightTest.class.getClassLoader();
         var config = JsonParser.parseReader(new InputStreamReader(loader.getResourceAsStream("avilixlogger_create_trains.mixins.json"))).getAsJsonObject();
         int failed = 0;

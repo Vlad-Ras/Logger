@@ -104,9 +104,17 @@ public final class SupplementariesDisplaySmoke {
             finally{CartRestoreLocks.clear();CartAuditContext.rollbackActive=false;}
             menu(level,board,book,context);
             // A registered source through the real Create gather/transfer dispatch, not a synthetic source.
-            display(board,written());((ChestBlockEntity)level.getBlockEntity(ORIGIN.below())).setItem(0,new ItemStack(Items.OAK_SAPLING,8));
-            link.activeSource=AllDisplaySources.COUNT_ITEMS.get();link.targetLine=0;link.updateGatheredData();
-            check(link.activeTarget!=null&&displayed(board).get(DataComponents.WRITTEN_BOOK_CONTENT).pages().getFirst().raw().getString().contains("8"),"real Create source/gather/target dispatch failed");
+            display(board,written());level.setBlockAndUpdate(ORIGIN.below(),Blocks.ENCHANTING_TABLE.defaultBlockState());
+            var pipelineBefore=NbtSerde.snapshotBlockEntity(level,board);var pipelineState=board.getBlockState();link.activeSource=AllDisplaySources.ENCHANT_POWER.get();link.targetLine=0;link.updateGatheredData();
+            check(link.activeTarget!=null&&displayed(board).get(DataComponents.WRITTEN_BOOK_CONTENT).pages().getFirst().raw().getString().matches("[0-9]+"),"real Create source/gather/target dispatch failed: target="+link.activeTarget+", source="+link.activeSource+", page="+displayed(board).get(DataComponents.WRITTEN_BOOK_CONTENT).pages().getFirst().raw().getString());
+            var pipelineRow=record(level,board,pipelineState,pipelineBefore,NbtSerde.snapshotBlockEntity(level,board),true);verifyRow(level,pipelineRow);rollback(level,board,pipelineRow,pipelineBefore,true);
+            // The prediction is deliberately read-only and may only conservatively overcapture.
+            for(var seed:List.of(written(),writable()))for(int first:new int[]{0,1,3,49,50,60})for(var input:List.of(lines(),lines("Входная страница"))){
+                display(board,seed.copy());var before=NbtSerde.snapshotBlockEntity(level,board);
+                boolean predicted=SupplementariesAutomationAudit.bookMayChange(displayed(board),first,input);
+                check(before.equals(NbtSerde.snapshotBlockEntity(level,board)),"page prediction mutated native item/state");
+                book.acceptText(first,input,context);check(predicted||!SupplementariesAutomationAudit.changed(before,NbtSerde.snapshotBlockEntity(level,board)),"page prediction missed native mutation at "+first);
+            }
             invalidRollback(level,board);
             vanillaSigns(level);
             faults();

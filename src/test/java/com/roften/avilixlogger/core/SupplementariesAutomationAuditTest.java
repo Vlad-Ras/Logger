@@ -17,7 +17,26 @@ public final class SupplementariesAutomationAuditTest {
         row.blockBefore="{Name:'supplementaries:notice_board',Properties:{has_book:'true'}}";row.blockAfter=row.blockBefore;
         row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,board("minecraft:written_book","До страницы"));row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,board("minecraft:written_book","После страницы"));row.materializeSnapshots();return row;
     }
+    private static void scopeCleanup(){
+        try{
+            var type=SupplementariesAutomationAudit.Frame.class;var ctor=type.getDeclaredConstructor();ctor.setAccessible(true);
+            var outer=ctor.newInstance();var inner=ctor.newInstance();
+            var currentField=SupplementariesAutomationAudit.class.getDeclaredField("CURRENT");currentField.setAccessible(true);
+            var freeField=SupplementariesAutomationAudit.class.getDeclaredField("FREE");freeField.setAccessible(true);
+            @SuppressWarnings("unchecked") var current=(ThreadLocal<SupplementariesAutomationAudit.Frame>)currentField.get(null);
+            @SuppressWarnings("unchecked") var free=(ThreadLocal<SupplementariesAutomationAudit.Frame>)freeField.get(null);
+            try{
+                var previous=type.getDeclaredField("previous");previous.setAccessible(true);previous.set(inner,outer);
+                var input=type.getDeclaredField("input");input.setAccessible(true);input.set(inner,List.of());
+                inner.bind(null,new net.minecraft.core.BlockPos(9,10,11));current.set(inner);
+                inner.close();check(current.get()==outer,"nested display scope did not restore parent");inner.close();check(current.get()==outer,"second close changed parent");outer.close();check(current.get()==null,"display scope leaked current frame");
+                var pooled=free.get();check(pooled!=null,"display frame was not recycled");
+                for(String name:List.of("previous","target","mechanism","input","before","state")){var field=type.getDeclaredField(name);field.setAccessible(true);check(field.get(pooled)==null,"idle display frame retained "+name);}
+            }finally{current.remove();free.remove();}
+        }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
+    }
     public static void run(){
+        scopeCleanup();
         var before=board("minecraft:written_book","raw");var after=before.copy();after.getList("Items",Tag.TAG_COMPOUND).getCompound(0).getCompound("components").getCompound("minecraft:written_book_content").getList("pages",Tag.TAG_COMPOUND).getCompound(0).putString("filtered","new filter");
         check(SupplementariesAutomationAudit.changed(before,after),"book filtered-only change missing");
         check(SupplementariesAutomationAudit.changed(before,board("minecraft:writable_book","raw")),"native book conversion missing");

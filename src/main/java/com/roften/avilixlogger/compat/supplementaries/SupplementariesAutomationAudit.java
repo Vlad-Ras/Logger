@@ -35,7 +35,10 @@ public final class SupplementariesAutomationAudit {
         int end=(int)Math.min(50,(long)first+input.size());
         if(end<=0)return false;
         if(book.is(Items.WRITABLE_BOOK))return true;
-        var pages=book.getOrDefault(DataComponents.WRITTEN_BOOK_CONTENT,WrittenBookContent.EMPTY).pages();
+        var content=book.getOrDefault(DataComponents.WRITTEN_BOOK_CONTENT,WrittenBookContent.EMPTY);
+        // withReplacedPages also resets resolved, even for an equal page or empty offset update.
+        if(content.resolved())return true;
+        var pages=content.pages();
         if(pages.size()<end)return true;
         for(int i=first;i<end;i++)if(pages.get(i).filtered().isPresent()||!Objects.equals(pages.get(i).raw(),input.get(i-first)))return true;
         return false;
