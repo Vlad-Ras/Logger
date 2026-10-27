@@ -651,3 +651,8 @@ Native загрузка кинетического BE выполняется с 
 ## Дополнение: захват меню AE2, 27.10.2026
 
 [Исправлены утечка вложенного scope при исключении, закрытие чужого меню в setting packet и адрес исходного target; stock confirm проверяет отключённый capture до чтения конфигурации](AE2_MENU_COMPATIBILITY_2.2.0.md). Native AEBaseMenu/slots/ConfigButtonPacket и настоящий Interface stock проверены отдельно от авторизованной публикации. Старый перехват воспроизводит retained depth/snapshot; ограничения обязательной авторизации и оставшаяся приёмка остальных ME-путей сохранены. Новых MSPT/heap замеров нет.
+
+
+## Дополнение: точные ME transfers, 27.10.2026
+
+[Добавлены полный ключ non-item ресурса, точное long количество, typed feed и обязательные подробности ME transfer в minimal mode](AE2_TRANSFER_COMPATIBILITY_2.2.0.md). Lambda machine source получает BE/имя из одного node/owner lookup; FakePlayer не получает человеческий UUID. Native сеть/энергетический helper проверены с ограниченным тестовым хранилищем и отдельно от production AuthCore. Дополнительная native сериализация non-item key остаётся синхронной; новых MSPT/heap замеров и отката виртуальной ME-сети нет.
