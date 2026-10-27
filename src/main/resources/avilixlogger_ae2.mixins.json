@@ -2,6 +2,7 @@
   "required": false,
   "minVersion": "0.8",
   "package": "com.roften.avilixlogger.compat.ae2.mixin",
+  "plugin": "com.roften.avilixlogger.compat.ae2.mixin.Ae2MixinPlugin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "NetworkStorageMixin",

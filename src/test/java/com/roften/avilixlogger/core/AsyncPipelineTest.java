@@ -38,6 +38,7 @@ public final class AsyncPipelineTest {
         CauseContextHotPathTest.run();
         JournalPipelineTest.run();
         JournalPressureTest.run();
+        Ae2ContractsTest.run();
         preparedSnapshots();
         CartAuditTest.run();
         CreateLinkedTransferPlanTest.run();

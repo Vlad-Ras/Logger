@@ -51,6 +51,8 @@ base {
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
 sourceSets.create("createSmoke")
+if (project.hasProperty('ae2Smoke')) sourceSets.createSmoke.java.include('**/Ae2NativeSmoke.java')
+if (project.hasProperty('ae2Absent')) sourceSets.createSmoke.java.include('**/Ae2AbsentSmoke.java')
 if (project.hasProperty('createAbsent')) sourceSets.createSmoke.java.include('**/CreateAbsentSmoke.java')
 if (project.hasProperty('supplementariesCreateAbsent')) sourceSets.createSmoke.java.include('**/SupplementariesTextSmoke.java', '**/AuditDetailsSmoke.java', '**/SnapshotDeltaNativeSmoke.java')
 sourceSets.createSmoke.compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
@@ -99,6 +101,11 @@ neoForge {
                 gameDirectory = project.file('run-create-absent')
             }
             if (project.hasProperty('backpackSmoke')) systemProperty 'avilixlogger.backpackSmoke', 'true'
+            if (project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) {
+                systemProperty 'avilixlogger.ae2Smoke', 'true'
+                systemProperty 'avilixlogger.ae2Absent', project.hasProperty('ae2Absent').toString()
+                gameDirectory = project.file('run-ae2')
+            }
             if (project.hasProperty('scgunsSmoke')) systemProperty 'avilixlogger.scgunsSmoke', 'true'
             if (project.hasProperty('chippedSmoke')) systemProperty 'avilixlogger.chippedSmoke', 'true'
             if (project.hasProperty('supplementariesSmoke')) {
@@ -155,7 +162,7 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
-            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke') || project.hasProperty('blockpackSmoke') || project.hasProperty('supplementariesSmoke')) sourceSet(sourceSets.createSmoke)
+            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke') || project.hasProperty('blockpackSmoke') || project.hasProperty('supplementariesSmoke') || project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) sourceSet(sourceSets.createSmoke)
         }
     }
 }
@@ -199,7 +206,7 @@ dependencies {
     // Optional integration: never ship AE2 classes inside the logger JAR.
     def compatAe2Version = project.findProperty('compatAe2Version') ?: '19.2.12'
     compileOnly "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
-    localRuntime "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
+    if (!project.hasProperty('ae2Absent')) localRuntime "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
     // Optional Create integration. Never embed Create or its libraries in the logger.
     def compatCreateVersion = project.findProperty('compatCreateVersion') ?: '6.0.11-313'
     if (compatCreateVersion.startsWith('6.0.10-')) {

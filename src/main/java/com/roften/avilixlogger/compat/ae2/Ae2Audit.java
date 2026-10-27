@@ -117,7 +117,11 @@ public final class Ae2Audit {
     }
 
     private static BlockPos targetPos(ServerPlayer player) {
-        if (player.containerMenu instanceof AEBaseMenu menu) {
+        return targetPos(player.containerMenu instanceof AEBaseMenu menu ? menu : null, player);
+    }
+
+    private static BlockPos targetPos(AEBaseMenu menu, ServerPlayer player) {
+        if (menu != null) {
             Object target = menu.getTarget();
             if (target instanceof BlockEntity be) return be.getBlockPos();
             if (target instanceof AEBasePart part && part.getBlockEntity() != null)
@@ -145,9 +149,19 @@ public final class Ae2Audit {
     public record SlotValue(String semantic, ItemStack stack) {}
     public record Snapshot(Map<Integer, SlotValue> slots, Map<String, String> settings) {}
 
+    public static boolean onServerThread(AEBaseMenu menu) {
+        return menu.getPlayer() instanceof ServerPlayer player && player.server.isSameThread();
+    }
+
     /** Capture only the menu's external slots. Never mistake player inventory for ME storage. */
     public static Snapshot capture(AEBaseMenu menu) {
-        if (!enabled() || !(menu.getPlayer() instanceof ServerPlayer)) return null;
+        if (!enabled() || !onServerThread(menu)) return null;
+        return snapshot(menu);
+    }
+
+    /** Data-only native snapshot kernel; production capture must pass enabled() first. */
+    public static Snapshot snapshot(AEBaseMenu menu) {
+        if (!onServerThread(menu)) return null;
         Map<Integer, SlotValue> slots = new HashMap<>();
         try {
             for (int i = 0; i < menu.slots.size(); i++) {
@@ -173,11 +187,11 @@ public final class Ae2Audit {
     }
 
     public static void compare(AEBaseMenu menu, Snapshot before) {
-        if (before == null || !enabled() || !(menu.getPlayer() instanceof ServerPlayer player)
+        if (before == null || !enabled() || !onServerThread(menu) || !(menu.getPlayer() instanceof ServerPlayer player)
                 || !(player.level() instanceof ServerLevel level)) return;
         Snapshot after = capture(menu);
         if (after == null) return;
-        BlockPos pos = targetPos(player);
+        BlockPos pos = targetPos(menu, player);
         String source = "ae2:" + menu.getClass().getSimpleName();
         for (var previous : before.slots().entrySet()) {
             int slot = previous.getKey();
@@ -205,9 +219,9 @@ public final class Ae2Audit {
     }
 
     public static void stockAmount(AEBaseMenu menu, int slot, ItemStack before, ItemStack after) {
-        if (!enabled() || !(menu.getPlayer() instanceof ServerPlayer player)
+        if (!enabled() || !onServerThread(menu) || !(menu.getPlayer() instanceof ServerPlayer player)
                 || !(player.level() instanceof ServerLevel level) || ItemStack.matches(before, after)) return;
-        change(level, targetPos(player), player, "ae2:" + menu.getClass().getSimpleName(),
+        change(level, targetPos(menu, player), player, "ae2:" + menu.getClass().getSimpleName(),
                 ActionType.ME_FILTER_CHANGE, slot, before, after);
     }
 

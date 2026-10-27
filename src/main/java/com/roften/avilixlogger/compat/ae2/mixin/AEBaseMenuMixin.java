@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import appeng.helpers.InventoryAction;
 import appeng.menu.AEBaseMenu;
 import com.roften.avilixlogger.compat.ae2.Ae2Audit;
@@ -10,10 +12,6 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /** Captures changes synchronously around player actions, never during an idle open menu tick. */
 @Mixin(targets = "appeng.menu.AEBaseMenu", remap = false)
@@ -46,53 +44,45 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
         }
     }
 
-    @Inject(method = "clicked", at = @At("HEAD"), require = 0, remap = false)
-    private void avilixlogger$clickBefore(int slot, int button, ClickType kind, Player player, CallbackInfo ci) {
-        if (player instanceof ServerPlayer) avilixlogger$beforeAction();
-    }
-
-    @Inject(method = "clicked", at = @At("RETURN"), require = 0, remap = false)
-    private void avilixlogger$clickAfter(int slot, int button, ClickType kind, Player player, CallbackInfo ci) {
-        if (player instanceof ServerPlayer) avilixlogger$afterAction();
-    }
-
-    @Inject(method = "quickMoveStack", at = @At("HEAD"), require = 0, remap = false)
-    private void avilixlogger$moveBefore(Player player, int slot, CallbackInfoReturnable<ItemStack> cir) {
-        if (player instanceof ServerPlayer) avilixlogger$beforeAction();
-    }
-
-    @Inject(method = "quickMoveStack", at = @At("RETURN"), require = 0, remap = false)
-    private void avilixlogger$moveAfter(Player player, int slot, CallbackInfoReturnable<ItemStack> cir) {
-        if (player instanceof ServerPlayer) avilixlogger$afterAction();
-    }
-
-    @Inject(method = "doAction", at = @At("HEAD"), require = 0, remap = false)
-    private void avilixlogger$actionBefore(ServerPlayer player, InventoryAction action, int slot, long id, CallbackInfo ci) {
+    @WrapMethod(method = "clicked")
+    private void avilixlogger$click(int slot, int button, ClickType kind, Player player,
+            Operation<Void> original) {
+        if (!(player instanceof ServerPlayer)) { original.call(slot, button, kind, player); return; }
         avilixlogger$beforeAction();
+        try { original.call(slot, button, kind, player); }
+        finally { avilixlogger$afterAction(); }
     }
 
-    @Inject(method = "doAction", at = @At("RETURN"), require = 0, remap = false)
-    private void avilixlogger$actionAfter(ServerPlayer player, InventoryAction action, int slot, long id, CallbackInfo ci) {
-        avilixlogger$afterAction();
-    }
-
-    @Inject(method = "setFilter", at = @At("HEAD"), require = 0, remap = false)
-    private void avilixlogger$filterBefore(int slot, ItemStack item, CallbackInfo ci) {
+    @WrapMethod(method = "quickMoveStack")
+    private ItemStack avilixlogger$move(Player player, int slot,
+            Operation<ItemStack> original) {
+        if (!(player instanceof ServerPlayer)) return original.call(player, slot);
         avilixlogger$beforeAction();
+        try { return original.call(player, slot); }
+        finally { avilixlogger$afterAction(); }
     }
 
-    @Inject(method = "setFilter", at = @At("RETURN"), require = 0, remap = false)
-    private void avilixlogger$filterAfter(int slot, ItemStack item, CallbackInfo ci) {
-        avilixlogger$afterAction();
-    }
-
-    @Inject(method = "receiveClientAction", at = @At("HEAD"), require = 0, remap = false)
-    private void avilixlogger$clientActionBefore(String name, String json, CallbackInfo ci) {
+    @WrapMethod(method = "doAction")
+    private void avilixlogger$action(ServerPlayer player, InventoryAction action, int slot, long id,
+            Operation<Void> original) {
         avilixlogger$beforeAction();
+        try { original.call(player, action, slot, id); }
+        finally { avilixlogger$afterAction(); }
     }
 
-    @Inject(method = "receiveClientAction", at = @At("RETURN"), require = 0, remap = false)
-    private void avilixlogger$clientActionAfter(String name, String json, CallbackInfo ci) {
-        avilixlogger$afterAction();
+    @WrapMethod(method = "setFilter")
+    private void avilixlogger$filter(int slot, ItemStack item,
+            Operation<Void> original) {
+        avilixlogger$beforeAction();
+        try { original.call(slot, item); }
+        finally { avilixlogger$afterAction(); }
+    }
+
+    @WrapMethod(method = "receiveClientAction")
+    private void avilixlogger$clientAction(String name, String json,
+            Operation<Void> original) {
+        avilixlogger$beforeAction();
+        try { original.call(name, json); }
+        finally { avilixlogger$afterAction(); }
     }
 }
