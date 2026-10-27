@@ -66,3 +66,8 @@ Supplementaries packet scope начинается в уже существующ
 [Сравнение ordinary sign, Supplementaries packet/display и MenuAction перенесено из producer](ASYNC_SNAPSHOT_DELTAS_2.2.0.md). Text/display кандидаты используют прежнюю FIFO event queue, отбрасываются до SNBT и сохраняют in-flight byte accounting/visibility/shutdown; меню сохраняет свой прежний CPU callback. Новые правила не получают live мир/игрока/меню. Отсутствие NBT comparisons/encoding на producer проверено thread probes и native detached pipeline.
 
 Объём no-op кандидатов в очереди может увеличиться; перенос не устраняет блокирующее противодавление и не является MSPT benchmark. Native snapshots, ранний read-only predictor и оценка веса остаются на серверном потоке. Численная приёмка фермы/полного модпака открыта.
+
+
+## Дополнение: захват меню AE2, 27.10.2026
+
+[Исправлены утечка вложенного scope при исключении, закрытие чужого меню в setting packet и адрес исходного target; stock confirm проверяет отключённый capture до чтения конфигурации](AE2_MENU_COMPATIBILITY_2.2.0.md). Native AEBaseMenu/slots/ConfigButtonPacket и настоящий Interface stock проверены отдельно от авторизованной публикации. Старый перехват воспроизводит retained depth/snapshot; ограничения обязательной авторизации и оставшаяся приёмка остальных ME-путей сохранены. Новых MSPT/heap замеров нет.

@@ -61,3 +61,8 @@ Curios 9.5.1+1.21.1, upstream commit `6b122c8a7e2b514fd94197459ade11f19a0bfb09`:
 ## Дополнение: насыщение journal queue, 27.10.2026
 
 [Исправлены удержание неполной пачки до таймера, отмена retry backoff обычными уведомлениями и lost wakeup sender](JOURNAL_PRESSURE_2.2.0.md). Проверка видимости больше не выбирает старейший файл из всего backlog. Подтверждены disk/replay, настоящая ClickHouse, четыре CI-профиля и GUI. Ограничения памяти и durable acknowledgement сохранены; длительная ресурсная перегрузка и production приёмка остаются открытыми.
+
+
+## Дополнение: захват меню AE2, 27.10.2026
+
+[Исправлены утечка вложенного scope при исключении, закрытие чужого меню в setting packet и адрес исходного target; stock confirm проверяет отключённый capture до чтения конфигурации](AE2_MENU_COMPATIBILITY_2.2.0.md). Native AEBaseMenu/slots/ConfigButtonPacket и настоящий Interface stock проверены отдельно от авторизованной публикации. Старый перехват воспроизводит retained depth/snapshot; ограничения обязательной авторизации и оставшаяся приёмка остальных ME-путей сохранены. Новых MSPT/heap замеров нет.
