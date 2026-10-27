@@ -80,29 +80,33 @@ public final class Ae2RemoteNativeSmoke {
             menu.setCarried(ItemStack.EMPTY); observed(menu, false, rows, () -> menu.doAction(player, InventoryAction.PICKUP_OR_SET_DOWN, -1, a.id), 0, 0);
             observed(menu, false, rows, () -> menu.doAction(player, InventoryAction.PICKUP_OR_SET_DOWN, 0, 123456789L), 0, 0);
             a.inventory.clear(); b.inventory.clear(); player.getInventory().clearContent();
-            int sourceSlot = playerSlot(menu); menu.slots.get(sourceSlot).set(second.copy());
-            observed(menu, false, rows, () -> menu.quickMovePattern(player, sourceSlot, List.of(b.id)), 1, 1);
-            check(menu.slots.get(sourceSlot).getItem().isEmpty() && !b.inventory.getStackInSlot(0).isEmpty(), "native quick move failed");
-            menu.slots.get(sourceSlot).set(second.copyWithCount(2));
-            observed(menu, false, rows, () -> menu.quickMovePattern(player, sourceSlot, List.of(b.id)), 0, 0);
-            for (int i = 0; i < b.inventory.size(); i++) b.inventory.setItemDirect(i, first.copyWithCount(64));
-            menu.slots.get(sourceSlot).set(second.copy());
-            observed(menu, false, rows, () -> menu.quickMovePattern(player, sourceSlot, List.of(b.id)), 0, 0);
-            var ids = new ArrayList<Long>();
-            for (int i = 0; i < 128; i++) {
-                var full = new AppEngInternalInventory(1); full.setItemDirect(0, first.copyWithCount(64));
-                ids.add(register(menu, a.host, full));
+            boolean quickMove = Arrays.stream(PatternAccessTermMenu.class.getDeclaredMethods()).anyMatch(m -> m.getName().equals("quickMovePattern"));
+            if (quickMove) {
+                int sourceSlot = playerSlot(menu); menu.slots.get(sourceSlot).set(second.copy());
+                observed(menu, false, rows, () -> quickMove(menu, player, sourceSlot, List.of(b.id)), 1, 1);
+                check(menu.slots.get(sourceSlot).getItem().isEmpty() && !b.inventory.getStackInSlot(0).isEmpty(), "native quick move failed");
+                menu.slots.get(sourceSlot).set(second.copyWithCount(2));
+                observed(menu, false, rows, () -> quickMove(menu, player, sourceSlot, List.of(b.id)), 0, 0);
+                for (int i = 0; i < b.inventory.size(); i++) b.inventory.setItemDirect(i, first.copyWithCount(64));
+                menu.slots.get(sourceSlot).set(second.copy());
+                observed(menu, false, rows, () -> quickMove(menu, player, sourceSlot, List.of(b.id)), 0, 0);
+                var ids = new ArrayList<Long>();
+                for (int i = 0; i < 128; i++) {
+                    var full = new AppEngInternalInventory(1); full.setItemDirect(0, first.copyWithCount(64));
+                    ids.add(register(menu, a.host, full));
+                }
+                var poison = new InternalInventory() {
+                    boolean armed;
+                    public int size() { if (armed) throw new AssertionError("unselected provider was scanned"); return 1; }
+                    public ItemStack getStackInSlot(int slot) { throw new AssertionError("unselected provider was read"); }
+                    public void setItemDirect(int slot, ItemStack stack) { throw new AssertionError("unselected provider was mutated"); }
+                };
+                register(menu, a.host, poison); poison.armed = true;
+                a.inventory.clear(); ids.add(a.id); menu.slots.get(sourceSlot).set(second.copy());
+                observed(menu, false, rows, () -> quickMove(menu, player, sourceSlot, ids), 1, 1);
+                check(menu.slots.get(sourceSlot).getItem().isEmpty() && !a.inventory.getStackInSlot(0).isEmpty(), "native full-provider fallback failed");
             }
-            var poison = new InternalInventory() {
-                boolean armed;
-                public int size() { if (armed) throw new AssertionError("unselected provider was scanned"); return 1; }
-                public ItemStack getStackInSlot(int slot) { throw new AssertionError("unselected provider was read"); }
-                public void setItemDirect(int slot, ItemStack stack) { throw new AssertionError("unselected provider was mutated"); }
-            };
-            register(menu, a.host, poison); poison.armed = true;
-            a.inventory.clear(); ids.add(a.id); menu.slots.get(sourceSlot).set(second.copy());
-            observed(menu, false, rows, () -> menu.quickMovePattern(player, sourceSlot, ids), 1, 1);
-            check(menu.slots.get(sourceSlot).getItem().isEmpty() && !a.inventory.getStackInSlot(0).isEmpty(), "native full-provider fallback failed");
+            a.inventory.setItemDirect(0, second.copy());
             int[] writes = {0};
             var failing = new InternalInventory() {
                 public int size() { return a.inventory.size(); }
@@ -131,7 +135,7 @@ public final class Ae2RemoteNativeSmoke {
             var thread = new Thread(() -> offThread.set(Ae2RemoteAudit.inspect(menu, true))); thread.start(); thread.join(5000);
             check(!thread.isAlive() && offThread.get() == null, "off-thread remote inspector read state");
             pipeline(level, player, terminalPos, rows);
-            org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_REMOTE_NATIVE_OK: real remote insert/swap/rejection/split/shift/live region/creative/invalid actions, quick move/full/fallback over 128 candidates with one retained slot, unselected inventory untouched, native partial failure once, original target+terminal, worker/replay; rows={}; inspector-only, authenticated emit not tested", rows.size());
+            org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_REMOTE_NATIVE_OK: real remote insert/swap/rejection/split/shift/live region/creative/invalid actions, native partial failure once, original target+terminal, worker/replay; quickMove={}, fullCandidates={}, rows={}; inspector-only, authenticated emit not tested", quickMove, quickMove ? 128 : 0, rows.size());
         } finally {
             player.containerMenu = previousMenu; player.connection = previousConnection;
             player.getInventory().clearContent(); for (int i = 0; i < inventoryBefore.size(); i++) player.getInventory().items.set(i, inventoryBefore.get(i));
@@ -187,9 +191,18 @@ public final class Ae2RemoteNativeSmoke {
             } catch (InvocationTargetException failure) { check(failure.getCause() == FAULT, "wrapper replaced original failure"); }
             check(calls[0] == 1 && field(PatternAccessTermMenu.class, FRAME).get(menu) == null, "disabled wrapper repeated or leaked scope"); tested++;
         }
-        check(tested == 2, "expected both transformed remote wrappers");
+        int expected = Arrays.stream(PatternAccessTermMenu.class.getDeclaredMethods()).anyMatch(m -> m.getName().equals("quickMovePattern")) ? 2 : 1;
+        check(tested == expected, "missing transformed remote wrappers");
     }
-    private static int playerSlot(AEBaseMenu menu) { for (int i = 0; i < menu.slots.size(); i++) if (menu.isPlayerSideSlot(menu.slots.get(i))) return i; throw new AssertionError("native player slot missing"); }
+    private static void quickMove(PatternAccessTermMenu menu, ServerPlayer player, int slot, List<Long> ids) {
+        try { PatternAccessTermMenu.class.getDeclaredMethod("quickMovePattern", ServerPlayer.class, int.class, List.class).invoke(menu, player, slot, ids); }
+        catch (InvocationTargetException failure) {
+            if (failure.getCause() instanceof RuntimeException original) throw original;
+            if (failure.getCause() instanceof Error original) throw original;
+            throw new AssertionError(failure.getCause());
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+    private static int playerSlot(AEBaseMenu menu) { for (int i = 0; i < menu.slots.size(); i++) if (menu.getSlotSemantic(menu.slots.get(i)) != null && menu.getSlotSemantic(menu.slots.get(i)).playerSide()) return i; throw new AssertionError("native player slot missing"); }
     private static BlockPos position(List<BlockPos> positions, int index) { var pos = new BlockPos(180 + index * 4, 100, 180); positions.add(pos); return pos; }
     private static Object part(ServerLevel level, ServerPlayer player, BlockPos pos, Item item) {
         level.setBlockAndUpdate(pos, AEBlocks.CABLE_BUS.block().defaultBlockState()); var host = (IPartHost)level.getBlockEntity(pos);

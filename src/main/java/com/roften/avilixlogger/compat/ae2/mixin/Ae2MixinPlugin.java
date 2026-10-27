@@ -11,13 +11,17 @@ import java.util.*;
 /** Optional, all-or-none raw contract verification; never initializes AE2 classes. */
 public final class Ae2MixinPlugin implements IMixinConfigPlugin {
     private boolean available;
+    private boolean quickMove;
 
-    public static void verify(CreateMixinPlugin.Classes classes) throws Exception {
+    public static void verify(CreateMixinPlugin.Classes classes, String version) throws Exception {
+        if (!version.equals("19.2.12") && !version.equals("19.2.18")) throw new IllegalStateException("Unsupported AE2 " + version);
+        boolean quickMove = version.equals("19.2.18");
         var checker = new CreateMixinPlugin.Preflight(classes);
         for (String name : List.of("NetworkStorageMixin", "StorageHelperMixin", "AEBaseMenuMixin",
                 "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin",
                 "PatternTrackerAccess", "PatternAccessTermMenuMixin"))
             checker.check("com/roften/avilixlogger/compat/ae2/mixin/" + name);
+        if (quickMove) checker.check("com/roften/avilixlogger/compat/ae2/mixin/PatternAccessQuickMoveMixin");
         var logic = classes.read("appeng/parts/encoding/PatternEncodingLogic");
         for (String contract : List.of("getMode()Lappeng/parts/encoding/EncodingMode;", "isSubstitution()Z", "isFluidSubstitution()Z",
                 "getStonecuttingRecipeId()Lnet/minecraft/resources/ResourceLocation;"))
@@ -27,7 +31,9 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         if (host.methods.stream().noneMatch(m -> m.name.equals("getLogic") && m.desc.equals("()Lappeng/parts/encoding/PatternEncodingLogic;")))
             throw new IllegalStateException("Missing AE2 pattern menu host logic");
         var remote = classes.read("appeng/menu/implementations/PatternAccessTermMenu");
-        for (String method : List.of("doAction", "quickMovePattern")) {
+        if (!quickMove && remote.methods.stream().anyMatch(m -> m.name.equals("quickMovePattern")))
+            throw new IllegalStateException("Unexpected quickMovePattern in AE2 19.2.12");
+        for (String method : quickMove ? List.of("doAction", "quickMovePattern") : List.of("doAction")) {
             var body = remote.methods.stream().filter(m -> m.name.equals(method)).findFirst()
                     .orElseThrow(() -> new IllegalStateException("Missing declared remote override " + method));
             int reads = 0;
@@ -54,7 +60,8 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
                     new ClassReader(input).accept(node, ClassReader.SKIP_FRAMES);
                     return node;
                 }
-            });
+            }, version);
+            quickMove = version.equals("19.2.18");
             available = true;
         } catch (Exception | LinkageError failure) {
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2").warn("AE2 audit integration disabled: {}", failure.toString());
@@ -62,7 +69,7 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
     }
 
     public String getRefMapperConfig() { return null; }
-    public boolean shouldApplyMixin(String target, String mixin) { return available; }
+    public boolean shouldApplyMixin(String target, String mixin) { return available && (quickMove || !mixin.endsWith(".PatternAccessQuickMoveMixin")); }
     public void acceptTargets(Set<String> mine, Set<String> other) {}
     public List<String> getMixins() { return null; }
     public void preApply(String target, ClassNode node, String mixin, IMixinInfo info) {}

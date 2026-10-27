@@ -13,7 +13,8 @@
     "PriorityMenuMixin",
     "StorageLevelEmitterMenuMixin",
     "PatternTrackerAccess",
-    "PatternAccessTermMenuMixin"
+    "PatternAccessTermMenuMixin",
+    "PatternAccessQuickMoveMixin"
   ],
   "client": [],
   "injectors": { "defaultRequire": 0 }

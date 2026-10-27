@@ -8,7 +8,7 @@ import java.util.*;
 /** Broken optional targets must disable the integration before any transformed AE2 class loads. */
 final class Ae2ContractsTest {
     static void run() throws Exception {
-        Ae2MixinPlugin.verify(Ae2ContractsTest::read);
+        verify(Ae2ContractsTest::read);
         var faults = List.of(
                 Map.entry("appeng/menu/AEBaseMenu", "receiveClientAction"),
                 Map.entry("appeng/core/network/serverbound/ConfigButtonPacket", "handleOnServer"),
@@ -22,9 +22,10 @@ final class Ae2ContractsTest {
                 Map.entry("appeng/menu/implementations/PatternAccessTermMenu", "doAction"),
                 Map.entry("appeng/menu/implementations/PatternAccessTermMenu", "quickMovePattern"));
         for (var fault : faults) {
+            if (!quickMove() && fault.getValue().equals("quickMovePattern")) continue;
             boolean refused = false;
             try {
-                Ae2MixinPlugin.verify(name -> {
+                verify(name -> {
                     var node = read(name);
                     if (name.equals(fault.getKey())) node.methods.removeIf(m -> m.name.equals(fault.getValue()));
                     return node;
@@ -34,7 +35,7 @@ final class Ae2ContractsTest {
         }
         boolean refused = false;
         try {
-            Ae2MixinPlugin.verify(name -> {
+            verify(name -> {
                 var node = read(name);
                 if (name.equals("appeng/menu/implementations/SetStockAmountMenu"))
                     node.fields.removeIf(f -> f.name.equals("host"));
@@ -44,16 +45,16 @@ final class Ae2ContractsTest {
         if (!refused) throw new AssertionError("AE2 preflight accepted missing stock host");
         for (String field : List.of("container", "serverId", "server")) {
             refused = false;
-            try { Ae2MixinPlugin.verify(name -> {
+            try { verify(name -> {
                 var node = read(name);
                 if (name.equals("appeng/menu/implementations/PatternAccessTermMenu$ContainerTracker")) node.fields.removeIf(f -> f.name.equals(field));
                 return node;
             }); } catch (IllegalStateException expected) { refused = true; }
             if (!refused) throw new AssertionError("AE2 preflight accepted missing tracker " + field);
         }
-        for (String method : List.of("doAction", "quickMovePattern")) {
+        for (String method : quickMove() ? List.of("doAction", "quickMovePattern") : List.of("doAction")) {
             refused = false;
-            try { Ae2MixinPlugin.verify(name -> {
+            try { verify(name -> {
                 var node = read(name);
                 if (name.equals("appeng/menu/implementations/PatternAccessTermMenu")) {
                     var body = node.methods.stream().filter(m -> m.name.equals(method)).findFirst().orElseThrow();
@@ -65,7 +66,12 @@ final class Ae2ContractsTest {
             }); } catch (IllegalStateException expected) { refused = true; }
             if (!refused) throw new AssertionError("AE2 preflight accepted changed remote inventory reads " + method);
         }
-        System.out.println("AE2_CONTRACTS_OK: nine optional hooks, pattern logic/remote inventory API and missing methods/stock field refusal, raw bytecode only");
+        System.out.println("AE2_CONTRACTS_OK: version-specific optional hooks, pattern logic/remote inventory API and missing methods/stock field refusal, raw bytecode only");
+    }
+
+    private static boolean quickMove() { return !System.getProperty("avilixlogger.ae2Version", "19.2.12").equals("19.2.12"); }
+    private static void verify(com.roften.avilixlogger.compat.create.mixin.CreateMixinPlugin.Classes classes) throws Exception {
+        Ae2MixinPlugin.verify(classes, System.getProperty("avilixlogger.ae2Version", "19.2.12"));
     }
 
     private static ClassNode read(String name) throws Exception {
