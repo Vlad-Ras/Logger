@@ -115,8 +115,8 @@ public final class PendingLogStorage implements LogStorage {
                 }
             } catch (Exception failure) {
                 AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Delivery delayed; journal retained for retry: {}", failure.toString());
-                retryPause(retryMillis);
-                retryMillis = Math.min(10_000, retryMillis * 2);
+                retryPause(retryMillis, current);
+                retryMillis = delegate != current ? 250 : Math.min(10_000, retryMillis * 2);
             }
         }
     }
@@ -136,10 +136,10 @@ public final class PendingLogStorage implements LogStorage {
         }
     }
     /** New journal batches must not turn an unavailable DB into a retry/log storm. */
-    private void retryPause(long millis) {
+    private void retryPause(long millis, BatchLogStorage failed) {
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(millis);
         synchronized (wakeup) {
-            while (sending) {
+            while (sending && delegate == failed) {
                 long remaining = deadline - System.nanoTime();
                 if (remaining <= 0) return;
                 try { java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(wakeup, remaining); }

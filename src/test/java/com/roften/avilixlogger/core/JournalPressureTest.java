@@ -65,10 +65,13 @@ final class JournalPressureTest {
         try{
             var version=method("wakeupVersion");var signal=method("signal");long observed=(long)version.invoke(storage);signal.invoke(storage);
             var pause=method("pauseIfUnchanged",long.class,long.class);var task=new FutureTask<Void>(()->{pause.invoke(storage,60_000L,observed);return null;});var waiter=new Thread(task,"notification-before-wait");waiter.setDaemon(true);waiter.start();task.get(2,TimeUnit.SECONDS);
-            var retry=method("retryPause",long.class);var retryTask=new FutureTask<Void>(()->{retry.invoke(storage,60_000L);return null;});var retryThread=new Thread(retryTask,"notification-during-backoff");retryThread.setDaemon(true);retryThread.start();await(()->retryThread.getState()==Thread.State.TIMED_WAITING,"retry fixture did not wait");
+            var retry=method("retryPause",long.class,BatchLogStorage.class);var retryTask=new FutureTask<Void>(()->{retry.invoke(storage,60_000L,null);return null;});var retryThread=new Thread(retryTask,"notification-during-backoff");retryThread.setDaemon(true);retryThread.start();await(()->retryThread.getState()==Thread.State.TIMED_WAITING,"retry fixture did not wait");
             for(int i=0;i<100;i++)signal.invoke(storage);
             try{retryTask.get(40,TimeUnit.MILLISECONDS);throw new AssertionError("ordinary notifications interrupted retry delay");}catch(TimeoutException expected){}
-            storage.shutdown();retryTask.get(2,TimeUnit.SECONDS);
+            var replacement=new BatchLogStorage(){public void appendBatch(String token,List<LogEntry> rows){throw new AssertionError("empty journal unexpectedly delivered rows");}public void append(LogEntry row){throw new AssertionError("empty journal append");}public List<LogEntry> query(LogQuery q){return List.of();}public List<LogEntry> queryReverse(LogQuery q){return List.of();}public void shutdown(){}};
+            storage.setDelegate(replacement);retryTask.get(2,TimeUnit.SECONDS);
+            var stopTask=new FutureTask<Void>(()->{retry.invoke(storage,60_000L,replacement);return null;});var stopThread=new Thread(stopTask,"shutdown-during-backoff");stopThread.setDaemon(true);stopThread.start();await(()->stopThread.getState()==Thread.State.TIMED_WAITING,"shutdown retry fixture did not wait");
+            storage.shutdown();stopTask.get(2,TimeUnit.SECONDS);
         }finally{storage.shutdown();delete(directory);}
     }
     private static void existence()throws Exception{

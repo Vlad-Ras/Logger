@@ -148,7 +148,8 @@ public final class ClickHouseNativeSmoke {
     private static void verifyJournalPressure(ClickHouseLogStorage db,List<LogEntry> rows){
         check(rows.size()==3,"real pressure fixture did not submit all rows");
         for(var expected:rows){var q=new LogQuery();q.type=expected.type;q.exactId=expected.id;q.untilTs=Long.MAX_VALUE;q.requireDetails=true;q.limit=2;var read=db.query(q);
-            check(read.size()==1&&read.getFirst().id==expected.id&&expected.beBefore.equals(read.getFirst().beBefore)&&expected.beAfter.equals(read.getFirst().beAfter)&&expected.extra.equals(read.getFirst().extra)&&read.getFirst().actorUuid==null&&expected.actorName.equals(read.getFirst().actorName),"real journal pressure/replay lost or duplicated payload/attribution by exact ID");}
+            check(read.size()==1&&read.getFirst().id==expected.id&&expected.beBefore.equals(read.getFirst().beBefore)&&expected.beAfter.equals(read.getFirst().beAfter)&&expected.extra.equals(read.getFirst().extra)&&read.getFirst().actorUuid==null&&expected.actorName.equals(read.getFirst().actorName)&&expected.source.equals(read.getFirst().source)&&expected.dim.equals(read.getFirst().dim)&&expected.x==read.getFirst().x&&expected.y==read.getFirst().y&&expected.z==read.getFirst().z&&expected.blockBefore.equals(read.getFirst().blockBefore)&&expected.blockAfter.equals(read.getFirst().blockAfter),"real journal pressure/replay lost or duplicated payload/attribution by exact ID");
+            q.requireDetails=false;check(db.query(q).size()==1,"real journal replay duplicated/lost exact ID in GUI feed");}
         System.out.println("JOURNAL_PRESSURE_CLICKHOUSE_OK: saturated partial batch, durable shutdown/restart replay, acknowledged visibility, exact IDs/full payload/actor survive real ClickHouse and database reopen");
     }
     private static void seedOldWeaponSchema(String endpoint,String user,String password)throws Exception{
