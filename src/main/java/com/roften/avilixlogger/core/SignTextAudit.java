@@ -26,11 +26,15 @@ public final class SignTextAudit {
     }
     public static void after(SignBlockEntity sign,CompoundTag before){
         if(before==null||!enabled()||!(sign.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return;
-        var row=row(level,sign,before,NbtSerde.snapshotBlockEntity(level,sign));if(row!=null)LoggerRuntime.storage(level).append(row);
+        var row=pendingRow(level,sign,before,NbtSerde.snapshotBlockEntity(level,sign));if(row!=null)LoggerRuntime.storage(level).append(row);
     }
     /** Builds a detached record without authorizing publication; supplied tags transfer ownership. */
     public static LogEntry row(ServerLevel level,SignBlockEntity sign,CompoundTag before,CompoundTag after){
-        if(!changed(before,after))return null;
+        var row=pendingRow(level,sign,before,after);return row==null?null:row.resolve();
+    }
+    /** Capture live attribution now; compare detached tags on the ordered event worker. */
+    public static LogEntry pendingRow(ServerLevel level,SignBlockEntity sign,CompoundTag before,CompoundTag after){
+        if(before==null||after==null)return null;
         var row=new LogEntry();row.ts=System.currentTimeMillis();row.dim=level.dimension().location().toString();row.type=ActionType.BLOCK_ENTITY_NBT_CHANGE;
         var pos=sign.getBlockPos();row.x=pos.getX();row.y=pos.getY();row.z=pos.getZ();
         var cause=CauseContext.peek();if(cause!=null){row.actorUuid=cause.actorUuid();row.actorName=cause.actorName();}
@@ -38,6 +42,7 @@ public final class SignTextAudit {
         if(row.actorName==null)row.actorName="SYSTEM";
         row.deferBlockBefore(sign.getBlockState());row.deferBlockAfter(sign.getBlockState());
         row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);row.extra="sign_text_edit";
+        row.deferSnapshotDelta(SnapshotDeltaPolicy.SIGN_TEXT);
         return row;
     }
 }

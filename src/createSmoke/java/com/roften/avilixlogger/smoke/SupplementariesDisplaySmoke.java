@@ -122,8 +122,9 @@ public final class SupplementariesDisplaySmoke {
             LOG.info("SUPPLEMENTARIES_DISPLAY_NATIVE_OK: native books/conversion/filter/no-op/50-page cap, real menu/map, registered Create gather pipeline, detached worker preparation + tick kernel rollback, invalid history refusal; positive authenticated emit remains untested");
         }finally{CartRestoreLocks.clear();CartAuditContext.rollbackActive=false;level.removeBlock(TARGET,false);level.removeBlock(ORIGIN,false);level.removeBlock(ORIGIN.below(),false);}
     }
-    private static LogEntry record(ServerLevel level,BlockEntity be,net.minecraft.world.level.block.state.BlockState beforeState,CompoundTag before,CompoundTag after,boolean completed){
-        var row=SupplementariesAutomationAudit.row(level.dimension().location().toString(),be.getBlockPos(),ORIGIN,beforeState,be.getBlockState(),before.copy(),after.copy(),completed);check(row!=null,"automation row missing");row.materializeSnapshots();return row;
+    private static LogEntry record(ServerLevel level,BlockEntity be,net.minecraft.world.level.block.state.BlockState beforeState,CompoundTag before,CompoundTag after,boolean completed)throws Exception{
+        var row=SupplementariesAutomationAudit.row(level.dimension().location().toString(),be.getBlockPos(),ORIGIN,beforeState,be.getBlockState(),before.copy(),after.copy(),completed);check(row!=null,"automation row missing");row.materializeSnapshots();
+        SnapshotDeltaNativeSmoke.verify(SupplementariesAutomationAudit.pendingRow(level.dimension().location().toString(),be.getBlockPos(),ORIGIN,beforeState,be.getBlockState(),before.copy(),after.copy(),completed),SupplementariesAutomationAudit.pendingRow(level.dimension().location().toString(),be.getBlockPos(),ORIGIN,be.getBlockState(),be.getBlockState(),after.copy(),after.copy(),completed),row,"supplementaries display");return row;
     }
     private static void verifyRow(ServerLevel level,LogEntry row){
         var restored=GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row),LogEntry.class);

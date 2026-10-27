@@ -10,7 +10,22 @@ import java.util.UUID;
  * - rollback-friendly: contains "before" snapshots where possible
  */
 public final class LogEntry implements QueuedLogEvent {
-    @Override public LogEntry resolve() { return this; }
+    @Override public LogEntry resolve() {
+        if (rejectedSnapshotDelta) return null;
+        if (snapshotDelta == null) return this;
+        var before = snapshots == null ? null : snapshots[SnapshotField.BE_BEFORE.ordinal()];
+        var after = snapshots == null ? null : snapshots[SnapshotField.BE_AFTER.ordinal()];
+        boolean changed = snapshotDelta.changed(before instanceof net.minecraft.nbt.CompoundTag tag ? tag : null,
+                after instanceof net.minecraft.nbt.CompoundTag tag ? tag : null);
+        snapshotDelta = null;
+        if (changed) return this;
+        rejectedSnapshotDelta = true;
+        snapshots = null;
+        snapshotBytes = 0;
+        deferredBlockBefore = null;
+        deferredBlockAfter = null;
+        return null;
+    }
     /** SQL row id (filled on reads). */
     public long id;
     public long ts;                // epoch millis
@@ -82,6 +97,15 @@ public final class LogEntry implements QueuedLogEvent {
     transient boolean aggregateDrop;
     private transient net.minecraft.world.level.block.state.BlockState deferredBlockBefore;
     private transient net.minecraft.world.level.block.state.BlockState deferredBlockAfter;
+    private transient SnapshotDeltaPolicy snapshotDelta;
+    private transient boolean rejectedSnapshotDelta;
+
+    /** Only detached NBT is inspected by resolve(); no callback or live-world reference. */
+    public void deferSnapshotDelta(SnapshotDeltaPolicy policy) {
+        if (policy == null || type != ActionType.BLOCK_ENTITY_NBT_CHANGE || rejectedSnapshotDelta)
+            throw new IllegalArgumentException("Snapshot delta requires unresolved block-entity evidence");
+        snapshotDelta = policy;
+    }
 
     public void deferBlockBefore(net.minecraft.world.level.block.state.BlockState state) { deferredBlockBefore = state; }
     public void deferBlockAfter(net.minecraft.world.level.block.state.BlockState state) { deferredBlockAfter = state; }
@@ -114,6 +138,8 @@ public final class LogEntry implements QueuedLogEvent {
     }
 
     public void materializeSnapshots() {
+        if (snapshotDelta != null) throw new IllegalStateException("Resolve snapshot delta before encoding");
+        if (rejectedSnapshotDelta) return;
         if (deferredBlockBefore != null) blockBefore = NbtSerde.writeBlockState(deferredBlockBefore);
         if (deferredBlockAfter != null) blockAfter = NbtSerde.writeBlockState(deferredBlockAfter);
         deferredBlockBefore = null;
@@ -191,6 +217,8 @@ public final class LogEntry implements QueuedLogEvent {
         copy.snapshotBytes = snapshotBytes;
         copy.deferredBlockBefore = deferredBlockBefore;
         copy.deferredBlockAfter = deferredBlockAfter;
+        copy.snapshotDelta = snapshotDelta;
+        copy.rejectedSnapshotDelta = rejectedSnapshotDelta;
         return copy;
     }
 }

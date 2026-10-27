@@ -14,7 +14,7 @@ import java.util.*;
 
 /** Native sign editing and DamageSource identity; publication still requires production AuthCore. */
 final class AuditDetailsSmoke {
-    static void run(ServerLevel level){
+    static void run(ServerLevel level)throws Exception{
         var config=com.roften.avilixlogger.LoggerConfig.VALUES;
         int cpu=config.asyncMaxQueuedPayloadMiB.get(),journal=config.clickHouseMaxQueuedPayloadMiB.get();
         try{
@@ -35,6 +35,9 @@ final class AuditDetailsSmoke {
         LogEntry row;
         try(var cause=CauseContext.push(editor,CauseContext.Kind.USE_BLOCK,pos,ItemStack.EMPTY)){row=SignTextAudit.row(level,sign,original,both);}
         check(row!=null&&row.actorUuid.equals(editor.getUUID())&&row.actorName.equals("SignEditor"),"sign author lost");row.materializeSnapshots();
+        try(var cause=CauseContext.push(editor,CauseContext.Kind.USE_BLOCK,pos,ItemStack.EMPTY)){
+            SnapshotDeltaNativeSmoke.verify(SignTextAudit.pendingRow(level,sign,original.copy(),both.copy()),SignTextAudit.pendingRow(level,sign,both.copy(),both.copy()),row,"vanilla sign + Amendments when present");
+        }
         String details=SignLogDetails.describe(level,row).stream().map(Component::getString).collect(java.util.stream.Collectors.joining("\n"));
         check(details.contains("Первая")&&details.contains("Обратная")&&details.contains("До [1]")&&details.contains("После [1]"),"both before/after sign sides not rendered");
         check(!SignTextAudit.changed(both,both.copy()),"no-op text created an edit");

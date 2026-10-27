@@ -43,7 +43,7 @@ public final class SupplementariesTextAudit {
             try{if(before==null||!enabled())return;var level=player.serverLevel();
                 if(!WorldSnapshotAccess.readable(level,pos)||level.getBlockEntity(pos)!=entity||entity.getBlockState()!=state){AdaptiveLogDiagnostics.adapterFailure("supplementaries-text-replaced");return;}
                 var after=NbtSerde.snapshotBlockEntity(level,entity);
-                var row=row(player.getUUID(),player.getGameProfile().getName(),level.dimension().location().toString(),pos,state,before,after,completed);
+                var row=pendingRow(player.getUUID(),player.getGameProfile().getName(),level.dimension().location().toString(),pos,state,before,after,completed);
                 close();if(row!=null)LoggerRuntime.storage(level).append(row);
             }catch(RuntimeException|LinkageError failure){AdaptiveLogDiagnostics.adapterFailure("supplementaries-text-after");}
             finally{close();}
@@ -65,9 +65,13 @@ public final class SupplementariesTextAudit {
     }
     /** Detached kernel, not an authorization path. Snapshot tags transfer ownership. */
     public static LogEntry row(UUID editor,String name,String dim,BlockPos pos,BlockState state,CompoundTag before,CompoundTag after,boolean completed){
-        if(editor==null||pos==null||state==null||!changed(before,after))return null;
+        var row=pendingRow(editor,name,dim,pos,state,before,after,completed);return row==null?null:row.resolve();
+    }
+    /** Detached candidate for the ordered event worker, before SNBT encoding. */
+    public static LogEntry pendingRow(UUID editor,String name,String dim,BlockPos pos,BlockState state,CompoundTag before,CompoundTag after,boolean completed){
+        if(editor==null||pos==null||state==null||before==null||after==null)return null;
         var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.BLOCK_ENTITY_NBT_CHANGE;row.dim=dim;row.x=pos.getX();row.y=pos.getY();row.z=pos.getZ();row.actorUuid=editor;row.actorName=name;row.source="mod:supplementaries:text_edit";row.extra="supplementaries_text_edit;completed="+completed;
-        row.deferBlockBefore(state);row.deferBlockAfter(state);row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);return row;
+        row.deferBlockBefore(state);row.deferBlockAfter(state);row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);row.deferSnapshotDelta(SnapshotDeltaPolicy.SUPPLEMENTARIES_TEXT);return row;
     }
     public static List<Component> describe(ServerLevel level,LogEntry row){
         boolean display=SupplementariesAutomationAudit.SOURCE.equals(row.source);

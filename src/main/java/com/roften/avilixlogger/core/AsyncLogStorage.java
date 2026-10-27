@@ -77,6 +77,7 @@ public final class AsyncLogStorage implements LogStorage {
                 if (work == null) continue;
                 try {
                     LogEntry row = work.value().resolve();
+                    if (row == null) continue;
                     row.materializeSnapshots();
                     if (row.aggregateDrop) drops.add(row, now);
                     else delegate.append(row);

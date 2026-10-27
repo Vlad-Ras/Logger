@@ -53,14 +53,17 @@ public final class SupplementariesAutomationAudit {
         private BlockState state;
         private boolean attempted,closed;
         private Frame(){}
-        public void bind(BlockEntity entity,BlockPos origin){target=entity;mechanism=origin==null?null:origin.immutable();}
+        public void bind(BlockEntity entity,BlockPos origin){
+            target=entity!=null&&entity.getLevel() instanceof ServerLevel level&&level.getServer().isSameThread()?entity:null;
+            mechanism=target==null||origin==null?null:origin.immutable();
+        }
         public void text(Object holder){
-            if(attempted)return;
+            if(attempted||target==null)return;
             try{if(holder instanceof TextHolderAuditAccess access&&!access.avilixlogger$matches(first,input))capture();}
             catch(RuntimeException|LinkageError failure){AdaptiveLogDiagnostics.adapterFailure("supplementaries-display-text");}
         }
         public void book(ItemStack item){
-            if(attempted)return;
+            if(attempted||target==null)return;
             try{if(bookMayChange(item,first,input))capture();}
             catch(RuntimeException|LinkageError failure){AdaptiveLogDiagnostics.adapterFailure("supplementaries-display-book");}
         }
@@ -83,7 +86,7 @@ public final class SupplementariesAutomationAudit {
                 var pos=target.getBlockPos();
                 if(!WorldSnapshotAccess.readable(level,pos)||level.getBlockEntity(pos)!=target){AdaptiveLogDiagnostics.adapterFailure("supplementaries-display-replaced");return;}
                 var after=NbtSerde.snapshotBlockEntity(level,target);
-                var row=row(level.dimension().location().toString(),pos,mechanism,state,target.getBlockState(),before,after,completed);
+                var row=pendingRow(level.dimension().location().toString(),pos,mechanism,state,target.getBlockState(),before,after,completed);
                 close();released=true;if(row!=null)LoggerRuntime.storage(level).append(row);
             }catch(RuntimeException|LinkageError failure){AdaptiveLogDiagnostics.adapterFailure("supplementaries-display-after");}
             finally{if(!released)close();}
@@ -101,11 +104,15 @@ public final class SupplementariesAutomationAudit {
     }
     /** Detached kernel, not authorization. Caller transfers snapshot ownership. */
     public static LogEntry row(String dimension,BlockPos target,BlockPos mechanism,BlockState beforeState,BlockState afterState,CompoundTag before,CompoundTag after,boolean completed){
-        if(target==null||mechanism==null||beforeState==null||afterState==null||!changed(before,after))return null;
+        var row=pendingRow(dimension,target,mechanism,beforeState,afterState,before,after,completed);return row==null?null:row.resolve();
+    }
+    /** Candidate for the ordered event worker. All snapshot tags have detached from the world. */
+    public static LogEntry pendingRow(String dimension,BlockPos target,BlockPos mechanism,BlockState beforeState,BlockState afterState,CompoundTag before,CompoundTag after,boolean completed){
+        if(target==null||mechanism==null||beforeState==null||afterState==null||before==null||after==null)return null;
         var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.BLOCK_ENTITY_NBT_CHANGE;row.dim=dimension;
         row.x=target.getX();row.y=target.getY();row.z=target.getZ();row.actorName="SYSTEM[create:display_link]";row.source=SOURCE;
         row.extra="supplementaries_display;mechanism=create:display_link@"+mechanism.getX()+","+mechanism.getY()+","+mechanism.getZ()+";dimension="+dimension+";completed="+completed;
         row.deferBlockBefore(beforeState);row.deferBlockAfter(afterState);
-        row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);return row;
+        row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,before);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,after);row.deferSnapshotDelta(SnapshotDeltaPolicy.SUPPLEMENTARIES_DISPLAY);return row;
     }
 }

@@ -1000,8 +1000,7 @@ public final class LoggerEventHandlers {
             LoggerRuntime.storage(level).append(row);
         }
         private void emit(CompoundTag before, CompoundTag after, CompoundTag beforeBe, CompoundTag afterBe, boolean direct) {
-            if (before == null || after == null || java.util.Objects.equals(before, after)
-                    && java.util.Objects.equals(beforeBe, afterBe)) return;
+            if (before == null || after == null) return;
             final UUID actor = direct ? CauseContext.actorUuid(player) : null;
             final String name = direct ? CauseContext.actorName(player) : "SYSTEM[container interval]";
             final String source = direct ? actionSource : "system:container_interval";
@@ -1013,6 +1012,7 @@ public final class LoggerEventHandlers {
             final boolean blockContainer=block!=null;
             final BlockPos actionPos=pos;
             AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after, beforeBe, afterBe), () -> {
+                if (java.util.Objects.equals(before, after) && java.util.Objects.equals(beforeBe, afterBe)) return;
                 String blockState = state == null ? null : NbtSerde.writeBlockState(state);
                 emitContainerChanges(before, after, access, storage, dim, actionPos, actor, name, source, blockState, timestamp);
                 if (blockContainer) {
