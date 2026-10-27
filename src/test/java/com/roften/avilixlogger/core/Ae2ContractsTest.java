@@ -16,7 +16,9 @@ final class Ae2ContractsTest {
                 "appeng/api/storage/StorageHelper", "poweredInsert",
                 "appeng/me/storage/NetworkStorage", "insert",
                 "appeng/menu/implementations/PriorityMenu", "setPriority",
-                "appeng/menu/implementations/StorageLevelEmitterMenu", "setValue");
+                "appeng/menu/implementations/StorageLevelEmitterMenu", "setValue",
+                "appeng/parts/encoding/PatternEncodingLogic", "getMode",
+                "appeng/helpers/IPatternTerminalMenuHost", "getLogic");
         for (var fault : faults.entrySet()) {
             boolean refused = false;
             try {
@@ -38,7 +40,7 @@ final class Ae2ContractsTest {
             });
         } catch (IllegalStateException expected) { refused = true; }
         if (!refused) throw new AssertionError("AE2 preflight accepted missing stock host");
-        System.out.println("AE2_CONTRACTS_OK: all seven optional hooks and missing methods/stock field refusal, raw bytecode only");
+        System.out.println("AE2_CONTRACTS_OK: seven optional hooks, pattern logic API and missing methods/stock field refusal, raw bytecode only");
     }
 
     private static ClassNode read(String name) throws Exception {

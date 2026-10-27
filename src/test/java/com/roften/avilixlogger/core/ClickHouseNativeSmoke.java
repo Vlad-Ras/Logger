@@ -81,7 +81,7 @@ public final class ClickHouseNativeSmoke {
         conversion.playerInvBefore="{Items:[{Slot:0,id:'minecraft:stone',count:2}]}";conversion.playerInvAfter="{Items:[{Slot:0,id:'chipped:carved_stone',count:2}]}";
         var textEdit=SupplementariesTextAuditTest.record();
         var display=SupplementariesAutomationAuditTest.record();
-        var meTransfers=List.of(Ae2TransferDetailsTest.record("i",Long.MAX_VALUE), Ae2TransferDetailsTest.record("f",1234567890123L), Ae2TransferDetailsTest.record("g",918273645L));
+        var meTransfers=List.of(Ae2TransferDetailsTest.record("i",Long.MAX_VALUE), Ae2TransferDetailsTest.record("f",1234567890123L), Ae2TransferDetailsTest.record("g",918273645L), Ae2TransferDetailsTest.device());
         for(var transfer:meTransfers)transfer.materializeSnapshots();
         var meConfigurations=List.of(Ae2ConfigurationDetailsTest.record(ActionType.ME_FILTER_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_UPGRADE_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_CELL_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_SETTING_CHANGE));
         for(var change:meConfigurations)change.materializeSnapshots();
@@ -169,6 +169,8 @@ public final class ClickHouseNativeSmoke {
             check(Ae2TransferDetails.summary(feed.getFirst()).amountLabel().contains(Long.toString(Ae2TransferDetails.summary(expected).amount())),"ME feed rendered truncated amount");
         }
         System.out.println("AE2_TRANSFER_CLICKHOUSE_OK: minimal-mode exact full key/components, long amount, typed feed, source/address and ID survive database reopen");
+        check(rows.stream().anyMatch(r -> Ae2TransferDetails.context(r).getString("Domain").equals("device-slot")), "physical slot fixture missing");
+        System.out.println("AE2_DEVICE_CLICKHOUSE_OK: physical slot components/domain/count, exact ID, source/address and feed survive minimal mode and reopened connection");
     }
     private static void verifyMeConfigurations(ClickHouseLogStorage db,List<LogEntry> rows)throws Exception{
         if(rows.getFirst().id==0)db.appendBatch("native-me-config-"+UUID.randomUUID(),rows);

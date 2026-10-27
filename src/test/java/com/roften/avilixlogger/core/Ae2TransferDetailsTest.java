@@ -7,6 +7,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.roften.avilixlogger.core.AsyncPipelineTest.*;
 
 final class Ae2TransferDetailsTest {
+    static LogEntry device() {
+        var row = record("i", 3); row.type = ActionType.ME_TAKE;
+        row.source = "ae2:PatternProviderMenu:ENCODED_PATTERN:slot=36";
+        var item = new CompoundTag(); item.putString("id", "ae2:processing_pattern"); item.putInt("count", 3);
+        var components = new CompoundTag(); components.putString("test:data", "native pattern " + "x".repeat(3000)); item.put("components", components);
+        Ae2TransferDetails.device(row, "ae2:processing_pattern", 3, item); row.count = 3; return row;
+    }
     static LogEntry record(String kind, long amount) {
         var row = AsyncPipelineTest.row("ae2-transfer-test");
         row.type = ActionType.ME_PUT; row.source = "ae2:InterfaceBlockEntity"; row.dim = "minecraft:overworld";
@@ -19,6 +26,11 @@ final class Ae2TransferDetailsTest {
     }
     static void run() throws Exception {
         var item = record("i", Long.MAX_VALUE); item.materializeSnapshots();
+        var device = device(); device.materializeSnapshots();
+        check(Ae2TransferDetails.context(device).getString("Domain").equals("device-slot") && device.itemStackNbt.length() > 3000
+                && Ae2TransferDetails.summary(device).amount() == 3 && Ae2TransferDetails.describe(device).stream().anyMatch(c -> c.getString().contains("физический слот")), "device transfer lost domain/components/delta");
+        var invalidDevice = device.copyForQueue(); invalidDevice.beAfter = device.beAfter.replace("device-slot", "unknown");
+        check(Ae2TransferDetails.context(invalidDevice) == null, "unknown device domain accepted");
         check(Ae2TransferDetails.summary(item).amount() == Long.MAX_VALUE && Ae2TransferDetails.context(item).getLong("Amount") == Long.MAX_VALUE, "ME amount truncated to int/double");
         check(Ae2TransferDetails.summary(item).amountLabel().contains("x" + Long.MAX_VALUE), "ME line used saturated int count");
         var fluid = record("f", 1234567); fluid.materializeSnapshots();
@@ -47,8 +59,18 @@ final class Ae2TransferDetailsTest {
         };
         probe.merge(tag); pending.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, probe);
         check(PayloadSizeEstimator.estimate(pending) >= tag.sizeInBytes() * 2L, "full resource key absent from byte accounting");
-        storage.append(pending); pending.extra = "producer mutation"; storage.shutdown();
-        check(rows.size() == 1 && encodes.get() == 1 && Ae2TransferDetails.context(rows.getFirst()).getCompound("Key").equals(tag.getCompound("Key")), "worker lost captured ME payload");
+        storage.append(pending); pending.extra = "producer mutation";
+        var pendingDevice = device(); long deviceWeight = 0;
+        for (var field : List.of(LogEntry.SnapshotField.ITEM, LogEntry.SnapshotField.BE_AFTER)) {
+            var source = (CompoundTag)pendingDevice.copyDeferredSnapshot(field); deviceWeight += 2L * source.sizeInBytes();
+            var deviceProbe = new CompoundTag() {
+                @Override public String toString() { check(Thread.currentThread().getName().equals("avilixlogger-event-worker"), "device SNBT ran on producer"); encodes.incrementAndGet(); return super.toString(); }
+            }; deviceProbe.merge(source); pendingDevice.deferSnapshot(field, deviceProbe);
+        }
+        check(PayloadSizeEstimator.estimate(pendingDevice) >= deviceWeight, "device item/evidence absent from byte accounting");
+        storage.append(pendingDevice); pendingDevice.extra = "producer mutation"; storage.shutdown();
+        check(rows.size() == 2 && encodes.get() == 3 && Ae2TransferDetails.context(rows.getFirst()).getCompound("Key").equals(tag.getCompound("Key")), "worker lost captured ME payload");
+        check(Ae2TransferDetails.context(rows.get(1)).getString("Domain").equals("device-slot") && rows.get(1).itemStackNbt.length() > 3000, "worker lost device metadata/components");
         var replay = GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(rows.getFirst()), LogEntry.class);
         check(replay.beAfter.equals(rows.getFirst().beAfter) && Ae2TransferDetails.summary(replay).amount() == Long.MAX_VALUE, "Gzip replay changed ME long/key");
         var directory = java.nio.file.Files.createTempDirectory("ae2-transfer-journal-");
@@ -56,7 +78,10 @@ final class Ae2TransferDetailsTest {
             var journal = new DiskLogJournal(directory); journal.initialize(); LogIdGenerator.ensure(replay);
             var file = journal.write(journal.newToken(), List.of(replay)); var fromDisk = DiskLogJournal.read(file).getFirst();
             check(fromDisk.id == replay.id && fromDisk.beAfter.equals(replay.beAfter) && Ae2TransferDetails.summary(fromDisk).amount() == Long.MAX_VALUE, "disk journal changed ME key/quantity/ID");
+            LogIdGenerator.ensure(device); var deviceDisk = DiskLogJournal.read(journal.write(journal.newToken(), List.of(device))).getFirst();
+            check(deviceDisk.id == device.id && deviceDisk.itemStackNbt.equals(device.itemStackNbt) && Ae2TransferDetails.context(deviceDisk).getString("Domain").equals("device-slot"), "journal lost physical slot components/domain");
         } finally { try (var files = java.nio.file.Files.walk(directory)) { for (var path : files.sorted(Comparator.reverseOrder()).toList()) java.nio.file.Files.delete(path); } }
         System.out.println("AE2_TRANSFER_EVIDENCE_OK: exact long, item/fluid/generic units, legacy/malformed refusal, bounded weight, worker-only SNBT and full key replay");
+        System.out.println("AE2_DEVICE_EVIDENCE_OK: exact physical slot delta/components/domain and journal ID replay; no network transfer claimed");
     }
 }

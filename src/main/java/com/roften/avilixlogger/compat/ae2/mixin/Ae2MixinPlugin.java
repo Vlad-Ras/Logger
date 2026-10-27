@@ -17,6 +17,14 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         for (String name : List.of("NetworkStorageMixin", "StorageHelperMixin", "AEBaseMenuMixin",
                 "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin"))
             checker.check("com/roften/avilixlogger/compat/ae2/mixin/" + name);
+        var logic = classes.read("appeng/parts/encoding/PatternEncodingLogic");
+        for (String contract : List.of("getMode()Lappeng/parts/encoding/EncodingMode;", "isSubstitution()Z", "isFluidSubstitution()Z",
+                "getStonecuttingRecipeId()Lnet/minecraft/resources/ResourceLocation;"))
+            if (logic.methods.stream().noneMatch(m -> (m.name + m.desc).equals(contract)))
+                throw new IllegalStateException("Missing AE2 pattern logic " + contract);
+        var host = classes.read("appeng/helpers/IPatternTerminalMenuHost");
+        if (host.methods.stream().noneMatch(m -> m.name.equals("getLogic") && m.desc.equals("()Lappeng/parts/encoding/PatternEncodingLogic;")))
+            throw new IllegalStateException("Missing AE2 pattern menu host logic");
     }
 
     public void onLoad(String pkg) {

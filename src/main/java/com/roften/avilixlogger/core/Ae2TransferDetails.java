@@ -19,6 +19,18 @@ public final class Ae2TransferDetails {
     /** Inputs and snapshots are detached; SNBT encoding stays with LogEntry's event worker. */
     public static void attach(LogEntry row, String kind, String resource, String keyType, long amount,
                               String unit, int scale, CompoundTag key) {
+        attach(row, kind, resource, keyType, amount, unit, scale, key, false);
+    }
+
+    /** A physical device slot delta, not a transfer through virtual network storage. */
+    public static void device(LogEntry row, String resource, int amount, CompoundTag item) {
+        if (item == null || !resource.equals(item.getString("id"))) throw new IllegalArgumentException("Missing device item");
+        attach(row, "i", resource, "ae2:item", amount, "", 1, null, true);
+        row.deferSnapshot(LogEntry.SnapshotField.ITEM, item);
+    }
+
+    private static void attach(LogEntry row, String kind, String resource, String keyType, long amount,
+                               String unit, int scale, CompoundTag key, boolean device) {
         if (!transfer(row) || !KINDS.contains(kind) || amount <= 0 || scale <= 0
                 || ResourceLocation.tryParse(resource) == null || ResourceLocation.tryParse(keyType) == null)
             throw new IllegalArgumentException("Invalid ME transfer evidence");
@@ -28,6 +40,7 @@ public final class Ae2TransferDetails {
         evidence.putLong("Amount", amount); evidence.putString("ResourceKind", kind);
         evidence.putString("NativeUnit", Objects.requireNonNullElse(unit, "")); evidence.putInt("AmountPerUnit", scale);
         if (key != null) evidence.put("Key", key);
+        if (device) evidence.putString("Domain", "device-slot");
         row.extra = PREFIX + kind + '|' + resource + '|' + keyType + '|' + amount;
         row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, evidence);
     }
@@ -51,6 +64,7 @@ public final class Ae2TransferDetails {
                 || !tag.contains("Amount", Tag.TAG_LONG) || tag.getLong("Amount") != summary.amount()
                 || !tag.getString("Resource").equals(summary.resource()) || !tag.getString("KeyType").equals(summary.keyType())
                 || !tag.getString("ResourceKind").equals(summary.kind()) || tag.getInt("AmountPerUnit") <= 0) return null;
+        if (tag.contains("Domain") && (!tag.getString("Domain").equals("device-slot") || !summary.kind().equals("i") || !summary.keyType().equals("ae2:item"))) return null;
         return tag;
     }
 
@@ -62,6 +76,7 @@ public final class Ae2TransferDetails {
         out.add(Component.literal("Тип ключа: " + summary.keyType()));
         var tag = context(row);
         if (tag != null) {
+            if (tag.getString("Domain").equals("device-slot")) out.add(Component.literal("Изменён физический слот устройства; адрес и слот указаны в источнике"));
             out.add(Component.literal("Единица AE2: " + tag.getInt("AmountPerUnit") + " → " + tag.getString("NativeUnit")));
             if (tag.contains("Key", Tag.TAG_COMPOUND)) out.add(Component.literal("Полный ключ ресурса сохранён в снимке"));
         }

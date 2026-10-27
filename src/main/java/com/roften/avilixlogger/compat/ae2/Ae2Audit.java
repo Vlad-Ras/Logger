@@ -192,6 +192,7 @@ public final class Ae2Audit {
                 if (!id.equals("UPGRADE") && !id.equals("CONFIG") && !id.equals("VIEW_CELL")
                         && !id.equals("STORAGE_CELL") && !id.equals("STORAGE") && !id.equals("MACHINE_INPUT")
                         && !id.equals("MACHINE_OUTPUT") && !id.equals("BLANK_PATTERN")
+                        && !id.equals("INSCRIBER_PLATE_TOP") && !id.equals("INSCRIBER_PLATE_BOTTOM")
                         && !id.equals("ENCODED_PATTERN") && !id.equals("PROCESSING_INPUTS")
                         && !id.equals("PROCESSING_OUTPUTS")) continue;
                 slots.put(i, new SlotValue(id, slot.getItem().copy()));
@@ -203,6 +204,14 @@ public final class Ae2Audit {
                 settings.put("avilixlogger:priority", Integer.toString(host.getPriority()));
             if (menu instanceof appeng.menu.implementations.StorageLevelEmitterMenu && target instanceof appeng.parts.automation.StorageLevelEmitterPart emitter)
                 settings.put("avilixlogger:reporting_value", Long.toString(emitter.getReportingValue()));
+            if (menu instanceof appeng.menu.me.items.PatternEncodingTermMenu && target instanceof appeng.helpers.IPatternTerminalMenuHost host) {
+                var logic = host.getLogic();
+                settings.put("avilixlogger:pattern_mode", logic.getMode().name());
+                settings.put("avilixlogger:pattern_substitution", Boolean.toString(logic.isSubstitution()));
+                settings.put("avilixlogger:pattern_fluid_substitution", Boolean.toString(logic.isFluidSubstitution()));
+                var recipe = logic.getStonecuttingRecipeId();
+                if (recipe != null) settings.put("avilixlogger:stonecutting_recipe", recipe.toString());
+            }
             return new Snapshot(slots, settings);
         } catch (Throwable ignored) {
             return null;
@@ -260,6 +269,7 @@ public final class Ae2Audit {
         }
     }
     private static void emit(MenuTarget target, LogEntry row, java.util.List<LogEntry> collector) {
+        if (row == null) return;
         if (collector == null) LoggerRuntime.storage(target.level()).append(row);
         else collector.add(row);
     }
@@ -314,7 +324,12 @@ public final class Ae2Audit {
     private static LogEntry physicalRow(ServerLevel level, BlockPos pos, ServerPlayer player,
                                         String source, ActionType type, ItemStack stack, int count) {
         LogEntry row = entry(level, pos, player, type, source);
-        row.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(stack, level.registryAccess()));
-        row.count = count; row.extra = "device inventory " + source; return row;
+        var item = NbtSerde.snapshotItemStack(stack, level.registryAccess());
+        if (item == null) {
+            com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("ae2-device-snapshot"); return null;
+        }
+        com.roften.avilixlogger.core.Ae2TransferDetails.device(row,
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), count, item);
+        row.count = count; return row;
     }
 }
