@@ -14,7 +14,9 @@ final class Ae2ContractsTest {
                 "appeng/core/network/serverbound/ConfigButtonPacket", "handleOnServer",
                 "appeng/menu/implementations/SetStockAmountMenu", "confirm",
                 "appeng/api/storage/StorageHelper", "poweredInsert",
-                "appeng/me/storage/NetworkStorage", "insert");
+                "appeng/me/storage/NetworkStorage", "insert",
+                "appeng/menu/implementations/PriorityMenu", "setPriority",
+                "appeng/menu/implementations/StorageLevelEmitterMenu", "setValue");
         for (var fault : faults.entrySet()) {
             boolean refused = false;
             try {
@@ -36,7 +38,7 @@ final class Ae2ContractsTest {
             });
         } catch (IllegalStateException expected) { refused = true; }
         if (!refused) throw new AssertionError("AE2 preflight accepted missing stock host");
-        System.out.println("AE2_CONTRACTS_OK: all five optional hooks and missing methods/stock field refusal, raw bytecode only");
+        System.out.println("AE2_CONTRACTS_OK: all seven optional hooks and missing methods/stock field refusal, raw bytecode only");
     }
 
     private static ClassNode read(String name) throws Exception {

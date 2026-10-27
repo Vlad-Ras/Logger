@@ -1148,6 +1148,7 @@ public final class LoggerNetwork {
         out.addAll(com.roften.avilixlogger.core.WeaponCombatTrace.describe(first));
         out.addAll(com.roften.avilixlogger.core.SignLogDetails.describe(level,first));
         out.addAll(com.roften.avilixlogger.core.Ae2TransferDetails.describe(first));
+        out.addAll(com.roften.avilixlogger.core.Ae2ConfigurationDetails.describe(first));
         out.addAll(com.roften.avilixlogger.compat.supplementaries.SupplementariesTextAudit.describe(level,first));
 
         if (chronological != null) {

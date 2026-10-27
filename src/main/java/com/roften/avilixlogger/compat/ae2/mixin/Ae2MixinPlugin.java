@@ -15,7 +15,7 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
     public static void verify(CreateMixinPlugin.Classes classes) throws Exception {
         var checker = new CreateMixinPlugin.Preflight(classes);
         for (String name : List.of("NetworkStorageMixin", "StorageHelperMixin", "AEBaseMenuMixin",
-                "ConfigButtonPacketMixin", "SetStockAmountMenuMixin"))
+                "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin"))
             checker.check("com/roften/avilixlogger/compat/ae2/mixin/" + name);
     }
 

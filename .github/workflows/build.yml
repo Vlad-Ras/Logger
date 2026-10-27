@@ -50,7 +50,7 @@ jobs:
           printf 'max-tick-time=-1\n' > run-ae2/server.properties
           timeout --signal=INT --kill-after=15s 300s ./gradlew runServer -Pae2Smoke --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
           tail -n 80 ae2-smoke.log
-          if ! grep -q 'AE2_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_TRANSFER_NATIVE_OK' ae2-smoke.log || grep -qE '(AE2_NATIVE_FAILED|AE2 audit integration disabled|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then exit 1; fi
+          if ! grep -q 'AE2_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_TRANSFER_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_DEVICE_SETTINGS_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_CONFIGURATION_NATIVE_OK' ae2-smoke.log || grep -qE '(AE2_NATIVE_FAILED|AE2 audit integration disabled|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then exit 1; fi
       - name: Native regression without AE2
         if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.profile == 'current-fd134' }}
         timeout-minutes: 10

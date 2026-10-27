@@ -672,6 +672,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if(e.type==ActionType.ITEM_TRANSFORM&&e.playerInvBefore!=null&&e.playerInvAfter!=null)return true;
         // The exact ME resource key is the transaction evidence, including fluid components.
         if ((e.type==ActionType.ME_PUT || e.type==ActionType.ME_TAKE) && e.beAfter!=null && Ae2TransferDetails.summary(e)!=null) return true;
+        // Both sides define the actual filter/upgrade/cell/setting change, even in minimal mode.
+        if (Ae2ConfigurationDetails.structured(e) && e.beBefore!=null && e.beAfter!=null) return true;
         // Historical weapon positions must survive non-rollback detail pruning.
         if(e.source!=null && e.source.startsWith("mod:scguns:") && e.beAfter!=null)return true;
         // The before/after values are the meaning of a settings event, even though it is audit-only.

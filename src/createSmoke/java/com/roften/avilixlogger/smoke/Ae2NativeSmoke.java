@@ -127,6 +127,7 @@ public final class Ae2NativeSmoke {
         target.update = () -> {};
         stock(level, player);
         Ae2TransferNativeSmoke.run(level, player);
+        Ae2DeviceSettingsNativeSmoke.run(level, player);
         LOG.info("AE2_MENU_SCOPE_NATIVE_OK: native filter/client action/setting packets, nested exceptions, original-menu close, detached snapshots, disabled/off-thread no reads; five wrapper fault contracts");
     }
 
@@ -173,7 +174,9 @@ public final class Ae2NativeSmoke {
             field(SetStockAmountMenu.class, "host").set(stock, proxy);
             field(SetStockAmountMenu.class, "slot").setInt(stock, 0);
             field(SetStockAmountMenu.class, "whatToStock").set(stock, key);
+            ItemStack oldStock = GenericStack.wrapInItemStack(host.getConfig().getStack(0));
             stock.confirm(32);
+            Ae2DeviceSettingsNativeSmoke.checkStock(stock, oldStock, GenericStack.wrapInItemStack(host.getConfig().getStack(0)));
             check(host.getConfig().getStack(0).amount() == 32 && returns[0] == 1 && reads[0] == 0 && configReads[0] == 1, "disabled stock audit read extra interface state or changed native confirm");
             fail[0] = true; expectFault(() -> stock.confirm(64));
             check(reads[0] == 0 && configReads[0] == 2 && host.getConfig().getStack(0).amount() == 32, "failed native stock action repeated or serialized with capture disabled");

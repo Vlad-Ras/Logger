@@ -9,7 +9,9 @@
     "StorageHelperMixin",
     "AEBaseMenuMixin",
     "ConfigButtonPacketMixin",
-    "SetStockAmountMenuMixin"
+    "SetStockAmountMenuMixin",
+    "PriorityMenuMixin",
+    "StorageLevelEmitterMenuMixin"
   ],
   "client": [],
   "injectors": { "defaultRequire": 0 }

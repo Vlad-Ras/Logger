@@ -370,8 +370,10 @@ public final class LogText {
                 MutableComponent item = itemNameComponent(level, e.itemStackNbt);
                 yield item != null ? item : Component.literal(e.extra != null ? e.extra : "ресурс МЭ");
             }
-            case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE ->
-                    Component.literal(e.extra != null ? e.extra : "устройство МЭ");
+            case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE -> {
+                var setting = Ae2ConfigurationDetails.label(e);
+                yield Component.literal(setting != null ? setting : e.extra != null ? e.extra : "устройство МЭ");
+            }
 
             case BACKPACK_PUT,BACKPACK_TAKE -> {
                 MutableComponent item=itemNameComponent(level,e.itemStackNbt);

@@ -83,6 +83,8 @@ public final class ClickHouseNativeSmoke {
         var display=SupplementariesAutomationAuditTest.record();
         var meTransfers=List.of(Ae2TransferDetailsTest.record("i",Long.MAX_VALUE), Ae2TransferDetailsTest.record("f",1234567890123L), Ae2TransferDetailsTest.record("g",918273645L));
         for(var transfer:meTransfers)transfer.materializeSnapshots();
+        var meConfigurations=List.of(Ae2ConfigurationDetailsTest.record(ActionType.ME_FILTER_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_UPGRADE_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_CELL_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_SETTING_CHANGE));
+        for(var change:meConfigurations)change.materializeSnapshots();
         List<LogEntry> pressureRows=List.of();
         ClickHouseLogStorage db = null;
         try {
@@ -97,7 +99,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
-            verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers);
+            verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations);
             pressureRows=journalPressure(db);verifyJournalPressure(db,pressureRows);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
@@ -122,7 +124,7 @@ public final class ClickHouseNativeSmoke {
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
-            verifyJournalPressure(db,pressureRows); verifyMeTransfers(db,meTransfers);
+            verifyJournalPressure(db,pressureRows); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
@@ -167,6 +169,18 @@ public final class ClickHouseNativeSmoke {
             check(Ae2TransferDetails.summary(feed.getFirst()).amountLabel().contains(Long.toString(Ae2TransferDetails.summary(expected).amount())),"ME feed rendered truncated amount");
         }
         System.out.println("AE2_TRANSFER_CLICKHOUSE_OK: minimal-mode exact full key/components, long amount, typed feed, source/address and ID survive database reopen");
+    }
+    private static void verifyMeConfigurations(ClickHouseLogStorage db,List<LogEntry> rows)throws Exception{
+        if(rows.getFirst().id==0)db.appendBatch("native-me-config-"+UUID.randomUUID(),rows);
+        for(var expected:rows){
+            var q=new LogQuery();q.type=expected.type;q.exactId=expected.id;q.untilTs=Long.MAX_VALUE;q.requireDetails=true;q.limit=2;
+            var detail=db.query(q);check(detail.size()==1,"ME configuration missing/duplicated exact ID");var read=detail.getFirst();
+            check(expected.beBefore.equals(read.beBefore)&&expected.beAfter.equals(read.beAfter)&&java.util.Objects.equals(expected.itemStackNbt,read.itemStackNbt)
+                    &&expected.extra.equals(read.extra)&&Ae2ConfigurationDetails.context(read)!=null&&expected.actorUuid.equals(read.actorUuid)&&expected.actorName.equals(read.actorName)
+                    &&expected.dim.equals(read.dim)&&expected.source.equals(read.source)&&expected.x==read.x&&expected.y==read.y&&expected.z==read.z,"ME configuration before/after/components/metadata lost in minimal details");
+            q.requireDetails=false;var feed=db.query(q);check(feed.size()==1&&expected.extra.equals(feed.getFirst().extra)&&Ae2ConfigurationDetails.label(feed.getFirst()).equals(Ae2ConfigurationDetails.label(expected)),"ME configuration feed label lost");
+        }
+        System.out.println("AE2_CONFIGURATION_CLICKHOUSE_OK: minimal mode retains both full filter/upgrade/cell/setting states, components, exact long, actor/address, feed/ID and reopened connection");
     }
     private static void seedOldWeaponSchema(String endpoint,String user,String password)throws Exception{
         var url=java.net.URI.create(endpoint).toURL();
