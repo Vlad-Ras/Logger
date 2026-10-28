@@ -13,12 +13,12 @@ public final class Ae2CraftingDetails {
         public String label() { return resource + " · " + amount + (kind.equals("i") ? " шт." : kind.equals("f") ? " мБ" : " ед.") + " · " + status(outcome); }
     }
     public static boolean structured(LogEntry row) {
-        return row != null && (row.type == ActionType.ME_CRAFT_REQUEST || row.type == ActionType.ME_CRAFT_CANCEL);
+        return row != null && (row.type == ActionType.ME_CRAFT_REQUEST || row.type == ActionType.ME_CRAFT_CANCEL || row.type == ActionType.ME_CRAFT_FINISH);
     }
     private static boolean valid(String kind, String resource, String keyType, long amount, String outcome, ActionType type) {
         return Set.of("i", "f", "g").contains(kind) && ResourceLocation.tryParse(resource) != null
                 && ResourceLocation.tryParse(keyType) != null && amount > 0
-                && (type == ActionType.ME_CRAFT_CANCEL ? outcome.equals("cancelled")
+                && (type == ActionType.ME_CRAFT_FINISH ? outcome.equals("finished") : type == ActionType.ME_CRAFT_CANCEL ? outcome.equals("cancelled")
                     : type == ActionType.ME_CRAFT_REQUEST && (outcome.equals("accepted") || outcome.equals("rejected")));
     }
     /** evidence is already detached and owned by this row; encoding remains on the event worker. */
@@ -50,7 +50,7 @@ public final class Ae2CraftingDetails {
                 || !tag.getString("Outcome").equals(summary.outcome()) || !tag.getString("QuantityMeaning").equals("planned-output")) return null;
         return tag;
     }
-    public static String status(String outcome) { return switch (outcome) { case "accepted" -> "принят"; case "rejected" -> "отказ"; case "cancelled" -> "отменён"; default -> outcome; }; }
+    public static String status(String outcome) { return switch (outcome) { case "accepted" -> "принят"; case "rejected" -> "отказ"; case "cancelled" -> "отменён"; case "finished" -> "завершён процессором"; default -> outcome; }; }
     public static List<Component> describe(LogEntry row) {
         var s = summary(row); if (s == null) return List.of();
         var out = new ArrayList<Component>(); out.add(Component.literal("Заказ МЭ: " + s.label()));
@@ -59,7 +59,7 @@ public final class Ae2CraftingDetails {
         if (tag != null) {
             if (tag.hasUUID("JobId")) out.add(Component.literal("ID задания: " + tag.getUUID("JobId")));
             if (tag.contains("ErrorCode", Tag.TAG_STRING)) out.add(Component.literal("Причина отказа AE2: " + tag.getString("ErrorCode")));
-            if (tag.getBoolean("NativeThrew")) out.add(Component.literal("Задание создано, затем операция завершилась ошибкой"));
+            if (tag.getBoolean("NativeThrew")) out.add(Component.literal(s.outcome().equals("finished") ? "Задание завершено, затем операция завершилась ошибкой" : "Задание создано, затем операция завершилась ошибкой"));
             if (tag.contains("Cpu", Tag.TAG_COMPOUND)) {
                 var cpu = tag.getCompound("Cpu");
                 out.add(Component.literal("Процессор: " + cpu.getString("Dimension") + " @ " + cpu.getString("BoundsMin") + " → " + cpu.getString("BoundsMax")));

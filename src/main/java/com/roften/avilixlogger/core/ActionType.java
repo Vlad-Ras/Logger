@@ -112,5 +112,8 @@ public enum ActionType {
     ITEM_GIFT, ITEM_TRADE,
 
     // Append-only: native AE2 job admission and confirmed UI cancellation; audit only.
-    ME_CRAFT_REQUEST, ME_CRAFT_CANCEL
+    ME_CRAFT_REQUEST, ME_CRAFT_CANCEL,
+
+    // Append-only: CPU success transition, with planned output; audit only.
+    ME_CRAFT_FINISH
 }

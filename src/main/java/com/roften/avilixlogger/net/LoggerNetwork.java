@@ -897,6 +897,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ME_CELL_CHANGE,
                     com.roften.avilixlogger.core.ActionType.ME_CRAFT_REQUEST,
                     com.roften.avilixlogger.core.ActionType.ME_CRAFT_CANCEL,
+                    com.roften.avilixlogger.core.ActionType.ME_CRAFT_FINISH,
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.GUI_OPEN
             );

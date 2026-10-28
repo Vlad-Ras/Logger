@@ -73,6 +73,7 @@ public final class Ae2GridNativeSmoke {
         int ticks, phase, clears, wirePackets, saturationCases;
         boolean wasForced;
         long blockId, partId;
+        Ae2AssemblyNativeSmoke assembly;
         Fixture(ServerLevel level) { this.level = level; }
         BlockPos position(int x) { var p = new BlockPos(32 + x, 110, 32); positions.add(p); return p; }
         void setup() {
@@ -111,7 +112,12 @@ public final class Ae2GridNativeSmoke {
             return Objects.requireNonNull(host.addPart((appeng.api.parts.IPartItem<?>)item, Direction.NORTH, player));
         }
         boolean tick() throws Exception {
-            check(++ticks <= 260, "powered grid did not reach phase " + phase + "; nodes=" + nodes.stream().map(n -> n.isReady() + "/" + n.isActive()).toList());
+            check(++ticks <= 1300, "powered grid did not reach phase " + phase + "; nodes=" + nodes.stream().map(n -> n.isReady() + "/" + n.isActive()).toList());
+            if (phase == 5) {
+                if (!assembly.tick()) return false;
+                LOG.info("AE2_NATIVE_OK: selected menu/packet/scope, powered grid and real assembler contracts; production authenticated emit remains open");
+                return true;
+            }
             if (phase == 0) {
                 if (nodes.stream().anyMatch(n -> !n.isReady())) return false;
                 // Explicit fixture links; remote provider discovery itself remains entirely native.
@@ -151,8 +157,8 @@ public final class Ae2GridNativeSmoke {
             broadcast(); check(ItemStack.matches(mirror.get(reconnected).get(2), block.getTerminalPatternInventory().getStackInSlot(2)), "reconnected payload lost pattern");
             check(!Ae2Audit.enabled(), "grid fixture changed production authorization");
             LOG.info("AE2_GRID_NATIVE_OK: native powered discovery BE+part, wire full/incremental/empty, filters, removal/stale IDs, disconnect/reconnect; saturationCases={}, wirePackets={}, clears={}, rows={}, ticks={}; inspector-only, client rendering/authenticated emit not tested", saturationCases, wirePackets, clears, rows.size(), ticks);
-            LOG.info("AE2_NATIVE_OK: selected menu/packet/scope and powered grid contracts; production authenticated emit remains open");
-            return true;
+            assembly = new Ae2AssemblyNativeSmoke(level, player, terminal, block, craftingBlock, power);
+            assembly.setup(); phase = 5; return false;
         }
         void discoveredActions() throws Exception {
             broadcast(); check(mirror.size() == 2, "native grid did not discover both BE/part providers");
@@ -241,6 +247,7 @@ public final class Ae2GridNativeSmoke {
             throw new AssertionError("native discovery omitted provider");
         }
         void close() {
+            if (assembly != null) { assembly.close(); assembly = null; }
             for (var pos : positions) level.removeBlock(pos, false);
             for (var node : nodes) node.destroy();
             if (!wasForced) level.setChunkForced(2, 2, false);

@@ -34,7 +34,7 @@ public final class HotPathMetrics {
         int family = type==ActionType.ME_PUT||type==ActionType.ME_TAKE
                 || type==ActionType.ME_FILTER_CHANGE||type==ActionType.ME_UPGRADE_CHANGE
                 || type==ActionType.ME_CELL_CHANGE||type==ActionType.ME_SETTING_CHANGE
-                || type==ActionType.ME_CRAFT_REQUEST||type==ActionType.ME_CRAFT_CANCEL ? 0
+                || type==ActionType.ME_CRAFT_REQUEST||type==ActionType.ME_CRAFT_CANCEL||type==ActionType.ME_CRAFT_FINISH ? 0
                 : source!=null&&source.startsWith("create:bearing:")?1
                 : source!=null&&source.startsWith("create:cart:")?2
                 : source!=null&&(source.startsWith("create:")||source.equals("mod:create"))?3:4;

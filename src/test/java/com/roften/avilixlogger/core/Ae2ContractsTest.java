@@ -25,6 +25,7 @@ final class Ae2ContractsTest {
                 Map.entry("appeng/me/cluster/implementations/CraftingCPUCluster", "submitJob"),
                 Map.entry("appeng/menu/me/crafting/CraftingCPUMenu", "cancelCrafting"),
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getLastLink"),
+                Map.entry("appeng/crafting/execution/CraftingCpuLogic", "finishJob"),
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getFinalJobOutput"),
                 Map.entry("appeng/me/cluster/implementations/CraftingCPUCluster", "getLevel"));
         for (var fault : faults) {
@@ -68,6 +69,13 @@ final class Ae2ContractsTest {
             return node;
         }); } catch (IllegalStateException expected) { refused = true; }
         if (!refused) throw new AssertionError("AE2 preflight accepted duplicate cancellation call");
+        refused = false;
+        try { verify(name -> {
+            var node = read(name);
+            if (name.equals("appeng/crafting/execution/CraftingCpuLogic")) node.fields.removeIf(f -> f.name.equals("cluster"));
+            return node;
+        }); } catch (IllegalStateException expected) { refused = true; }
+        if (!refused) throw new AssertionError("AE2 preflight accepted missing CPU logic cluster");
         for (String field : List.of("container", "serverId", "server")) {
             refused = false;
             try { verify(name -> {

@@ -43,6 +43,21 @@ public final class Ae2CraftingAudit {
     }
     /** Data only: no player permission/authentication mutation. */
     public static Cancellation inspectCancellation(AEBaseMenu menu, CraftingCPUCluster cpu) { return cancellation(menu, cpu, false); }
+    public static Completion beginCompletion(CraftingCPUCluster cpu) { return Ae2Audit.enabled() ? completion(cpu, true) : null; }
+    /** Native state inspector only; no production append or authorization mutation. */
+    public static Completion inspectCompletion(CraftingCPUCluster cpu) { return completion(cpu, false); }
+    private static Completion completion(CraftingCPUCluster cluster, boolean production) {
+        try {
+            if (!serverThread() || cluster == null) return null;
+            var link = cluster.craftingLogic.getLastLink();
+            if (link == null || link.isCanceled()) return null;
+            var context = origin(cluster.getSrc(), cluster.craftingLogic.getFinalJobOutput(), production);
+            if (context == null) return null;
+            cpu(context, cluster); context.data().putUUID("JobId", link.getCraftingID());
+            context.data().putString("StateTransition", "cpu-success-cleared-job");
+            return new Completion(context, cluster, link);
+        } catch (Throwable invalid) { failure(); return null; }
+    }
     private static Cancellation cancellation(AEBaseMenu menu, CraftingCPUCluster cluster, boolean production) {
         try {
             if (!serverThread() || cluster == null || !Ae2Audit.onServerThread(menu)) return null;
@@ -88,8 +103,8 @@ public final class Ae2CraftingAudit {
     private static LogEntry finish(Context context, String outcome) {
         if (!serverThread() || context.production() && !Ae2Audit.enabled()) return null;
         var output = context.output(); var key = output.what(); var type = key.getType(); var row = context.row();
-        row.type = outcome.equals("cancelled") ? ActionType.ME_CRAFT_CANCEL : ActionType.ME_CRAFT_REQUEST;
-        row.source += outcome.equals("cancelled") ? ":cancel" : ":submit";
+        row.type = outcome.equals("finished") ? ActionType.ME_CRAFT_FINISH : outcome.equals("cancelled") ? ActionType.ME_CRAFT_CANCEL : ActionType.ME_CRAFT_REQUEST;
+        row.source += outcome.equals("finished") ? ":finish" : outcome.equals("cancelled") ? ":cancel" : ":submit";
         String kind = key instanceof AEItemKey ? "i" : key instanceof AEFluidKey ? "f" : "g";
         if (key instanceof AEItemKey item) {
             var tag = NbtSerde.snapshotItemStack(item.toStack(), context.level().registryAccess());
@@ -139,5 +154,19 @@ public final class Ae2CraftingAudit {
             catch (Throwable invalid) { failure(); return null; } finally { close(); }
         }
         public void close() { context = null; link = null; }
+    }
+    public static final class Completion implements AutoCloseable {
+        private Context context;
+        private CraftingCPUCluster cluster;
+        private ICraftingLink link;
+        private Completion(Context context, CraftingCPUCluster cluster, ICraftingLink link) { this.context = context; this.cluster = cluster; this.link = link; }
+        public LogEntry finish(boolean returnedNormally) {
+            try {
+                if (context == null || !serverThread() || link.isCanceled() || cluster.craftingLogic.getLastLink() == link) return null;
+                if (!returnedNormally) context.data().putBoolean("NativeThrew", true);
+                return Ae2CraftingAudit.finish(context, "finished");
+            } catch (Throwable invalid) { failure(); return null; } finally { close(); }
+        }
+        public void close() { context = null; cluster = null; link = null; }
     }
 }

@@ -209,7 +209,7 @@ public final class LogText {
             case CONTAINER_TAKE, ITEM_DROP, ITEM_USE_STOP -> ChatFormatting.RED;
             case ME_PUT, BACKPACK_PUT -> ChatFormatting.GREEN;
             case ME_TAKE, BACKPACK_TAKE, BACKPACK_DESTROY -> ChatFormatting.RED;
-            case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE, ME_CRAFT_REQUEST, ME_CRAFT_CANCEL -> ChatFormatting.YELLOW;
+            case ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_SETTING_CHANGE, ME_CELL_CHANGE, ME_CRAFT_REQUEST, ME_CRAFT_CANCEL, ME_CRAFT_FINISH -> ChatFormatting.YELLOW;
 
             case PLAYER_JOIN, PLAYER_RESPAWN, PLAYER_DIMENSION_CHANGE, GUI_OPEN -> ChatFormatting.GREEN;
             case PLAYER_LEAVE -> ChatFormatting.RED;
@@ -263,6 +263,7 @@ public final class LogText {
             case ME_SETTING_CHANGE -> "изменил настройку МЭ";
             case ME_CRAFT_REQUEST -> "отправил заказ МЭ";
             case ME_CRAFT_CANCEL -> "отменил заказ МЭ";
+            case ME_CRAFT_FINISH -> "завершил задание МЭ";
             case ME_CELL_CHANGE -> "изменил ячейку МЭ";
                         case BACKPACK_CREATE -> "создал рюкзак";
             case BACKPACK_DISCOVER -> "учёл рюкзак";
@@ -366,7 +367,7 @@ public final class LogText {
             // container/item diffs
             case CONTAINER_PUT, CONTAINER_TAKE, ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, WEAPON_RELOAD, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, ITEM_SMELT, ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP ->
                     itemNameComponent(level, e.itemStackNbt);
-            case ME_CRAFT_REQUEST, ME_CRAFT_CANCEL -> {
+            case ME_CRAFT_REQUEST, ME_CRAFT_CANCEL, ME_CRAFT_FINISH -> {
                 var job = Ae2CraftingDetails.summary(e);
                 yield Component.literal(job == null ? "заказ МЭ" : job.label());
             }

@@ -17,7 +17,8 @@
     "PatternAccessQuickMoveMixin",
     "CraftingServiceMixin",
     "CraftingCPUClusterMixin",
-    "CraftingCPUMenuMixin"
+    "CraftingCPUMenuMixin",
+    "CraftingCpuLogicMixin"
   ],
   "client": [],
   "injectors": { "defaultRequire": 0 }

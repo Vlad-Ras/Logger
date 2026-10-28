@@ -70,7 +70,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ME_UPGRADE_CHANGE,
                 ActionType.ME_FILTER_CHANGE,
                 ActionType.ME_SETTING_CHANGE,
-                ActionType.ME_CELL_CHANGE, ActionType.ME_CRAFT_REQUEST, ActionType.ME_CRAFT_CANCEL, ActionType.GUI_CHANGE);
+                ActionType.ME_CELL_CHANGE, ActionType.ME_CRAFT_REQUEST, ActionType.ME_CRAFT_CANCEL, ActionType.ME_CRAFT_FINISH, ActionType.GUI_CHANGE);
         map(TableKind.ENTITIES,
                 ActionType.ENTITY_DEATH,
                 ActionType.ENTITY_SPAWN,
@@ -1791,7 +1791,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         return switch (e.type) {
             case BLOCK_BREAK -> targetBlock(e.blockBefore, e.extra);
             case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> targetBlock(e.blockAfter, e.extra);
-            case ME_CRAFT_REQUEST, ME_CRAFT_CANCEL -> {
+            case ME_CRAFT_REQUEST, ME_CRAFT_CANCEL, ME_CRAFT_FINISH -> {
                 var job = Ae2CraftingDetails.summary(e);
                 yield job == null ? new TargetInfo("other", "", "заказ МЭ")
                         : new TargetInfo(job.kind().equals("i") ? "item" : job.kind().equals("f") ? "fluid" : "resource", job.resource(), job.label());
