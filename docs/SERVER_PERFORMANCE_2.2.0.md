@@ -1,5 +1,7 @@
 # Нагрузка и скорость AvilixLogger 2.2.0
 
+28.10.2026: [AE2 CPU finish и настоящая цепочка assembler](AE2_ASSEMBLY_COMPATIBILITY_2.2.0.md). В production добавлена одна точка на finishJob(success=true), без тиков, Future/polling, рецептурных/slot/grid обходов и постоянной карты jobs. Контекст освобождается в finally; одна отделённая строка идёт в прежнюю ограниченную очередь. Реальные расчёты и чтение балансов cell выполняются только dev fixture. Native key encoding остаётся на сервере, SNBT/JSON и storage — worker. Численный MSPT/heap выигрыш и A/B/A фермы не заявлены.
+
 28.10.2026: [AE2 job receipts](AE2_CRAFTING_COMPATIBILITY_2.2.0.md) добавляют O(1) наблюдение admission/refusal/cancel без тиков, поиска по grid, Future wait или постоянной карты заданий. Живые native keys сериализуются на сервере только для реальной строки; SNBT/JSON, journal и БД — worker. Возможны два временных контекста на submit через сервис, один фактический receipt. Численный MSPT/heap выигрыш не заявляется; bounded queue/backpressure сохранены.
 
 28.10.2026: [native-проверка запитанной ME-grid и заполненного инвентаря](AE2_GRID_COMPATIBILITY_2.2.0.md) дополняет remote capture: обнаружение block/part, full/incremental wire payloads, stale ID, скрытие, потеря и возврат питания; шесть сравнений SHIFT_CLICK/MOVE_REGION с чистым AE2. Это тестовый пакет без изменения production-кода. Отрисованный remote клиент, AuthCore и полный модпак остаются в приёмке; ниже сохранены предыдущие этапы.

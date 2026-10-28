@@ -1,5 +1,7 @@
 # AE2: приём заказа автокрафта и подтверждённая отмена
 
+28.10.2026: [настоящий расчёт рецептов, Molecular Assembler и завершение CPU задания](AE2_ASSEMBLY_COMPATIBILITY_2.2.0.md): ME_CRAFT_FINISH с native JobId/CPU и planned-output; проверены log → planks → 8 sticks, honey block + 4 glass bottle remainders и отмена с возвратом 2 logs. Обе версии AE2: 7 новых строк, 3 jobs, 2 завершения. Production AuthCore и остальные рецепты/машины остаются в приёмке; ниже — предыдущие этапы.
+
 28.10.2026. Продолжение [native ME-grid](AE2_GRID_COMPATIBILITY_2.2.0.md). База `4e0b597f6d8e150f2f8e4c31ec8f9051c54b0214`; ветка `work/2.2.0-ae2-crafting-20261028`. Релизный JAR не создаётся.
 
 ## Какие события добавлены
