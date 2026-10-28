@@ -1,5 +1,7 @@
 # AE2: удалённые слоты Pattern Access Terminal
 
+28.10.2026: [приём заказов автокрафта и подтверждённая UI отмена AE2](AE2_CRAFTING_COMPATIBILITY_2.2.0.md): actual CPU/native JobId, source address/actor, полный ключ и planned-output long, реальные errorCode и partial failure. Два append-only типа; обе версии AE2 дали по 14 строк (5 принятий, 5 отказов, 4 отмены). Полный расчёт рецептов/производство и production AuthCore остаются в приёмке; ниже — предыдущие этапы.
+
 28.10.2026: [native-проверка запитанной ME-grid и заполненного инвентаря](AE2_GRID_COMPATIBILITY_2.2.0.md) дополняет remote capture: обнаружение block/part, full/incremental wire payloads, stale ID, скрытие, потеря и возврат питания; шесть сравнений SHIFT_CLICK/MOVE_REGION с чистым AE2. Это тестовый пакет без изменения production-кода. Отрисованный remote клиент, AuthCore и полный модпак остаются в приёмке; ниже сохранены предыдущие этапы.
 
 28.10.2026. Проверенный код `bab2f74e9774b0107b8b5ad1389f213c945123cf`, tree `36f4860251ac77867fae506f56a9ffc4283c4d6b`. Основа — `8abf4f6ad843c7a489b9a96237ec88366b847350`; ветка — `work/2.2.0-ae2-remote-patterns-20261028`. [Шаблоны и физические слоты](AE2_PATTERN_COMPATIBILITY_2.2.0.md), [device settings](AE2_DEVICE_SETTINGS_COMPATIBILITY_2.2.0.md) и [ME transfers](AE2_TRANSFER_COMPATIBILITY_2.2.0.md) сохранены. Релизный JAR не создавался.

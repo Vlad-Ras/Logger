@@ -1,5 +1,7 @@
 # Нагрузка и скорость AvilixLogger 2.2.0
 
+28.10.2026: [AE2 job receipts](AE2_CRAFTING_COMPATIBILITY_2.2.0.md) добавляют O(1) наблюдение admission/refusal/cancel без тиков, поиска по grid, Future wait или постоянной карты заданий. Живые native keys сериализуются на сервере только для реальной строки; SNBT/JSON, journal и БД — worker. Возможны два временных контекста на submit через сервис, один фактический receipt. Численный MSPT/heap выигрыш не заявляется; bounded queue/backpressure сохранены.
+
 28.10.2026: [native-проверка запитанной ME-grid и заполненного инвентаря](AE2_GRID_COMPATIBILITY_2.2.0.md) дополняет remote capture: обнаружение block/part, full/incremental wire payloads, stale ID, скрытие, потеря и возврат питания; шесть сравнений SHIFT_CLICK/MOVE_REGION с чистым AE2. Это тестовый пакет без изменения production-кода. Отрисованный remote клиент, AuthCore и полный модпак остаются в приёмке; ниже сохранены предыдущие этапы.
 
 28.10.2026: [remote pattern capture AE2](AE2_REMOTE_PATTERN_COMPATIBILITY_2.2.0.md) наблюдает только inventories, до которых дошёл native action; не перечисляет grid/byId ради снимка. Неудачная вставка освобождает before сразу; тест 128 full candidates оставляет один retained slot при успехе. Native чтение/копии/сравнение синхронны, SNBT/JSON и storage идут worker; строки передаются в ограниченную очередь по одной. У wrappers/cache есть собственная цена; численные MSPT/heap результаты не заявлены.

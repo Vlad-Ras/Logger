@@ -1,5 +1,7 @@
 # Совместимость серверного модпака: текущая работа
 
+28.10.2026: [приём заказов автокрафта и подтверждённая UI отмена AE2](AE2_CRAFTING_COMPATIBILITY_2.2.0.md): actual CPU/native JobId, source address/actor, полный ключ и planned-output long, реальные errorCode и partial failure. Два append-only типа; обе версии AE2 дали по 14 строк (5 принятий, 5 отказов, 4 отмены). Полный расчёт рецептов/производство и production AuthCore остаются в приёмке; ниже — предыдущие этапы.
+
 28.10.2026: [native-проверка запитанной ME-grid и заполненного инвентаря](AE2_GRID_COMPATIBILITY_2.2.0.md) дополняет remote capture: обнаружение block/part, full/incremental wire payloads, stale ID, скрытие, потеря и возврат питания; шесть сравнений SHIFT_CLICK/MOVE_REGION с чистым AE2. Это тестовый пакет без изменения production-кода. Отрисованный remote клиент, AuthCore и полный модпак остаются в приёмке; ниже сохранены предыдущие этапы.
 
 28.10.2026: [выбранные remote actions Pattern Access Terminal](AE2_REMOTE_PATTERN_COMPATIBILITY_2.2.0.md) получают точный provider address, полный pattern, terminal/source/slot и actor. Native 13 строк, partial failure и 128 full candidates; девять/десять optional hook групп по версии и 112 supplied targets. Это не discovery/синхронизация всей grid, не полный transformed модпак и не положительная production AuthCore публикация.
