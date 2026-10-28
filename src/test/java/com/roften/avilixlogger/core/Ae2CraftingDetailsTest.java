@@ -52,7 +52,7 @@ final class Ae2CraftingDetailsTest {
             var journal = new DiskLogJournal(dir); journal.initialize();
             for (var row : rows) {
                 check(Ae2CraftingDetails.summary(row).amount() == Long.MAX_VALUE && Ae2CraftingDetails.context(row) != null, "job long/evidence lost");
-                check(LogText.toChatLine(row).getString().contains(Long.toString(Long.MAX_VALUE)) && !LogText.toChatLine(row).getString().contains("ae2-crafting-v1"), "job line truncated amount/leaked prefix");
+                check(Ae2CraftingDetails.summary(row).label().contains(Long.toString(Long.MAX_VALUE)) && !Ae2CraftingDetails.summary(row).label().contains("ae2-crafting-v1"), "job feed label truncated amount/leaked prefix");
                 check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("планируемому")), "planned output claimed physical production");
                 LogIdGenerator.ensure(row); var replay = GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row), LogEntry.class);
                 var disk = DiskLogJournal.read(journal.write(journal.newToken(), List.of(replay))).getFirst();

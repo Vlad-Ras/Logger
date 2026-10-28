@@ -145,7 +145,7 @@ public final class ClickHouseNativeSmoke {
                     &&read.actorUuid.equals(expected.actorUuid)&&read.actorName.equals(expected.actorName)&&read.dim.equals(expected.dim)
                     &&read.x==expected.x&&read.y==expected.y&&read.z==expected.z&&read.source.equals(expected.source),"job details/actor/address/key/outcome lost in minimal mode");
             q.requireDetails=false;var feed=db.query(q);check(feed.size()==1&&Ae2CraftingDetails.summary(feed.getFirst()).equals(Ae2CraftingDetails.summary(expected))
-                    &&LogText.toChatLine(feed.getFirst()).getString().contains(Long.toString(Long.MAX_VALUE)),"job feed lost exact long/outcome");
+                    &&Ae2CraftingDetails.summary(feed.getFirst()).label().contains(Long.toString(Long.MAX_VALUE)),"job feed lost exact long/outcome");
         }
         System.out.println("AE2_CRAFTING_CLICKHOUSE_OK: accepted/refused/cancelled planned long outputs, full key, actor, CPU/job identity and exact feed/details survive minimal mode and reopened connection");
     }
