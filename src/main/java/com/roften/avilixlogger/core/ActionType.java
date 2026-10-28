@@ -109,5 +109,8 @@ public enum ActionType {
     WEAPON_KILL, WEAPON_RELOAD,
 
     // Append-only: receipts for automatic gifts and confirmed native trades; audit only.
-    ITEM_GIFT, ITEM_TRADE
+    ITEM_GIFT, ITEM_TRADE,
+
+    // Append-only: native AE2 job admission and confirmed UI cancellation; audit only.
+    ME_CRAFT_REQUEST, ME_CRAFT_CANCEL
 }

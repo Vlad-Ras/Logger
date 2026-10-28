@@ -5,6 +5,7 @@ import com.roften.avilixlogger.LoggerConfig;
 import net.neoforged.fml.config.IConfigSpec;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /** Runs against an isolated, real ClickHouse instance; no AuthCore bypass or Minecraft world. */
@@ -85,6 +86,8 @@ public final class ClickHouseNativeSmoke {
         for(var transfer:meTransfers)transfer.materializeSnapshots();
         var meConfigurations=List.of(Ae2ConfigurationDetailsTest.record(ActionType.ME_FILTER_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_UPGRADE_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_CELL_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_SETTING_CHANGE));
         for(var change:meConfigurations)change.materializeSnapshots();
+        var meJobs=List.of(Ae2CraftingDetailsTest.record("i","accepted"), Ae2CraftingDetailsTest.record("f","rejected"), Ae2CraftingDetailsTest.record("g","cancelled"));
+        for(var job:meJobs)job.materializeSnapshots();
         List<LogEntry> pressureRows=List.of();
         ClickHouseLogStorage db = null;
         try {
@@ -99,7 +102,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
-            verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations);
+            verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations); verifyMeJobs(db,meJobs);
             pressureRows=journalPressure(db);verifyJournalPressure(db,pressureRows);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
 
@@ -124,12 +127,27 @@ public final class ClickHouseNativeSmoke {
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
-            verifyJournalPressure(db,pressureRows); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations);
+            verifyJournalPressure(db,pressureRows); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations); verifyMeJobs(db,meJobs);
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
             LoggerConfig.SPEC.acceptConfig(null);
         }
+    }
+
+    private static void verifyMeJobs(ClickHouseLogStorage db,List<LogEntry> rows)throws Exception {
+        for(var expected:rows) {
+            var q=new LogQuery();q.exactId=expected.id;q.requireDetails=true;q.limit=1;
+            if(expected.id==0) db.appendBatch("native-me-job-"+UUID.randomUUID(),List.of(expected));
+            q.exactId=expected.id;var details=db.query(q);check(details.size()==1,"job exact ID missing");var read=details.getFirst();
+            check(read.type==expected.type && read.extra.equals(expected.extra) && expected.beAfter.equals(read.beAfter)
+                    &&Objects.equals(expected.itemStackNbt,read.itemStackNbt)&&Ae2CraftingDetails.context(read)!=null
+                    &&read.actorUuid.equals(expected.actorUuid)&&read.actorName.equals(expected.actorName)&&read.dim.equals(expected.dim)
+                    &&read.x==expected.x&&read.y==expected.y&&read.z==expected.z&&read.source.equals(expected.source),"job details/actor/address/key/outcome lost in minimal mode");
+            q.requireDetails=false;var feed=db.query(q);check(feed.size()==1&&Ae2CraftingDetails.summary(feed.getFirst()).equals(Ae2CraftingDetails.summary(expected))
+                    &&LogText.toChatLine(feed.getFirst()).getString().contains(Long.toString(Long.MAX_VALUE)),"job feed lost exact long/outcome");
+        }
+        System.out.println("AE2_CRAFTING_CLICKHOUSE_OK: accepted/refused/cancelled planned long outputs, full key, actor, CPU/job identity and exact feed/details survive minimal mode and reopened connection");
     }
 
     private static List<LogEntry> journalPressure(ClickHouseLogStorage database)throws Exception{

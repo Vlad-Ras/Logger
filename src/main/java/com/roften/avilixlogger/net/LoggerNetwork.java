@@ -895,6 +895,8 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.ME_FILTER_CHANGE,
                     com.roften.avilixlogger.core.ActionType.ME_SETTING_CHANGE,
                     com.roften.avilixlogger.core.ActionType.ME_CELL_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.ME_CRAFT_REQUEST,
+                    com.roften.avilixlogger.core.ActionType.ME_CRAFT_CANCEL,
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.GUI_OPEN
             );
@@ -1149,6 +1151,7 @@ public final class LoggerNetwork {
         out.addAll(com.roften.avilixlogger.core.SignLogDetails.describe(level,first));
         out.addAll(com.roften.avilixlogger.core.Ae2TransferDetails.describe(first));
         out.addAll(com.roften.avilixlogger.core.Ae2ConfigurationDetails.describe(first));
+        out.addAll(com.roften.avilixlogger.core.Ae2CraftingDetails.describe(first));
         out.addAll(com.roften.avilixlogger.compat.supplementaries.SupplementariesTextAudit.describe(level,first));
 
         if (chronological != null) {

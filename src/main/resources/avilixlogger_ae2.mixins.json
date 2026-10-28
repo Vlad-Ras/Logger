@@ -14,7 +14,10 @@
     "StorageLevelEmitterMenuMixin",
     "PatternTrackerAccess",
     "PatternAccessTermMenuMixin",
-    "PatternAccessQuickMoveMixin"
+    "PatternAccessQuickMoveMixin",
+    "CraftingServiceMixin",
+    "CraftingCPUClusterMixin",
+    "CraftingCPUMenuMixin"
   ],
   "client": [],
   "injectors": { "defaultRequire": 0 }

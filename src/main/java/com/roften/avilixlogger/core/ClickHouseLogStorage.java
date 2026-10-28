@@ -70,7 +70,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ME_UPGRADE_CHANGE,
                 ActionType.ME_FILTER_CHANGE,
                 ActionType.ME_SETTING_CHANGE,
-                ActionType.ME_CELL_CHANGE, ActionType.GUI_CHANGE);
+                ActionType.ME_CELL_CHANGE, ActionType.ME_CRAFT_REQUEST, ActionType.ME_CRAFT_CANCEL, ActionType.GUI_CHANGE);
         map(TableKind.ENTITIES,
                 ActionType.ENTITY_DEATH,
                 ActionType.ENTITY_SPAWN,
@@ -667,6 +667,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private boolean shouldStoreDetails(LogEntry e) {
         if (e == null) return false;
+        if (Ae2CraftingDetails.summary(e) != null && e.beAfter != null) return true;
         if ((e.type==ActionType.ITEM_GIFT||e.type==ActionType.ITEM_TRADE)&&e.beAfter!=null)return true;
         // Conversion inventory states are the meaning of the transaction, although audit-only.
         if(e.type==ActionType.ITEM_TRANSFORM&&e.playerInvBefore!=null&&e.playerInvAfter!=null)return true;
@@ -1790,6 +1791,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         return switch (e.type) {
             case BLOCK_BREAK -> targetBlock(e.blockBefore, e.extra);
             case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> targetBlock(e.blockAfter, e.extra);
+            case ME_CRAFT_REQUEST, ME_CRAFT_CANCEL -> {
+                var job = Ae2CraftingDetails.summary(e);
+                yield job == null ? new TargetInfo("other", "", "заказ МЭ")
+                        : new TargetInfo(job.kind().equals("i") ? "item" : job.kind().equals("f") ? "fluid" : "resource", job.resource(), job.label());
+            }
             case ME_PUT, ME_TAKE -> {
                 var transfer = Ae2TransferDetails.summary(e);
                 yield transfer == null ? targetItem(e.itemStackNbt, e.count, e.extra)

@@ -19,9 +19,24 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         var checker = new CreateMixinPlugin.Preflight(classes);
         for (String name : List.of("NetworkStorageMixin", "StorageHelperMixin", "AEBaseMenuMixin",
                 "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin",
-                "PatternTrackerAccess", "PatternAccessTermMenuMixin"))
+                "PatternTrackerAccess", "PatternAccessTermMenuMixin", "CraftingServiceMixin", "CraftingCPUClusterMixin", "CraftingCPUMenuMixin"))
             checker.check("com/roften/avilixlogger/compat/ae2/mixin/" + name);
         if (quickMove) checker.check("com/roften/avilixlogger/compat/ae2/mixin/PatternAccessQuickMoveMixin");
+        for (var entry : Map.of(
+                "appeng/crafting/execution/CraftingCpuLogic", List.of("getLastLink()Lappeng/api/networking/crafting/ICraftingLink;", "getFinalJobOutput()Lappeng/api/stacks/GenericStack;"),
+                "appeng/me/cluster/implementations/CraftingCPUCluster", List.of("getLevel()Lnet/minecraft/world/level/Level;", "getBoundsMin()Lnet/minecraft/core/BlockPos;", "getBoundsMax()Lnet/minecraft/core/BlockPos;", "getName()Lnet/minecraft/network/chat/Component;")).entrySet()) {
+            var node = classes.read(entry.getKey());
+            for (String contract : entry.getValue()) if (node.methods.stream().noneMatch(m -> (m.name + m.desc).equals(contract) && (m.access & org.objectweb.asm.Opcodes.ACC_PUBLIC) != 0))
+                throw new IllegalStateException("Missing AE2 crafting contract " + entry.getKey() + '.' + contract);
+        }
+        var cluster = classes.read("appeng/me/cluster/implementations/CraftingCPUCluster");
+        if (cluster.fields.stream().noneMatch(f -> f.name.equals("craftingLogic") && f.desc.equals("Lappeng/crafting/execution/CraftingCpuLogic;") && (f.access & org.objectweb.asm.Opcodes.ACC_PUBLIC) != 0))
+            throw new IllegalStateException("Missing AE2 crafting logic field");
+        var cancel = classes.read("appeng/menu/me/crafting/CraftingCPUMenu").methods.stream().filter(m -> m.name.equals("cancelCrafting") && m.desc.equals("()V")).findFirst().orElseThrow(() -> new IllegalStateException("Missing AE2 cancelCrafting"));
+        int calls = 0;
+        for (var instruction : cancel.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call
+                && call.owner.equals("appeng/me/cluster/implementations/CraftingCPUCluster") && call.name.equals("cancelJob") && call.desc.equals("()V")) calls++;
+        if (calls != 1) throw new IllegalStateException("Unsupported AE2 cancel call count " + calls);
         var logic = classes.read("appeng/parts/encoding/PatternEncodingLogic");
         for (String contract : List.of("getMode()Lappeng/parts/encoding/EncodingMode;", "isSubstitution()Z", "isFluidSubstitution()Z",
                 "getStonecuttingRecipeId()Lnet/minecraft/resources/ResourceLocation;"))

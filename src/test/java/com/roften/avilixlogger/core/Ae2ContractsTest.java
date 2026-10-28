@@ -20,7 +20,13 @@ final class Ae2ContractsTest {
                 Map.entry("appeng/parts/encoding/PatternEncodingLogic", "getMode"),
                 Map.entry("appeng/helpers/IPatternTerminalMenuHost", "getLogic"),
                 Map.entry("appeng/menu/implementations/PatternAccessTermMenu", "doAction"),
-                Map.entry("appeng/menu/implementations/PatternAccessTermMenu", "quickMovePattern"));
+                Map.entry("appeng/menu/implementations/PatternAccessTermMenu", "quickMovePattern"),
+                Map.entry("appeng/me/service/CraftingService", "submitJob"),
+                Map.entry("appeng/me/cluster/implementations/CraftingCPUCluster", "submitJob"),
+                Map.entry("appeng/menu/me/crafting/CraftingCPUMenu", "cancelCrafting"),
+                Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getLastLink"),
+                Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getFinalJobOutput"),
+                Map.entry("appeng/me/cluster/implementations/CraftingCPUCluster", "getLevel"));
         for (var fault : faults) {
             if (!quickMove() && fault.getValue().equals("quickMovePattern")) continue;
             boolean refused = false;
@@ -43,6 +49,25 @@ final class Ae2ContractsTest {
             });
         } catch (IllegalStateException expected) { refused = true; }
         if (!refused) throw new AssertionError("AE2 preflight accepted missing stock host");
+        refused = false;
+        try { verify(name -> {
+            var node = read(name);
+            if (name.equals("appeng/me/cluster/implementations/CraftingCPUCluster")) node.fields.removeIf(f -> f.name.equals("craftingLogic"));
+            return node;
+        }); } catch (IllegalStateException expected) { refused = true; }
+        if (!refused) throw new AssertionError("AE2 preflight accepted missing craftingLogic");
+        refused = false;
+        try { verify(name -> {
+            var node = read(name);
+            if (name.equals("appeng/menu/me/crafting/CraftingCPUMenu")) {
+                var method = node.methods.stream().filter(m -> m.name.equals("cancelCrafting")).findFirst().orElseThrow();
+                for (var instruction : method.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call && call.name.equals("cancelJob")) {
+                    method.instructions.insertBefore(call, new org.objectweb.asm.tree.MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf)); break;
+                }
+            }
+            return node;
+        }); } catch (IllegalStateException expected) { refused = true; }
+        if (!refused) throw new AssertionError("AE2 preflight accepted duplicate cancellation call");
         for (String field : List.of("container", "serverId", "server")) {
             refused = false;
             try { verify(name -> {

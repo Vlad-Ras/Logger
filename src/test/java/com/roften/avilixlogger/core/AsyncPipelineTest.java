@@ -40,6 +40,7 @@ public final class AsyncPipelineTest {
         JournalPressureTest.run();
         Ae2ContractsTest.run();
         Ae2TransferDetailsTest.run();
+        Ae2CraftingDetailsTest.run();
         Ae2ConfigurationDetailsTest.run();
         preparedSnapshots();
         CartAuditTest.run();
