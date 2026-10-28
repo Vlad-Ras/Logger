@@ -1,5 +1,7 @@
 # AE2: удалённые слоты Pattern Access Terminal
 
+28.10.2026: [native-проверка запитанной ME-grid и заполненного инвентаря](AE2_GRID_COMPATIBILITY_2.2.0.md) дополняет remote capture: обнаружение block/part, full/incremental wire payloads, stale ID, скрытие, потеря и возврат питания; шесть сравнений SHIFT_CLICK/MOVE_REGION с чистым AE2. Это тестовый пакет без изменения production-кода. Отрисованный remote клиент, AuthCore и полный модпак остаются в приёмке; ниже сохранены предыдущие этапы.
+
 28.10.2026. Проверенный код `bab2f74e9774b0107b8b5ad1389f213c945123cf`, tree `36f4860251ac77867fae506f56a9ffc4283c4d6b`. Основа — `8abf4f6ad843c7a489b9a96237ec88366b847350`; ветка — `work/2.2.0-ae2-remote-patterns-20261028`. [Шаблоны и физические слоты](AE2_PATTERN_COMPATIBILITY_2.2.0.md), [device settings](AE2_DEVICE_SETTINGS_COMPATIBILITY_2.2.0.md) и [ME transfers](AE2_TRANSFER_COMPATIBILITY_2.2.0.md) сохранены. Релизный JAR не создавался.
 
 ## Что было пропущено
@@ -67,6 +69,6 @@ ClickHouseNativeSmoke добавляет remote source с отдельными p
 
 ## Остаток
 
-Не закрыты discovery/синхронизация remote GUI в настоящей ME-grid, все addon PatternContainer и сторонние transformed hooks, насыщенный player inventory во всех region сценариях, история creative cursor creation, исполнение autocrafting jobs, реальные виртуальные/составные storage и их rollback. Нужны полный согласованный модпак, production конфиги/скрипты/AuthCore, end-to-end ClickHouse/GUI/rollback job. Native manual stop Scguns 1.5 остаётся отдельным блокером; поезда и вырезанный портал в работу не возвращаются.
+Native discovery и wire payloads вынесены в следующий пакет выше. Не закрыты отрисовка/обработчик remote GUI и настоящий клиентский сеанс, все addon PatternContainer и сторонние transformed hooks, насыщенный player inventory во всех region сценариях, история creative cursor creation, исполнение autocrafting jobs, реальные виртуальные/составные storage и их rollback. Нужны полный согласованный модпак, production конфиги/скрипты/AuthCore, end-to-end ClickHouse/GUI/rollback job. Native manual stop Scguns 1.5 остаётся отдельным блокером; поезда и вырезанный портал в работу не возвращаются.
 
 Нет новых A/B/A MSPT/heap/GC результатов фермы 8 пил + 8 активаторов с саженцами + portable storage interface. Длительное противодавление и прежние около 60 000 мкс/тик Observable не объявляются устранёнными.

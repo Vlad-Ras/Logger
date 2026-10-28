@@ -1,5 +1,7 @@
 # Подготовка AvilixLogger 2.2.0
 
+28.10.2026: [native-проверка запитанной ME-grid и заполненного инвентаря](AE2_GRID_COMPATIBILITY_2.2.0.md) дополняет remote capture: обнаружение block/part, full/incremental wire payloads, stale ID, скрытие, потеря и возврат питания; шесть сравнений SHIFT_CLICK/MOVE_REGION с чистым AE2. Это тестовый пакет без изменения production-кода. Отрисованный remote клиент, AuthCore и полный модпак остаются в приёмке; ниже сохранены предыдущие этапы.
+
 28.10.2026: [добавлены remote Pattern Access Terminal doAction/quickMovePattern](AE2_REMOTE_PATTERN_COMPATIBILITY_2.2.0.md) с provider address, terminal/source/slot и полным pattern. Проверены 13 строк и поиск через 128 full candidates. Grid discovery, addons, autocrafting/virtual rollback, production AuthCore и A/B/A фермы остаются в приёмке. Релизный JAR не создавался.
 
 27.10.2026: [AE2 — четыре режима кодирования шаблонов, поставщик block/part, буфер возврата и оба press slots](AE2_PATTERN_COMPATIBILITY_2.2.0.md). Полные физические предметы сохраняются в minimal detail mode; новый native пакет — 56 строк. Это выбранные контракты, без объявления готовности удалённого Pattern Access Terminal, autocrafting jobs, виртуального ME rollback или production AuthCore.
