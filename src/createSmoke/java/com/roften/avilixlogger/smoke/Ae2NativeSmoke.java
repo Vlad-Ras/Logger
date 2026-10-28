@@ -35,9 +35,10 @@ public final class Ae2NativeSmoke {
 
     @SubscribeEvent public static void started(ServerStartedEvent event) {
         if (!Boolean.getBoolean("avilixlogger.ae2Smoke") || Boolean.getBoolean("avilixlogger.ae2Absent")) return;
-        try { run(event.getServer().overworld()); LOG.info("AE2_NATIVE_OK: selected menu/packet/scope contracts; production authenticated emit remains open"); }
-        catch (Throwable failure) { LOG.error("AE2_NATIVE_FAILED", failure); }
-        finally { event.getServer().halt(false); }
+        try {
+            run(event.getServer().overworld());
+            Ae2GridNativeSmoke.start(event.getServer().overworld());
+        } catch (Throwable failure) { LOG.error("AE2_NATIVE_FAILED", failure); event.getServer().halt(false); }
     }
 
     private static final class Contents extends AppEngInternalInventory {

@@ -160,7 +160,7 @@ public final class Ae2RemoteNativeSmoke {
         var access = (PatternTrackerAccess)tracker; check(access.avilixlogger$container() == host && access.avilixlogger$server() == inventory, "tracker accessor changed identity");
         long id = access.avilixlogger$serverId(); trackers(menu).put(id, tracker); return id;
     }
-    private static void observed(PatternAccessTermMenu menu, boolean liveReads, List<LogEntry> rows, Runnable action, int count, int retained) throws Exception {
+    static void observed(PatternAccessTermMenu menu, boolean liveReads, List<LogEntry> rows, Runnable action, int count, int retained) throws Exception {
         var frame = field(PatternAccessTermMenu.class, FRAME); check(frame.get(menu) == null, "remote scope leaked before action");
         var capture = Ae2RemoteAudit.inspect(menu, liveReads); check(capture != null, "remote data inspector unavailable"); frame.set(menu, capture);
         try {
