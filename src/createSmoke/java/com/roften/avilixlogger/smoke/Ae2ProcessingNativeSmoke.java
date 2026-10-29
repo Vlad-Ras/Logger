@@ -105,6 +105,8 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
                 + " raw=" + count(Items.RAW_IRON) + " cellIron=" + count(Items.IRON_INGOT) + " interface=" + stock()
                 + " furnace=" + List.of(furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)) + " " + (cancellation == null ? "" : cancellation.status()));
         check(!Ae2Audit.enabled(), "processing fixture enabled production capture");
+        // This fixture owns a deliberate requester disconnect and must keep observing expiry/recovery.
+        if (phase == 11) return cancellation.tick();
         if (!connected) {
             if (!drive.getMainNode().isReady() || !requester.getMainNode().isReady() || !importer.getMainNode().isReady()) return false;
             GridHelper.createConnection(drive.getMainNode().getNode(), power.getNode());
@@ -188,7 +190,6 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
             cancellation = new Ae2RequesterCancelNativeSmoke(level, player, requester, cpuBlock, furnace, importer);
             cancellation.setup(); phase = 11; return false;
         }
-        if (phase == 11) return cancellation.tick();
         throw new AssertionError("unknown processing phase " + phase);
     }
     private void pipeline() {
