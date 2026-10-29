@@ -1,5 +1,7 @@
 # AE2: приём заказа автокрафта и подтверждённая отмена
 
+29.10.2026: [прямая отмена CPU AE2 и единый UI источник](AE2_CPU_CANCEL_COMPATIBILITY_2.2.0.md): общий finishJob(false) закрывает direct CPU/logic API, временный menu source сохраняет редактора без второй UI строки; linked cleanup отсекается по прежнему canceled link. Семь автономных native jobs, standalone fluid long и storage проверки; production AuthCore и численные замеры остаются открытыми. Ниже — предыдущие этапы.
+
 29.10.2026: [отмена связанного заказа AE2 машиной](AE2_REQUESTER_CANCEL_COMPATIBILITY_2.2.0.md): новый nexus cancel hook сохраняет requester/CPU/JobId и planned output с нейтральным actor, подтверждённая отмена перед ошибкой получает NativeThrew; CPU flag/order protocol защищает существующую UI запись. Четыре native cases дополняют external processing; production AuthCore приёмка остаётся открытой. Ниже — предыдущие этапы.
 
 29.10.2026: [внешний processing route и автономный заказ ME Interface](AE2_PROCESSING_COMPATIBILITY_2.2.0.md): реальная Blast Furnace/Import Bus, ожидание топлива и возврата, частичная доставка и сохранение исходного planned amount; выбранный Interface с Crafting Card инициирует собственный non-standalone job и получает результат в stock. Это dev acceptance без изменения production hooks; ниже — предыдущие этапы.
