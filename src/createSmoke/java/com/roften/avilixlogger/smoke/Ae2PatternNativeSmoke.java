@@ -115,7 +115,7 @@ public final class Ae2PatternNativeSmoke {
         menu.setCarried(stack); action(rows, menu, () -> menu.clicked(slot, 0, ClickType.PICKUP, player), count); menu.setCarried(ItemStack.EMPTY);
     }
     private static void action(List<LogEntry> rows, AEBaseMenu menu, Runnable mutation, int count) {
-        var before = Ae2Audit.snapshot(menu); check(before != null, "before snapshot failed"); mutation.run(); var after = Ae2Audit.snapshot(menu); check(after != null, "after snapshot failed");
+        var before = Ae2Audit.snapshot(menu); check(before != null, "before snapshot failed"); mutation.run(); var after = Ae2Audit.followUpSnapshot(menu, before); check(after != null, "after snapshot failed");
         var changes = Ae2Audit.changes(menu, before, after);
         check(changes.size() == count, menu.getClass().getSimpleName() + " expected " + count + " rows, got " + changes.size() + ": " + changes.stream().map(r -> r.type + "/" + r.extra).toList());
         var target = menu.getTarget(); var be = target instanceof net.minecraft.world.level.block.entity.BlockEntity block ? block : ((appeng.parts.AEBasePart)target).getBlockEntity();

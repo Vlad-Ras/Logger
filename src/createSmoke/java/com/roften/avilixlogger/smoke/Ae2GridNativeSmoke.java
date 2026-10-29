@@ -65,6 +65,7 @@ public final class Ae2GridNativeSmoke {
         final List<PatternAccessTerminalPacket> updates = new ArrayList<>();
         ServerPlayer player;
         PatternAccessTerminalPart terminal;
+        appeng.parts.reporting.ItemTerminalPart storageTerminal;
         PatternProviderLogicHost block, part;
         IManagedGridNode power;
         appeng.blockentity.crafting.CraftingBlockEntity craftingBlock;
@@ -104,6 +105,8 @@ public final class Ae2GridNativeSmoke {
             level.setBlockAndUpdate(craftingPos, AEBlocks.CRAFTING_STORAGE_1K.block().defaultBlockState());
             craftingBlock = (appeng.blockentity.crafting.CraftingBlockEntity)Objects.requireNonNull(level.getBlockEntity(craftingPos));
             nodes.add(craftingBlock.getMainNode());
+            storageTerminal = (appeng.parts.reporting.ItemTerminalPart)installPart(position(15), AEParts.TERMINAL.asItem());
+            nodes.add(storageTerminal.getMainNode());
             menu = new PatternAccessTermMenu(117, player.getInventory(), terminal); player.containerMenu = menu;
             check(!Ae2Audit.enabled(), "grid fixture bypassed production authorization");
         }
@@ -128,7 +131,7 @@ public final class Ae2GridNativeSmoke {
             if (phase == 0) {
                 if (nodes.stream().anyMatch(n -> !n.isReady())) return false;
                 // Explicit fixture links; remote provider discovery itself remains entirely native.
-                for (int i : List.of(0, 1, 2, 4)) {
+                for (int i : List.of(0, 1, 2, 4, 5)) {
                     var connection = GridHelper.createConnection(nodes.get(i).getNode(), power.getNode());
                     if (i == 0) terminalConnection = connection;
                 }
@@ -137,6 +140,7 @@ public final class Ae2GridNativeSmoke {
             if (phase == 1) {
                 if (nodes.stream().anyMatch(n -> !n.isActive())) return false;
                 if (craftingBlock.getCluster() == null || !terminal.getGridNode().getGrid().getCraftingService().getCpus().contains(craftingBlock.getCluster())) return false;
+                Ae2TerminalCostNativeSmoke.run(player, storageTerminal);
                 Ae2CraftingNativeSmoke.run(level, player, terminal, craftingBlock);
                 discoveredActions(); filters(); saturation();
                 nodes.get(2).destroy(); level.removeBlock(part.getBlockEntity().getBlockPos(), false);

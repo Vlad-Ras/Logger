@@ -135,7 +135,7 @@ public final class Ae2DeviceSettingsNativeSmoke {
         return -1;
     }
     private static List<LogEntry> mutate(Device device, ServerPlayer player, Runnable action, ActionType expected) {
-        var before = snapshot(device.menu()); action.run(); var after = snapshot(device.menu());
+        var before = snapshot(device.menu()); action.run(); var after = Ae2Audit.followUpSnapshot(device.menu(), before);
         var changes = Ae2Audit.changes(device.menu(), before, after);
         if (expected == null) check(changes.isEmpty(), "no-op action produced rows on " + device.name());
         else check(changes.stream().filter(row -> row.type == expected).count() == 1, "native action missing/duplicated " + expected + " on " + device.name() + ": " + changes.stream().map(row -> row.type).toList());

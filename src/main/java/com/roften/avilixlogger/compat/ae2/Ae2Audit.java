@@ -179,6 +179,15 @@ public final class Ae2Audit {
 
     /** Data-only native snapshot kernel; production capture must pass enabled() first. */
     public static Snapshot snapshot(AEBaseMenu menu) {
+        return snapshot(menu, null);
+    }
+
+    /** Action-local follow-up. Unchanged values reuse the detached, read-only baseline; no live stack is retained. */
+    public static Snapshot followUpSnapshot(AEBaseMenu menu, Snapshot before) {
+        return snapshot(menu, before);
+    }
+
+    private static Snapshot snapshot(AEBaseMenu menu, Snapshot before) {
         if (!onServerThread(menu)) return null;
         Map<Integer, SlotValue> slots = new HashMap<>();
         try {
@@ -195,7 +204,10 @@ public final class Ae2Audit {
                         && !id.equals("INSCRIBER_PLATE_TOP") && !id.equals("INSCRIBER_PLATE_BOTTOM")
                         && !id.equals("ENCODED_PATTERN") && !id.equals("PROCESSING_INPUTS")
                         && !id.equals("PROCESSING_OUTPUTS")) continue;
-                slots.put(i, new SlotValue(id, slot.getItem().copy()));
+                var live = slot.getItem();
+                var previous = before == null ? null : before.slots().get(i);
+                slots.put(i, previous != null && id.equals(previous.semantic()) && ItemStack.matches(previous.stack(), live)
+                        ? previous : new SlotValue(id, live.copy()));
             }
             Object target = menu.getTarget();
             Map<String, String> settings = target instanceof IConfigurableObject configurable
@@ -220,7 +232,7 @@ public final class Ae2Audit {
 
     public static void compare(AEBaseMenu menu, Snapshot before) {
         if (before == null || !enabled() || !onServerThread(menu)) return;
-        Snapshot after = capture(menu);
+        Snapshot after = followUpSnapshot(menu, before);
         if (after == null) return;
         ServerPlayer player = (ServerPlayer) menu.getPlayer();
         MenuTarget target = menuTarget(menu, player);
@@ -266,7 +278,7 @@ public final class Ae2Audit {
         for (var previous : before.slots().entrySet()) {
             int slot = previous.getKey(); SlotValue old = previous.getValue(); SlotValue now = after.slots().get(slot);
             // A changed menu layout is not evidence that an absent slot became empty.
-            if (now == null || !old.semantic().equals(now.semantic()) || ItemStack.matches(old.stack(), now.stack())) continue;
+            if (now == null || old == now || !old.semantic().equals(now.semantic()) || ItemStack.matches(old.stack(), now.stack())) continue;
             ActionType type = configurationType(old.semantic());
             if (type != null) {
                 LogEntry row = configurationRow(target, player, source, type, old.semantic(), slot, old.stack(), now.stack());
