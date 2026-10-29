@@ -15,12 +15,16 @@ public class NetworkStorageMixin {
     @Inject(method = "insert", at = @At("RETURN"), require = 0, remap = false)
     private void avilixlogger$insert(AEKey key, long requested, Actionable mode, IActionSource source,
                                       CallbackInfoReturnable<Long> result) {
-        if (!Ae2Audit.insidePowered()) Ae2Audit.transfer(key, result.getReturnValue(), mode, source, true);
+        if (mode != Actionable.MODULATE || key == null || source == null) return;
+        long actual = result.getReturnValue();
+        if (actual > 0 && !Ae2Audit.insidePowered()) Ae2Audit.transfer(key, actual, mode, source, true);
     }
 
     @Inject(method = "extract", at = @At("RETURN"), require = 0, remap = false)
     private void avilixlogger$extract(AEKey key, long requested, Actionable mode, IActionSource source,
                                        CallbackInfoReturnable<Long> result) {
-        if (!Ae2Audit.insidePowered()) Ae2Audit.transfer(key, result.getReturnValue(), mode, source, false);
+        if (mode != Actionable.MODULATE || key == null || source == null) return;
+        long actual = result.getReturnValue();
+        if (actual > 0 && !Ae2Audit.insidePowered()) Ae2Audit.transfer(key, actual, mode, source, false);
     }
 }
