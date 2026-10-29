@@ -103,7 +103,7 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
     public boolean tick() throws Exception {
         if (++ticks > 4600) throw new AssertionError("processing timeout phase=" + phase + " busy=" + cpu().isBusy()
                 + " raw=" + count(Items.RAW_IRON) + " cellIron=" + count(Items.IRON_INGOT) + " interface=" + stock()
-                + " furnace=" + List.of(furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)));
+                + " furnace=" + List.of(furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)) + " " + (cancellation == null ? "" : cancellation.status()));
         check(!Ae2Audit.enabled(), "processing fixture enabled production capture");
         if (!connected) {
             if (!drive.getMainNode().isReady() || !requester.getMainNode().isReady() || !importer.getMainNode().isReady()) return false;
@@ -185,7 +185,7 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
             if (++stable < 30) return false;
             pipeline(); check(rows.size() == 3, "external recipe receipt count changed");
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_PROCESSING_NATIVE_OK: actual blasting recipe, provider -> vanilla blast furnace -> bottom import bus; unfueled/blocked return/partial delivery guards; standalone machine-source 2 raw iron -> 2 cell ingots; autonomous crafting-card interface requests and receives exactly 2 ingots, paired native requester/CPU links done and released; rows=3, finished=2; data-only inspectors, autonomous admission/production authenticated emit not observed");
-            cancellation = new Ae2RequesterCancelNativeSmoke(level, player, requester, cpuBlock, furnace);
+            cancellation = new Ae2RequesterCancelNativeSmoke(level, player, requester, cpuBlock, furnace, importer);
             cancellation.setup(); phase = 11; return false;
         }
         if (phase == 11) return cancellation.tick();

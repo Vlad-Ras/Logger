@@ -29,6 +29,7 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
     private final InterfaceBlockEntity requester;
     private final CraftingBlockEntity block;
     private final AbstractFurnaceBlockEntity furnace;
+    private final appeng.parts.automation.ImportBusPart importer;
     private final List<LogEntry> rows = new ArrayList<>();
     private final Set<UUID> ids = new HashSet<>();
     private ICraftingLink requestLink, cpuLink;
@@ -39,13 +40,15 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
     private boolean detached;
     private int disconnectedAt;
     private int mode, phase, ticks, stable;
-    public Ae2RequesterCancelNativeSmoke(ServerLevel level, ServerPlayer player, InterfaceBlockEntity requester, CraftingBlockEntity block, AbstractFurnaceBlockEntity furnace) {
-        this.level = level; this.player = player; this.requester = requester; this.block = block; this.furnace = furnace;
+    public Ae2RequesterCancelNativeSmoke(ServerLevel level, ServerPlayer player, InterfaceBlockEntity requester, CraftingBlockEntity block, AbstractFurnaceBlockEntity furnace, appeng.parts.automation.ImportBusPart importer) {
+        this.level = level; this.player = player; this.requester = requester; this.block = block; this.furnace = furnace; this.importer = importer;
     }
     private static void check(boolean ok, String why) { if (!ok) throw new AssertionError(why); }
     private appeng.me.cluster.implementations.CraftingCPUCluster cpu() { return block.getCluster(); }
     private long count(Item item) { return cpu().getGrid().getStorageService().getInventory().extract(AEItemKey.of(item), Long.MAX_VALUE, Actionable.SIMULATE, new MachineSource(requester)); }
     private long stock() { return requester.getInterfaceLogic().getStorage().getAmount(0); }
+    public String status() { return "cancelMode=" + mode + " cancelPhase=" + phase + " ticks=" + ticks + " detached=" + detached
+            + " nexus=" + (nexus == null ? "none" : nexus.avilixlogger$cancelled() + "/" + nexus.avilixlogger$done() + "/requestMissing=" + (nexus.avilixlogger$requestLink() == null)); }
     public void setup() {
         check(!Ae2Audit.enabled() && !cpu().isBusy() && furnace.getItem(0).isEmpty() && furnace.getItem(2).isEmpty(), "requester cancellation setup not idle");
         requester.getInterfaceLogic().getConfig().setStack(0, null);
@@ -131,8 +134,10 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
                 if (!nexus.avilixlogger$cancelled() || cpu().isBusy()) return false;
                 check(ticks - disconnectedAt >= 60 && nexus.avilixlogger$requestLink() == null, "requester expired without native missing-peer grace");
             }
-            if (furnace.getItem(0).getCount() != 2) return false;
-            check(furnace.getItem(0).is(Items.RAW_IRON) && furnace.getItem(2).isEmpty() && stock() == 0, "cancel point was not dispatched raw inputs");
+            if (!detached) {
+                if (furnace.getItem(0).getCount() != 2) return false;
+                check(furnace.getItem(0).is(Items.RAW_IRON) && furnace.getItem(2).isEmpty() && stock() == 0, "cancel point was not dispatched raw inputs");
+            }
             var capture = mode < 3 ? Objects.requireNonNull(Ae2CraftingAudit.inspectLinkedCancellation(nexus)) : null;
             var cpuCapture = mode > 3 && mode < 7 ? Objects.requireNonNull(Ae2CraftingAudit.inspectCpuCancellation(cpu())) : null;
             var linkCapture = mode == 7 || mode == 8 ? Objects.requireNonNull(Ae2CraftingAudit.inspectLinkCancellation(cpuLink)) : null;
@@ -146,6 +151,8 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
             else if (mode == 7) cpuLink.cancel();
             else if (mode == 8) linkFault(true);
             else if (mode == 9 && !detached) {
+                // Hold native output delivery while expiry is pending; furnace ticks remain unchanged.
+                importer.getConfig().setStack(0, new GenericStack(AEItemKey.of(Items.DIAMOND), 0));
                 var node = requester.getMainNode().getNode(); var connections = node.getConnections();
                 check(connections.size() == 1, "requester is not attached by one known dev connection");
                 var connection = connections.getFirst(); peer = connection.getOtherSide(node); connection.destroy();
@@ -168,6 +175,7 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
                 row = Objects.requireNonNull(disconnected.finish(true)); check(disconnected.finish(true) == null, "missing-peer cancel repeated receipt"); disconnected = null;
                 appeng.api.networking.GridHelper.createConnection(requester.getMainNode().getNode(), peer);
                 check(requester.getMainNode().getGrid() == cpu().getGrid(), "requester did not return to original grid");
+                importer.getConfig().setStack(0, null);
                 peer = null;
             } else if (mode >= 7) { row = Objects.requireNonNull(linkCapture.finish(mode != 8)); check(linkCapture.finish(true) == null, "link cancellation repeated receipt"); }
             else if (mode > 3) { row = Objects.requireNonNull(cpuCapture.finish(mode != 6)); check(cpuCapture.finish(true) == null, "CPU cancellation repeated receipt"); }
