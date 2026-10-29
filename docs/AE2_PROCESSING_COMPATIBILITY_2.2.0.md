@@ -1,5 +1,7 @@
 # AE2: внешняя обработка и автономный заказ интерфейса
 
+29.10.2026: [отмена связанного заказа AE2 машиной](AE2_REQUESTER_CANCEL_COMPATIBILITY_2.2.0.md): новый nexus cancel hook сохраняет requester/CPU/JobId и planned output с нейтральным actor, подтверждённая отмена перед ошибкой получает NativeThrew; CPU flag/order protocol защищает существующую UI запись. Четыре native cases дополняют external processing; production AuthCore приёмка остаётся открытой. Ниже — предыдущие этапы.
+
 29.10.2026. Продолжение [проверок сохранённого мира и отмены](AE2_LIFECYCLE_COMPATIBILITY_2.2.0.md). База `4ab772f082d0cb7e16a512e524d6874ff4c86c88`; ветка `work/2.2.0-ae2-processing-20261029`. Пакет расширяет dev acceptance/CI; production hooks, схемы, права и AuthCore не меняются. Релизный JAR не создаётся.
 
 ## Настоящий внешний маршрут
