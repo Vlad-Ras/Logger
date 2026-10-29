@@ -37,6 +37,24 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         for (var instruction : cancel.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call
                 && call.owner.equals("appeng/me/cluster/implementations/CraftingCPUCluster") && call.name.equals("cancelJob") && call.desc.equals("()V")) calls++;
         if (calls != 1) throw new IllegalStateException("Unsupported AE2 cancel call count " + calls);
+        for (var route : List.of(
+                List.of("appeng/me/cluster/implementations/CraftingCPUCluster", "cancelJob", "()V", "appeng/crafting/execution/CraftingCpuLogic", "cancel", "()V", ""),
+                List.of("appeng/crafting/execution/CraftingCpuLogic", "cancel", "()V", "appeng/crafting/execution/CraftingCpuLogic", "finishJob", "(Z)V", "false"),
+                List.of("appeng/crafting/execution/CraftingCpuLogic", "finishJob", "(Z)V", "appeng/crafting/CraftingLink", "cancel", "()V", ""))) {
+            var body = classes.read(route.get(0)).methods.stream().filter(m -> m.name.equals(route.get(1)) && m.desc.equals(route.get(2)))
+                    .findFirst().orElseThrow(() -> new IllegalStateException("Missing AE2 CPU cancellation route " + route));
+            int invocations = 0;
+            for (var instruction : body.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call
+                    && call.owner.equals(route.get(3)) && call.name.equals(route.get(4)) && call.desc.equals(route.get(5))) {
+                invocations++;
+                if (route.get(6).equals("false")) {
+                    var previous = instruction.getPrevious(); while (previous != null && previous.getOpcode() < 0) previous = previous.getPrevious();
+                    if (previous == null || previous.getOpcode() != org.objectweb.asm.Opcodes.ICONST_0)
+                        throw new IllegalStateException("Unsupported AE2 CPU cancellation success flag");
+                }
+            }
+            if (invocations != 1) throw new IllegalStateException("Unsupported AE2 CPU cancellation route count " + route + '/' + invocations);
+        }
         var linkCancel = classes.read("appeng/crafting/CraftingLink").methods.stream()
                 .filter(m -> m.name.equals("cancel") && m.desc.equals("()V")).findFirst().orElseThrow(() -> new IllegalStateException("Missing AE2 crafting link cancel"));
         int setFlag = -1, nexusCancel = -1, index = 0, flags = 0, nexusCalls = 0;

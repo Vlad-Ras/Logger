@@ -113,7 +113,7 @@ public final class Ae2GridNativeSmoke {
             return Objects.requireNonNull(host.addPart((appeng.api.parts.IPartItem<?>)item, Direction.NORTH, player));
         }
         boolean tick() throws Exception {
-            check(++ticks <= 4200, "powered grid did not reach phase " + phase + "; nodes=" + nodes.stream().map(n -> n.isReady() + "/" + n.isActive()).toList());
+            check(++ticks <= 5200, "powered grid did not reach phase " + phase + "; nodes=" + nodes.stream().map(n -> n.isReady() + "/" + n.isActive()).toList());
             if (phase == 5) {
                 if (!assembly.tick()) return false;
                 assembly.close(); assembly = null;

@@ -26,6 +26,8 @@ final class Ae2ContractsTest {
                 Map.entry("appeng/menu/me/crafting/CraftingCPUMenu", "cancelCrafting"),
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getLastLink"),
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "finishJob"),
+                Map.entry("appeng/crafting/execution/CraftingCpuLogic", "cancel"),
+                Map.entry("appeng/me/cluster/implementations/CraftingCPUCluster", "cancelJob"),
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getFinalJobOutput"),
                 Map.entry("appeng/crafting/CraftingLink", "cancel"),
                 Map.entry("appeng/crafting/CraftingLinkNexus", "cancel"),
@@ -105,6 +107,39 @@ final class Ae2ContractsTest {
             }); } catch (IllegalStateException expected) { refused = true; }
             if (!refused) throw new AssertionError("AE2 preflight accepted changed CPU cancel flag/order");
         }
+        for (var route : List.of(
+                List.of("appeng/me/cluster/implementations/CraftingCPUCluster", "cancelJob", "cancel"),
+                List.of("appeng/crafting/execution/CraftingCpuLogic", "cancel", "finishJob"),
+                List.of("appeng/crafting/execution/CraftingCpuLogic", "finishJob", "cancel"))) {
+            for (boolean duplicate : List.of(false, true)) {
+                refused = false;
+                try { verify(name -> {
+                    var node = read(name);
+                    if (name.equals(route.get(0))) {
+                        var body = node.methods.stream().filter(m -> m.name.equals(route.get(1))).findFirst().orElseThrow();
+                        for (var instruction : body.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call && call.name.equals(route.get(2))) {
+                            if (duplicate) body.instructions.insertBefore(call, new org.objectweb.asm.tree.MethodInsnNode(call.getOpcode(), call.owner, call.name, call.desc, call.itf));
+                            else body.instructions.remove(call);
+                            break;
+                        }
+                    }
+                    return node;
+                }); } catch (IllegalStateException expected) { refused = true; }
+                if (!refused) throw new AssertionError("AE2 preflight accepted missing/duplicate CPU cancel route " + route);
+            }
+        }
+        refused = false;
+        try { verify(name -> {
+            var node = read(name);
+            if (name.equals("appeng/crafting/execution/CraftingCpuLogic")) {
+                var body = node.methods.stream().filter(m -> m.name.equals("cancel")).findFirst().orElseThrow();
+                for (var instruction : body.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call && call.name.equals("finishJob")) {
+                    body.instructions.set(call.getPrevious(), new org.objectweb.asm.tree.InsnNode(org.objectweb.asm.Opcodes.ICONST_1)); break;
+                }
+            }
+            return node;
+        }); } catch (IllegalStateException expected) { refused = true; }
+        if (!refused) throw new AssertionError("AE2 preflight accepted CPU cancel calling successful finish");
         for (String field : List.of("container", "serverId", "server")) {
             refused = false;
             try { verify(name -> {

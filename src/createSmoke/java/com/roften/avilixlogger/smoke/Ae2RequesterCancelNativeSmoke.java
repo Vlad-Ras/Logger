@@ -21,7 +21,7 @@ import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/** Three real autonomous jobs: card removal, requester API and nexus cancellation after dispatch. */
+/** Seven real autonomous jobs, including direct CPU and logic cancellation after dispatch. */
 public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
     private static final RuntimeException FAULT = new RuntimeException("intentional linked cancellation fault after native transition");
     private final ServerLevel level;
@@ -72,8 +72,20 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
         }); throw new AssertionError("nexus wrapper swallowed original fault"); }
         catch (InvocationTargetException failure) { check(failure.getCause() == FAULT && calls[0] == 1, "nexus wrapper replaced/repeated original fault"); }
     }
+    private void cpuFault(boolean nativeCancel) throws Exception {
+        var logic = cpu().craftingLogic;
+        var method = Arrays.stream(logic.getClass().getDeclaredMethods()).filter(m -> m.getName().contains("avilixlogger$finishJob")
+                && m.getParameterCount() == 2 && m.getParameterTypes()[1] == Operation.class).findFirst().orElseThrow(); method.setAccessible(true);
+        int[] calls = {0};
+        try { method.invoke(logic, false, (Operation<Void>)args -> {
+            check(args.length == 1 && Boolean.FALSE.equals(args[0]), "CPU wrapper changed cancellation argument"); calls[0]++;
+            if (nativeCancel) logic.cancel();
+            throw FAULT;
+        }); throw new AssertionError("CPU finish wrapper swallowed original fault"); }
+        catch (InvocationTargetException failure) { check(failure.getCause() == FAULT && calls[0] == 1, "CPU finish wrapper replaced/repeated original fault"); }
+    }
     public boolean tick() throws Exception {
-        check(++ticks <= 1800, "requester cancellation timeout mode=" + mode + " phase=" + phase + " cell=" + count(Items.IRON_INGOT) + " stock=" + stock());
+        check(++ticks <= 2800, "requester cancellation timeout mode=" + mode + " phase=" + phase + " cell=" + count(Items.IRON_INGOT) + " stock=" + stock());
         check(!Ae2Audit.enabled(), "requester fixture enabled production capture");
         if (phase == 0) {
             if (!cpu().isBusy()) return false;
@@ -83,32 +95,47 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
                     && !cpuLink.isStandalone(), "cancel fixture reused a job or wrong link pair");
             nexus = nexus(cpuLink); check(nexus.avilixlogger$cpuLink() == cpuLink && nexus.avilixlogger$requestLink() == requestLink, "nexus view changed native pair");
             var early = Objects.requireNonNull(Ae2CraftingAudit.inspectLinkedCancellation(nexus)); check(early.finish(true) == null, "running nexus fabricated cancel");
+            var earlyCpu = Objects.requireNonNull(Ae2CraftingAudit.inspectCpuCancellation(cpu())); check(earlyCpu.finish(false) == null, "running CPU fabricated cancelled fault");
             completion = Objects.requireNonNull(Ae2CraftingAudit.inspectCompletion(cpu()));
             if (mode == 0) { fault(false); check(!nexus.avilixlogger$cancelled() && cpu().isBusy(), "fault-only wrapper changed native state"); offThread(); }
+            if (mode == 4) { cpuFault(false); check(cpu().isBusy() && !cpuLink.isCanceled(), "fault-only CPU wrapper changed native job"); }
             phase = 1; return false;
         }
         if (phase == 1) {
             if (furnace.getItem(0).getCount() != 2) return false;
             check(furnace.getItem(0).is(Items.RAW_IRON) && furnace.getItem(2).isEmpty() && stock() == 0, "cancel point was not dispatched raw inputs");
-            var capture = mode == 3 ? null : Objects.requireNonNull(Ae2CraftingAudit.inspectLinkedCancellation(nexus));
+            var capture = mode < 3 ? Objects.requireNonNull(Ae2CraftingAudit.inspectLinkedCancellation(nexus)) : null;
+            var cpuCapture = mode > 3 ? Objects.requireNonNull(Ae2CraftingAudit.inspectCpuCancellation(cpu())) : null;
             LogEntry row;
             if (mode == 0) requester.getInterfaceLogic().getUpgrades().setItemDirect(0, ItemStack.EMPTY);
             else if (mode == 1) requestLink.cancel();
             else if (mode == 2) fault(true);
+            else if (mode == 4) cpu().cancelJob();
+            else if (mode == 5) cpu().craftingLogic.cancel();
+            else if (mode == 6) cpuFault(true);
             if (mode == 3) {
                 var previous = player.containerMenu; var menu = new CraftingCPUMenu(CraftingCPUMenu.TYPE, 128, player.getInventory(), block); player.containerMenu = menu;
-                try { var ui = Objects.requireNonNull(Ae2CraftingAudit.inspectCancellation(menu, cpu())); menu.receiveClientAction("cancelCrafting", "null"); row = Objects.requireNonNull(ui.finish()); check(ui.finish() == null, "paired UI cancellation repeated receipt"); }
-                finally { menu.removed(player); player.containerMenu = previous; }
-            } else { row = Objects.requireNonNull(capture.finish(mode != 2)); check(capture.finish(true) == null, "linked cancellation repeated receipt"); }
+                var scope = (Ae2CpuCancellationSource)(Object)cpu().craftingLogic;
+                var old = scope.avilixlogger$swapCancellationMenu(menu); check(old == null, "CPU retained a stale menu source");
+                try {
+                    check(scope.avilixlogger$swapCancellationMenu(null) == menu && scope.avilixlogger$swapCancellationMenu(menu) == null, "nested menu scope changed previous source");
+                    var ui = Objects.requireNonNull(Ae2CraftingAudit.inspectCpuCancellation(cpu()));
+                    menu.receiveClientAction("cancelCrafting", "null"); row = Objects.requireNonNull(ui.finish()); check(ui.finish() == null, "paired UI cancellation repeated receipt");
+                } finally { scope.avilixlogger$swapCancellationMenu(old); menu.removed(player); player.containerMenu = previous; }
+                check(scope.avilixlogger$cancellationMenu() == null, "CPU retained the player/menu after native call");
+            } else if (mode > 3) { row = Objects.requireNonNull(cpuCapture.finish(mode != 6)); check(cpuCapture.finish(true) == null, "CPU cancellation repeated receipt"); }
+            else { row = Objects.requireNonNull(capture.finish(mode != 2)); check(capture.finish(true) == null, "linked cancellation repeated receipt"); }
             check(completion.finish(true) == null, "linked cancellation reported success"); completion = null;
             var tag = (CompoundTag)row.copyDeferredSnapshot(LogEntry.SnapshotField.BE_AFTER);
-            var address = mode == 3 ? block.getBlockPos() : requester.getBlockPos();
+            var address = mode >= 3 ? block.getBlockPos() : requester.getBlockPos();
             check(row.type == ActionType.ME_CRAFT_CANCEL && (mode == 3 ? player.getUUID().equals(row.actorUuid) : row.actorUuid == null) && tag.getUUID("JobId").equals(cpuLink.getCraftingID())
-                    && tag.getLong("Amount") == 2 && (mode == 3 || tag.getString("CancellationOrigin").equals("linked-job")) && tag.getBoolean("NativeThrew") == (mode == 2)
+                    && tag.getLong("Amount") == 2 && tag.getString("CancellationOrigin").equals(mode < 3 ? "linked-job" : mode == 3 ? "cpu-menu" : "cpu")
+                    && tag.getBoolean("NativeThrew") == (mode == 2 || mode == 6)
                     && row.x == address.getX() && row.y == address.getY() && row.z == address.getZ(), "linked cancel lost machine/job/planned quantity/failure evidence");
             rows.add(row);
             check(requestLink.isCanceled() && cpuLink.isCanceled() && !requestLink.isDone() && requester.getInterfaceLogic().getRequestedJobs().isEmpty(), "native cancellation did not propagate/release request link");
             check(Ae2CraftingAudit.inspectLinkedCancellation(nexus) == null && ((CraftingLinkAccess)cpuLink).avilixlogger$rawCancelled(), "cancelled nexus retained eligible capture");
+            check(Ae2CraftingAudit.inspectCpuCancellation(cpu()) == null, "already cancelled CPU created second receipt");
             requestLink.cancel(); check(Ae2CraftingAudit.inspectLinkedCancellation(nexus) == null, "repeat native cancellation fabricated receipt");
             requester.getInterfaceLogic().getUpgrades().setItemDirect(0, ItemStack.EMPTY); // Prevent a replacement craft job; ordinary restocking remains enabled.
             phase = 2; stable = 0; return false;
@@ -118,9 +145,10 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
             check(count(Items.RAW_IRON) == 0 && count(Items.IRON_INGOT) == 0 && requester.getInterfaceLogic().getRequestedJobs().isEmpty()
                     && Ae2CraftingAudit.inspectCompletion(cpu()) == null, "cancelled job resurrected or changed delivered balance");
             if (++stable < 25) return false;
-            if (++mode < 4) { setup(); phase = 0; return false; }
-            pipeline(); check(rows.size() == 4 && ids.size() == 4, "linked cancel case count changed");
-            org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_REQUESTER_CANCEL_NATIVE_OK: four autonomous real interface jobs; crafting-card removal, requester link API, nexus cancel + original fault once, paired UI cancellation; two dispatched raw iron continue to two stock ingots after cancellation via ordinary restock, no false CPU finish; machineRows=3, uiRows=1, rows=4; inspector-only, authenticated production emit/dedup not tested");
+            if (++mode < 7) { setup(); phase = 0; return false; }
+            pipeline(); check(rows.size() == 7 && ids.size() == 7, "linked/CPU cancel case count changed");
+            org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_REQUESTER_CANCEL_NATIVE_OK: retained card removal, requester API, nexus fault and paired UI; seven autonomous jobs including CPU API, logic API and finish(false) + original fault; two dispatched raw iron still reach stock after each cancellation; machineRows=6, uiRows=1, rows=7; inspector-only, authenticated production emit/dedup not tested");
+            org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_CPU_CANCEL_NATIVE_OK: CPU/logic direct cancellation, post-transition fault once, running/idle/repeat refusal, no false finish, original job IDs and planned output, CPU versus requester coordinates, call-scoped UI actor restored, worker/Gzip/details and rollback refusal; three new real recipe jobs; authenticated production append not tested");
             return true;
         }
         throw new AssertionError("unknown requester cancel phase");
@@ -134,8 +162,10 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
             public boolean avilixlogger$done() { throw read(); }
         };
         check(Ae2CraftingAudit.beginLinkedCancellation(poison) == null, "disabled production capture touched nexus");
+        check(Ae2CraftingAudit.beginCpuCancellation(cpu()) == null, "disabled CPU production capture admitted job");
         var error = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        var thread = new Thread(() -> { try { check(Ae2CraftingAudit.inspectLinkedCancellation(poison) == null, "off-thread nexus capture accepted"); } catch (Throwable failure) { error.set(failure); } });
+        var cluster = cpu();
+        var thread = new Thread(() -> { try { check(Ae2CraftingAudit.inspectLinkedCancellation(poison) == null && Ae2CraftingAudit.inspectCpuCancellation(cluster) == null, "off-thread cancellation capture accepted"); } catch (Throwable failure) { error.set(failure); } });
         thread.start(); thread.join(5000); check(!thread.isAlive() && error.get() == null, "off-thread guard failed: " + error.get());
     }
     private void pipeline() {
@@ -146,16 +176,16 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
             public void shutdown() {}
         }, 2, 1024 * 1024);
         try { rows.forEach(storage::append); } finally { storage.shutdown(); }
-        check(received.size() == 4, "linked cancel worker dropped rows");
+        check(received.size() == 7, "linked/CPU cancel worker dropped rows");
         var actualIds = new HashSet<UUID>();
         for (int i = 0; i < received.size(); i++) {
             var row = received.get(i); var detail = Ae2CraftingDetails.context(row);
             check(detail != null && row.type == ActionType.ME_CRAFT_CANCEL && detail.getLong("Amount") == 2 && actualIds.add(detail.getUUID("JobId"))
-                    && detail.getBoolean("NativeThrew") == (i == 2) && row.itemStackNbt != null, "linked cancel worker lost ordering/full item/identity");
+                    && detail.getBoolean("NativeThrew") == (i == 2 || i == 6) && row.itemStackNbt != null, "linked cancel worker lost ordering/full item/identity");
             var replay = GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row), LogEntry.class);
             check(row.beAfter.equals(replay.beAfter) && row.itemStackNbt.equals(replay.itemStackNbt), "linked cancel Gzip lost evidence");
             check(!LogText.toChatLine(level, row).getString().contains("ae2-crafting-v1"), "linked cancel UI leaked prefix");
-            if (i == 2) check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("Отмена подтверждена")), "cancellation fault described as job creation");
+            if (i == 2 || i == 6) check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("Отмена подтверждена")), "cancellation fault described as job creation");
             var rollback = RollbackEngine.applyPreparedEntry(level, row); check(rollback.applied == 0 && rollback.skipped == 1, "linked cancel receipt refunded items");
         }
         check(actualIds.equals(ids), "linked cancel replay changed job identities");

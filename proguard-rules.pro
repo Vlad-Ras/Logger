@@ -66,6 +66,8 @@
 -keep interface com.roften.avilixlogger.core.CreateOriginDataAccess { *; }
 -keep interface com.roften.avilixlogger.core.BlockEntityPersistentDataAccess { *; }
 -keep interface com.roften.avilixlogger.compat.supplementaries.TextHolderAuditAccess { *; }
+-keep interface com.roften.avilixlogger.compat.ae2.Ae2CpuCancellationSource { *; }
+-keep interface com.roften.avilixlogger.compat.ae2.Ae2LinkedCancellationState { *; }
 -keep interface com.roften.avilixlogger.core.WeaponTraceAccess { *; }
 -keep interface com.roften.avilixlogger.core.WeaponReloadAccess { *; }
 # Accessor interfaces are casts into classes woven after release obfuscation.

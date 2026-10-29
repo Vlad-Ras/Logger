@@ -48,13 +48,14 @@ jobs:
           mkdir -p run-ae2
           printf 'eula=true\n' > run-ae2/eula.txt
           printf 'max-tick-time=-1\n' > run-ae2/server.properties
-          timeout --signal=INT --kill-after=15s 300s ./gradlew runServer -Pae2Smoke --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
+          timeout --signal=INT --kill-after=15s 400s ./gradlew runServer -Pae2Smoke --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
           tail -n 80 ae2-smoke.log
           grep -q 'AE2_GRID_NATIVE_OK' ae2-smoke.log
           grep -q 'AE2_CRAFTING_NATIVE_OK' ae2-smoke.log
           grep -q 'AE2_ASSEMBLY_NATIVE_OK' ae2-smoke.log
           grep -q 'AE2_PROCESSING_NATIVE_OK:' ae2-smoke.log
           grep -q 'AE2_REQUESTER_CANCEL_NATIVE_OK:' ae2-smoke.log
+          grep -q 'AE2_CPU_CANCEL_NATIVE_OK:' ae2-smoke.log
           if ! grep -q 'AE2_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_TRANSFER_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_DEVICE_SETTINGS_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_CONFIGURATION_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_PATTERN_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_REMOTE_NATIVE_OK' ae2-smoke.log || grep -qE '(AE2_NATIVE_FAILED|AE2 audit integration disabled|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then exit 1; fi
       - name: Native AE2 mid-job cancel and three-process world persistence
         if: ${{ !cancelled() && steps.compile.outcome == 'success' && (matrix.profile == 'current-fd134' || matrix.profile == 'client-s4-core') }}

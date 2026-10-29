@@ -35,7 +35,7 @@ final class Ae2CraftingDetailsTest {
         check(ActionType.ME_CRAFT_REQUEST.ordinal() == ActionType.ITEM_TRADE.ordinal() + 1
                 && ActionType.ME_CRAFT_CANCEL.ordinal() == ActionType.ME_CRAFT_REQUEST.ordinal() + 1
                 && ActionType.ME_CRAFT_FINISH.ordinal() == ActionType.ME_CRAFT_CANCEL.ordinal() + 1, "job action types not appended");
-        var input = List.of(record("i", "accepted"), record("f", "rejected"), record("g", "cancelled"), record("i", "finished"));
+        var input = List.of(record("i", "accepted"), record("f", "rejected"), record("g", "cancelled"), record("i", "finished"), cpuCancellation(false), cpuCancellation(true));
         var rows = new CopyOnWriteArrayList<LogEntry>(); var encoded = new AtomicInteger();
         var storage = new AsyncLogStorage(new LogStorage() {
             public void append(LogEntry row) { rows.add(row); }
@@ -52,7 +52,7 @@ final class Ae2CraftingDetailsTest {
                 check(PayloadSizeEstimator.estimate(row) >= 2L * data.sizeInBytes(), "job receipt absent from queue byte weight"); storage.append(row);
             }
         } finally { storage.shutdown(); }
-        check(rows.size() == 4 && encoded.get() == 4, "job queue dropped/duplicated rows or encoded twice");
+        check(rows.size() == 6 && encoded.get() == 6, "job queue dropped/duplicated rows or encoded twice");
         var dir = java.nio.file.Files.createTempDirectory("ae2-crafting-journal-");
         try {
             var journal = new DiskLogJournal(dir); journal.initialize();
@@ -60,7 +60,7 @@ final class Ae2CraftingDetailsTest {
                 check(Ae2CraftingDetails.summary(row).amount() == Long.MAX_VALUE && Ae2CraftingDetails.context(row) != null, "job long/evidence lost");
                 check(Ae2CraftingDetails.summary(row).label().contains(Long.toString(Long.MAX_VALUE)) && !Ae2CraftingDetails.summary(row).label().contains("ae2-crafting-v1"), "job feed label truncated amount/leaked prefix");
                 check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("планируемому")), "planned output claimed physical production");
-                if (row.type == ActionType.ME_CRAFT_CANCEL) check(row.actorUuid == null && Ae2CraftingDetails.context(row).getString("CancellationOrigin").equals("linked-job")
+                if (row.type == ActionType.ME_CRAFT_CANCEL) check((Ae2CraftingDetails.context(row).getString("CancellationOrigin").equals("cpu-menu") ? row.actorUuid != null : row.actorUuid == null)
                         && Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("Отмена подтверждена")), "machine cancellation/failure described as player admission");
                 LogIdGenerator.ensure(row); var replay = GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row), LogEntry.class);
                 var disk = DiskLogJournal.read(journal.write(journal.newToken(), List.of(replay))).getFirst();
@@ -82,5 +82,15 @@ final class Ae2CraftingDetailsTest {
                     && !CaptureTypePolicy.allows(ActionType.ME_CRAFT_FINISH, "ae2:crafting", null), "job types bypassed category gate");
         } finally { CaptureTypePolicy.install(mask); }
         System.out.println("AE2_CRAFTING_EVIDENCE_OK: append-only types, planned long output, typed outcome, full key, worker SNBT, queue weight, journal/Gzip, actor/address and malformed refusal");
+    }
+    static LogEntry cpuCancellation(boolean menu) {
+        var row = record("f", "cancelled");
+        var data = (CompoundTag)row.copyDeferredSnapshot(LogEntry.SnapshotField.BE_AFTER);
+        data.putString("Origin", "CraftingBlockEntity"); data.putString("StateTransition", "cpu-cancelled-job");
+        data.putString("CancellationOrigin", menu ? "cpu-menu" : "cpu");
+        row.dim = "minecraft:the_nether"; row.x = 31; row.y = 70; row.z = -9;
+        if (menu) { row.actorUuid = UUID.randomUUID(); row.actorName = "NativeCancellationEditor"; }
+        Ae2CraftingDetails.attach(row, "f", "minecraft:water", "ae2:fluid", Long.MAX_VALUE, "cancelled", data);
+        return row;
     }
 }
