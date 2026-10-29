@@ -59,7 +59,11 @@ public final class Ae2CraftingDetails {
         if (tag != null) {
             if (tag.hasUUID("JobId")) out.add(Component.literal("ID задания: " + tag.getUUID("JobId")));
             if (tag.contains("ErrorCode", Tag.TAG_STRING)) out.add(Component.literal("Причина отказа AE2: " + tag.getString("ErrorCode")));
-            if (tag.getBoolean("NativeThrew")) out.add(Component.literal(s.outcome().equals("finished") ? "Задание завершено, затем операция завершилась ошибкой" : "Задание создано, затем операция завершилась ошибкой"));
+            if (tag.getBoolean("NativeThrew")) out.add(Component.literal(switch (s.outcome()) {
+                case "finished" -> "Задание завершено, затем операция завершилась ошибкой";
+                case "cancelled" -> "Отмена подтверждена, затем операция завершилась ошибкой";
+                default -> "Задание создано, затем операция завершилась ошибкой";
+            }));
             if (tag.contains("Cpu", Tag.TAG_COMPOUND)) {
                 var cpu = tag.getCompound("Cpu");
                 out.add(Component.literal("Процессор: " + cpu.getString("Dimension") + " @ " + cpu.getString("BoundsMin") + " → " + cpu.getString("BoundsMax")));

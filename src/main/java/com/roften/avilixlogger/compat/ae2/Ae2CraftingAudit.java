@@ -6,6 +6,7 @@ import appeng.api.stacks.*;
 import appeng.me.cluster.implementations.CraftingCPUCluster;
 import appeng.menu.AEBaseMenu;
 import appeng.parts.AEBasePart;
+import com.roften.avilixlogger.compat.ae2.mixin.CraftingLinkAccess;
 import com.roften.avilixlogger.core.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -46,6 +47,29 @@ public final class Ae2CraftingAudit {
     public static Completion beginCompletion(CraftingCPUCluster cpu) { return Ae2Audit.enabled() ? completion(cpu, true) : null; }
     /** Native state inspector only; no production append or authorization mutation. */
     public static Completion inspectCompletion(CraftingCPUCluster cpu) { return completion(cpu, false); }
+    public static LinkedCancellation beginLinkedCancellation(Ae2LinkedCancellationState state) {
+        return Ae2Audit.enabled() ? linkedCancellation(state, true) : null;
+    }
+    /** Data only: never enables authorization or appends to production storage. */
+    public static LinkedCancellation inspectLinkedCancellation(Ae2LinkedCancellationState state) { return linkedCancellation(state, false); }
+    private static LinkedCancellation linkedCancellation(Ae2LinkedCancellationState state, boolean production) {
+        try {
+            if (!serverThread() || state == null || state.avilixlogger$cancelled() || state.avilixlogger$done()) return null;
+            var request = state.avilixlogger$requestLink(); var cpuLink = state.avilixlogger$cpuLink();
+            if (!(request instanceof CraftingLinkAccess requestAccess) || !(cpuLink instanceof CraftingLinkAccess cpuAccess)
+                    || cpuAccess.avilixlogger$rawCancelled() || request.isDone() || cpuLink.isDone()) return null;
+            // CPU-initiated cancellation sets its own flag before entering the nexus. UI already owns that receipt.
+            if (!(cpuAccess.avilixlogger$cpu() instanceof CraftingCPUCluster cluster)
+                    || cluster.craftingLogic.getLastLink() != cpuLink || !cpuLink.getCraftingID().equals(request.getCraftingID())) return null;
+            var requester = requestAccess.avilixlogger$requester(); if (requester == null) return null;
+            var context = origin(new appeng.me.helpers.MachineSource(requester), cluster.craftingLogic.getFinalJobOutput(), production);
+            if (context == null) return null;
+            cpu(context, cluster); context.data().putUUID("JobId", request.getCraftingID());
+            context.data().putString("StateTransition", "linked-job-cancelled");
+            context.data().putString("CancellationOrigin", "linked-job");
+            return new LinkedCancellation(context, state, request, cpuLink);
+        } catch (Throwable invalid) { failure(); return null; }
+    }
     private static Completion completion(CraftingCPUCluster cluster, boolean production) {
         try {
             if (!serverThread() || cluster == null) return null;
@@ -168,5 +192,22 @@ public final class Ae2CraftingAudit {
             } catch (Throwable invalid) { failure(); return null; } finally { close(); }
         }
         public void close() { context = null; cluster = null; link = null; }
+    }
+    public static final class LinkedCancellation implements AutoCloseable {
+        private Context context;
+        private Ae2LinkedCancellationState state;
+        private ICraftingLink request, cpu;
+        private LinkedCancellation(Context context, Ae2LinkedCancellationState state, ICraftingLink request, ICraftingLink cpu) {
+            this.context = context; this.state = state; this.request = request; this.cpu = cpu;
+        }
+        public LogEntry finish(boolean returnedNormally) {
+            try {
+                if (context == null || !serverThread() || !state.avilixlogger$cancelled() || state.avilixlogger$done()
+                        || !request.isCanceled() || request.isDone() || !cpu.isCanceled() || cpu.isDone()) return null;
+                if (!returnedNormally) context.data().putBoolean("NativeThrew", true);
+                return Ae2CraftingAudit.finish(context, "cancelled");
+            } catch (Throwable invalid) { failure(); return null; } finally { close(); }
+        }
+        public void close() { context = null; state = null; request = null; cpu = null; }
     }
 }

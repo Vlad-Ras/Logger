@@ -27,6 +27,8 @@ final class Ae2ContractsTest {
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getLastLink"),
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "finishJob"),
                 Map.entry("appeng/crafting/execution/CraftingCpuLogic", "getFinalJobOutput"),
+                Map.entry("appeng/crafting/CraftingLink", "cancel"),
+                Map.entry("appeng/crafting/CraftingLinkNexus", "cancel"),
                 Map.entry("appeng/me/cluster/implementations/CraftingCPUCluster", "getLevel"));
         for (var fault : faults) {
             if (!quickMove() && fault.getValue().equals("quickMovePattern")) continue;
@@ -76,6 +78,33 @@ final class Ae2ContractsTest {
             return node;
         }); } catch (IllegalStateException expected) { refused = true; }
         if (!refused) throw new AssertionError("AE2 preflight accepted missing CPU logic cluster");
+        for (var target : Map.of("appeng/crafting/CraftingLink", List.of("req", "cpu", "canceled"),
+                "appeng/crafting/CraftingLinkNexus", List.of("req", "cpu", "canceled", "done")).entrySet()) {
+            for (String field : target.getValue()) {
+                refused = false;
+                try { verify(name -> { var node = read(name); if (name.equals(target.getKey())) node.fields.removeIf(f -> f.name.equals(field)); return node; }); }
+                catch (IllegalStateException expected) { refused = true; }
+                if (!refused) throw new AssertionError("AE2 preflight accepted missing linked cancellation field " + target.getKey() + '.' + field);
+            }
+        }
+        for (boolean reverse : List.of(false, true)) {
+            refused = false;
+            try { verify(name -> {
+                var node = read(name);
+                if (name.equals("appeng/crafting/CraftingLink")) {
+                    var method = node.methods.stream().filter(m -> m.name.equals("cancel")).findFirst().orElseThrow();
+                    org.objectweb.asm.tree.MethodInsnNode flag = null, nexus = null;
+                    for (var instruction : method.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call) {
+                        if (call.name.equals("setCanceled")) flag = call;
+                        if (call.owner.equals("appeng/crafting/CraftingLinkNexus") && call.name.equals("cancel")) nexus = call;
+                    }
+                    if (reverse) { method.instructions.remove(nexus); method.instructions.insertBefore(flag, nexus); }
+                    else { var value = flag.getPrevious(); method.instructions.set(value, new org.objectweb.asm.tree.InsnNode(org.objectweb.asm.Opcodes.ICONST_0)); }
+                }
+                return node;
+            }); } catch (IllegalStateException expected) { refused = true; }
+            if (!refused) throw new AssertionError("AE2 preflight accepted changed CPU cancel flag/order");
+        }
         for (String field : List.of("container", "serverId", "server")) {
             refused = false;
             try { verify(name -> {

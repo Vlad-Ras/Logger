@@ -19,6 +19,10 @@ final class Ae2CraftingDetailsTest {
         var cpu = new CompoundTag(); cpu.putString("Dimension", "minecraft:the_nether"); cpu.putString("BoundsMin", "31, 70, -9");
         cpu.putString("BoundsMax", "32, 71, -8"); cpu.putString("Name", "Native CPU"); data.put("Cpu", cpu);
         if (outcome.equals("finished")) { row.actorUuid = null; row.actorName = null; row.dim = "minecraft:the_nether"; row.x = 31; row.y = 70; row.z = -9; data.putString("StateTransition", "cpu-success-cleared-job"); }
+        if (outcome.equals("cancelled")) {
+            row.actorUuid = null; row.actorName = null; data.putString("Origin", "InterfaceBlockEntity"); data.putString("OriginKind", "block");
+            data.putString("CancellationOrigin", "linked-job"); data.putString("StateTransition", "linked-job-cancelled"); data.putBoolean("NativeThrew", true);
+        }
         String resource = kind.equals("i") ? "ae2:processing_pattern" : kind.equals("f") ? "minecraft:water" : "example:steam";
         String type = kind.equals("i") ? "ae2:item" : kind.equals("f") ? "ae2:fluid" : "example:gas";
         var full = new CompoundTag(); full.putString("id", resource); full.putInt("count", 1);
@@ -56,6 +60,8 @@ final class Ae2CraftingDetailsTest {
                 check(Ae2CraftingDetails.summary(row).amount() == Long.MAX_VALUE && Ae2CraftingDetails.context(row) != null, "job long/evidence lost");
                 check(Ae2CraftingDetails.summary(row).label().contains(Long.toString(Long.MAX_VALUE)) && !Ae2CraftingDetails.summary(row).label().contains("ae2-crafting-v1"), "job feed label truncated amount/leaked prefix");
                 check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("планируемому")), "planned output claimed physical production");
+                if (row.type == ActionType.ME_CRAFT_CANCEL) check(row.actorUuid == null && Ae2CraftingDetails.context(row).getString("CancellationOrigin").equals("linked-job")
+                        && Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("Отмена подтверждена")), "machine cancellation/failure described as player admission");
                 LogIdGenerator.ensure(row); var replay = GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row), LogEntry.class);
                 var disk = DiskLogJournal.read(journal.write(journal.newToken(), List.of(replay))).getFirst();
                 check(disk.id == row.id && disk.extra.equals(row.extra) && disk.beAfter.equals(row.beAfter) && Objects.equals(disk.itemStackNbt, row.itemStackNbt)

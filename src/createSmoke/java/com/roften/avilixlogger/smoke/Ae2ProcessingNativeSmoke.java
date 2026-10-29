@@ -39,6 +39,7 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
     private AbstractFurnaceBlockEntity furnace;
     private ImportBusPart importer;
     private Future<ICraftingPlan> calculation;
+    private Ae2RequesterCancelNativeSmoke cancellation;
     private Ae2CraftingAudit.Completion completion;
     private ICraftingLink cpuLink, requestLink;
     private UUID firstJob;
@@ -100,7 +101,7 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
         rows.add(row);
     }
     public boolean tick() throws Exception {
-        if (++ticks > 1800) throw new AssertionError("processing timeout phase=" + phase + " busy=" + cpu().isBusy()
+        if (++ticks > 2600) throw new AssertionError("processing timeout phase=" + phase + " busy=" + cpu().isBusy()
                 + " raw=" + count(Items.RAW_IRON) + " cellIron=" + count(Items.IRON_INGOT) + " interface=" + stock()
                 + " furnace=" + List.of(furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)));
         check(!Ae2Audit.enabled(), "processing fixture enabled production capture");
@@ -184,8 +185,10 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
             if (++stable < 30) return false;
             pipeline(); check(rows.size() == 3, "external recipe receipt count changed");
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_PROCESSING_NATIVE_OK: actual blasting recipe, provider -> vanilla blast furnace -> bottom import bus; unfueled/blocked return/partial delivery guards; standalone machine-source 2 raw iron -> 2 cell ingots; autonomous crafting-card interface requests and receives exactly 2 ingots, paired native requester/CPU links done and released; rows=3, finished=2; data-only inspectors, autonomous admission/production authenticated emit not observed");
-            return true;
+            cancellation = new Ae2RequesterCancelNativeSmoke(level, player, requester, cpuBlock, furnace);
+            cancellation.setup(); phase = 11; return false;
         }
+        if (phase == 11) return cancellation.tick();
         throw new AssertionError("unknown processing phase " + phase);
     }
     private void pipeline() {
@@ -209,6 +212,7 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
         }
     }
     public void close() {
+        if (cancellation != null) cancellation.close(); cancellation = null;
         if (calculation != null) calculation.cancel(true); calculation = null;
         if (completion != null) completion.close(); completion = null;
         if (requester != null) requester.getInterfaceLogic().getConfig().setStack(0, null);

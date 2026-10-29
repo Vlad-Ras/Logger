@@ -18,8 +18,12 @@
     "CraftingServiceMixin",
     "CraftingCPUClusterMixin",
     "CraftingCPUMenuMixin",
-    "CraftingCpuLogicMixin"
+    "CraftingCpuLogicMixin",
+    "CraftingLinkAccess",
+    "CraftingLinkNexusMixin"
   ],
   "client": [],
-  "injectors": { "defaultRequire": 0 }
+  "injectors": {
+    "defaultRequire": 0
+  }
 }

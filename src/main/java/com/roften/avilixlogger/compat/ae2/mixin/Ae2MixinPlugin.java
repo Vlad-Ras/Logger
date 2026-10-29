@@ -19,7 +19,7 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         var checker = new CreateMixinPlugin.Preflight(classes);
         for (String name : List.of("NetworkStorageMixin", "StorageHelperMixin", "AEBaseMenuMixin",
                 "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin",
-                "PatternTrackerAccess", "PatternAccessTermMenuMixin", "CraftingServiceMixin", "CraftingCPUClusterMixin", "CraftingCPUMenuMixin", "CraftingCpuLogicMixin"))
+                "PatternTrackerAccess", "PatternAccessTermMenuMixin", "CraftingServiceMixin", "CraftingCPUClusterMixin", "CraftingCPUMenuMixin", "CraftingCpuLogicMixin", "CraftingLinkAccess", "CraftingLinkNexusMixin"))
             checker.check("com/roften/avilixlogger/compat/ae2/mixin/" + name);
         if (quickMove) checker.check("com/roften/avilixlogger/compat/ae2/mixin/PatternAccessQuickMoveMixin");
         for (var entry : Map.of(
@@ -37,6 +37,22 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         for (var instruction : cancel.instructions) if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call
                 && call.owner.equals("appeng/me/cluster/implementations/CraftingCPUCluster") && call.name.equals("cancelJob") && call.desc.equals("()V")) calls++;
         if (calls != 1) throw new IllegalStateException("Unsupported AE2 cancel call count " + calls);
+        var linkCancel = classes.read("appeng/crafting/CraftingLink").methods.stream()
+                .filter(m -> m.name.equals("cancel") && m.desc.equals("()V")).findFirst().orElseThrow(() -> new IllegalStateException("Missing AE2 crafting link cancel"));
+        int setFlag = -1, nexusCancel = -1, index = 0, flags = 0, nexusCalls = 0;
+        for (var instruction : linkCancel.instructions) {
+            if (instruction instanceof org.objectweb.asm.tree.MethodInsnNode call) {
+                if (call.owner.equals("appeng/crafting/CraftingLink") && call.name.equals("setCanceled") && call.desc.equals("(Z)V")) {
+                    var previous = instruction.getPrevious();
+                    while (previous != null && previous.getOpcode() < 0) previous = previous.getPrevious();
+                    if (previous == null || previous.getOpcode() != org.objectweb.asm.Opcodes.ICONST_1) throw new IllegalStateException("Unsupported AE2 cancel flag value");
+                    setFlag = index; flags++;
+                }
+                if (call.owner.equals("appeng/crafting/CraftingLinkNexus") && call.name.equals("cancel") && call.desc.equals("()V")) { nexusCancel = index; nexusCalls++; }
+            }
+            index++;
+        }
+        if (flags != 1 || nexusCalls != 1 || setFlag >= nexusCancel) throw new IllegalStateException("Unsupported AE2 cancellation ordering");
         var logic = classes.read("appeng/parts/encoding/PatternEncodingLogic");
         for (String contract : List.of("getMode()Lappeng/parts/encoding/EncodingMode;", "isSubstitution()Z", "isFluidSubstitution()Z",
                 "getStonecuttingRecipeId()Lnet/minecraft/resources/ResourceLocation;"))

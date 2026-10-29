@@ -147,7 +147,7 @@ public final class ClickHouseNativeSmoke {
             q.requireDetails=false;var feed=db.query(q);check(feed.size()==1&&Ae2CraftingDetails.summary(feed.getFirst()).equals(Ae2CraftingDetails.summary(expected))
                     &&Ae2CraftingDetails.summary(feed.getFirst()).label().contains(Long.toString(Long.MAX_VALUE)),"job feed lost exact long/outcome");
         }
-        System.out.println("AE2_CRAFTING_CLICKHOUSE_OK: accepted/refused/cancelled/finished planned long outputs, full key, actor, CPU/job identity and exact feed/details survive minimal mode and reopened connection");
+        System.out.println("AE2_CRAFTING_CLICKHOUSE_OK: accepted/refused/cancelled/finished planned long outputs, full key, actor, CPU/job identity, neutral machine cancel/failure details and exact feed/details survive minimal mode and reopened connection");
     }
 
     private static List<LogEntry> journalPressure(ClickHouseLogStorage database)throws Exception{
