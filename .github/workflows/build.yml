@@ -54,6 +54,25 @@ jobs:
           grep -q 'AE2_CRAFTING_NATIVE_OK' ae2-smoke.log
           grep -q 'AE2_ASSEMBLY_NATIVE_OK' ae2-smoke.log
           if ! grep -q 'AE2_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_TRANSFER_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_DEVICE_SETTINGS_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_CONFIGURATION_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_PATTERN_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_REMOTE_NATIVE_OK' ae2-smoke.log || grep -qE '(AE2_NATIVE_FAILED|AE2 audit integration disabled|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then exit 1; fi
+      - name: Native AE2 mid-job cancel and three-process world persistence
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && (matrix.profile == 'current-fd134' || matrix.profile == 'client-s4-core') }}
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          mkdir -p run-ae2-lifecycle
+          printf 'eula=true\n' > run-ae2-lifecycle/eula.txt
+          printf 'max-tick-time=-1\n' > run-ae2-lifecycle/server.properties
+          for phase in seed resume verify; do
+            timeout --signal=INT --kill-after=15s 240s ./gradlew runServer -Pae2Smoke -Pae2Lifecycle="$phase" --console=plain --no-daemon > "ae2-lifecycle-$phase-smoke.log" 2>&1
+            tail -n 70 "ae2-lifecycle-$phase-smoke.log"
+            if grep -qE 'AE2_NATIVE_FAILED|AE2 audit integration disabled|Failed to start the minecraft server|MixinApplyError|MixinTransformerError' "ae2-lifecycle-$phase-smoke.log"; then exit 1; fi
+            grep -q 'All dimensions are saved' "ae2-lifecycle-$phase-smoke.log"
+          done
+          grep -q 'AE2_MID_CANCEL_NATIVE_OK:' ae2-lifecycle-seed-smoke.log
+          grep -q 'AE2_LIFECYCLE_SEEDED:' ae2-lifecycle-seed-smoke.log
+          grep -q 'AE2_LIFECYCLE_RESUMED:' ae2-lifecycle-resume-smoke.log
+          grep -q 'AE2_LIFECYCLE_NATIVE_OK:' ae2-lifecycle-verify-smoke.log
+          test -s run-ae2-lifecycle/world/level.dat
       - name: Native regression without AE2
         if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.profile == 'current-fd134' }}
         timeout-minutes: 10

@@ -36,6 +36,10 @@ public final class Ae2NativeSmoke {
     @SubscribeEvent public static void started(ServerStartedEvent event) {
         if (!Boolean.getBoolean("avilixlogger.ae2Smoke") || Boolean.getBoolean("avilixlogger.ae2Absent")) return;
         try {
+            if (System.getProperty("avilixlogger.ae2Lifecycle") != null) {
+                Ae2LifecycleNativeSmoke.start(event.getServer().overworld());
+                return;
+            }
             run(event.getServer().overworld());
             Ae2GridNativeSmoke.start(event.getServer().overworld());
         } catch (Throwable failure) { LOG.error("AE2_NATIVE_FAILED", failure); event.getServer().halt(false); }

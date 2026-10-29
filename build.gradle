@@ -51,7 +51,7 @@ base {
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
 sourceSets.create("createSmoke")
-if (project.hasProperty('ae2Smoke')) sourceSets.createSmoke.java.include('**/Ae2NativeSmoke.java', '**/Ae2TransferNativeSmoke.java', '**/Ae2DeviceSettingsNativeSmoke.java', '**/Ae2PatternNativeSmoke.java', '**/Ae2RemoteNativeSmoke.java', '**/Ae2GridNativeSmoke.java', '**/Ae2CraftingNativeSmoke.java', '**/Ae2AssemblyNativeSmoke.java')
+if (project.hasProperty('ae2Smoke')) sourceSets.createSmoke.java.include('**/Ae2NativeSmoke.java', '**/Ae2TransferNativeSmoke.java', '**/Ae2DeviceSettingsNativeSmoke.java', '**/Ae2PatternNativeSmoke.java', '**/Ae2RemoteNativeSmoke.java', '**/Ae2GridNativeSmoke.java', '**/Ae2CraftingNativeSmoke.java', '**/Ae2AssemblyNativeSmoke.java', '**/Ae2LifecycleNativeSmoke.java')
 if (project.hasProperty('ae2Absent')) sourceSets.createSmoke.java.include('**/Ae2AbsentSmoke.java')
 if (project.hasProperty('createAbsent')) sourceSets.createSmoke.java.include('**/CreateAbsentSmoke.java')
 if (project.hasProperty('supplementariesCreateAbsent')) sourceSets.createSmoke.java.include('**/SupplementariesTextSmoke.java', '**/AuditDetailsSmoke.java', '**/SnapshotDeltaNativeSmoke.java')
@@ -105,6 +105,11 @@ neoForge {
                 systemProperty 'avilixlogger.ae2Smoke', 'true'
                 systemProperty 'avilixlogger.ae2Absent', project.hasProperty('ae2Absent').toString()
                 gameDirectory = project.file('run-ae2')
+            }
+            if (project.hasProperty('ae2Lifecycle')) {
+                if (!project.hasProperty('ae2Smoke')) throw new GradleException('ae2Lifecycle requires ae2Smoke')
+                systemProperty 'avilixlogger.ae2Lifecycle', project.property('ae2Lifecycle')
+                gameDirectory = project.file('run-ae2-lifecycle')
             }
             if (project.hasProperty('scgunsSmoke')) systemProperty 'avilixlogger.scgunsSmoke', 'true'
             if (project.hasProperty('chippedSmoke')) systemProperty 'avilixlogger.chippedSmoke', 'true'
