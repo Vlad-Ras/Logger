@@ -1,5 +1,7 @@
 # AE2: расчёт рецептов, сборщик и завершение задания
 
+29.10.2026: [отмена начатой сборки и сохранённый мир AE2](AE2_LIFECYCLE_COMPATIBILITY_2.2.0.md): отдельный dev/CI стенд с тремя server processes проверяет mid-job cancel, native JobId/inventories после disk save/load и завершённое idle состояние при следующем restart. В 19.2.12 сохраняется работающий job, в 19.2.18 — job на штатной паузе; in-flight assembler продолжает уже принятый рецепт. Production capture/авторизация не меняются; ниже — предыдущие этапы.
+
 28.10.2026. Продолжение [приёма и отмены заказов](AE2_CRAFTING_COMPATIBILITY_2.2.0.md). База `510c207d27feace3aee80ccc01fcfadfb94064ed`; ветка `work/2.2.0-ae2-assembly-20261028`. Релизный JAR не создаётся.
 
 ## История завершения
