@@ -1,5 +1,7 @@
 # AE2: отмена CPU без открытого меню
 
+29.10.2026: [отмена CPU link и потеря requester связи AE2](AE2_LINK_CANCEL_COMPATIBILITY_2.2.0.md): новый link.cancel hook, scoped capture owner и fallback по сохранившемуся CPU при request=null. Native набор расширен до 10 автономных jobs с настоящим grid split/expiry/reconnect; full key/JobId/planned output и storage regression. Production AuthCore и численные замеры остаются открытыми. Ниже — предыдущие этапы.
+
 29.10.2026. Продолжение [отмены связанного заказа](AE2_REQUESTER_CANCEL_COMPATIBILITY_2.2.0.md). База `aa3c1a04741334a7f73335a6c83cb52aa1914d14`; ветка `work/2.2.0-ae2-cpu-cancel-20261029`. Проверенный код — `a14662fa87154236ea926732405af89765efc484`, tree `a14b3734668d0a0178261e2419d42d2d4b926ad8`. Выпускной JAR не создаётся.
 
 ## Изменение захвата

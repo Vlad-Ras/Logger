@@ -1,5 +1,7 @@
 # AE2: отмена связанного заказа машиной
 
+29.10.2026: [отмена CPU link и потеря requester связи AE2](AE2_LINK_CANCEL_COMPATIBILITY_2.2.0.md): новый link.cancel hook, scoped capture owner и fallback по сохранившемуся CPU при request=null. Native набор расширен до 10 автономных jobs с настоящим grid split/expiry/reconnect; full key/JobId/planned output и storage regression. Production AuthCore и численные замеры остаются открытыми. Ниже — предыдущие этапы.
+
 29.10.2026: [прямая отмена CPU AE2 и единый UI источник](AE2_CPU_CANCEL_COMPATIBILITY_2.2.0.md): общий finishJob(false) закрывает direct CPU/logic API, временный menu source сохраняет редактора без второй UI строки; linked cleanup отсекается по прежнему canceled link. Семь автономных native jobs, standalone fluid long и storage проверки; production AuthCore и численные замеры остаются открытыми. Ниже — предыдущие этапы.
 
 29.10.2026. Продолжение [автономного заказа и внешней обработки](AE2_PROCESSING_COMPATIBILITY_2.2.0.md). База `0074a306b90bb57192691e14eb1dad6e96a935b6`; ветка `work/2.2.0-ae2-requester-cancel-20261029`. Пакет добавляет production захват linked cancellation, native acceptance и проверки хранения; релизный JAR не создаётся.
