@@ -59,6 +59,8 @@ public final class Ae2CraftingDetails {
         if (tag != null) {
             if (tag.hasUUID("JobId")) out.add(Component.literal("ID задания: " + tag.getUUID("JobId")));
             if (tag.contains("ErrorCode", Tag.TAG_STRING)) out.add(Component.literal("Причина отказа AE2: " + tag.getString("ErrorCode")));
+            if (tag.getBoolean("RequestLinkMissing")) out.add(Component.literal("Связь с заказчиком отсутствовала; запись привязана к процессору"));
+            if (tag.getString("CancellationOrigin").equals("cpu-link")) out.add(Component.literal("Отмена через ссылку задания процессора"));
             if (tag.getBoolean("NativeThrew")) out.add(Component.literal(switch (s.outcome()) {
                 case "finished" -> "Задание завершено, затем операция завершилась ошибкой";
                 case "cancelled" -> "Отмена подтверждена, затем операция завершилась ошибкой";

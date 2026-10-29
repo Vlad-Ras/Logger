@@ -6,4 +6,6 @@ import appeng.menu.AEBaseMenu;
 public interface Ae2CpuCancellationSource {
     AEBaseMenu avilixlogger$swapCancellationMenu(AEBaseMenu menu);
     AEBaseMenu avilixlogger$cancellationMenu();
+    boolean avilixlogger$cancellationOwned();
+    boolean avilixlogger$swapCancellationOwned(boolean owned);
 }

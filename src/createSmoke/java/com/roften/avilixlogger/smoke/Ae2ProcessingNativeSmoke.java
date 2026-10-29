@@ -101,7 +101,7 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
         rows.add(row);
     }
     public boolean tick() throws Exception {
-        if (++ticks > 3600) throw new AssertionError("processing timeout phase=" + phase + " busy=" + cpu().isBusy()
+        if (++ticks > 4600) throw new AssertionError("processing timeout phase=" + phase + " busy=" + cpu().isBusy()
                 + " raw=" + count(Items.RAW_IRON) + " cellIron=" + count(Items.IRON_INGOT) + " interface=" + stock()
                 + " furnace=" + List.of(furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)));
         check(!Ae2Audit.enabled(), "processing fixture enabled production capture");

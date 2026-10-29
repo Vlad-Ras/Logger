@@ -49,13 +49,33 @@ public final class Ae2CraftingAudit {
     }
     /** Data only, including the current synchronous menu source; never enables production capture. */
     public static Cancellation inspectCpuCancellation(CraftingCPUCluster cpu) { return cpuCancellation(cpu, false); }
+    public static Cancellation beginLinkCancellation(ICraftingLink link) {
+        return Ae2Audit.enabled() ? linkCancellation(link, true) : null;
+    }
+    /** Data only: no authorization or production append. */
+    public static Cancellation inspectLinkCancellation(ICraftingLink link) { return linkCancellation(link, false); }
+    private static Cancellation linkCancellation(ICraftingLink link, boolean production) {
+        try {
+            if (!serverThread() || !(link instanceof CraftingLinkAccess access) || access.avilixlogger$rawCancelled() || link.isDone()
+                    || !(access.avilixlogger$cpu() instanceof CraftingCPUCluster cluster) || cluster.craftingLogic.getLastLink() != link
+                    || ((Ae2CpuCancellationSource)(Object)cluster.craftingLogic).avilixlogger$cancellationOwned()) return null;
+            var capture = cpuCancellation(cluster, production);
+            if (capture != null) {
+                capture.context.data().putString("CancellationOrigin", "cpu-link");
+                capture.context.data().putString("StateTransition", "cpu-link-cancelled");
+            }
+            return capture;
+        } catch (Throwable invalid) { failure(); return null; }
+    }
     private static Cancellation cpuCancellation(CraftingCPUCluster cluster, boolean production) {
         try {
             if (!serverThread() || cluster == null) return null;
             var link = cluster.craftingLogic.getLastLink();
             // Requester/nexus cancellation already owns its receipt before the CPU cleans up.
             if (link == null || link.isCanceled() || link.isDone()) return null;
-            var menu = ((Ae2CpuCancellationSource)(Object)cluster.craftingLogic).avilixlogger$cancellationMenu();
+            var scope = (Ae2CpuCancellationSource)(Object)cluster.craftingLogic;
+            if (scope.avilixlogger$cancellationOwned()) return null;
+            var menu = scope.avilixlogger$cancellationMenu();
             if (menu != null) return cancellation(menu, cluster, production);
             var context = origin(cluster.getSrc(), cluster.craftingLogic.getFinalJobOutput(), production);
             if (context == null) return null;
@@ -77,15 +97,22 @@ public final class Ae2CraftingAudit {
         try {
             if (!serverThread() || state == null || state.avilixlogger$cancelled() || state.avilixlogger$done()) return null;
             var request = state.avilixlogger$requestLink(); var cpuLink = state.avilixlogger$cpuLink();
-            if (!(request instanceof CraftingLinkAccess requestAccess) || !(cpuLink instanceof CraftingLinkAccess cpuAccess)
-                    || cpuAccess.avilixlogger$rawCancelled() || request.isDone() || cpuLink.isDone()) return null;
+            if (!(cpuLink instanceof CraftingLinkAccess cpuAccess) || cpuAccess.avilixlogger$rawCancelled() || cpuLink.isDone()) return null;
             // CPU-initiated cancellation sets its own flag first. Its finishJob(false) scope owns that receipt.
             if (!(cpuAccess.avilixlogger$cpu() instanceof CraftingCPUCluster cluster)
-                    || cluster.craftingLogic.getLastLink() != cpuLink || !cpuLink.getCraftingID().equals(request.getCraftingID())) return null;
-            var requester = requestAccess.avilixlogger$requester(); if (requester == null) return null;
-            var context = origin(new appeng.me.helpers.MachineSource(requester), cluster.craftingLogic.getFinalJobOutput(), production);
+                    || cluster.craftingLogic.getLastLink() != cpuLink) return null;
+            IActionSource source;
+            if (request == null) source = cluster.getSrc();
+            else {
+                if (!(request instanceof CraftingLinkAccess requestAccess) || request.isDone()
+                        || !cpuLink.getCraftingID().equals(request.getCraftingID())) return null;
+                var requester = requestAccess.avilixlogger$requester(); if (requester == null) return null;
+                source = new appeng.me.helpers.MachineSource(requester);
+            }
+            var context = origin(source, cluster.craftingLogic.getFinalJobOutput(), production);
             if (context == null) return null;
-            cpu(context, cluster); context.data().putUUID("JobId", request.getCraftingID());
+            cpu(context, cluster); context.data().putUUID("JobId", cpuLink.getCraftingID());
+            if (request == null) context.data().putBoolean("RequestLinkMissing", true);
             context.data().putString("StateTransition", "linked-job-cancelled");
             context.data().putString("CancellationOrigin", "linked-job");
             return new LinkedCancellation(context, state, request, cpuLink);
@@ -233,7 +260,7 @@ public final class Ae2CraftingAudit {
         public LogEntry finish(boolean returnedNormally) {
             try {
                 if (context == null || !serverThread() || !state.avilixlogger$cancelled() || state.avilixlogger$done()
-                        || !request.isCanceled() || request.isDone() || !cpu.isCanceled() || cpu.isDone()) return null;
+                        || (request != null && (!request.isCanceled() || request.isDone())) || !cpu.isCanceled() || cpu.isDone()) return null;
                 if (!returnedNormally) context.data().putBoolean("NativeThrew", true);
                 return Ae2CraftingAudit.finish(context, "cancelled");
             } catch (Throwable invalid) { failure(); return null; } finally { close(); }

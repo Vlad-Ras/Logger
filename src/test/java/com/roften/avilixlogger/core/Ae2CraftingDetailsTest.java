@@ -35,7 +35,7 @@ final class Ae2CraftingDetailsTest {
         check(ActionType.ME_CRAFT_REQUEST.ordinal() == ActionType.ITEM_TRADE.ordinal() + 1
                 && ActionType.ME_CRAFT_CANCEL.ordinal() == ActionType.ME_CRAFT_REQUEST.ordinal() + 1
                 && ActionType.ME_CRAFT_FINISH.ordinal() == ActionType.ME_CRAFT_CANCEL.ordinal() + 1, "job action types not appended");
-        var input = List.of(record("i", "accepted"), record("f", "rejected"), record("g", "cancelled"), record("i", "finished"), cpuCancellation(false), cpuCancellation(true));
+        var input = List.of(record("i", "accepted"), record("f", "rejected"), record("g", "cancelled"), record("i", "finished"), cpuCancellation(false), cpuCancellation(true), linkCancellation(false), linkCancellation(true));
         var rows = new CopyOnWriteArrayList<LogEntry>(); var encoded = new AtomicInteger();
         var storage = new AsyncLogStorage(new LogStorage() {
             public void append(LogEntry row) { rows.add(row); }
@@ -52,7 +52,7 @@ final class Ae2CraftingDetailsTest {
                 check(PayloadSizeEstimator.estimate(row) >= 2L * data.sizeInBytes(), "job receipt absent from queue byte weight"); storage.append(row);
             }
         } finally { storage.shutdown(); }
-        check(rows.size() == 6 && encoded.get() == 6, "job queue dropped/duplicated rows or encoded twice");
+        check(rows.size() == 8 && encoded.get() == 8, "job queue dropped/duplicated rows or encoded twice");
         var dir = java.nio.file.Files.createTempDirectory("ae2-crafting-journal-");
         try {
             var journal = new DiskLogJournal(dir); journal.initialize();
@@ -62,6 +62,8 @@ final class Ae2CraftingDetailsTest {
                 check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("планируемому")), "planned output claimed physical production");
                 if (row.type == ActionType.ME_CRAFT_CANCEL) check((Ae2CraftingDetails.context(row).getString("CancellationOrigin").equals("cpu-menu") ? row.actorUuid != null : row.actorUuid == null)
                         && Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("Отмена подтверждена")), "machine cancellation/failure described as player admission");
+                if (Ae2CraftingDetails.context(row).getBoolean("RequestLinkMissing")) check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("запись привязана к процессору")), "missing requester address not explained");
+                if (Ae2CraftingDetails.context(row).getString("CancellationOrigin").equals("cpu-link")) check(Ae2CraftingDetails.describe(row).stream().anyMatch(c -> c.getString().contains("через ссылку задания")), "direct link cancellation not described");
                 LogIdGenerator.ensure(row); var replay = GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row), LogEntry.class);
                 var disk = DiskLogJournal.read(journal.write(journal.newToken(), List.of(replay))).getFirst();
                 check(disk.id == row.id && disk.extra.equals(row.extra) && disk.beAfter.equals(row.beAfter) && Objects.equals(disk.itemStackNbt, row.itemStackNbt)
@@ -92,5 +94,12 @@ final class Ae2CraftingDetailsTest {
         if (menu) { row.actorUuid = UUID.randomUUID(); row.actorName = "NativeCancellationEditor"; }
         Ae2CraftingDetails.attach(row, "f", "minecraft:water", "ae2:fluid", Long.MAX_VALUE, "cancelled", data);
         return row;
+    }
+    static LogEntry linkCancellation(boolean missingRequester) {
+        var row = cpuCancellation(false); var data = (CompoundTag)row.copyDeferredSnapshot(LogEntry.SnapshotField.BE_AFTER);
+        data.putString("CancellationOrigin", missingRequester ? "linked-job" : "cpu-link");
+        data.putString("StateTransition", missingRequester ? "linked-job-cancelled" : "cpu-link-cancelled");
+        if (missingRequester) data.putBoolean("RequestLinkMissing", true);
+        Ae2CraftingDetails.attach(row, "f", "minecraft:water", "ae2:fluid", Long.MAX_VALUE, "cancelled", data); return row;
     }
 }

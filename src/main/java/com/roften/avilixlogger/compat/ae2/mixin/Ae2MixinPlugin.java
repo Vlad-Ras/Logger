@@ -19,7 +19,7 @@ public final class Ae2MixinPlugin implements IMixinConfigPlugin {
         var checker = new CreateMixinPlugin.Preflight(classes);
         for (String name : List.of("NetworkStorageMixin", "StorageHelperMixin", "AEBaseMenuMixin",
                 "ConfigButtonPacketMixin", "SetStockAmountMenuMixin", "PriorityMenuMixin", "StorageLevelEmitterMenuMixin",
-                "PatternTrackerAccess", "PatternAccessTermMenuMixin", "CraftingServiceMixin", "CraftingCPUClusterMixin", "CraftingCPUMenuMixin", "CraftingCpuLogicMixin", "CraftingLinkAccess", "CraftingLinkNexusMixin"))
+                "PatternTrackerAccess", "PatternAccessTermMenuMixin", "CraftingServiceMixin", "CraftingCPUClusterMixin", "CraftingCPUMenuMixin", "CraftingCpuLogicMixin", "CraftingLinkAccess", "CraftingLinkMixin", "CraftingLinkNexusMixin"))
             checker.check("com/roften/avilixlogger/compat/ae2/mixin/" + name);
         if (quickMove) checker.check("com/roften/avilixlogger/compat/ae2/mixin/PatternAccessQuickMoveMixin");
         for (var entry : Map.of(

@@ -62,7 +62,10 @@ public final class Ae2CraftingNativeSmoke {
             var machine = new MachineSource(terminal); var fluid = new GenericStack(AEFluidKey.of(net.minecraft.world.level.material.Fluids.WATER), 5_000_000_000L);
             submit(service, cpu, machine, new Plan(fluid, 64, false, false), cpu, rows);
             var machineRow = rows.getLast(); check(machineRow.actorUuid == null && (machineRow.actorName == null || machineRow.actorName.equals("Сервер")), "machine job blamed a nearby player");
-            var fluidCancel = Ae2CraftingAudit.inspectCpuCancellation(cpu); cpu.cancelJob(); rows.add(Objects.requireNonNull(fluidCancel.finish()));
+            var standalone = cpu.craftingLogic.getLastLink(); var fluidCancel = Ae2CraftingAudit.inspectLinkCancellation(standalone);
+            standalone.cancel(); rows.add(Objects.requireNonNull(fluidCancel.finish()));
+            check(Ae2CraftingAudit.inspectLinkCancellation(standalone) == null && Ae2CraftingAudit.inspectCpuCancellation(cpu) == null, "standalone link cleanup duplicated cancel");
+            cpu.cancelJob(); // Native cleanup sees the already cancelled link, just as the next normal CPU tick does.
             check(Ae2CraftingAudit.inspectCpuCancellation(cpu) == null, "standalone CPU idle/repeat created receipt");
             var completeOutput = new GenericStack(AEItemKey.of(Items.DIAMOND), 2);
             submit(service, cpu, source, new Plan(completeOutput, 64, false, false), cpu, rows);
@@ -98,7 +101,7 @@ public final class Ae2CraftingNativeSmoke {
             }); worker.start(); worker.join(5000); check(!worker.isAlive() && errors.get() == null, "off-thread inspector failed: " + errors.get());
             pipeline(level, player, terminal, rows);
             check(rows.size() == 14 && !Ae2Audit.enabled(), "unexpected job receipt count or production authorization changed");
-            org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_CRAFTING_NATIVE_OK: real powered CPU and standalone links, auto/explicit admission, five refusals, UI cancel/idle/repeat, direct standalone CPU cancel with neutral actor/full fluid key/5000000000 planned quantity, completed job is not cancel, partial admission/cancel evidence, native fault once, detached worker/replay; accepted=5, rejected=5, cancelled=4, rows={}; controlled plans, recipe calculation/assembler chain and authenticated emit not tested", rows.size());
+            org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info("AE2_CRAFTING_NATIVE_OK: real powered CPU and standalone links, auto/explicit admission, five refusals, UI cancel/idle/repeat, direct standalone CPU-link cancel with neutral actor/full fluid key/5000000000 planned quantity and no cleanup duplicate, completed job is not cancel, partial admission/cancel evidence, native fault once, detached worker/replay; accepted=5, rejected=5, cancelled=4, rows={}; controlled plans, recipe calculation/assembler chain and authenticated emit not tested", rows.size());
         } finally { cpu.cancelJob(); menu.removed(player); player.containerMenu = previousMenu; }
     }
     private static ICraftingSubmitResult submit(ICraftingService service, CraftingCPUCluster cpu, IActionSource source, Plan plan, ICraftingCPU selected, List<LogEntry> rows) {
@@ -165,7 +168,7 @@ public final class Ae2CraftingNativeSmoke {
             var row = received.get(i); var data = Ae2CraftingDetails.context(row);
             check(data != null && row.type == rows.get(i).type && row.source.equals(rows.get(i).source), "native receipt FIFO/evidence lost");
             if (row.type == ActionType.ME_CRAFT_CANCEL) {
-                if (data.getString("CancellationOrigin").equals("cpu")) check(row.actorUuid == null
+                if (data.getString("CancellationOrigin").equals("cpu-link")) check(row.actorUuid == null
                         && data.getCompound("Cpu").getString("BoundsMin").equals(new net.minecraft.core.BlockPos(row.x, row.y, row.z).toShortString())
                         && Ae2CraftingDetails.summary(row).amount() == 5_000_000_000L, "standalone CPU cancellation lost neutral CPU address/long output");
                 else check(row.actorUuid.equals(player.getUUID()), "cancellation attributed to old requester instead of current editor");

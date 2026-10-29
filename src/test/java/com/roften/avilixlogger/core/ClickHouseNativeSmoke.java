@@ -86,7 +86,7 @@ public final class ClickHouseNativeSmoke {
         for(var transfer:meTransfers)transfer.materializeSnapshots();
         var meConfigurations=List.of(Ae2ConfigurationDetailsTest.record(ActionType.ME_FILTER_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_UPGRADE_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_CELL_CHANGE), Ae2ConfigurationDetailsTest.record(ActionType.ME_SETTING_CHANGE));
         for(var change:meConfigurations)change.materializeSnapshots();
-        var meJobs=List.of(Ae2CraftingDetailsTest.record("i","accepted"), Ae2CraftingDetailsTest.record("f","rejected"), Ae2CraftingDetailsTest.record("g","cancelled"), Ae2CraftingDetailsTest.record("i","finished"), Ae2CraftingDetailsTest.cpuCancellation(false), Ae2CraftingDetailsTest.cpuCancellation(true));
+        var meJobs=List.of(Ae2CraftingDetailsTest.record("i","accepted"), Ae2CraftingDetailsTest.record("f","rejected"), Ae2CraftingDetailsTest.record("g","cancelled"), Ae2CraftingDetailsTest.record("i","finished"), Ae2CraftingDetailsTest.cpuCancellation(false), Ae2CraftingDetailsTest.cpuCancellation(true), Ae2CraftingDetailsTest.linkCancellation(false), Ae2CraftingDetailsTest.linkCancellation(true));
         for(var job:meJobs)job.materializeSnapshots();
         List<LogEntry> pressureRows=List.of();
         ClickHouseLogStorage db = null;
@@ -147,7 +147,7 @@ public final class ClickHouseNativeSmoke {
             q.requireDetails=false;var feed=db.query(q);check(feed.size()==1&&Ae2CraftingDetails.summary(feed.getFirst()).equals(Ae2CraftingDetails.summary(expected))
                     &&Ae2CraftingDetails.summary(feed.getFirst()).label().contains(Long.toString(Long.MAX_VALUE)),"job feed lost exact long/outcome");
         }
-        System.out.println("AE2_CRAFTING_CLICKHOUSE_OK: accepted/refused/cancelled/finished planned long outputs, full key, actor, CPU/job identity, linked/CPU neutral and CPU-menu player cancellation/failure details and exact feed/details survive minimal mode and reopened connection");
+        System.out.println("AE2_CRAFTING_CLICKHOUSE_OK: accepted/refused/cancelled/finished planned long outputs, full key, actor, CPU/job identity, linked/CPU/CPU-link/missing requester neutral and CPU-menu player cancellation/failure details and exact feed/details survive minimal mode and reopened connection");
     }
 
     private static List<LogEntry> journalPressure(ClickHouseLogStorage database)throws Exception{
