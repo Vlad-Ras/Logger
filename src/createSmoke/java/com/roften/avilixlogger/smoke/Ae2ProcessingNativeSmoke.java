@@ -57,9 +57,12 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
     private void block(BlockPos pos, net.minecraft.world.level.block.state.BlockState state) { positions.add(pos); level.setBlockAndUpdate(pos, state); }
     public void setup() {
         check(!Ae2Audit.enabled() && !cpu().isBusy(), "processing setup changed authorization or busy CPU");
-        var furnacePos = provider.getBlockEntity().getBlockPos().east();
+        // Vanilla furnaces accept ingredients only from the top; horizontal access is fuel-only.
+        var furnacePos = provider.getBlockEntity().getBlockPos().below();
         block(furnacePos, Blocks.BLAST_FURNACE.defaultBlockState());
         furnace = (AbstractFurnaceBlockEntity)Objects.requireNonNull(level.getBlockEntity(furnacePos));
+        var input = level.getCapability(net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK, furnacePos, Direction.UP);
+        check(input != null && input.insertItem(0, new ItemStack(Items.RAW_IRON), true).isEmpty() && furnace.getItem(0).isEmpty(), "native top input cannot simulate raw iron without mutation");
         var busPos = furnacePos.below(); block(busPos, AEBlocks.CABLE_BUS.block().defaultBlockState());
         importer = (ImportBusPart)((IPartHost)Objects.requireNonNull(level.getBlockEntity(busPos)))
                 .addPart((IPartItem<?>)AEParts.IMPORT_BUS.asItem(), Direction.UP, player);
