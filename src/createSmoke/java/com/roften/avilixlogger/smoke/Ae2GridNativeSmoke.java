@@ -74,6 +74,7 @@ public final class Ae2GridNativeSmoke {
         boolean wasForced;
         long blockId, partId;
         Ae2AssemblyNativeSmoke assembly;
+        Ae2ProcessingNativeSmoke processing;
         Fixture(ServerLevel level) { this.level = level; }
         BlockPos position(int x) { var p = new BlockPos(32 + x, 110, 32); positions.add(p); return p; }
         void setup() {
@@ -112,10 +113,16 @@ public final class Ae2GridNativeSmoke {
             return Objects.requireNonNull(host.addPart((appeng.api.parts.IPartItem<?>)item, Direction.NORTH, player));
         }
         boolean tick() throws Exception {
-            check(++ticks <= 1300, "powered grid did not reach phase " + phase + "; nodes=" + nodes.stream().map(n -> n.isReady() + "/" + n.isActive()).toList());
+            check(++ticks <= 3200, "powered grid did not reach phase " + phase + "; nodes=" + nodes.stream().map(n -> n.isReady() + "/" + n.isActive()).toList());
             if (phase == 5) {
                 if (!assembly.tick()) return false;
-                LOG.info("AE2_NATIVE_OK: selected menu/packet/scope, powered grid and real assembler contracts; production authenticated emit remains open");
+                assembly.close(); assembly = null;
+                processing = new Ae2ProcessingNativeSmoke(level, player, block, craftingBlock, power);
+                processing.setup(); phase = 6; return false;
+            }
+            if (phase == 6) {
+                if (!processing.tick()) return false;
+                LOG.info("AE2_NATIVE_OK: selected menu/packet/scope, powered grid, real assembler, external processing and autonomous requester contracts; production authenticated emit remains open");
                 return true;
             }
             if (phase == 0) {
@@ -247,6 +254,7 @@ public final class Ae2GridNativeSmoke {
             throw new AssertionError("native discovery omitted provider");
         }
         void close() {
+            if (processing != null) { processing.close(); processing = null; }
             if (assembly != null) { assembly.close(); assembly = null; }
             for (var pos : positions) level.removeBlock(pos, false);
             for (var node : nodes) node.destroy();
