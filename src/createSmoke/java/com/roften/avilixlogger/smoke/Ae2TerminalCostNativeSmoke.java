@@ -29,6 +29,11 @@ public final class Ae2TerminalCostNativeSmoke {
         public void avilixlogger$afterAction() { ends++; }
     }
     private record Cost(long bytes, long cpuNanos, long wallNanos) {}
+    private static Cost median(Cost[] samples) {
+        return new Cost(Arrays.stream(samples).mapToLong(Cost::bytes).sorted().toArray()[samples.length/2],
+                Arrays.stream(samples).mapToLong(Cost::cpuNanos).sorted().toArray()[samples.length/2],
+                Arrays.stream(samples).mapToLong(Cost::wallNanos).sorted().toArray()[samples.length/2]);
+    }
     private static Cost measure(ProbeMenu menu, Ae2Audit.Snapshot baseline, boolean optimized, int iterations,
                                 com.sun.management.ThreadMXBean bean) {
         long thread = Thread.currentThread().threadId();
@@ -66,14 +71,18 @@ public final class Ae2TerminalCostNativeSmoke {
             var bean = (com.sun.management.ThreadMXBean)ManagementFactory.getThreadMXBean();
             check(bean.isThreadAllocatedMemorySupported() && bean.isCurrentThreadCpuTimeSupported(), "JDK cannot measure native data-kernel cost");
             bean.setThreadAllocatedMemoryEnabled(true); bean.setThreadCpuTimeEnabled(true);
-            for (int i = 0; i < 4000; i++) {
+            for (int i = 0; i < 50000; i++) {
                 sink = Ae2Audit.snapshot(menu); check(Ae2Audit.changes(menu, baseline, sink).isEmpty(), "full-copy warm-up emitted rows");
                 sink = Ae2Audit.followUpSnapshot(menu, baseline); check(Ae2Audit.changes(menu, baseline, sink).isEmpty(), "follow-up warm-up emitted rows");
             }
             int iterations = 20000;
-            var a1 = measure(menu, baseline, false, iterations, bean);
-            var b = measure(menu, baseline, true, iterations, bean);
-            var a2 = measure(menu, baseline, false, iterations, bean);
+            var a1Samples = new Cost[5]; var bSamples = new Cost[5]; var a2Samples = new Cost[5];
+            for (int i = 0; i < a1Samples.length; i++) {
+                a1Samples[i] = measure(menu, baseline, false, iterations, bean);
+                bSamples[i] = measure(menu, baseline, true, iterations, bean);
+                a2Samples[i] = measure(menu, baseline, false, iterations, bean);
+            }
+            var a1 = median(a1Samples); var b = median(bSamples); var a2 = median(a2Samples);
             check(b.bytes() < a1.bytes() && b.bytes() < a2.bytes(), "follow-up allocation did not improve both full-copy controls");
 
             var changed = AEItems.VIEW_CELL.stack(); var data = new CompoundTag(); data.putString("new", "changed-components");
@@ -96,7 +105,7 @@ public final class Ae2TerminalCostNativeSmoke {
             var worker = new Thread(() -> { try { check(Ae2Audit.followUpSnapshot(menu, baseline) == null, "follow-up accepted off-thread reads"); } catch (Throwable t) { error.set(t); } });
             worker.start(); worker.join(5000); check(!worker.isAlive() && error.get() == null, "off-thread follow-up failed");
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info(
-                    "AE2_TERMINAL_COST_NATIVE_OK: real powered MEStorageMenu; idleBroadcasts=1000 auditEntries=0, live action probe=1; unchangedReused={}, changedCopies=1; A/B/A post-snapshot+diff iterations={} bytesPerOp={}/{}/{} cpuNsPerOp={}/{}/{} wallNsPerOp={}/{}/{}; no-op and component-only receipt parity, native detachment/off-thread guard; dev entry override and data-only kernels, production AuthCore/MSPT not tested",
+                    "AE2_TERMINAL_COST_NATIVE_OK: real powered MEStorageMenu; idleBroadcasts=1000 auditEntries=0, live action probe=1; unchangedReused={}, changedCopies=1; warmupPairs=50000 rounds=5 medians; A/B/A post-snapshot+diff iterations={} bytesPerOp={}/{}/{} cpuNsPerOp={}/{}/{} wallNsPerOp={}/{}/{}; no-op and component-only receipt parity, native detachment/off-thread guard; dev entry override and data-only kernels, production AuthCore/MSPT not tested",
                     reused, iterations, a1.bytes()/iterations, b.bytes()/iterations, a2.bytes()/iterations,
                     a1.cpuNanos()/iterations, b.cpuNanos()/iterations, a2.cpuNanos()/iterations,
                     a1.wallNanos()/iterations, b.wallNanos()/iterations, a2.wallNanos()/iterations);
