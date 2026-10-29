@@ -1,5 +1,7 @@
 # Совместимость серверного модпака: текущая работа
 
+29.10.2026: [внешний processing route и автономный заказ ME Interface](AE2_PROCESSING_COMPATIBILITY_2.2.0.md): реальная Blast Furnace/Import Bus, ожидание топлива и возврата, частичная доставка и сохранение исходного planned amount; выбранный Interface с Crafting Card инициирует собственный non-standalone job и получает результат в stock. Это dev acceptance без изменения production hooks; ниже — предыдущие этапы.
+
 29.10.2026: [отмена начатой сборки и сохранённый мир AE2](AE2_LIFECYCLE_COMPATIBILITY_2.2.0.md): отдельный dev/CI стенд с тремя server processes проверяет mid-job cancel, native JobId/inventories после disk save/load и завершённое idle состояние при следующем restart. В 19.2.12 сохраняется работающий job, в 19.2.18 — job на штатной паузе; in-flight assembler продолжает уже принятый рецепт. Production capture/авторизация не меняются; ниже — предыдущие этапы.
 
 28.10.2026: [настоящий расчёт рецептов, Molecular Assembler и завершение CPU задания](AE2_ASSEMBLY_COMPATIBILITY_2.2.0.md): ME_CRAFT_FINISH с native JobId/CPU и planned-output; проверены log → planks → 8 sticks, honey block + 4 glass bottle remainders и отмена с возвратом 2 logs. Обе версии AE2: 7 новых строк, 3 jobs, 2 завершения. Production AuthCore и остальные рецепты/машины остаются в приёмке; ниже — предыдущие этапы.

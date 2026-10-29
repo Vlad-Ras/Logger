@@ -1,5 +1,7 @@
 # AE2: отмена начатой сборки и сохранённый мир
 
+29.10.2026: [внешний processing route и автономный заказ ME Interface](AE2_PROCESSING_COMPATIBILITY_2.2.0.md): реальная Blast Furnace/Import Bus, ожидание топлива и возврата, частичная доставка и сохранение исходного planned amount; выбранный Interface с Crafting Card инициирует собственный non-standalone job и получает результат в stock. Это dev acceptance без изменения production hooks; ниже — предыдущие этапы.
+
 29.10.2026. Продолжение [расчёта рецептов и Molecular Assembler](AE2_ASSEMBLY_COMPATIBILITY_2.2.0.md). База `701b58ee5f6297de1a7204f8a2764622c6118b83`; ветка `work/2.2.0-ae2-lifecycle-20261029`. Этот пакет расширяет dev acceptance и CI. Production hooks, типы событий, схемы БД, права и AuthCore не меняются; релизный JAR не создаётся.
 
 ## Что проверяется

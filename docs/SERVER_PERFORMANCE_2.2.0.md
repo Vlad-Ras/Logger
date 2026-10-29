@@ -1,5 +1,7 @@
 # Нагрузка и скорость AvilixLogger 2.2.0
 
+29.10.2026: [внешний processing route и автономный заказ ME Interface](AE2_PROCESSING_COMPATIBILITY_2.2.0.md): реальная Blast Furnace/Import Bus, ожидание топлива и возврата, частичная доставка и сохранение исходного planned amount; выбранный Interface с Crafting Card инициирует собственный non-standalone job и получает результат в stock. Это dev acceptance без изменения production hooks; ниже — предыдущие этапы.
+
 29.10.2026: [отмена начатой сборки и сохранённый мир AE2](AE2_LIFECYCLE_COMPATIBILITY_2.2.0.md): отдельный dev/CI стенд с тремя server processes проверяет mid-job cancel, native JobId/inventories после disk save/load и завершённое idle состояние при следующем restart. В 19.2.12 сохраняется работающий job, в 19.2.18 — job на штатной паузе; in-flight assembler продолжает уже принятый рецепт. Production capture/авторизация не меняются; ниже — предыдущие этапы.
 
 28.10.2026: [AE2 CPU finish и настоящая цепочка assembler](AE2_ASSEMBLY_COMPATIBILITY_2.2.0.md). В production добавлена одна точка на finishJob(success=true), без тиков, Future/polling, рецептурных/slot/grid обходов и постоянной карты jobs. Контекст освобождается в finally; одна отделённая строка идёт в прежнюю ограниченную очередь. Реальные расчёты и чтение балансов cell выполняются только dev fixture. Native key encoding остаётся на сервере, SNBT/JSON и storage — worker. Численный MSPT/heap выигрыш и A/B/A фермы не заявлены.
