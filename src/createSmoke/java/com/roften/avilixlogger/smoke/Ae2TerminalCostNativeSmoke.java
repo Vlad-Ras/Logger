@@ -33,7 +33,10 @@ public final class Ae2TerminalCostNativeSmoke {
                                 com.sun.management.ThreadMXBean bean) {
         long thread = Thread.currentThread().threadId();
         long bytes = bean.getThreadAllocatedBytes(thread), cpu = bean.getCurrentThreadCpuTime(), wall = System.nanoTime();
-        for (int i = 0; i < iterations; i++) sink = optimized ? Ae2Audit.followUpSnapshot(menu, baseline) : Ae2Audit.snapshot(menu);
+        for (int i = 0; i < iterations; i++) {
+            sink = optimized ? Ae2Audit.followUpSnapshot(menu, baseline) : Ae2Audit.snapshot(menu);
+            check(Ae2Audit.changes(menu, baseline, sink).isEmpty(), "unchanged post-action kernel emitted rows");
+        }
         return new Cost(bean.getThreadAllocatedBytes(thread) - bytes, bean.getCurrentThreadCpuTime() - cpu, System.nanoTime() - wall);
     }
     public static void run(ServerPlayer player, ITerminalHost host) throws Exception {
@@ -63,7 +66,10 @@ public final class Ae2TerminalCostNativeSmoke {
             var bean = (com.sun.management.ThreadMXBean)ManagementFactory.getThreadMXBean();
             check(bean.isThreadAllocatedMemorySupported() && bean.isCurrentThreadCpuTimeSupported(), "JDK cannot measure native data-kernel cost");
             bean.setThreadAllocatedMemoryEnabled(true); bean.setThreadCpuTimeEnabled(true);
-            for (int i = 0; i < 4000; i++) { sink = Ae2Audit.snapshot(menu); sink = Ae2Audit.followUpSnapshot(menu, baseline); }
+            for (int i = 0; i < 4000; i++) {
+                sink = Ae2Audit.snapshot(menu); check(Ae2Audit.changes(menu, baseline, sink).isEmpty(), "full-copy warm-up emitted rows");
+                sink = Ae2Audit.followUpSnapshot(menu, baseline); check(Ae2Audit.changes(menu, baseline, sink).isEmpty(), "follow-up warm-up emitted rows");
+            }
             int iterations = 20000;
             var a1 = measure(menu, baseline, false, iterations, bean);
             var b = measure(menu, baseline, true, iterations, bean);
@@ -90,7 +96,7 @@ public final class Ae2TerminalCostNativeSmoke {
             var worker = new Thread(() -> { try { check(Ae2Audit.followUpSnapshot(menu, baseline) == null, "follow-up accepted off-thread reads"); } catch (Throwable t) { error.set(t); } });
             worker.start(); worker.join(5000); check(!worker.isAlive() && error.get() == null, "off-thread follow-up failed");
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/AE2Smoke").info(
-                    "AE2_TERMINAL_COST_NATIVE_OK: real powered MEStorageMenu; idleBroadcasts=1000 auditEntries=0, live action probe=1; unchangedReused={}, changedCopies=1; A/B/A data-kernel iterations={} bytesPerOp={}/{}/{} cpuNsPerOp={}/{}/{} wallNsPerOp={}/{}/{}; no-op and component-only receipt parity, native detachment/off-thread guard; dev entry override and data-only kernels, production AuthCore/MSPT not tested",
+                    "AE2_TERMINAL_COST_NATIVE_OK: real powered MEStorageMenu; idleBroadcasts=1000 auditEntries=0, live action probe=1; unchangedReused={}, changedCopies=1; A/B/A post-snapshot+diff iterations={} bytesPerOp={}/{}/{} cpuNsPerOp={}/{}/{} wallNsPerOp={}/{}/{}; no-op and component-only receipt parity, native detachment/off-thread guard; dev entry override and data-only kernels, production AuthCore/MSPT not tested",
                     reused, iterations, a1.bytes()/iterations, b.bytes()/iterations, a2.bytes()/iterations,
                     a1.cpuNanos()/iterations, b.cpuNanos()/iterations, a2.cpuNanos()/iterations,
                     a1.wallNanos()/iterations, b.wallNanos()/iterations, a2.wallNanos()/iterations);
