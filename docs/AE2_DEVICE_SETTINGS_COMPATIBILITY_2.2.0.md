@@ -1,5 +1,7 @@
 # AE2: полные изменения фильтров, улучшений, ячеек и настроек
 
+30.10.2026: [стоимость захвата терминала AE2](AE2_TERMINAL_PERFORMANCE_2.2.0.md): follow-up переиспользует отделённые неизменившиеся физические слоты; добавлены powered обычный ME terminal, idle entry probe и A/B/A allocation/CPU/wall замер data kernel. Это отдельная проверка цены второго снимка; production MSPT и причина жалобы на 1.2.22 не объявляются установленными. Ниже — предыдущие этапы.
+
 28.10.2026: [Pattern Access Terminal теперь наблюдает достигнутые native inventories отдельно от обычных menu slots](AE2_REMOTE_PATTERN_COMPATIBILITY_2.2.0.md). Адресом строки служит поставщик; исходный терминал/runtime ID/slot сохраняются в source. Native inspector-пакет — 13 строк; production AuthCore и grid discovery остаются открытыми.
 
 Следующий этап 27.10.2026: [настройки четырёх режимов Pattern Encoding Terminal, сохранение компонентов физических слотов в minimal mode, два варианта Pattern Provider и оба слота пресса](AE2_PATTERN_COMPATIBILITY_2.2.0.md). Дополнительный native пакет — 56 строк; удалённый Pattern Access Terminal остаётся отдельной задачей.

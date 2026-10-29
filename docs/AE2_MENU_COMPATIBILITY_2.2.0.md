@@ -1,5 +1,7 @@
 # AE2: границы захвата меню и пакетов
 
+30.10.2026: [стоимость захвата терминала AE2](AE2_TERMINAL_PERFORMANCE_2.2.0.md): follow-up переиспользует отделённые неизменившиеся физические слоты; добавлены powered обычный ME terminal, idle entry probe и A/B/A allocation/CPU/wall замер data kernel. Это отдельная проверка цены второго снимка; production MSPT и причина жалобы на 1.2.22 не объявляются установленными. Ниже — предыдущие этапы.
+
 27.10.2026: [добавлены полные before/after configuration events, priority и long reporting threshold](AE2_DEVICE_SETTINGS_COMPATIBILITY_2.2.0.md). Новые wrappers расширяют optional preflight до семи групп; exact supplied targets — 110. Девять конкретных устройств и priority submenu проверены native; production AuthCore и полный ME rollback остаются в приёмке. Сведения ниже описывают исторический этап до этого дополнения.
 
 27.10.2026. Проверенный код `9250c70f3ac301353777e6217e7278721410a560`, tree `55871f1268c72b52fa26798aa2dc9f3ed684d185`. Основа — `fb36d3bb02c9c754e4da03f0579c440630c6c90b`, рабочая ветка — `work/2.2.0-ae2-actions-20261027`. Релизный JAR не собирается.

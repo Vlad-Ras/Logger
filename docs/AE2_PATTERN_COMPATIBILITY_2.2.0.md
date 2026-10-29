@@ -1,5 +1,7 @@
 # AE2: шаблоны, физические слоты устройств и пресс
 
+30.10.2026: [стоимость захвата терминала AE2](AE2_TERMINAL_PERFORMANCE_2.2.0.md): follow-up переиспользует отделённые неизменившиеся физические слоты; добавлены powered обычный ME terminal, idle entry probe и A/B/A allocation/CPU/wall замер data kernel. Это отдельная проверка цены второго снимка; production MSPT и причина жалобы на 1.2.22 не объявляются установленными. Ниже — предыдущие этапы.
+
 28.10.2026: [настоящий расчёт рецептов, Molecular Assembler и завершение CPU задания](AE2_ASSEMBLY_COMPATIBILITY_2.2.0.md): ME_CRAFT_FINISH с native JobId/CPU и planned-output; проверены log → planks → 8 sticks, honey block + 4 glass bottle remainders и отмена с возвратом 2 logs. Обе версии AE2: 7 новых строк, 3 jobs, 2 завершения. Production AuthCore и остальные рецепты/машины остаются в приёмке; ниже — предыдущие этапы.
 
 28.10.2026: [приём заказов автокрафта и подтверждённая UI отмена AE2](AE2_CRAFTING_COMPATIBILITY_2.2.0.md): actual CPU/native JobId, source address/actor, полный ключ и planned-output long, реальные errorCode и partial failure. Два append-only типа; обе версии AE2 дали по 14 строк (5 принятий, 5 отказов, 4 отмены). Полный расчёт рецептов/производство и production AuthCore остаются в приёмке; ниже — предыдущие этапы.

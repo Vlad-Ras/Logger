@@ -1,5 +1,7 @@
 # Совместимость серверного модпака: текущая работа
 
+30.10.2026: [стоимость захвата терминала AE2](AE2_TERMINAL_PERFORMANCE_2.2.0.md): follow-up переиспользует отделённые неизменившиеся физические слоты; добавлены powered обычный ME terminal, idle entry probe и A/B/A allocation/CPU/wall замер data kernel. Это отдельная проверка цены второго снимка; production MSPT и причина жалобы на 1.2.22 не объявляются установленными. Ниже — предыдущие этапы.
+
 29.10.2026: [отмена CPU link и потеря requester связи AE2](AE2_LINK_CANCEL_COMPATIBILITY_2.2.0.md): новый link.cancel hook, scoped capture owner и fallback по сохранившемуся CPU при request=null. Native набор расширен до 10 автономных jobs с настоящим grid split/expiry/reconnect; full key/JobId/planned output и storage regression. Production AuthCore и численные замеры остаются открытыми. Ниже — предыдущие этапы.
 
 29.10.2026: [прямая отмена CPU AE2 и единый UI источник](AE2_CPU_CANCEL_COMPATIBILITY_2.2.0.md): общий finishJob(false) закрывает direct CPU/logic API, временный menu source сохраняет редактора без второй UI строки; linked cleanup отсекается по прежнему canceled link. Семь автономных native jobs, standalone fluid long и storage проверки; production AuthCore и численные замеры остаются открытыми. Ниже — предыдущие этапы.
