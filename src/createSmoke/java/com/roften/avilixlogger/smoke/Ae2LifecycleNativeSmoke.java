@@ -58,6 +58,8 @@ public final class Ae2LifecycleNativeSmoke {
         final List<IManagedGridNode> nodes = new ArrayList<>();
         final List<LogEntry> rows = new ArrayList<>();
         final Path evidence;
+        // Native pause was added after 19.2.12. Keep this fixture compilable against both supported APIs.
+        final boolean supportsPause = Arrays.stream(CraftingCPUMenu.class.getMethods()).anyMatch(m -> m.getName().equals("toggleScheduling") && m.getParameterCount() == 0);
         ServerPlayer player;
         PatternProviderBlockEntity provider;
         MolecularAssemblerBlockEntity assembler;
@@ -119,6 +121,9 @@ public final class Ae2LifecycleNativeSmoke {
         private IActionSource source() { return new PlayerSource(player, provider); }
         private long count(Item item) { return grid().getStorageService().getInventory().extract(AEItemKey.of(item), Long.MAX_VALUE, Actionable.SIMULATE, source()); }
         private long stored(Item item) { return cpu().craftingLogic.getStored(AEItemKey.of(item)); }
+        private boolean suspended() throws Exception {
+            return supportsPause && (boolean)cpu().craftingLogic.getClass().getMethod("isJobSuspended").invoke(cpu().craftingLogic);
+        }
         private boolean drained() { return assembler.getInternalInventory().isEmpty() && provider.getLogic().getReturnInv().isEmpty(); }
         private long machine(Item item) {
             long count = 0; var inv = assembler.getInternalInventory();
@@ -167,11 +172,12 @@ public final class Ae2LifecycleNativeSmoke {
                 if (nodes.stream().anyMatch(n -> !n.isReady()) || cpu() == null) return false;
                 if (mode.equals("resume")) {
                     link = Objects.requireNonNull(cpu().craftingLogic.getLastLink());
-                    check(link.getCraftingID().equals(savedJob) && cpu().isBusy() && cpu().craftingLogic.isJobSuspended(), "restart lost native job identity/pause");
+                    check(link.getCraftingID().equals(savedJob) && cpu().isBusy() && suspended() == supportsPause, "restart lost native job identity/pause");
                     check(machine(Items.OAK_LOG) == 1 && stored(Items.OAK_LOG) == 1 && stored(Items.OAK_PLANKS) == 0, "restart lost in-flight assembler input/CPU balance");
                     check(cpu().craftingLogic.getFinalJobOutput().equals(new GenericStack(AEItemKey.of(Items.STICK), 16)), "restart changed original planned output");
                     completion = Objects.requireNonNull(Ae2CraftingAudit.inspectCompletion(cpu()));
                     rows.add(savedRequest);
+                    if (!supportsPause) phase = 1;
                 }
                 if (mode.equals("verify")) check(!cpu().isBusy() && Ae2CraftingAudit.inspectCompletion(cpu()) == null, "finished job resurrected after second restart");
                 // Dev fixture links are recreated, not persisted game cables. All saved inventories/job state remain native.
@@ -185,7 +191,7 @@ public final class Ae2LifecycleNativeSmoke {
                 if (++stable < 25) return false;
                 var finish = GzipJson.fromGzippedJsonBytes(Files.readAllBytes(evidence.resolve("finish.gz")), LogEntry.class);
                 check(finish.type == ActionType.ME_CRAFT_FINISH && finish.actorUuid == null && Ae2CraftingDetails.context(finish).getUUID("JobId").equals(savedJob), "persisted finish lost CPU/job/system actor");
-                LOG.info("AE2_LIFECYCLE_NATIVE_OK: three server processes; mid-flight cancel 1 log + 4 planks, suspended in-flight assembler/job restored with same UUID, resumed to exactly 16 sticks, second restart idle/no replay; data-only inspector receipts, production authentication not tested");
+                LOG.info("AE2_LIFECYCLE_NATIVE_OK: three server processes; mid-flight cancel 1 log + 4 planks, in-flight assembler/job restored with same UUID, completed to exactly 16 sticks, second restart idle/no resurrected job; nativePause={}; data-only inspector receipts, production authentication not tested", supportsPause);
                 return true;
             }
             if (mode.equals("resume")) return resumed();
@@ -222,15 +228,15 @@ public final class Ae2LifecycleNativeSmoke {
             if (phase == 7) {
                 if (assembler.getInternalInventory().isEmpty()) return false;
                 check(machine(Items.OAK_LOG) == 1 && stored(Items.OAK_LOG) == 1, "save point not in actual first assembler operation");
-                action("toggleScheduling", false);
-                check(cpu().isBusy() && cpu().craftingLogic.isJobSuspended() && completion.finish(true) == null, "pause cleared or completed job"); completion = null;
+                if (supportsPause) action("toggleScheduling", false);
+                check(cpu().isBusy() && suspended() == supportsPause && completion.finish(true) == null, "save point cleared or completed job"); completion = null;
                 check(rows.size() == 3, "pause invented submission/cancel receipt");
                 var request = materialized(rows.getLast()); savedJob = link.getCraftingID();
                 check(!savedJob.equals(Ae2CraftingDetails.context(materialized(rows.getFirst())).getUUID("JobId")), "second job reused cancelled identity");
                 Files.createDirectories(evidence);
                 Files.write(evidence.resolve("identity.gz"), GzipJson.toGzippedJsonBytes(new String[]{actorId.toString(), savedJob.toString()}));
                 Files.write(evidence.resolve("request.gz"), GzipJson.toGzippedJsonBytes(request));
-                LOG.info("AE2_LIFECYCLE_SEEDED: suspended native job={}, CPU log=1, assembler log=1, output=16 sticks; awaiting normal world save", savedJob);
+                LOG.info("AE2_LIFECYCLE_SEEDED: native job={}, suspended={}, CPU log=1, assembler log=1, output=16 sticks; awaiting normal world save", savedJob, supportsPause);
                 return true;
             }
             throw new AssertionError("unknown lifecycle seed phase " + phase);
@@ -238,10 +244,10 @@ public final class Ae2LifecycleNativeSmoke {
         private boolean resumed() throws Exception {
             check(cpu().craftingLogic.getLastLink() == link || !cpu().isBusy(), "resume silently replaced native job link");
             if (phase == 0) {
-                check(cpu().isBusy() && cpu().craftingLogic.isJobSuspended() && count(Items.STICK) == 0 && count(Items.OAK_LOG) == 0 && count(Items.OAK_PLANKS) == 0, "paused restored job scheduled more work");
+                check(cpu().isBusy() && suspended() && count(Items.STICK) == 0 && count(Items.OAK_LOG) == 0 && count(Items.OAK_PLANKS) == 0, "paused restored job scheduled more work");
                 if (!drained() || stored(Items.OAK_LOG) != 1 || stored(Items.OAK_PLANKS) != 4) return false;
                 if (++stable < 25) return false;
-                action("toggleScheduling", false); check(!cpu().craftingLogic.isJobSuspended(), "native resume did not unpause");
+                action("toggleScheduling", false); check(!suspended(), "native resume did not unpause");
                 phase = 1; return false;
             }
             if (phase == 1) {
