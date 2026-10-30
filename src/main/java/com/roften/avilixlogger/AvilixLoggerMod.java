@@ -57,6 +57,9 @@ public final class AvilixLoggerMod {
             NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.core.WeaponCombatAudit::damage);
         }
         NeoForge.EVENT_BUS.register(new LoggerEventHandlers());
+        com.roften.avilixlogger.compat.accessories.AccessoriesAudit.install();
+        com.roften.avilixlogger.compat.corpse.CorpseAudit.install();
+        NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.opac.OpenPacAudit::started);
         if (net.neoforged.fml.ModList.get().isLoaded("curios")) {
             try { com.roften.avilixlogger.compat.curios.CuriosAudit.install(); }
             catch (LinkageError | RuntimeException failure) {

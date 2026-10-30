@@ -667,6 +667,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private boolean shouldStoreDetails(LogEntry e) {
         if (e == null) return false;
+        // Optional equipment/corpse/claim receipts lose their meaning without exact evidence.
+        if (e.type == ActionType.ENTITY_EQUIPMENT_CHANGE && e.beBefore != null && e.beAfter != null) return true;
+        if (e.type == ActionType.CORPSE_CONTENT_CHANGE && e.beBefore != null && e.beAfter != null
+                && e.playerInvBefore != null && e.playerInvAfter != null) return true;
+        if (e.type == ActionType.CLAIM_ACTION && e.beAfter != null) return true;
         if (Ae2CraftingDetails.summary(e) != null && e.beAfter != null) return true;
         if ((e.type==ActionType.ITEM_GIFT||e.type==ActionType.ITEM_TRADE)&&e.beAfter!=null)return true;
         // Conversion inventory states are the meaning of the transaction, although audit-only.
@@ -1805,7 +1810,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                  ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, WEAPON_RELOAD, ITEM_SMELT,
                  ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
+                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
             case CHAT_MESSAGE -> new TargetInfo("chat", "", safeString(e.extra));
             case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, TRAIN_CONTROL_START, TRAIN_CONTROL_STOP ->

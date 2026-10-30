@@ -711,7 +711,8 @@ public final class LoggerEventHandlers {
         // 3) Generic GUI/menu open fallback: crafting table/anvil/villager trade/modded menus.
         // Containers already logged above as CONTAINER_OPEN/ENTITY_CONTAINER_OPEN, so do not duplicate them.
         if (!trackedMenu) {
-            if (wantContainers && !isAe2Menu(event.getContainer())) {
+            if (wantContainers && !isAe2Menu(event.getContainer())
+                    && !com.roften.avilixlogger.compat.corpse.CorpseAudit.handles(event.getContainer())) {
                 try {
                     var menu = event.getContainer();
                     CompoundTag before = GenericMenuSnapshot.snapshot(menu, level.registryAccess());
@@ -940,7 +941,8 @@ public final class LoggerEventHandlers {
     public static MenuAction beginMenuAction(ServerPlayer player) { return beginMenuAction(player,"player:container_click"); }
     public static MenuAction beginMenuAction(ServerPlayer player,String actionSource) {
         if (!CaptureTypePolicy.enabled(2) || player==null || !player.server.isSameThread() || !LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()
-                || isAe2Menu(player.containerMenu) || player.containerMenu.slots.size() > 4096) return null;
+                || isAe2Menu(player.containerMenu) || com.roften.avilixlogger.compat.corpse.CorpseAudit.handles(player.containerMenu)
+                || player.containerMenu.slots.size() > 4096) return null;
         try { return new MenuAction(player,actionSource); } catch (Throwable failure) { return null; }
     }
 

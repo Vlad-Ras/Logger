@@ -172,3 +172,6 @@ config="avilixlogger_scguns.mixins.json"
 config="avilixlogger_blockpack.mixins.json"
 [[mixins]]
 config="avilixlogger_supplementaries.mixins.json"
+
+[[mixins]]
+config="avilixlogger_corpse.mixins.json"

@@ -24,10 +24,11 @@ public abstract class ContainerClickCauseMixin {
             if(slot.container instanceof net.minecraft.world.level.block.entity.BlockEntity be && com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(be.getLevel(),be.getBlockPos())){player.containerMenu.broadcastFullState();return;}
         }
         try(var cause=CauseContext.push(player,CauseContext.Kind.OTHER,player.blockPosition(),ItemStack.EMPTY)){
-            var transfer=com.roften.avilixlogger.core.CreateSupport.available()?com.roften.avilixlogger.compat.create.CartMenuTransferAudit.begin(player):null;
-            var menuAction=transfer==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player):null;
+            var corpse=com.roften.avilixlogger.compat.corpse.CorpseAudit.begin(player,"container-click");
+            var transfer=corpse==null&&com.roften.avilixlogger.core.CreateSupport.available()?com.roften.avilixlogger.compat.create.CartMenuTransferAudit.begin(player):null;
+            var menuAction=corpse==null&&transfer==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player):null;
             boolean success=false;
-            try{original.call(packet);success=true;}finally{try{if(transfer!=null)transfer.finish(success);}finally{if(menuAction!=null)menuAction.finish();}}
+            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{if(menuAction!=null)menuAction.finish();}}}
         }
     }
     @WrapMethod(method="handleContainerButtonClick")
@@ -39,10 +40,11 @@ public abstract class ContainerClickCauseMixin {
             if(slot.container instanceof net.minecraft.world.level.block.entity.BlockEntity be && com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(be.getLevel(),be.getBlockPos())){player.containerMenu.broadcastFullState();return;}
         }
         try(var cause=CauseContext.push(player,CauseContext.Kind.OTHER,player.blockPosition(),ItemStack.EMPTY)){
-            var transfer=com.roften.avilixlogger.core.CreateSupport.available()?com.roften.avilixlogger.compat.create.CartMenuTransferAudit.begin(player):null;
-            var menuAction=transfer==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player,"player:menu_button"):null;
+            var corpse=com.roften.avilixlogger.compat.corpse.CorpseAudit.begin(player,"menu-button");
+            var transfer=corpse==null&&com.roften.avilixlogger.core.CreateSupport.available()?com.roften.avilixlogger.compat.create.CartMenuTransferAudit.begin(player):null;
+            var menuAction=corpse==null&&transfer==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player,"player:menu_button"):null;
             boolean success=false;
-            try{original.call(packet);success=true;}finally{try{if(transfer!=null)transfer.finish(success);}finally{if(menuAction!=null)menuAction.finish();}}
+            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{if(menuAction!=null)menuAction.finish();}}}
         }
     }
 }

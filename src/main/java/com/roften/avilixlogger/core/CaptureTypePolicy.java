@@ -46,14 +46,14 @@ public final class CaptureTypePolicy {
         if (type == ActionType.CHAT_MESSAGE && !enabled(7)) return false;
         if (!enabled(6) && extra != null && extra.toLowerCase(java.util.Locale.ROOT).contains("cannon")) return false;
         return switch (type) {
-            case BLOCK_BREAK, BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE ->
+            case BLOCK_BREAK, BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, CLAIM_ACTION ->
                     enabled(1);
             case BLOCK_ENTITY_NBT_CHANGE -> enabled(1) && enabled(2);
             case CONTAINER_OPEN, ENTITY_CONTAINER_OPEN, CONTAINER_PUT, CONTAINER_TAKE,
                     ME_PUT, ME_TAKE, ME_UPGRADE_CHANGE, ME_FILTER_CHANGE,
                     ME_SETTING_CHANGE, ME_CELL_CHANGE, ME_CRAFT_REQUEST, ME_CRAFT_CANCEL, ME_CRAFT_FINISH -> enabled(2);
             case GUI_OPEN -> enabled(2) && enabled(3);
-            case GUI_CHANGE -> enabled(2);
+            case GUI_CHANGE, CORPSE_CONTENT_CHANGE -> enabled(2);
             case ENTITY_SPAWN, ENTITY_DEATH, ENTITY_MOUNT, ENTITY_DISMOUNT,
                     ENTITY_INTERACT, ENTITY_ATTACK, ENTITY_EQUIPMENT_CHANGE, WEAPON_KILL, PLAYER_DEATH,
                     PLAYER_DIMENSION_CHANGE, PLAYER_RESPAWN -> enabled(3);

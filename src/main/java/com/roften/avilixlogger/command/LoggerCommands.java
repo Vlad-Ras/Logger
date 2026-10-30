@@ -1675,6 +1675,8 @@ public final class LoggerCommands {
             case "projectile_hit", "hit", "arrow_hit", "impact" -> ActionType.PROJECTILE_HIT;
             case "gui_change", "menu_change" -> ActionType.GUI_CHANGE;
             case "equipment", "equipment_change" -> ActionType.ENTITY_EQUIPMENT_CHANGE;
+            case "corpse", "corpse_change", "corpse_content_change" -> ActionType.CORPSE_CONTENT_CHANGE;
+            case "claim", "claim_action", "opac" -> ActionType.CLAIM_ACTION;
             case "gui", "gui_open", "menu", "interface" -> ActionType.GUI_OPEN;
             case "player_death" -> ActionType.PLAYER_DEATH;
             case "join", "player_join" -> ActionType.PLAYER_JOIN;

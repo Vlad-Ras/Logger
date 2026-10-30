@@ -115,5 +115,8 @@ public enum ActionType {
     ME_CRAFT_REQUEST, ME_CRAFT_CANCEL,
 
     // Append-only: CPU success transition, with planned output; audit only.
-    ME_CRAFT_FINISH
+    ME_CRAFT_FINISH,
+
+    // Append-only: optional mod receipts; no generic item/block rollback contract.
+    CORPSE_CONTENT_CHANGE, CLAIM_ACTION
 }
