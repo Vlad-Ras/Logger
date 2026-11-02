@@ -4,6 +4,6 @@
   "package": "com.roften.avilixlogger.compat.corpse.mixin",
   "plugin": "com.roften.avilixlogger.compat.corpse.mixin.CorpseMixinPlugin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": ["TransferItemsMixin"],
+  "mixins": ["TransferItemsMixin", "TransferApiMixin", "CorpseEntityMixin"],
   "injectors": {"defaultRequire": 0}
 }

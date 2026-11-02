@@ -667,6 +667,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private boolean shouldStoreDetails(LogEntry e) {
         if (e == null) return false;
+        if (e.source != null && (e.source.startsWith("mod:corpse:") || e.source.startsWith("mod:accessories:"))) return true;
         // Optional equipment/corpse/claim receipts lose their meaning without exact evidence.
         if (e.type == ActionType.ENTITY_EQUIPMENT_CHANGE && e.beBefore != null && e.beAfter != null) return true;
         if (e.type == ActionType.CORPSE_CONTENT_CHANGE && e.beBefore != null && e.beAfter != null

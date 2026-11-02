@@ -18,11 +18,13 @@ public final class CorpseMixinPlugin implements IMixinConfigPlugin {
             if (file.getMods().stream().noneMatch(m -> m.getModId().equals("corpse")
                     && m.getVersion().toString().equals("1.21.1-1.1.21")))
                 throw new IllegalStateException("Unsupported Corpse version");
-            new CreateMixinPlugin.Preflight(name -> {
+            var preflight = new CreateMixinPlugin.Preflight(name -> {
                 try (var input = Objects.requireNonNull(MixinService.getService().getResourceAsStream(name + ".class"))) {
                     var node = new ClassNode(); new ClassReader(input).accept(node, ClassReader.SKIP_FRAMES); return node;
                 }
-            }).check(pkg.replace('.', '/') + "/TransferItemsMixin");
+            });
+            for (String mixin : List.of("TransferItemsMixin", "TransferApiMixin", "CorpseEntityMixin"))
+                preflight.check(pkg.replace('.', '/') + "/" + mixin);
             available = true;
         } catch (Exception | LinkageError failure) {
             org.slf4j.LoggerFactory.getLogger("AvilixLogger/Corpse").warn("Corpse packet audit disabled: {}", failure.toString());

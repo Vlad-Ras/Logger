@@ -19,6 +19,7 @@ import java.util.UUID;
 public final class CorpseAudit {
     private static final String[] SECTIONS = {"Main", "Armor", "OffHand", "Additional"};
     private static volatile Api api;
+    private static final ThreadLocal<Action> ACTIVE = new ThreadLocal<>();
     private CorpseAudit() {}
 
     public static void install() {
@@ -38,14 +39,14 @@ public final class CorpseAudit {
                 throw new IllegalStateException("Incompatible Corpse menu contract");
             Method death = corpse.getReturnType().getMethod("getDeath");
             Class<?> data = death.getReturnType();
-            Method owner = data.getMethod("getPlayerUUID"), name = data.getMethod("getPlayerName");
-            if (owner.getReturnType() != UUID.class || name.getReturnType() != String.class)
+            Method owner = data.getMethod("getPlayerUUID"), name = data.getMethod("getPlayerName"), id = data.getMethod("getId");
+            if (owner.getReturnType() != UUID.class || id.getReturnType() != UUID.class || name.getReturnType() != String.class)
                 throw new IllegalStateException("Incompatible Corpse owner contract");
             Method[] lists = {data.getMethod("getMainInventory"), data.getMethod("getArmorInventory"),
                     data.getMethod("getOffHandInventory"), data.getMethod("getAdditionalItems")};
             for (Method method : lists) if (!List.class.isAssignableFrom(method.getReturnType()))
                 throw new IllegalStateException("Incompatible Corpse inventory contract");
-            api = new Api(menu, corpse, editable, history, death, owner, name, lists);
+            api = new Api(menu, corpse, editable, history, death, owner, name, id, lists);
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
             AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Corpse audit disabled: incompatible optional API", failure);
         }
@@ -56,21 +57,55 @@ public final class CorpseAudit {
         return current != null && current.menu.isInstance(menu);
     }
 
+    public static boolean opened(ServerPlayer player, AbstractContainerMenu menu) {
+        Api current = api;
+        if (current == null || !current.menu.isInstance(menu) || !enabled(player)) return false;
+        try {
+            Entity body = (Entity) current.corpse.invoke(menu); Object death = current.death.invoke(body);
+            var tag = snapshot(current, death, player); tag.putBoolean("History", (boolean) current.history.invoke(menu));
+            tag.putBoolean("Editable", (boolean) current.editable.invoke(menu));
+            var row = new LogEntry(); row.ts = System.currentTimeMillis(); row.type = ActionType.ENTITY_CONTAINER_OPEN;
+            row.actorUuid = CauseContext.actorUuid(player); row.actorName = CauseContext.actorName(player);
+            EntityLogIdentity.capture(row, body); row.entityName = "тело " + tag.getString("OwnerName");
+            row.dim = body.level().dimension().location().toString(); var pos = body.blockPosition();
+            row.x = pos.getX(); row.y = pos.getY(); row.z = pos.getZ(); row.source = "mod:corpse:menu-open";
+            row.extra = "owner=" + tag.getString("OwnerName") + "; ownerUuid=" + tag.getUUID("OwnerUUID") + "; deathId=" + tag.getUUID("DeathId")
+                    + "; history=" + tag.getBoolean("History") + "; editable=" + tag.getBoolean("Editable") + "; menu=" + menu.getClass().getSimpleName();
+            row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, tag); LoggerRuntime.storage(player.serverLevel()).append(row); return true;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { AdaptiveLogDiagnostics.adapterFailure("corpse-menu-open"); return false; }
+    }
     private static boolean enabled(ServerPlayer player) {
         return player != null && player.server.isSameThread() && CaptureTypePolicy.enabled(2)
                 && LoggerConfig.isEnabled() && LoggerConfig.VALUES.logContainers.get() && !CartAuditContext.restoring();
     }
 
     public static Action begin(ServerPlayer player, String source) {
-        Api current = api;
-        if (current == null || player == null || !current.menu.isInstance(player.containerMenu) || !enabled(player)) return null;
+        return begin(player, source, player == null ? null : player.containerMenu);
+    }
+
+    public static Action beginMenu(Object menu) {
+        if (api == null || !api.menu.isInstance(menu)) return null;
         try {
-            AbstractContainerMenu menu = player.containerMenu;
-            if (!(boolean) current.editable.invoke(menu) || (boolean) current.history.invoke(menu)) return null;
+            var inventory = api.menu.getDeclaredField("playerInventory"); inventory.setAccessible(true);
+            var playerInventory = (net.minecraft.world.entity.player.Inventory) inventory.get(menu);
+            return playerInventory.player instanceof ServerPlayer player ? begin(player, "transfer-api", (AbstractContainerMenu) menu) : null;
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+            AdaptiveLogDiagnostics.adapterFailure("corpse-transfer-api"); return null;
+        }
+    }
+
+    private static Action begin(ServerPlayer player, String source, AbstractContainerMenu menu) {
+        Api current = api;
+        if (current == null || player == null || !current.menu.isInstance(menu) || !enabled(player) || ACTIVE.get() != null) return null;
+        try {
+            if (!(boolean) current.editable.invoke(menu)) return null;
+            boolean historical = (boolean) current.history.invoke(menu);
             Entity body = (Entity) current.corpse.invoke(menu);
             if (body == null || body.level() != player.level() || body.isRemoved()) return null;
             Object death = current.death.invoke(body);
             var before = snapshot(current, death, player);
+            before.putBoolean("History", historical);
+            before.put("Cursor", item(menu.getCarried(), player));
             var inventory = EntityContainerSerde.snapshot(player.getInventory(), player.registryAccess());
             if (inventory == null) return null;
             var row = new LogEntry(); row.ts = System.currentTimeMillis(); row.type = ActionType.CORPSE_CONTENT_CHANGE;
@@ -80,8 +115,10 @@ public final class CorpseAudit {
             row.entityName = "тело " + owner;
             row.dim = body.level().dimension().location().toString();
             var pos = body.blockPosition(); row.x = pos.getX(); row.y = pos.getY(); row.z = pos.getZ();
-            row.source = "mod:corpse:" + source; row.extra = "owner=" + owner + "; corpse=" + body.getUUID() + "; audit only";
-            return new Action(player, current, body, death, before, inventory, row);
+            row.source = "mod:corpse:" + source; row.extra = "owner=" + owner + "; ownerUuid=" + current.owner.invoke(death)
+                    + "; deathId=" + current.id.invoke(death) + "; corpse=" + body.getUUID() + "; history=" + historical + "; audit only";
+            var action = new Action(player, current, body, death, before, inventory, row, menu);
+            ACTIVE.set(action); return action;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
             AdaptiveLogDiagnostics.adapterFailure("corpse-before"); return null;
         }
@@ -89,6 +126,7 @@ public final class CorpseAudit {
 
     private static CompoundTag snapshot(Api access, Object death, ServerPlayer player) throws ReflectiveOperationException {
         var root = new CompoundTag(); root.putString("Provider", "corpse");
+        root.putUUID("DeathId", (UUID) access.id.invoke(death));
         root.putUUID("OwnerUUID", (UUID) access.owner.invoke(death)); root.putString("OwnerName", (String) access.name.invoke(death));
         int total = 0;
         for (int section = 0; section < SECTIONS.length; section++) {
@@ -109,7 +147,7 @@ public final class CorpseAudit {
     }
 
     private record Api(Class<?> menu, Method corpse, Method editable, Method history, Method death,
-                       Method owner, Method name, Method[] lists) {}
+                       Method owner, Method name, Method id, Method[] lists) {}
 
     public static final class Action {
         private final ServerPlayer player;
@@ -118,21 +156,26 @@ public final class CorpseAudit {
         private final Object death;
         private final CompoundTag before, playerBefore;
         private final LogEntry row;
+        private final AbstractContainerMenu originalMenu;
         private boolean finished;
         private Action(ServerPlayer player, Api access, Entity body, Object death, CompoundTag before,
-                       CompoundTag playerBefore, LogEntry row) {
+                       CompoundTag playerBefore, LogEntry row, AbstractContainerMenu originalMenu) {
             this.player = player; this.access = access; this.body = body; this.death = death;
+            this.originalMenu = originalMenu;
             this.before = before; this.playerBefore = playerBefore; this.row = row;
         }
 
         public void finish(boolean nativeThrew) {
             if (finished) return;
             finished = true;
+            if (ACTIVE.get() == this) ACTIVE.remove();
             if (!enabled(player)) return;
             try {
                 // Do not follow a replacement menu or replacement death object after transferItems.
                 if (access.death.invoke(body) != death) return;
                 var after = snapshot(access, death, player);
+                after.putBoolean("History", before.getBoolean("History"));
+                after.put("Cursor", item(originalMenu.getCarried(), player));
                 var playerAfter = EntityContainerSerde.snapshot(player.getInventory(), player.registryAccess());
                 if (playerAfter == null) return;
                 var storage = LoggerRuntime.storage(player.serverLevel());
@@ -167,6 +210,45 @@ public final class CorpseAudit {
                 AdaptiveLogDiagnostics.adapterFailure("corpse-after");
             }
         }
+    }
+
+    private static CompoundTag item(ItemStack stack, ServerPlayer player) {
+        var tag = stack.isEmpty() ? new CompoundTag() : NbtSerde.snapshotItemStack(stack, player.registryAccess());
+        if (tag == null) throw new IllegalStateException("Corpse cursor codec failed");
+        return tag;
+    }
+
+    public static boolean handles(Entity entity) {
+        Api current = api;
+        return current != null && current.death.getDeclaringClass().isInstance(entity);
+    }
+
+    /** Detached native death contents, including DeathId, also for lifecycle receipts. */
+    public static CompoundTag bodySnapshot(Entity body) throws ReflectiveOperationException {
+        Api current = api;
+        if (current == null) return null;
+        // snapshot only needs registry access; lifecycle uses its own item writer below.
+        Object death = current.death.invoke(body);
+        var root = new CompoundTag(); root.putString("Provider", "corpse");
+        root.putUUID("DeathId", (UUID) current.id.invoke(death));
+        root.putUUID("OwnerUUID", (UUID) current.owner.invoke(death));
+        root.putString("OwnerName", (String) current.name.invoke(death));
+        int total = 0;
+        for (int section = 0; section < SECTIONS.length; section++) {
+            var list = (List<?>) current.lists[section].invoke(death);
+            if (list == null || list.size() > 4096 || (total += list.size()) > 4096) throw new IllegalStateException("Corpse inventory limit");
+            var contents = new CompoundTag(); contents.putInt("Size", list.size());
+            var items = new ListTag();
+            for (int slot = 0; slot < list.size(); slot++) {
+                if (!(list.get(slot) instanceof ItemStack stack)) throw new IllegalStateException("Invalid Corpse item");
+                if (stack.isEmpty()) continue;
+                var tag = NbtSerde.snapshotItemStack(stack, body.registryAccess());
+                if (tag == null) throw new IllegalStateException("Corpse item codec failed");
+                tag.putInt("Slot", slot); items.add(tag);
+            }
+            contents.put("Items", items); root.put(SECTIONS[section], contents);
+        }
+        return root;
     }
 
     private static String label(ItemStack stack) {

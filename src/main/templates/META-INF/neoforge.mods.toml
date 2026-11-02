@@ -175,3 +175,6 @@ config="avilixlogger_supplementaries.mixins.json"
 
 [[mixins]]
 config="avilixlogger_corpse.mixins.json"
+
+[[mixins]]
+config="avilixlogger_accessories.mixins.json"

@@ -642,6 +642,11 @@ public final class LoggerEventHandlers {
 
         String dim = level.dimension().location().toString();
         boolean trackedMenu = false;
+        if (wantContainers && (com.roften.avilixlogger.compat.corpse.CorpseAudit.opened(sp, event.getContainer())
+                || com.roften.avilixlogger.compat.accessories.AccessoriesAudit.opened(sp, event.getContainer()))) {
+            PENDING_BLOCK_CONTAINER_OPEN.remove(sp.getUUID()); PENDING_ENTITY_CONTAINER_OPEN.remove(sp.getUUID());
+            return;
+        }
 
         // 0) Block container open confirmed by menu open.
         try {
@@ -941,7 +946,7 @@ public final class LoggerEventHandlers {
     public static MenuAction beginMenuAction(ServerPlayer player) { return beginMenuAction(player,"player:container_click"); }
     public static MenuAction beginMenuAction(ServerPlayer player,String actionSource) {
         if (!CaptureTypePolicy.enabled(2) || player==null || !player.server.isSameThread() || !LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()
-                || isAe2Menu(player.containerMenu) || com.roften.avilixlogger.compat.corpse.CorpseAudit.handles(player.containerMenu)
+                || isAe2Menu(player.containerMenu) || com.roften.avilixlogger.compat.corpse.CorpseAudit.handles(player.containerMenu) || com.roften.avilixlogger.compat.accessories.AccessoriesAudit.handles(player.containerMenu)
                 || player.containerMenu.slots.size() > 4096) return null;
         try { return new MenuAction(player,actionSource); } catch (Throwable failure) { return null; }
     }
@@ -1304,6 +1309,12 @@ public final class LoggerEventHandlers {
         if (CartAuditContext.restoring()) return;
         if (ent instanceof com.roften.avilixlogger.compat.create.CartEntityAccess a && a.avilixlogger$mountedState() != null) return;
         if (ent instanceof AbstractMinecart && ent.getPersistentData().contains("AvilixCartAudit")) return;
+
+        if (com.roften.avilixlogger.compat.corpse.CorpseLifecycleAudit.handles(ent)) {
+            com.roften.avilixlogger.compat.corpse.CorpseLifecycleAudit.joined(ent, event.loadedFromDisk()); return;
+        }
+        if (ent instanceof ItemEntity corpseDrop && com.roften.avilixlogger.compat.corpse.CorpseLifecycleAudit.dropped(corpseDrop)) return;
+        if (ent instanceof ItemEntity accessoryDrop && com.roften.avilixlogger.compat.accessories.AccessoriesAudit.dropped(accessoryDrop)) return;
 
         // Tag Create-related minecarts/entities with owner info (best-effort).
         try { CreateOwnershipTracker.onEntityJoin(event); } catch (Throwable ignored) {}
@@ -2228,6 +2239,7 @@ public final class LoggerEventHandlers {
 
         Entity ent = event.getEntity();
         if (ent == null) return;
+        if (com.roften.avilixlogger.compat.corpse.CorpseLifecycleAudit.handles(ent)) return;
         if(CreateSupport.available()&&(com.roften.avilixlogger.compat.create.CartAutomationAudit.worldCovered(ent)||com.roften.avilixlogger.compat.create.CreateLifecycleAudit.handles(ent)))return;
         var origin=CreateEntityOrigin.read(ent);
         if(!LoggerConfig.VALUES.logEntities.get() && origin==null

@@ -226,7 +226,11 @@ public final class RollbackEngine {
         return report;
     }
 
+    private static boolean modAuditOnly(LogEntry entry) {
+        return entry != null && entry.source != null && (entry.source.startsWith("mod:corpse:") || entry.source.startsWith("mod:accessories:"));
+    }
     private static void countPreparedEntry(LogEntry entry, RollbackReport report) {
+        if (modAuditOnly(entry)) { report.onSkipped("not_rollbackable"); return; }
         if (entry == null || entry.type == null) {
             report.onSkipped("not_rollbackable");
             return;
@@ -541,6 +545,7 @@ public final class RollbackEngine {
     private record BlockBackup(BlockPos pos, BlockState state, CompoundTag beSnbt, CompoundTag containerSnbt) {}
 
     private static void applyRollback(ServerLevel level, LogEntry e, RollbackReport report, boolean apply) {
+        if (modAuditOnly(e)) { report.onSkipped("not_rollbackable"); return; }
         try {
             BlockPos pos = new BlockPos(e.x, e.y, e.z);
 
