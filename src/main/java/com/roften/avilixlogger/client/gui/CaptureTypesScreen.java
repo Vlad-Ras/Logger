@@ -122,7 +122,10 @@ public final class CaptureTypesScreen extends Screen {
             g.drawString(font,"▼ Остальные типы ниже",x,Math.min(height-70,57+count*21),0xFF999999);
         g.drawCenteredString(font,font.plainSubstrByWidth(status,Math.max(30,width-24)),
                 width/2,height-62,lastSuccess?0xFFAAAAAA:0xFFFF6666);
-        g.drawCenteredString(font,"Пауза ВЫКЛ: полная очередь задерживает серверный тик",
+        String overflow=!loaded?"Получение режима переполнения…":(disabledMask&(1<<29))==0
+                ?"Переполнение: пауза и автоматическое возобновление"
+                :"Без паузы: полная очередь задерживает серверный тик";
+        g.drawCenteredString(font,overflow,
                 width/2,height-48,0xFFFFAA55);
         for(var widget:renderables)widget.render(g,mx,my,partial);
     }
