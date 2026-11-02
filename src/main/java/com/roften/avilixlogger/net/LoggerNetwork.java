@@ -916,6 +916,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.WEAPON_KILL,
                     com.roften.avilixlogger.core.ActionType.ENTITY_EQUIPMENT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PARTY_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.EXPERIENCE_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT,
                     com.roften.avilixlogger.core.ActionType.PLAYER_DEATH,

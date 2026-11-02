@@ -644,7 +644,8 @@ public final class LoggerEventHandlers {
         boolean trackedMenu = false;
         if (wantContainers && (com.roften.avilixlogger.compat.corpse.CorpseAudit.opened(sp, event.getContainer())
                 || com.roften.avilixlogger.compat.accessories.AccessoriesAudit.opened(sp, event.getContainer())
-                || com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.opened(sp, event.getContainer()))) {
+                || com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.opened(sp, event.getContainer())
+                || com.roften.avilixlogger.compat.industry.DieselAudit.opened(sp, event.getContainer()))) {
             PENDING_BLOCK_CONTAINER_OPEN.remove(sp.getUUID()); PENDING_ENTITY_CONTAINER_OPEN.remove(sp.getUUID());
             return;
         }
@@ -1678,6 +1679,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        com.roften.avilixlogger.compat.industry.IndustrialTools.player(event.getEntity());
         UUID playerId = event.getEntity().getUUID();
         OPEN_CONTAINER.remove(playerId);
         PENDING_BLOCK_CONTAINER_OPEN.remove(playerId);
@@ -1867,6 +1869,7 @@ public final class LoggerEventHandlers {
     }
 
     private static void logProjectileShootIfNeeded(ServerLevel level, Projectile projectile) {
+        if(projectile instanceof com.roften.avilixlogger.compat.industry.IndustrialChemicalProjectile)return;
         if (level == null || projectile == null || WeaponCombatAudit.traced(projectile)) return;
         if (!isEnabled(LoggerConfig.VALUES.logProjectileShots)) return;
 
@@ -1917,8 +1920,10 @@ public final class LoggerEventHandlers {
         if (level == null || projectile == null || WeaponCombatAudit.traced(projectile)) return;
         if (!isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
 
+        boolean chemical=projectile instanceof com.roften.avilixlogger.compat.industry.IndustrialChemicalProjectile;
         ActorInfo actor = projectileActor(level, projectile);
-        if (actor == null || actor.uuid == null && CreateEntityOrigin.read(projectile) == null) return;
+        if(chemical&&actor==null)actor=new ActorInfo(null,"SYSTEM",null);
+        if (actor == null || actor.uuid == null && CreateEntityOrigin.read(projectile) == null && !chemical) return;
 
         long now = System.currentTimeMillis();
         String key = "PROJECTILE_HIT:" + projectile.getUUID() + ":" + (target == null ? "block" : target.getUUID());
@@ -1948,6 +1953,7 @@ public final class LoggerEventHandlers {
         e.extra = "projectile_hit projectile=" + projectileType + " target=" + targetText
                 + (hitKind == null || hitKind.isBlank() ? "" : " kind=" + hitKind)
                 + (damage > 0.0f ? " damage=" + damage : "");
+        if(chemical){e.source="mod:createdieselgenerators:chemical-projectile-contact";e.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,com.roften.avilixlogger.compat.industry.IndustrialImpacts.projectile(projectile));}
         LoggerRuntime.storage(level).append(e);
     }
 

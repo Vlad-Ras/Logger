@@ -190,3 +190,12 @@ config="avilixlogger_createcobblestone.mixins.json"
 
 [[mixins]]
 config="avilixlogger_vibrantvaults.mixins.json"
+
+[[mixins]]
+config="avilixlogger_industry.mixins.json"
+
+[[mixins]]
+config="avilixlogger_enchantmentindustry.mixins.json"
+
+[[mixins]]
+config="avilixlogger_dieselgenerators.mixins.json"

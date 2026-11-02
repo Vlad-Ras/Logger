@@ -121,5 +121,8 @@ public enum ActionType {
     CORPSE_CONTENT_CHANGE, CLAIM_ACTION, PARTY_CHANGE, PROTECTION_CHANGE,
 
     // Physical machine evidence; requires a dedicated rollback contract.
-    MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE
+    MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE,
+
+    // Native experience and related mending evidence.
+    EXPERIENCE_CHANGE
 }

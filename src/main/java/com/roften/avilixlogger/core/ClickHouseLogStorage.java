@@ -80,7 +80,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ENTITY_ATTACK, ActionType.WEAPON_KILL,
                 ActionType.PROJECTILE_SHOOT,
                 ActionType.PROJECTILE_HIT,
-                ActionType.ENTITY_OWNER_SET, ActionType.ENTITY_EQUIPMENT_CHANGE, ActionType.PARTY_CHANGE);
+                ActionType.ENTITY_OWNER_SET, ActionType.ENTITY_EQUIPMENT_CHANGE, ActionType.PARTY_CHANGE, ActionType.EXPERIENCE_CHANGE);
         map(TableKind.ITEMS,
                 ActionType.ITEM_DROP,
                 ActionType.ITEM_PICKUP,
@@ -670,6 +670,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (e.source != null && (e.source.startsWith("mod:corpse:") || e.source.startsWith("mod:accessories:"))) return true;
         if (e.source != null && (e.source.startsWith("mod:ftbteams:") || e.source.startsWith("mod:openpartiesandclaims:"))) return true;
         if (e.type == ActionType.MACHINE_STATE_CHANGE || e.type == ActionType.MACHINE_CONTENT_CHANGE) return true;
+        if(e.source!=null&&(e.source.startsWith("mod:create_enchantment_industry:")||e.source.startsWith("mod:createdieselgenerators:")))return true;
         // Optional equipment/corpse/claim receipts lose their meaning without exact evidence.
         if (e.type == ActionType.ENTITY_EQUIPMENT_CHANGE && e.beBefore != null && e.beAfter != null) return true;
         if (e.type == ActionType.CORPSE_CONTENT_CHANGE && e.beBefore != null && e.beAfter != null
@@ -1813,7 +1814,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                  ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, WEAPON_RELOAD, ITEM_SMELT,
                  ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
+                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, EXPERIENCE_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
             case MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE -> targetBlock(e.blockAfter, e.extra);
             case PARTY_CHANGE -> new TargetInfo("party", "", safeString(e.extra));

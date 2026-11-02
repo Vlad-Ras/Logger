@@ -165,6 +165,8 @@ public final class NbtSerde {
             return null;
         }
 
+        if(ent instanceof com.roften.avilixlogger.compat.industry.IndustrialChemicalProjectile)
+            tag.put("AvilixChemicalProjectile",com.roften.avilixlogger.compat.industry.IndustrialImpacts.projectile(ent));
         // Create contraptions are a special case: during removal/disassembly the generic save path may
         // produce a half-empty snapshot where Contraption.Type is already missing. For rollback we need
         // the full nested Contraption NBT. Enrich it while the entity is still alive.
@@ -525,6 +527,7 @@ public final class NbtSerde {
         String rawId = tag.getString("id");
         ResourceLocation id = rawId == null || rawId.isBlank() ? rootType : ResourceLocation.tryParse(rawId);
         if (id == null || BuiltInRegistries.ENTITY_TYPE.getOptional(id).isEmpty()) return "unknown_entity_type";
+        if (id.toString().equals("createdieselgenerators:chemical_sprayer_projectile")) return "chemical_projectile_audit_only";
         if (root && rootType != null && !rootType.equals(id)) return "entity_type_mismatch";
         if (!tag.hasUUID("UUID")) return "entity_missing_uuid";
         if (root && expectedRootUuid != null && !expectedRootUuid.equals(tag.getUUID("UUID"))) return "entity_uuid_mismatch";

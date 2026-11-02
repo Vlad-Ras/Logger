@@ -1,0 +1,31 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.enchantmentindustry.mixin",
+  "plugin": "com.roften.avilixlogger.compat.enchantmentindustry.mixin.EnchantmentIndustryMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ClassicTickMixin",
+    "DeployerExperienceMixin",
+    "EnchanterSettingsMixin",
+    "EnchanterTickMixin",
+    "ExperienceEffectMixin",
+    "ExperienceFuelMixin",
+    "ForgerInventoryMixin",
+    "ForgerTickMixin",
+    "GrindstoneExtractMixin",
+    "GrindstoneMixin",
+    "GrindstoneTickMixin",
+    "HatchExperienceMixin",
+    "HeldItemMixin",
+    "LanternExperienceMixin",
+    "LanternTickMixin",
+    "PrinterFilterMixin",
+    "PrinterProcessingMixin",
+    "PrinterTickMixin",
+    "XpHelperMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

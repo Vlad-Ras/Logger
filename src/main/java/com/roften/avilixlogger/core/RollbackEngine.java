@@ -227,9 +227,11 @@ public final class RollbackEngine {
     }
 
     private static boolean modAuditOnly(LogEntry entry) {
-        return entry != null && entry.source != null && (entry.source.startsWith("mod:corpse:") || entry.source.startsWith("mod:accessories:")
+        return entry != null && ("createdieselgenerators:chemical_sprayer_projectile".equals(entry.entityType)
+                || entry.source != null && (entry.source.startsWith("mod:corpse:") || entry.source.startsWith("mod:accessories:")
                 || entry.source.startsWith("mod:ftbteams:") || entry.source.startsWith("mod:openpartiesandclaims:")
-                || entry.source.startsWith("mod:createcobblestone:") || entry.source.startsWith("mod:create_vibrant_vaults:"));
+                || entry.source.startsWith("mod:createcobblestone:") || entry.source.startsWith("mod:create_vibrant_vaults:")
+                || entry.source.startsWith("mod:create_enchantment_industry:") || entry.source.startsWith("mod:createdieselgenerators:")));
     }
     private static void countPreparedEntry(LogEntry entry, RollbackReport report) {
         if (modAuditOnly(entry)) { report.onSkipped("not_rollbackable"); return; }

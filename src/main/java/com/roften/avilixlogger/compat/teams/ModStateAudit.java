@@ -14,7 +14,9 @@ public final class ModStateAudit {
         if (server == null || !server.isSameThread() || !LoggerConfig.isEnabled() || !CaptureTypePolicy.allows(type, null, null) || CartAuditContext.restoring()) return false;
         return switch (type) {
             case CLAIM_ACTION, PROTECTION_CHANGE, MACHINE_STATE_CHANGE -> LoggerConfig.VALUES.logBlocks.get();
-            case MACHINE_CONTENT_CHANGE, CONTAINER_OPEN -> LoggerConfig.VALUES.logContainers.get();
+            case MACHINE_CONTENT_CHANGE, CONTAINER_OPEN, GUI_CHANGE -> LoggerConfig.VALUES.logContainers.get();
+            case ITEM_TRANSFORM -> LoggerConfig.VALUES.logItemTransactions.get();
+            case ENTITY_ATTACK -> LoggerConfig.VALUES.logEntityAttacks.get();
             case CHAT_MESSAGE -> LoggerConfig.VALUES.logChat.get();
             default -> LoggerConfig.VALUES.logEntities.get();
         };
@@ -58,6 +60,9 @@ public final class ModStateAudit {
             if (x < Integer.MIN_VALUE || x > Integer.MAX_VALUE || z < Integer.MIN_VALUE || z > Integer.MAX_VALUE) return;
             row.x = (int)x; row.z = (int)z;
         }
+        if(after.hasUUID("EntityUUID")){row.entityUuid=after.getUUID("EntityUUID");row.entityType=after.getString("EntityType");row.entityName=after.getString("EntityName");}
+        var focus=after.getCompound("FocusStack");if(focus.isEmpty())focus=before.getCompound("FocusStack");
+        if(!focus.isEmpty()){row.deferSnapshot(LogEntry.SnapshotField.ITEM,focus);row.count=focus.getInt("count");}
         var storage = LoggerRuntime.storage(server.overworld());
         AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after), () -> {
             if (before.contains("BlockState")) row.blockBefore = before.getCompound("BlockState").toString();
@@ -66,7 +71,8 @@ public final class ModStateAudit {
             changed.removeIf(key -> java.util.Objects.equals(before.get(key), after.get(key)));
             row.extra += "; changed=" + String.join(",", changed);
             var differences = new ListTag(); collectDifferences(before, after, "", 0, differences);
-            after.put("Changes", differences); after.putBoolean("ChangesMayBeTruncated", differences.size() == 256);
+            var evidence = after.copy();
+            evidence.put("Changes", differences); evidence.putBoolean("ChangesMayBeTruncated", differences.size() == 256);
             for (int i = 0; i < Math.min(6, differences.size()); i++) {
                 var difference = differences.getCompound(i);
                 row.extra += "; " + difference.getString("Path") + ": " + label(difference.get("Before")) + " -> " + label(difference.get("After"));
@@ -76,8 +82,8 @@ public final class ModStateAudit {
                 Tag value = after.contains(key) ? after.get(key) : before.get(key);
                 if (value != null) row.extra += "; " + key + "=" + value.getAsString();
             }
-            after.putBoolean("NativeThrew", threw || after.getBoolean("NativeThrew")); if (threw || after.getBoolean("NativeThrew")) row.extra += "; NativeThrew";
-            row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE, before); row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, after); storage.append(row);
+            evidence.putBoolean("NativeThrew", threw || after.getBoolean("NativeThrew")); if (threw || after.getBoolean("NativeThrew")) row.extra += "; NativeThrew";
+            row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE, before); row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, evidence); storage.append(row);
         });
     }
     private static void collectDifferences(Tag before, Tag after, String path, int depth, ListTag changes) {
@@ -87,13 +93,22 @@ public final class ModStateAudit {
             for (String key : keys) { if (changes.size() >= 256) break; collectDifferences(first.get(key), last.get(key), path.isEmpty() ? key : path + "." + key, depth + 1, changes); }
             return;
         }
+        if(depth < 16 && before instanceof ListTag first && after instanceof ListTag last) {
+            for(int i=0;i<Math.max(first.size(),last.size()) && changes.size()<256;i++)
+                collectDifferences(i<first.size()?first.get(i):null,i<last.size()?last.get(i):null,path+"["+i+"]",depth+1,changes);
+            return;
+        }
         var change = new CompoundTag(); change.putString("Path", path); change.putBoolean("BeforePresent", before != null); change.putBoolean("AfterPresent", after != null);
         if (before != null) change.put("Before", before); if (after != null) change.put("After", after); changes.add(change);
     }
     private static String label(Tag value) {
         if (value == null) return "absent";
         if (value instanceof ListTag list) return "list[" + list.size() + "]";
-        if (value instanceof CompoundTag compound) return "state[" + compound.size() + "]";
+        if (value instanceof CompoundTag compound) {
+            if(compound.contains("Stack"))return label(compound.get("Stack"));
+            if(compound.contains("id",Tag.TAG_STRING))return compound.getString("id")+(compound.contains("count")?" x"+compound.getInt("count"):compound.contains("amount")?" "+compound.getInt("amount")+"mB":"");
+            return "state["+compound.size()+"]";
+        }
         String text = value.getAsString().replace('\n', ' ').replace('\r', ' ');
         return text.length() > 120 ? text.substring(0, 120) + "…" : text;
     }

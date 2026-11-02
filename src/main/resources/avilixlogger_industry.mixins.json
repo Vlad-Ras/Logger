@@ -1,0 +1,22 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.industry.mixin",
+  "plugin": "com.roften.avilixlogger.compat.industry.mixin.IndustrialMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "AttachMixin",
+    "ConfigurationMixin",
+    "FilterMixin",
+    "FluidItemMixin",
+    "FluidMixin",
+    "ItemMixin",
+    "SmartMixin",
+    "SyncedMixin",
+    "ToolReleaseMixin",
+    "ValueMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
