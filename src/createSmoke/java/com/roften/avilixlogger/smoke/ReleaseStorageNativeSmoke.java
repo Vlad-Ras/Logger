@@ -11,6 +11,7 @@ public final class ReleaseStorageNativeSmoke {
         if(!Boolean.getBoolean("avilixlogger.storageSmoke"))return;
         try {
             GuiCommandOutputNativeSmoke.run(event.getServer());
+            PlayerDeathNativeSmoke.run(event.getServer());
             BlockMenuStorageSmoke.run(event.getServer().overworld());
             if(net.neoforged.fml.ModList.get().isLoaded("openpartiesandclaims")) {
                 ScgunsNativeSmoke.check(com.roften.avilixlogger.compat.opac.OpenPacStateAudit.available(),"OPAC mutation mixins unavailable");

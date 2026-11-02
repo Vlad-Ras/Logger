@@ -26,7 +26,7 @@ final class LoggerGuideScreen extends Screen {
         var heading=captionLayout.get(font,caption,Math.max(30,width-110));
         for(int i=0;i<Math.min(2,heading.size());i++)g.drawCenteredString(font,heading.get(i),width/2,31+i*10,0xFFFFFF);
         var lines=layout.get(font,current.text(),width-28);int visible=Math.max(1,(height-100)/12);scroll=Math.min(scroll,Math.max(0,lines.size()-visible));
-        g.fill(8,58,width-8,height-36,0x44000000);g.enableScissor(12,62,width-12,height-38);
+        g.enableScissor(12,62,width-12,height-38);
         for(int i=scroll;i<Math.min(lines.size(),scroll+visible);i++)g.drawString(font,lines.get(i),14,62+(i-scroll)*12,0xFFFFFF);g.disableScissor();
         for(var widget:renderables)widget.render(g,x,y,dt);
     }

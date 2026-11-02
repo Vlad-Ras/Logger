@@ -1,6 +1,7 @@
 package com.roften.avilixlogger.net;
 
 import com.roften.avilixlogger.AvilixLoggerMod;
+import com.roften.avilixlogger.core.ActionType;
 import com.roften.avilixlogger.auth.AuthCoreBridge;
 import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LastQueryManager;
@@ -804,6 +805,14 @@ public final class LoggerNetwork {
             q.maxPos = null;
         }
 
+        var spatialModule=com.roften.avilixlogger.core.ModLogFilters.find(gf!=null?gf.typePresetIdx():0);
+        if(spatialModule!=null && spatialModule.preset()==14) {
+            q.dim=level.dimension().location().toString();
+            com.roften.avilixlogger.core.ChunkLogSearch.radius(q,sp.blockPosition(),customRadius,gf.radiusPresetIdx());
+        }
+
+        q.includeIntersectingClaims=true;
+
         // Actor
         if (gf != null && gf.actor() != null && !gf.actor().isBlank()) {
             q.actorName = gf.actor().trim();
@@ -835,6 +844,7 @@ public final class LoggerNetwork {
         var module = com.roften.avilixlogger.core.ModLogFilters.find(gf != null ? gf.typePresetIdx() : 0);
         if (module != null) {
             q.sourcePrefix = module.sourcePrefix();
+            q.types = com.roften.avilixlogger.core.ModLogFilters.types(gf.typePresetIdx());
             // The existing contextual ID field becomes a module evidence search, never a train-name predicate.
             if (gf.train() != null && !gf.train().isBlank()) q.extraTextFilter = gf.train().trim();
         }
@@ -934,7 +944,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.PARTY_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT,
-                    com.roften.avilixlogger.core.ActionType.PLAYER_DEATH,
+                    com.roften.avilixlogger.core.ActionType.PLAYER_DEATH, ActionType.PLAYER_KILL,
                     com.roften.avilixlogger.core.ActionType.PLAYER_DIMENSION_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PLAYER_RESPAWN,
                     com.roften.avilixlogger.core.ActionType.GUI_OPEN

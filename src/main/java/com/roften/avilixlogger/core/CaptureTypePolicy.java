@@ -10,7 +10,7 @@ package com.roften.avilixlogger.core;
  * planes from ordinary entities, avoiding accidental global suppression.
  */
 public final class CaptureTypePolicy {
-    public static final int GROUPS = 12;
+    public static final int GROUPS = 30;
     public static final int ALL_DISABLED = (1 << GROUPS) - 1;
     private static volatile int disabledMask;
     private CaptureTypePolicy() {}
@@ -31,6 +31,8 @@ public final class CaptureTypePolicy {
         if (type == null || disabledMask == 0 || type == ActionType.CART_ROLLBACK) return true;
         // Filter specific source families before generic action categories.
         if (source != null) {
+            for (var module : ModLogFilters.MODULES)
+                if (source.startsWith(module.sourcePrefix()) && !enabled(module.preset())) return false;
             if (source.startsWith("create:train:") || source.equals("create:train"))
                 if (!enabled(5)) return false;
             if (source.startsWith("create:cart:") && !enabled(9)) return false;
@@ -39,6 +41,13 @@ public final class CaptureTypePolicy {
             if ((source.startsWith("plane:") || source.startsWith("mod:immersive_aircraft")
                     || source.startsWith("mod:man_of_many_planes")) && !enabled(8)) return false;
         }
+        if (type.name().startsWith("ME_")) {
+            if (!enabled(13)) return false;
+            if (type.name().startsWith("ME_CRAFT_") && !enabled(26)) return false;
+            if ((type == ActionType.ME_PUT || type == ActionType.ME_TAKE) && !enabled(27)) return false;
+            if (!(type.name().startsWith("ME_CRAFT_") || type == ActionType.ME_PUT || type == ActionType.ME_TAKE) && !enabled(28)) return false;
+        }
+        if (type == ActionType.PLAYER_DEATH || type == ActionType.PLAYER_KILL) return enabled(29);
         if (type.name().startsWith("TRAIN_") && !enabled(5)) return false;
         if (type.name().startsWith("CART_") && !enabled(9)
                 && (source == null || source.startsWith("create:cart:"))) return false;
@@ -62,6 +71,19 @@ public final class CaptureTypePolicy {
             case ITEM_GIFT, ITEM_TRADE, WEAPON_RELOAD, ITEM_DROP, ITEM_PICKUP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_SMELT,
                     ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME -> enabled(4);
             default -> true;
+        };
+    }
+
+    public static String title(int preset) {
+        var module = ModLogFilters.find(preset);
+        if (module != null) return "Мод: " + module.title();
+        return switch (preset) {
+            case 26 -> "AE2: автокрафт (запрос / отмена / завершение)";
+            case 27 -> "AE2: добавление и извлечение ресурсов";
+            case 28 -> "AE2: настройки, фильтры, ячейки и улучшения";
+            case 29 -> "Смерти и убийства игроков";
+            case 30 -> "Переполнение: пауза записи для защиты TPS";
+            default -> null;
         };
     }
 

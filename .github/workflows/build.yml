@@ -45,6 +45,7 @@ jobs:
           tail -n 70 storage-admission-smoke.log
           grep -q 'STORAGE_BLOCK_ADDRESS_NATIVE_OK' storage-admission-smoke.log
           grep -q 'GUI_COMMAND_OUTPUT_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'PLAYER_DEATH_NATIVE_OK' storage-admission-smoke.log
           grep -q 'OPAC_STATE_NATIVE_OK' storage-admission-smoke.log
           grep -q 'OPAC_ACTOR_NATIVE_OK' storage-admission-smoke.log
           grep -q 'SERVER_CAPTURE_GUARD_NATIVE_OK' storage-admission-smoke.log

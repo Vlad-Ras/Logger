@@ -30,6 +30,12 @@ public final class ReleaseUiContractsTest {
             check(ModLogFilters.find(module.preset()).equals(module),"unstable module lookup");
         }
         check(ModLogFilters.find(0)==null&&ModLogFilters.find(12)==null&&ModLogFilters.find(26)==null,"legacy or invalid ID became a module");
+        for(var module:ModLogFilters.MODULES)for(int option:ModLogFilters.options(module))check(ModLogFilters.find(option).equals(module),"subfilter lost its module");
+        check(ModLogFilters.types(1302).contains(ActionType.ME_CRAFT_FINISH) && !ModLogFilters.types(1302).contains(ActionType.ME_TAKE),"craft filter includes resources");
+        var chunks=new LogQuery();chunks.dim="minecraft:overworld";
+        ChunkLogSearch.radius(chunks,new net.minecraft.core.BlockPos(-1,180,31),0,0);
+        check(chunks.minPos.getX()==-16&&chunks.maxPos.getX()==-1&&chunks.minPos.getZ()==16&&chunks.maxPos.getZ()==31&&chunks.minPos.getY()==Integer.MIN_VALUE,"negative/current chunk or height mismatch");
+        chunks.includeIntersectingClaims=true;check(chunks.copy().includeIntersectingClaims,"spatial scope lost in fallback copy");
         check(ModLogFilters.find(14).sourcePrefix().equals("mod:openpartiesandclaims:"),"OPAC scope mismatch");
         check(ModLogFilters.find(20).sourcePrefix().equals("mod:create_vibrant_vaults:"),"Vibrant Vaults scope mismatch");
     }

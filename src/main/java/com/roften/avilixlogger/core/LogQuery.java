@@ -16,6 +16,7 @@ public final class LogQuery {
 
     /** If set, filter by axis-aligned bounding box (inclusive). */
     public BlockPos minPos;
+    public boolean includeIntersectingClaims;
     public BlockPos maxPos;
 
     /** Optional player name filter (case-insensitive exact match). */
@@ -82,6 +83,7 @@ public final class LogQuery {
         q.limit = this.limit;
         q.exactPos = this.exactPos;
         q.minPos = this.minPos;
+        q.includeIntersectingClaims = this.includeIntersectingClaims;
         q.maxPos = this.maxPos;
         q.actorName = this.actorName;
         q.owner = this.owner;

@@ -91,7 +91,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ITEM_USE_STOP,
                 ActionType.ITEM_CONSUME);
         map(TableKind.PLAYERS,
-                ActionType.PLAYER_DEATH,
+                ActionType.PLAYER_DEATH, ActionType.PLAYER_KILL,
                 ActionType.PLAYER_JOIN,
                 ActionType.PLAYER_LEAVE,
                 ActionType.PLAYER_DIMENSION_CHANGE,
@@ -1307,9 +1307,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                         .append(" AND chunk_x BETWEEN ").append(floorDiv(minX, 16)).append(" AND ").append(floorDiv(maxX, 16))
                         .append(" AND chunk_z BETWEEN ").append(floorDiv(minZ, 16)).append(" AND ").append(floorDiv(maxZ, 16));
             }
-            sql.append(" AND x BETWEEN ").append(minX).append(" AND ").append(maxX)
-                    .append(" AND y BETWEEN ").append(minY).append(" AND ").append(maxY)
-                    .append(" AND z BETWEEN ").append(minZ).append(" AND ").append(maxZ);
+            ChunkLogSearch.appendBounds(sql,q,min,max);
         }
     }
 
@@ -1360,9 +1358,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         } else if (q.minPos != null && q.maxPos != null) {
             BlockPos min = q.minPos;
             BlockPos max = q.maxPos;
-            sql.append(" AND x BETWEEN ").append(Math.min(min.getX(), max.getX())).append(" AND ").append(Math.max(min.getX(), max.getX()))
-                    .append(" AND y BETWEEN ").append(Math.min(min.getY(), max.getY())).append(" AND ").append(Math.max(min.getY(), max.getY()))
-                    .append(" AND z BETWEEN ").append(Math.min(min.getZ(), max.getZ())).append(" AND ").append(Math.max(min.getZ(), max.getZ()));
+            ChunkLogSearch.appendBounds(sql,q,min,max);
         }
 
         if(q.exactId>0)sql.append(" AND id = ").append(q.exactId);

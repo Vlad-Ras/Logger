@@ -73,7 +73,7 @@ final class WeightedQueue<T> {
         if(!acquired)return Offer.BUSY;
         try{
             if(closed)throw new IllegalStateException("Logger queue is closed");
-            if(weight>maxBytes)return Offer.OVERSIZED;
+            if(weight>maxBytes && outstanding>0)return Offer.OVERSIZED;
             if(full(weight)){pressureRequested=true;ready.signalAll();return Offer.FULL;}
             entries.addLast(new Work<>(value,weight));bytes+=weight;outstanding++;
             peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);ready.signal();return Offer.ACCEPTED;

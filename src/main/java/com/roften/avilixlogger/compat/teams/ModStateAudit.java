@@ -26,7 +26,7 @@ public final class ModStateAudit {
         return false;
     }
     public static Action begin(MinecraftServer server, String provider, String operation, Object target, String key, ActionType type, Snapshot snapshot) {
-        if (!enabled(server, type)) return null;
+        if (!enabled(server, type) || !CaptureTypePolicy.allows(type, "mod:" + provider + ":", null)) return null;
         for (Action current = ACTIVE.get(); current != null; current = current.parent)
             if (current.target == target && current.key.equals(key)) return null;
         try {
@@ -35,7 +35,7 @@ public final class ModStateAudit {
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { failure(provider); return null; }
     }
     public static void receipt(MinecraftServer server, String provider, String operation, ActionType type, CompoundTag before, CompoundTag after) {
-        if (!enabled(server, type)) return;
+        if (!enabled(server, type) || !CaptureTypePolicy.allows(type, "mod:" + provider + ":", null)) return;
         try { append(server, row(server, provider, operation, type), before, after, false); }
         catch (RuntimeException | LinkageError failure) { failure(provider); }
     }

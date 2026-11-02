@@ -30,8 +30,8 @@ public final class HotPathQueueStandaloneTest {
         var second=queue.poll(100);check(second.value()==2,"resumed event lost");queue.complete(second);
         check(queue.retainedBytes()==0&&queue.backpressureCount()==1,"reservation/wait count incorrect");
         String report=HotPathMetrics.stop();
-        check(report.contains("AE2: 1")&&report.contains("Queue waits: 1"),"diagnostics missed the transfer/stall");
-        check(!report.substring(report.indexOf("Queue waits:")).contains("0.00 ms server thread"),"world-thread stall not attributed");
+        check(report.contains("AE2: 1")&&report.contains("Ожидание очередей на серверном потоке:"),"diagnostics missed the transfer/stall");
+        check(!report.substring(report.indexOf("Ожидание очередей на серверном потоке:")).startsWith("Ожидание очередей на серверном потоке: 0.00 мс"),"world-thread stall not attributed");
         HotPathMetrics.queued(ActionType.ME_PUT,"ae2:terminal");
         check(HotPathMetrics.report().equals(report),"stopped session still changing");
         HotPathMetrics.clear();

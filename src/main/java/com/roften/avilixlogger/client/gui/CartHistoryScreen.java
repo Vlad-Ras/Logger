@@ -139,7 +139,7 @@ public final class CartHistoryScreen extends Screen {
     public void render(GuiGraphics g,int mx,int my,float dt){
         LoggerGuiWidgets.beginFrame(g,width,height);
         g.drawCenteredString(font,title,width/2,9,0xFFFFFF);
-        g.fill(listX,listY,listX+listW,listY+listH,0x44000000);g.enableScissor(listX,listY,listX+listW,listY+listH);
+        g.enableScissor(listX,listY,listX+listW,listY+listH);
         if(rows.isEmpty())g.drawString(font,loading?"Загрузка…":"Нет записей. Измените фильтры или нажмите «Все записи».",listX+5,listY+8,0xAABBCD);
         for(int i=listScroll;i<rows.size();i++){int y=listY+(i-listScroll)*38;if(y>=listY+listH)break;var r=rows.get(i);
             if(i==selected)g.fill(listX,y,listX+listW,y+37,0x55336699);
@@ -147,7 +147,7 @@ public final class CartHistoryScreen extends Screen {
             g.drawString(font,font.plainSubstrByWidth(r.actor()+" · "+r.location(),listW-12),listX+6,y+16,0xB5C5D5);
             g.drawString(font,font.plainSubstrByWidth("ID: "+r.cartId()+(r.snapshot()?" · полный снимок":""),listW-12),listX+6,y+27,r.snapshot()?0x8ED5A1:0x8294A6);
         }g.disableScissor();
-        if(detailW>0){g.fill(detailX,detailY,detailX+detailW,detailY+detailH,0x44000000);var lines=detailLayout.get(font,details(),detailW-12);detailScroll=Math.min(detailScroll,Math.max(0,lines.size()-Math.max(1,detailH/11)));g.enableScissor(detailX,detailY,detailX+detailW,detailY+detailH);
+        if(detailW>0){var lines=detailLayout.get(font,details(),detailW-12);detailScroll=Math.min(detailScroll,Math.max(0,lines.size()-Math.max(1,detailH/11)));g.enableScissor(detailX,detailY,detailX+detailW,detailY+detailH);
             for(int i=detailScroll;i<lines.size();i++){int y=detailY+5+(i-detailScroll)*11;if(y>=detailY+detailH)break;g.drawString(font,lines.get(i),detailX+6,y,0xDCE6F0);}g.disableScissor();}
         g.drawString(font,font.plainSubstrByWidth((operationRunning?"Выполняется · ":"")+status,width-110),10,height-19,0xC9D7E4);for(var widget:renderables)widget.render(g,mx,my,dt);
     }
@@ -167,7 +167,7 @@ public final class CartHistoryScreen extends Screen {
         @Override public void render(GuiGraphics g,int x,int y,float dt){for(var widget:renderables)widget.render(g,x,y,dt);}
         public boolean isPauseScreen(){return false;}
         public void onClose(){Minecraft.getInstance().setScreen(parent);}
-        void background(GuiGraphics g){LoggerGuiWidgets.beginFrame(g,width,height);g.fill(8,34,width-8,height-40,0x44000000);g.drawCenteredString(font,title,width/2,12,0xFFFFFF);}
+        void background(GuiGraphics g){LoggerGuiWidgets.beginFrame(g,width,height);g.drawCenteredString(font,title,width/2,12,0xFFFFFF);}
         void text(GuiGraphics g,String text,int top,int bottom){var lines=layout.get(font,text,Math.max(30,width-40));scroll=Math.min(scroll,Math.max(0,lines.size()-Math.max(1,(bottom-top)/12)));g.enableScissor(20,top,width-20,bottom);for(int i=scroll;i<lines.size();i++){int y=top+(i-scroll)*12;if(y>=bottom)break;g.drawString(font,lines.get(i),20,y,0xE4ECF4);}g.disableScissor();}
         public boolean mouseScrolled(double x,double y,double dx,double dy){scroll=Math.max(0,scroll-(int)Math.signum(dy)*3);return true;}
     }

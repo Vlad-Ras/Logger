@@ -10,6 +10,7 @@ public final class HotPathMetrics {
     private HotPathMetrics() {}
     private static final class Session {
         final long started = System.nanoTime();
+        final LongAdder ticks=new LongAdder();
         final LongAdder[] rows = counters(ActionType.values().length);
         final LongAdder[] families = counters(5);
         final LongAdder snapshots = new LongAdder(), snapshotNs = new LongAdder(), serverSnapshotNs = new LongAdder();
@@ -55,15 +56,17 @@ public final class HotPathMetrics {
     }
     private static volatile Thread serverThread;
     public static void serverThread(Thread thread) { serverThread=thread; }
+    public static void tick(){var current=session;if(current!=null)current.ticks.increment();}
     private static String report(Session current) {
         double seconds=Math.max(.001,(System.nanoTime()-current.started)/1e9);
-        StringBuilder out=new StringBuilder(String.format(Locale.ROOT,"Logger: %.1f с; событий поставлено в очередь:\n",seconds));
-        String[] names={"AE2","Create подшипники","Create вагонетки","Create остальные","прочие"};
-        for(int i=0;i<names.length;i++)out.append(String.format(Locale.ROOT,"%s: %d (%.1f/с)\n",names[i],current.families[i].sum(),current.families[i].sum()/seconds));
-        out.append(String.format(Locale.ROOT,"NBT snapshot calls: %d, %.2f ms cumulative, %.2f ms server thread (nested calls included)\nQueue waits: %d; %.2f ms all producers; %.2f ms server thread\n",
-            current.snapshots.sum(),current.snapshotNs.sum()/1e6,current.serverSnapshotNs.sum()/1e6,current.waits.sum(),current.waitNs.sum()/1e6,current.serverWaitNs.sum()/1e6));
-        ActionType[] types=ActionType.values();
-        for(int i=0;i<types.length;i++)if(current.rows[i].sum()>0)out.append(types[i]).append(": ").append(current.rows[i].sum()).append(' ');
+        long total=0;for(var counter:current.families)total+=counter.sum();
+        var out=new StringBuilder(String.format(Locale.ROOT,"Период: %.1f с. Принято записей: %d (%.1f/с).\n",seconds,total,total/seconds));
+        String[] names={"AE2","Create: подшипники","Create: вагонетки","Create: остальные","Другие события"};
+        for(int i=0;i<names.length;i++)if(current.families[i].sum()>0)out.append(String.format(Locale.ROOT,"%s: %d (%.1f/с)\n",names[i],current.families[i].sum(),current.families[i].sum()/seconds));
+        double wait=current.serverWaitNs.sum()/1e6;
+        out.append(String.format(Locale.ROOT,"Снимки на серверном потоке: %.2f мс за период (%d вызовов; вложенные входят в сумму).\nОжидание очередей на серверном потоке: %.2f мс.\n",current.serverSnapshotNs.sum()/1e6,current.snapshots.sum(),wait));
+        if(current.ticks.sum()>0)out.append(String.format(Locale.ROOT,"Ожидание очередей: %.3f мс/тик (%d тиков).\n",wait/current.ticks.sum(),current.ticks.sum()));
+        out.append("Это измеренные операции Logger; полный вклад в TPS проверяется профилировщиком сервера.");
         return out.toString();
     }
 }

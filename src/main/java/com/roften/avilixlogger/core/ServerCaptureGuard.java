@@ -24,7 +24,7 @@ public final class ServerCaptureGuard {
     public static long generation(){return generation;}
     public static boolean captureAllowed(){var current=fault;if(current==null||Thread.currentThread()!=serverThread)return true;current.suppressed.increment();return false;}
     static <T> boolean enqueue(WeightedQueue<T> queue,T value,long bytes){
-        if(Thread.currentThread()!=serverThread){queue.put(value,bytes);return true;}
+        if(Thread.currentThread()!=serverThread || !CaptureTypePolicy.enabled(30) && fault==null){queue.put(value,bytes);return true;}
         var current=fault;if(current!=null){current.rejected.increment();return false;}
         var offered=queue.offer(value,bytes);if(offered==WeightedQueue.Offer.ACCEPTED)return true;
         current=new Fault(queue.name(),offered.name());generation++;fault=current;
@@ -39,10 +39,14 @@ public final class ServerCaptureGuard {
     static void resume(Gap gap){last=gap;generation++;fault=null;}
     public static String report(){
         var gap=active();if(gap==null)gap=last;
-        if(gap==null)return "Защита TPS включена; аварийных остановок захвата не было.";
-        return (gap.until()==0?"ЗАХВАТ ОСТАНОВЛЕН ДЛЯ ЗАЩИТЫ TPS":"Захват возобновлён; последний пропуск")
-            +". Начало: "+java.time.Instant.ofEpochMilli(gap.since())+"; "+(gap.until()==0?"интервал ещё открыт":"конец: "+java.time.Instant.ofEpochMilli(gap.until()))
-            +". Очередь: "+gap.queue()+"; причина: "+gap.reason()+". Отклонено заданий: "+gap.rejected()+"; пропущено проверок захвата: "+gap.suppressedChecks()
-            +". Это не точное число игровых событий. Уже принятые записи дописываются. После освобождения очередей: Действия → Производительность → Возобновить захват.";
+        String mode=CaptureTypePolicy.enabled(30)?"Переполнение: временная пауза с автоматическим возобновлением.":"Переполнение: ожидание очереди, серверный тик может задерживаться.";
+        if(gap==null)return "Запись событий работает. "+mode;
+        String queue=switch(gap.queue()){case "cpu"->"обработка снимков";case "events"->"события";case "journal"->"запись на диск";default->gap.queue();};
+        String reason=switch(gap.reason()){case "FULL"->"достигнут лимит очереди: обработка медленнее поступления";case "BUSY"->"очередь не освободила блокировку за 0,2 мс";case "OVERSIZED"->"крупный снимок ожидает освобождения буфера";default->gap.reason();};
+        var format=java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm:ss z").withZone(java.time.ZoneId.systemDefault());
+        return (gap.until()==0?"ЗАПИСЬ ВРЕМЕННО ПРИОСТАНОВЛЕНА с ":"Запись работает. Последняя пауза: ")+format.format(java.time.Instant.ofEpochMilli(gap.since()))
+            +".\nПричина: "+queue+" — "+reason+".\nОтклонено заданий: "+gap.rejected()+"; пропущено проверок: "+gap.suppressedChecks()+" (это не число игровых действий)."
+            +(gap.until()==0?"\nПосле освобождения очередей запись возобновится автоматически. Пропущенные действия восстановить нельзя.":"\nПауза завершена в "+format.format(java.time.Instant.ofEpochMilli(gap.until()))+"; интервал сохранён в журнале.")
+            +"\nРежим можно изменить: Настройки → Запись событий → Переполнение. "+mode;
     }
 }

@@ -24,11 +24,24 @@ final class ServerCaptureGuardTest {
             var marker=LoggerRuntime.captureGapEntry(gap);check(marker.type==ActionType.CAPTURE_GAP&&marker.actorUuid==null&&EntryPositionEvidence.read(marker)==null,"gap fabricated actor/position");
             ServerCaptureGuard.resume(gap);check(ServerCaptureGuard.captureAllowed()&&ServerCaptureGuard.last().equals(gap),"resume lost gap");
         }finally{queue.close();ServerCaptureGuard.stop();}
-        oversized();lockContention();journalFlush();
+        oversized();lockContention();journalFlush();backpressureChoice();
         System.out.println("SERVER_CAPTURE_GUARD_OK: protected full/oversized/contended admission, server gate, accepted worker drain, gap and partial batch flush");
     }
+    private static void backpressureChoice()throws Exception {
+        int previous=CaptureTypePolicy.mask();var q=new WeightedQueue<Integer>(1,10);
+        CaptureTypePolicy.install(CaptureTypePolicy.changed(0,30,false));ServerCaptureGuard.start(Thread.currentThread(),gap->{});
+        try {
+            q.put(1,5);var held=q.poll(100);
+            var release=new Thread(()->{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);while(q.statistics().waitingProducers()==0 && System.nanoTime()<deadline)Thread.yield();q.complete(held);});release.start();
+            check(ServerCaptureGuard.enqueue(q,2,5)&&!ServerCaptureGuard.paused(),"no-pause mode paused or lost accepted work");
+            release.join(2000);check(q.statistics().waits()==1,"no-pause mode did not apply bounded backpressure");q.complete(q.poll(100));
+        }finally{q.close();ServerCaptureGuard.stop();CaptureTypePolicy.install(previous);}
+    }
     private static void oversized(){var q=new WeightedQueue<Integer>(1,10);ServerCaptureGuard.start(Thread.currentThread(),gap->{});
-        try{check(!ServerCaptureGuard.enqueue(q,1,11)&&q.retainedBytes()==0&&ServerCaptureGuard.active().reason().equals("OVERSIZED"),"server exceeded queue cap");}finally{q.close();ServerCaptureGuard.stop();}}
+        try{check(ServerCaptureGuard.enqueue(q,1,11)&&q.retainedBytes()==11&&!ServerCaptureGuard.paused(),"single large snapshot was lost");
+            check(!ServerCaptureGuard.enqueue(q,2,11)&&ServerCaptureGuard.active().reason().equals("OVERSIZED"),"two oversized snapshots exceeded retained bound");
+        }finally{q.close();ServerCaptureGuard.stop();}}
+
     private static void lockContention()throws Exception{
         var q=new WeightedQueue<Integer>(1,10);var field=WeightedQueue.class.getDeclaredField("lock");field.setAccessible(true);var lock=(java.util.concurrent.locks.ReentrantLock)field.get(q);
         var held=new CountDownLatch(1);var release=new CountDownLatch(1);

@@ -396,13 +396,13 @@ public final class LoggerCommands {
         }
         ItemStack plane = getPlaneItem(sp);
         if (plane.isEmpty()) {
-            sp.sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
+            ctx.getSource().sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
             return 0;
         }
 
         var tag = AirplanesCompatHooks.getOwnerTag(plane);
         if (tag == null) {
-            sp.sendSystemMessage(Component.literal("У этого самолёта владелец не задан.").withStyle(ChatFormatting.YELLOW));
+            ctx.getSource().sendSystemMessage(Component.literal("У этого самолёта владелец не задан.").withStyle(ChatFormatting.YELLOW));
             return 1;
         }
 
@@ -418,7 +418,7 @@ public final class LoggerCommands {
         if (uuid != null && !uuid.isBlank()) {
             msg.append(Component.literal(" (" + uuid + ")").withStyle(ChatFormatting.DARK_GRAY));
         }
-        sp.sendSystemMessage(msg);
+        ctx.getSource().sendSystemMessage(msg);
         return 1;
     }
 
@@ -429,7 +429,7 @@ public final class LoggerCommands {
         }
         ItemStack plane = getPlaneItem(sp);
         if (plane.isEmpty()) {
-            sp.sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
+            ctx.getSource().sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
             return 0;
         }
 
@@ -446,7 +446,7 @@ public final class LoggerCommands {
         AirplanesCompatHooks.clearOwnerOnItem(plane);
 
         logPlaneOwnerChange(sp, plane, oldName, oldUuid, null, null);
-        sp.sendSystemMessage(Component.literal("Владелец сброшен.").withStyle(ChatFormatting.YELLOW));
+        ctx.getSource().sendSystemMessage(Component.literal("Владелец сброшен.").withStyle(ChatFormatting.YELLOW));
         return 1;
     }
 
@@ -457,7 +457,7 @@ public final class LoggerCommands {
         }
         ItemStack plane = getPlaneItem(sp);
         if (plane.isEmpty()) {
-            sp.sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
+            ctx.getSource().sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
             return 0;
         }
 
@@ -500,7 +500,7 @@ public final class LoggerCommands {
         AirplanesCompatHooks.setOwnerOnItem(plane, newName, newUuid);
         logPlaneOwnerChange(sp, plane, oldName, oldUuid, newName, newUuid);
 
-        sp.sendSystemMessage(Component.literal("Владелец установлен: ").withStyle(ChatFormatting.GRAY)
+        ctx.getSource().sendSystemMessage(Component.literal("Владелец установлен: ").withStyle(ChatFormatting.GRAY)
                 .append(Component.literal(newName).withStyle(ChatFormatting.AQUA))
                 .append(newUuid != null ? Component.literal(" (" + newUuid + ")").withStyle(ChatFormatting.DARK_GRAY) : Component.empty()));
         return 1;
@@ -738,14 +738,14 @@ public final class LoggerCommands {
                     if (!sp.isAlive() || sp.connection == null) return;
 
                     if (total == 0) {
-                        sp.sendSystemMessage(Component.literal("Офлайн-поиск завершён: самолёты владельца не найдены. (регионов просмотрено: " + scanned + ")")
+                        ctx.getSource().sendSystemMessage(Component.literal("Офлайн-поиск завершён: самолёты владельца не найдены. (регионов просмотрено: " + scanned + ")")
                                 .withStyle(ChatFormatting.RED));
-                        sp.sendSystemMessage(Component.literal("Подсказка: если мод самолётов хранит owner не в сущности/Entities, а в Tile/Capabilities, тогда нужно будет другой парсер.")
+                        ctx.getSource().sendSystemMessage(Component.literal("Подсказка: если мод самолётов хранит owner не в сущности/Entities, а в Tile/Capabilities, тогда нужно будет другой парсер.")
                                 .withStyle(ChatFormatting.DARK_GRAY));
                         return;
                     }
 
-                    sp.sendSystemMessage(Component.literal("Офлайн-поиск завершён. Найдено самолётов: ")
+                    ctx.getSource().sendSystemMessage(Component.literal("Офлайн-поиск завершён. Найдено самолётов: ")
                             .withStyle(ChatFormatting.GRAY)
                             .append(Component.literal(String.valueOf(total)).withStyle(ChatFormatting.GREEN))
                             .append(Component.literal(" | владелец: ").withStyle(ChatFormatting.GRAY))
@@ -771,16 +771,16 @@ public final class LoggerCommands {
                                                 .append(Component.literal("\nКлик: телепорт").withStyle(ChatFormatting.GRAY))))
                                 .withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, tpCmd)));
 
-                        sp.sendSystemMessage(line);
+                        ctx.getSource().sendSystemMessage(line);
                     }
 
                     if (total > 30) {
-                        sp.sendSystemMessage(Component.literal("Показаны первые 30. Всего: " + total).withStyle(ChatFormatting.DARK_GRAY));
+                        ctx.getSource().sendSystemMessage(Component.literal("Показаны первые 30. Всего: " + total).withStyle(ChatFormatting.DARK_GRAY));
                     }
                 });
 
             } catch (Throwable t) {
-                server.execute(() -> sp.sendSystemMessage(Component.literal("Офлайн-поиск упал с ошибкой: " + t.getClass().getSimpleName())
+                server.execute(() -> ctx.getSource().sendSystemMessage(Component.literal("Офлайн-поиск упал с ошибкой: " + t.getClass().getSimpleName())
                         .withStyle(ChatFormatting.RED)));
             }
         }, "avilixlogger-plane-offline-scan");
@@ -1710,7 +1710,7 @@ public final class LoggerCommands {
         return switch (m) {
             case "grief", "build" -> EnumSet.of(ActionType.BLOCK_BREAK, ActionType.BLOCK_PLACE, ActionType.BLOCK_INTERACT);
             case "theft", "steal" -> EnumSet.of(ActionType.CONTAINER_OPEN, ActionType.CONTAINER_PUT, ActionType.CONTAINER_TAKE, ActionType.ITEM_PICKUP, ActionType.ITEM_DROP, ActionType.GUI_OPEN);
-            case "combat", "pvp" -> EnumSet.of(ActionType.WEAPON_KILL, ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
+            case "combat", "pvp" -> EnumSet.of(ActionType.WEAPON_KILL, ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.PLAYER_KILL, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
             case "items", "item" -> EnumSet.of(ActionType.WEAPON_RELOAD, ActionType.ITEM_DROP, ActionType.ITEM_PICKUP, ActionType.ITEM_CRAFT, ActionType.ITEM_TRANSFORM, ActionType.ITEM_SMELT, ActionType.ITEM_USE, ActionType.ITEM_USE_START, ActionType.ITEM_USE_STOP, ActionType.ITEM_CONSUME, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
             case "gui", "menus", "interfaces" -> EnumSet.of(ActionType.GUI_CHANGE, ActionType.GUI_OPEN, ActionType.CONTAINER_OPEN, ActionType.ENTITY_CONTAINER_OPEN);
             case "planes", "plane", "aircraft" -> EnumSet.of(

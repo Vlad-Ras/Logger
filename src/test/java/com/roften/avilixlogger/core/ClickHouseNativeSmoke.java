@@ -104,6 +104,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
             db.appendBatch("release-storage-"+UUID.randomUUID(),releaseStorage);ReleaseStorageEvidence.verify(db,releaseStorage);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
+            verifyChunkSearch(db);
             verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations); verifyMeJobs(db,meJobs);
             pressureRows=journalPressure(db);verifyJournalPressure(db,pressureRows);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
@@ -126,6 +127,7 @@ public final class ClickHouseNativeSmoke {
             db = new ClickHouseLogStorage();
             verifyDetails(db.queryReverse(detail), block, item);
             ReleaseStorageEvidence.verify(db,releaseStorage);
+            verifyChunkSearch(db);
             verifyWeapons(db,weapons);
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
@@ -136,6 +138,21 @@ public final class ClickHouseNativeSmoke {
             if (db != null) db.shutdown();
             LoggerConfig.SPEC.acceptConfig(null);
         }
+    }
+
+    private static void verifyChunkSearch(ClickHouseLogStorage db)throws Exception {
+        var claim=AsyncPipelineTest.row("native-chunk-spatial");claim.type=ActionType.CLAIM_ACTION;claim.dim="minecraft:overworld";claim.x=16;claim.y=0;claim.z=16;
+        claim.source="mod:openpartiesandclaims:native:"+UUID.randomUUID()+":";
+        claim.beAfter="{Provider:'openpartiesandclaims',Dimension:'minecraft:overworld',ChunkX:1,ChunkZ:1,Claimed:1b}";
+        var normal=claim.copyForQueue();normal.id=0;normal.type=ActionType.BLOCK_PLACE;normal.x=31;normal.z=31;
+        db.appendBatch("native-spatial-"+UUID.randomUUID(),List.of(claim,normal));
+        var q=new LogQuery();q.dim=claim.dim;q.sourcePrefix=claim.source;q.includeIntersectingClaims=true;
+        q.minPos=new net.minecraft.core.BlockPos(30,79,30);q.maxPos=new net.minecraft.core.BlockPos(32,81,32);
+        for(boolean details:List.of(false,true)){q.requireDetails=details;var rows=db.queryReverse(q);check(rows.size()==1&&rows.getFirst().id==claim.id,"standing in chunk did not find claim, or ignored height for ordinary blocks");}
+        q.includeIntersectingClaims=false;check(db.queryReverse(q).isEmpty(),"rollback/block scope was widened");
+        q.includeIntersectingClaims=true;ChunkLogSearch.radius(q,new net.minecraft.core.BlockPos(31,180,31),0,0);
+        check(db.queryReverse(q).stream().anyMatch(row->row.id==claim.id),"OPAC zero-chunk radius missing current chunk");
+        System.out.println("CLICKHOUSE_CHUNK_SEARCH_OK: current chunk, synthetic y=0, feed/details, unchanged ordinary block/rollback bounds");
     }
 
     private static void verifyMeJobs(ClickHouseLogStorage db,List<LogEntry> rows)throws Exception {

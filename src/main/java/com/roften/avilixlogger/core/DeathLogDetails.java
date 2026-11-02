@@ -12,9 +12,19 @@ import java.util.List;
 /** Detached death context in the existing extra column; old death_message rows remain readable. */
 public final class DeathLogDetails {
     private DeathLogDetails(){}
+    public static LogEntry killerRow(LogEntry death, DamageSource source) {
+        if (!(source.getEntity() instanceof net.minecraft.server.level.ServerPlayer killer)
+                || CauseContext.actorUuid(killer)==null || killer.getUUID().equals(death.actorUuid)) return null;
+        var row=death.copyForQueue();row.id=0;row.type=ActionType.PLAYER_KILL;
+        row.actorUuid=killer.getUUID();row.actorName=killer.getGameProfile().getName();return row;
+    }
     public static String capture(LivingEntity victim,DamageSource source,String message){
         var context=new JsonObject();context.addProperty("Version",1);context.addProperty("Message",message);
         context.addProperty("DamageType",source.typeHolder().unwrapKey().map(key->key.location().toString()).orElse("unknown"));
+        if(source.getEntity() instanceof LivingEntity killer && !killer.getMainHandItem().isEmpty()) {
+            context.addProperty("WeaponId",net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(killer.getMainHandItem().getItem()).toString());
+            context.addProperty("WeaponName",killer.getMainHandItem().getHoverName().getString());
+        }
         context.addProperty("MessageId",source.getMsgId());context.addProperty("DirectDamage",source.isDirect());
         context.add("Victim",identity(victim));context.add("Direct",identity(source.getDirectEntity()));context.add("Responsible",identity(source.getEntity()));
         var position=source.getSourcePosition();if(position!=null){var p=new JsonObject();p.addProperty("X",position.x);p.addProperty("Y",position.y);p.addProperty("Z",position.z);context.add("SourcePosition",p);}
@@ -36,7 +46,16 @@ public final class DeathLogDetails {
     }
     public static String message(LogEntry row){
         if(row.extra!=null&&row.extra.startsWith("death_message:"))return row.extra.substring("death_message:".length()).trim();
-        var context=context(row);return context==null?null:text(context,"Message");
+        var context=context(row);if(context==null)return null;
+        var killer=context.getAsJsonObject("Responsible");var victim=context.getAsJsonObject("Victim");
+        if(killer!=null && "minecraft:player".equals(text(killer,"Type")) && victim!=null) {
+            String weapon=text(context,"WeaponName");String id=text(context,"WeaponId");
+            if(!id.isBlank()) {var item=net.minecraft.core.registries.BuiltInRegistries.ITEM.get(net.minecraft.resources.ResourceLocation.tryParse(id));if(item!=null)weapon=item.getDescription().getString();}
+            String with=weapon.isBlank()?"":" при помощи "+weapon;
+            if(row.type==ActionType.PLAYER_KILL)return text(killer,"Name")+" убил игрока "+text(victim,"Name")+with;
+            return text(victim,"Name")+" был убит игроком "+text(killer,"Name")+with;
+        }
+        return text(context,"Message");
     }
     public static List<Component> describe(LogEntry row){
         var context=context(row);if(context==null)return List.of();var lines=new ArrayList<Component>();

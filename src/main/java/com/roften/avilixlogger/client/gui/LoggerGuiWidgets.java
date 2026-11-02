@@ -11,7 +11,11 @@ import net.minecraft.network.chat.Component;
 final class LoggerGuiWidgets {
     private LoggerGuiWidgets() {}
     static void beginFrame(GuiGraphics g,int width,int height){
+        beginFrame(g,width,height,true);
+    }
+    static void beginFrame(GuiGraphics g,int width,int height,boolean dim){
         if(net.minecraft.client.Minecraft.getInstance().level==null)g.fill(0,0,width,height,0xFF101010);
+        else if(dim)g.fill(4,4,width-4,height-4,LogViewerScreen.backgroundDimAlpha()<<24);
     }
     private static float clampFloat(float value,float min,float max){return Math.max(min,Math.min(max,value));}
     /**

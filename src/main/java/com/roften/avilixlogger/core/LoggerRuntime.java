@@ -32,10 +32,11 @@ public final class LoggerRuntime {
         var text=new StringBuilder(ServerCaptureGuard.report()+"\nОчереди Logger (пики с последнего запуска замеров):\n");
         for(var state:states) {
             String name=switch(state.name()){case "cpu"->"Обработка снимков";case "events"->"События";case "journal"->"Запись на диск";default->state.name();};
-            text.append(String.format(java.util.Locale.ROOT,"%s: в очереди %d, в обработке %d; пик записей %d / %d; данные %.2f MiB, пик %.2f / %.2f MiB; ожиданий %d, сейчас ждут %d, завершённый максимум %.3f ms\n",
-                name,state.queued(),state.outstanding()-state.queued(),state.peakOutstanding(),state.countLimit(),state.bytes()/1048576.0,state.peakBytes()/1048576.0,state.byteLimit()/1048576.0,state.waits(),state.waitingProducers(),state.maxWaitNanos()/1e6));
+            text.append(String.format(java.util.Locale.ROOT,"%s: занято %d из %d; буфер %.1f из %.1f МБ (пик %.1f МБ).\n",
+                name,state.outstanding(),state.countLimit(),state.bytes()/1048576.0,state.byteLimit()/1048576.0,state.peakBytes()/1048576.0));
         }
-        text.append("Объём — оценка данных очереди, а не весь heap JVM. Один крупный снимок может превысить лимит буфера.");
+        var runtime=Runtime.getRuntime();
+        text.append(String.format(java.util.Locale.ROOT,"Память всей JVM: %.0f / %.0f МБ. Буферы выше относятся к Logger; отдельно память его объектов здесь не измеряется.",(runtime.totalMemory()-runtime.freeMemory())/1048576.0,runtime.maxMemory()/1048576.0));
         return text.toString();
     }
     public static void resetQueueStatistics() {
@@ -60,6 +61,10 @@ public final class LoggerRuntime {
     public static boolean enqueueDiagnostic(LogEntry entry){
         if(entry==null||entry.type!=ActionType.LOGGER_DIAGNOSTIC||!"logger:diagnostic".equals(entry.source)||!LoggerConfig.isEnabled())return false;
         var events=ASYNC;if(events==null)return false;LogIdGenerator.ensure(entry);return events.appendDiagnostic(entry);
+    }
+    public static void autoResumeCapture() {
+        var gap=ServerCaptureGuard.active();
+        if(gap!=null && System.currentTimeMillis()-gap.since()>=1000) resumeCapture();
     }
     static LogEntry captureGapEntry(ServerCaptureGuard.Gap gap){
         var row=new LogEntry();row.ts=gap.until();row.type=ActionType.CAPTURE_GAP;row.dim="*";row.actorName="Система";row.source="logger:capture-gap";

@@ -83,6 +83,7 @@ public final class LogViewerScreen extends Screen {
         var screen=new LogViewerScreen();
         screen.module=com.roften.avilixlogger.core.ModLogFilters.find(preset);
         if(screen.module==null)throw new IllegalArgumentException("Неизвестный мод журнала");
+        screen.typeOptions=com.roften.avilixlogger.core.ModLogFilters.options(screen.module);
         screen.moduleParent=parent;screen.title=screen.module.title();screen.typePresetIdx=preset;screen.radiusPresetIdx=3;screen.trainFilter="";screen.freshModule=true;
         return screen;
     }
@@ -112,6 +113,19 @@ public final class LogViewerScreen extends Screen {
     private long selectedEntryId = -1L;
 
     private List<Component> detailLines = List.of();
+    private EditBox detailSearchBox;
+    private List<Component> searchDetailSource=List.of(), searchedDetails=List.of();
+    private String detailNeedle="", cachedDetailNeedle="";
+    static int backgroundDimAlpha(){return Math.round(255f*clampInt(savedBackgroundDimPercent,0,100)/100f);}
+    private List<Component> shownDetails(){
+        var source=showRawTab?rawLines:detailLines;
+        if(source==null)source=List.of();
+        if(source!=searchDetailSource || !detailNeedle.equals(cachedDetailNeedle)){
+            searchDetailSource=source;cachedDetailNeedle=detailNeedle;
+            searchedDetails=detailNeedle.isBlank()?source:source.stream().filter(line->line.getString().toLowerCase(java.util.Locale.ROOT).contains(detailNeedle.toLowerCase(java.util.Locale.ROOT))).toList();
+        }
+        return searchedDetails;
+    }
     private List<Component> rawLines = List.of();
     private final WrappedLogText detailLayout = new WrappedLogText();
     private final WrappedLogText previewLayout = new WrappedLogText();
@@ -410,7 +424,7 @@ public final class LogViewerScreen extends Screen {
         this.btnRadius = addButton(Component.translatable("gui.avilixlogger.filter.radius"), b -> cycleRadius(),
                 leftX, y, btnW, leftRowH);
         this.radiusBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.radius"));
-        this.radiusBox.setHint(Component.translatable("gui.avilixlogger.hint.radius"));
+        this.radiusBox.setHint(module != null && module.preset()==14 ? Component.literal("Чанки (0 = текущий)") : Component.translatable("gui.avilixlogger.hint.radius"));
         this.radiusBox.setValue(savedRadiusInput);
         this.addRenderableWidget(this.radiusBox);
         y += leftRowH + leftGap;
@@ -418,7 +432,7 @@ public final class LogViewerScreen extends Screen {
         // Type dropdown (full width)
         this.btnType = addButton(Component.translatable("gui.avilixlogger.filter.type"), b -> toggleTypeDropdown(),
                 leftX, y, leftPanelW, leftRowH);
-        this.btnType.active = module == null;
+        this.btnType.active = true;
         y += leftRowH + leftGap;
 
         // Actor
@@ -537,7 +551,12 @@ public final class LogViewerScreen extends Screen {
             if(moduleParent!=null){minecraft.setScreen(moduleParent);LogViewerClientHooks.resume(this.moduleParent);}
             else minecraft.setScreen(new ModulePickerScreen(this));
         },rightX,y2,rightW,btnH);
-        this.detailsPanelTop = y2 + btnH + gap + 2;
+        this.detailSearchBox=makeEditBox(rightX,y2+btnH+gap,rightW,btnH,Component.literal("Поиск в деталях / RAW"));
+        this.detailSearchBox.setHint(Component.literal("Найти параметр…"));
+        this.detailSearchBox.setMaxLength(128);this.detailSearchBox.setValue(detailNeedle);
+        this.detailSearchBox.setResponder(value->{detailNeedle=value;detailsScroll=0;});
+        this.addRenderableWidget(this.detailSearchBox);
+        this.detailsPanelTop = y2 + 2*(btnH+gap) + 2;
 
         updateButtons();
         refreshFilterButtonLabels();
@@ -738,7 +757,7 @@ public final class LogViewerScreen extends Screen {
         int detailY=Math.max(detailsPanelTop,listTop())+14,detailBottom=this.height-30;
         if(button==0 && !showRawTab && mouseX>=detailLeft+3 && mouseX<detailRight-6 && mouseY>=detailY && mouseY<detailBottom){
             int splitW=Math.max(10,Math.round(Math.max(10,detailRight-detailLeft-8)/Math.max(0.25f,logTextScale())));
-            var lines=detailLayout.get(this.font,detailLines,splitW);
+            var lines=detailLayout.get(this.font,shownDetails(),splitW);
             int visible=(int)((mouseY-detailY)/detailLineH());
             int index=detailsScroll+visible;
             if(visible<(detailBottom-detailY)/detailLineH() && index>=0 && index<lines.size()){
@@ -842,7 +861,7 @@ public final class LogViewerScreen extends Screen {
             int step = (int) Math.signum(deltaY);
             int wrapW = Math.max(10, rightPanelW() - 8);
             int splitW = Math.max(10, Math.round(wrapW / Math.max(0.25f, logTextScale())));
-            var lines = detailLayout.get(this.font, showRawTab ? rawLines : detailLines, splitW);
+            var lines = detailLayout.get(this.font, shownDetails(), splitW);
             int headerH = 14;
             int y = detailsTop + headerH;
             int maxLines = Math.max(0, (detailsBottom - y) / detailLineH());
@@ -861,7 +880,7 @@ public final class LogViewerScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        LoggerGuiWidgets.beginFrame(g,width,height);
+        LoggerGuiWidgets.beginFrame(g,width,height,false);
         // Do NOT call Screen#renderBackground or Screen#render here.
         // On 1.21.x some Screen render paths apply the vanilla blurred/dimmed background.
         // This GUI draws logs/details before widgets, so a late vanilla background pass makes
@@ -992,7 +1011,7 @@ public final class LogViewerScreen extends Screen {
 
         g.fill(panelLeft, panelTop, panelRight, panelBottom, 0x44000000);
 
-        List<Component> base = showRawTab ? rawLines : detailLines;
+        List<Component> base = shownDetails();
         if (base == null) base = List.of();
 
         // Wrap lines to fit the panel width.
@@ -1178,7 +1197,8 @@ public final class LogViewerScreen extends Screen {
         }
     }
 
-    private final int[] typeOptions = java.util.stream.IntStream.range(0, 26)
+    private int[] typeOptions = java.util.stream.IntStream.range(0, 26)
+            .filter(i -> com.roften.avilixlogger.core.ModLogFilters.find(i)==null || !com.roften.avilixlogger.core.ModLogFilters.find(i).large())
             .filter(i -> LogViewerClientHooks.createAvailable() || i != 5 && i != 6 && i != 9 && i != 11 && i != 12)
             .toArray();
 
@@ -1198,7 +1218,7 @@ public final class LogViewerScreen extends Screen {
         int maxTextW = 1;
         for (int i = 0; i < typeOptions.length; i++) {
             maxTextW = Math.max(maxTextW,
-                    this.font.width(Component.translatable("gui.avilixlogger.type." + typeKey(typeOptions[i]))));
+                    this.font.width(typeOptionLabel(typeOptions[i])));
         }
         int availableW = Math.max(20, this.width - margin * 2);
         int desiredW = Math.max(btnType.getWidth(), Math.round(maxTextW * preferredTextScale) + 14);
@@ -1252,7 +1272,7 @@ public final class LogViewerScreen extends Screen {
                     && mouseY >= yy && mouseY <= yy + layout.itemHeight();
             if (i == typePresetIdx) g.fill(layout.x(), yy, layout.x() + layout.width(), yy + layout.itemHeight(), 0x55333333);
             if (hover) g.fill(layout.x(), yy, layout.x() + layout.width(), yy + layout.itemHeight(), 0x55222222);
-            Component label = Component.translatable("gui.avilixlogger.type." + typeKey(i));
+            Component label = typeOptionLabel(i);
             g.enableScissor(layout.x() + 2, yy + 1,
                     layout.x() + layout.width() - 2, yy + layout.itemHeight() - 1);
             drawDropdownLabel(g, label, layout.x() + 5, yy, layout.width() - 10, layout.itemHeight());
@@ -1413,7 +1433,7 @@ public final class LogViewerScreen extends Screen {
     private void refreshFilterButtonLabels() {
         String t = timeLabel();
         String r = radiusLabel();
-        Component ty = Component.translatable("gui.avilixlogger.type." + typeKey(typePresetIdx));
+        Component ty = typeOptionLabel(typePresetIdx);
         boolean compact = compactControlLabels();
         if (btnTime != null) btnTime.setMessage(compact ? Component.literal("T: " + t) : Component.translatable("gui.avilixlogger.filter.time.v", t));
         if (btnRadius != null) btnRadius.setMessage(compact ? Component.literal("R: " + r) : Component.translatable("gui.avilixlogger.filter.radius.v", r));
@@ -1469,6 +1489,7 @@ public final class LogViewerScreen extends Screen {
 
     private String radiusLabel() {
         int custom = parseRadius(radiusBox != null ? radiusBox.getValue() : "");
+        if(module!=null && module.preset()==14) return custom>=0 ? custom+" ч." : radiusPresetIdx==3?"WORLD":new int[]{0,1,3}[radiusPresetIdx]+" ч.";
         if (custom >= 0) return custom == 0 ? "WORLD" : String.valueOf(custom);
         return switch (radiusPresetIdx) {
             case 0 -> "5";
@@ -1479,7 +1500,10 @@ public final class LogViewerScreen extends Screen {
         };
     }
 
+    private Component typeOptionLabel(int preset) { return module==null ? Component.translatable("gui.avilixlogger.type."+typeKey(preset)) : Component.literal(com.roften.avilixlogger.core.ModLogFilters.label(preset)); }
+
     private String typeLabel() {
+        if(module!=null)return com.roften.avilixlogger.core.ModLogFilters.label(typePresetIdx);
         return typeKey(typePresetIdx).toUpperCase();
     }
 
@@ -1876,7 +1900,7 @@ public final class LogViewerScreen extends Screen {
             int panelH = Math.min(265, this.height - 12);
             int left = (this.width - panelW) / 2;
             int top = (this.height - panelH) / 2;
-            g.fill(left, top, left + panelW, top + panelH, 0xE0101010);
+            LoggerGuiWidgets.beginFrame(g,width,height);
             g.drawCenteredString(this.font, this.title, this.width / 2, top + 9, 0xFFFFAA00);
 
             if (inspectToolStatus != null && !inspectToolStatus.getString().isBlank()) {

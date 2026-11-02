@@ -128,5 +128,6 @@ public enum ActionType {
     /** Explicit audit interruption, not a world action. */
     CAPTURE_GAP,
     /** Explicit operator-requested delivery check. */
-    LOGGER_DIAGNOSTIC
+    LOGGER_DIAGNOSTIC,
+    PLAYER_KILL
 }

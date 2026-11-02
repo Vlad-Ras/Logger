@@ -141,7 +141,7 @@ public final class LoggerActionsScreen extends Screen {
         g.drawCenteredString(font,title,width/2,10,0xFFAA00);
         if(results)text(g,resultLines,resultLayout,10,60,width-20,height-96);
         else if(!actions.isEmpty()){
-            g.fill(8,58,divider()+3,height-35,0x44000000);g.enableScissor(10,60,divider(),height-36);
+            g.enableScissor(10,60,divider(),height-36);
             for(int i=listScroll;i<actions.size();i++){
                 int y=60+(i-listScroll)*ACTION_ROW_H;if(y>=height-36)break;
                 if(i==selected)g.fill(10,y,divider(),y+ACTION_ROW_H-1,0x55336699);
@@ -158,7 +158,7 @@ public final class LoggerActionsScreen extends Screen {
     }
     private void text(GuiGraphics g,Object value,WrappedLogText layout,int x,int y,int w,int h){
         if(w<10||h<10)return;var lines=layout.get(font,value,w-8);int visible=Math.max(1,h/11);textScroll=Math.min(textScroll,Math.max(0,lines.size()-visible));
-        g.fill(x-2,y-2,x+w,y+h,0x44000000);g.enableScissor(x,y,x+w,y+h);
+        g.enableScissor(x,y,x+w,y+h);
         for(int i=textScroll;i<Math.min(lines.size(),textScroll+visible);i++)g.drawString(font,lines.get(i),x+3,y+(i-textScroll)*11,0xFFFFFF);g.disableScissor();
     }
     public void resize(Minecraft minecraft,int width,int height){remember();super.resize(minecraft,width,height);}

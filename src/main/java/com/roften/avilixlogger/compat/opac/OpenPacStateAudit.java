@@ -49,17 +49,6 @@ public final class OpenPacStateAudit {
             });
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { failure("impersonation-before"); return null; }
     }
-    public static void broadcast(ServerPlayer caller, Object party, net.minecraft.network.chat.Component message, boolean threw) {
-        if (!available || caller == null || !ModStateAudit.enabled(caller.server, ActionType.CHAT_MESSAGE)) return;
-        try {
-            var tag = new CompoundTag(); tag.putString("PartyId", StateAccess.call(party, "getId").toString());
-            tag.putString("SubmittedCallerUUID", caller.getUUID().toString()); tag.putString("MessageText", message.getString());
-            tag.putString("MessageJson", net.minecraft.network.chat.Component.Serializer.toJson(message, caller.registryAccess()));
-            tag.putBoolean("NativeThrew", threw); tag.putString("Phase", threw ? "native-broadcast-threw" : "native-broadcast-returned");
-            tag.putString("Meaning", "party notification/chat broadcast, not client delivery confirmation");
-            ModStateAudit.receipt(caller.server, "openpartiesandclaims", "party-broadcast", ActionType.CHAT_MESSAGE, new CompoundTag(), tag);
-        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { failure("broadcast"); }
-    }
     private static MinecraftServer server(Object manager) throws ReflectiveOperationException { return (MinecraftServer) StateAccess.call(manager, "getServer"); }
     private static boolean loaded(Object manager) throws ReflectiveOperationException { return Boolean.TRUE.equals(StateAccess.call(manager, "isLoaded")); }
     private static void failure(String path) { AdaptiveLogDiagnostics.adapterFailure("opac-" + path); }

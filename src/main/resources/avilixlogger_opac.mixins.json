@@ -16,7 +16,6 @@
     "ImpersonationMixin",
     "ModesMixin",
     "PacketCauseMixin",
-    "PartyBroadcastMixin",
     "PartyManagerMixin",
     "PartyMixin",
     "QueueCauseMixin",

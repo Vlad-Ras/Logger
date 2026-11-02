@@ -23,7 +23,7 @@ public final class Ae2CraftingAudit {
     }
     private record Context(ServerLevel level, LogEntry row, GenericStack output, CompoundTag data, boolean production) {}
     public static Submission beginSubmission(ICraftingPlan plan, IActionSource source, ICraftingCPU cpu) {
-        return Ae2Audit.enabled() ? submission(plan, source, cpu, true) : null;
+        return (Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(26)) ? submission(plan, source, cpu, true) : null;
     }
     /** Data only: never enables capture or appends to production storage. */
     public static Submission inspectSubmission(ICraftingPlan plan, IActionSource source, ICraftingCPU cpu) {
@@ -40,17 +40,17 @@ public final class Ae2CraftingAudit {
         } catch (Throwable invalid) { failure(); return null; }
     }
     public static Cancellation beginCancellation(AEBaseMenu menu, CraftingCPUCluster cpu) {
-        return Ae2Audit.enabled() ? cancellation(menu, cpu, true) : null;
+        return (Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(26)) ? cancellation(menu, cpu, true) : null;
     }
     /** Data only: no player permission/authentication mutation. */
     public static Cancellation inspectCancellation(AEBaseMenu menu, CraftingCPUCluster cpu) { return cancellation(menu, cpu, false); }
     public static Cancellation beginCpuCancellation(CraftingCPUCluster cpu) {
-        return Ae2Audit.enabled() ? cpuCancellation(cpu, true) : null;
+        return (Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(26)) ? cpuCancellation(cpu, true) : null;
     }
     /** Data only, including the current synchronous menu source; never enables production capture. */
     public static Cancellation inspectCpuCancellation(CraftingCPUCluster cpu) { return cpuCancellation(cpu, false); }
     public static Cancellation beginLinkCancellation(ICraftingLink link) {
-        return Ae2Audit.enabled() ? linkCancellation(link, true) : null;
+        return (Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(26)) ? linkCancellation(link, true) : null;
     }
     /** Data only: no authorization or production append. */
     public static Cancellation inspectLinkCancellation(ICraftingLink link) { return linkCancellation(link, false); }
@@ -85,11 +85,11 @@ public final class Ae2CraftingAudit {
             return new Cancellation(context, link);
         } catch (Throwable invalid) { failure(); return null; }
     }
-    public static Completion beginCompletion(CraftingCPUCluster cpu) { return Ae2Audit.enabled() ? completion(cpu, true) : null; }
+    public static Completion beginCompletion(CraftingCPUCluster cpu) { return (Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(26)) ? completion(cpu, true) : null; }
     /** Native state inspector only; no production append or authorization mutation. */
     public static Completion inspectCompletion(CraftingCPUCluster cpu) { return completion(cpu, false); }
     public static LinkedCancellation beginLinkedCancellation(Ae2LinkedCancellationState state) {
-        return Ae2Audit.enabled() ? linkedCancellation(state, true) : null;
+        return (Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(26)) ? linkedCancellation(state, true) : null;
     }
     /** Data only: never enables authorization or appends to production storage. */
     public static LinkedCancellation inspectLinkedCancellation(Ae2LinkedCancellationState state) { return linkedCancellation(state, false); }
@@ -175,7 +175,7 @@ public final class Ae2CraftingAudit {
         context.data().put("Cpu", tag);
     }
     private static LogEntry finish(Context context, String outcome) {
-        if (!serverThread() || context.production() && !Ae2Audit.enabled()) return null;
+        if (!serverThread() || context.production() && !(Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(26))) return null;
         var output = context.output(); var key = output.what(); var type = key.getType(); var row = context.row();
         row.type = outcome.equals("finished") ? ActionType.ME_CRAFT_FINISH : outcome.equals("cancelled") ? ActionType.ME_CRAFT_CANCEL : ActionType.ME_CRAFT_REQUEST;
         row.source += outcome.equals("finished") ? ":finish" : outcome.equals("cancelled") ? ":cancel" : ":submit";

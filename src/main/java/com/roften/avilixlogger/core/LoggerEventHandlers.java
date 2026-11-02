@@ -1188,7 +1188,8 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onEntityDeath(LivingDeathEvent event) {
-        if (!CaptureTypePolicy.enabled(3)) return;
+        if (!(event.getEntity() instanceof ServerPlayer) && !CaptureTypePolicy.enabled(3)) return;
+        if (event.getEntity() instanceof ServerPlayer && !CaptureTypePolicy.enabled(29)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
         net.minecraft.world.entity.LivingEntity victim = event.getEntity();
@@ -1197,7 +1198,7 @@ public final class LoggerEventHandlers {
         // Player deaths belong to the player-lifecycle stream. Keep accepting logEntities as a
         // compatibility switch for existing configs where deaths used to live under that option.
         if (playerDeath) {
-            if (!LoggerConfig.VALUES.logPlayerLifecycle.get() && !LoggerConfig.VALUES.logEntities.get()) return;
+            if (!CaptureTypePolicy.enabled(29)) return;
         } else if (!LoggerConfig.VALUES.logEntities.get()) {
             return;
         }
@@ -1241,7 +1242,7 @@ public final class LoggerEventHandlers {
                 preNbt = snap.entityNbt;
             }
         }
-        e.deferSnapshot(LogEntry.SnapshotField.ENTITY, preNbt != null ? preNbt : NbtSerde.snapshotEntity(level, victim));
+        if (!playerDeath) e.deferSnapshot(LogEntry.SnapshotField.ENTITY, preNbt != null ? preNbt : NbtSerde.snapshotEntity(level, victim));
         if (playerDeath) {
             ServerPlayer player = (ServerPlayer) victim;
             String deathMessage = "";
@@ -1258,6 +1259,10 @@ public final class LoggerEventHandlers {
         e.extra=DeathLogDetails.capture(victim,event.getSource(),message);
         WeaponCombatAudit.death(e,victim,event.getSource());
         LoggerRuntime.storage(level).append(e);
+        if (playerDeath) {
+            var kill=DeathLogDetails.killerRow(e,event.getSource());
+            if(kill!=null)LoggerRuntime.storage(level).append(kill);
+        }
     }
 
     

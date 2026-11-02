@@ -31,7 +31,7 @@ public final class CaptureTypesScreen extends Screen {
     private Button enableAll, disableAll;
 
     public CaptureTypesScreen(Screen parent) {
-        super(Component.literal("AvilixLogger 2.2.0-dev — Запись событий"));
+        super(Component.literal("AvilixLogger — Запись событий"));
         this.parent = parent;
     }
 
@@ -71,7 +71,7 @@ public final class CaptureTypesScreen extends Screen {
             button.setY(54+(i-scroll)*21);
             boolean enabled=loaded&&(disabledMask&(1<<i))==0;
             button.setMessage(Component.literal((enabled?"●  ":"○  ")+
-                    Component.translatable("gui.avilixlogger.type."+KEYS[i+1]).getString()
+                    (CaptureTypePolicy.title(i+1) != null ? CaptureTypePolicy.title(i+1) : Component.translatable("gui.avilixlogger.type."+KEYS[i+1]).getString())
                     +(enabled?"  —  ВКЛ":"  —  ВЫКЛ")));
             button.active=loaded&&canEdit&&!pending;
         }
@@ -112,7 +112,7 @@ public final class CaptureTypesScreen extends Screen {
     @Override public void render(GuiGraphics g,int mx,int my,float partial) {
         LoggerGuiWidgets.beginFrame(g,width,height);
         int x=Math.max(8,(width-Math.min(width-20,450))/2);
-        g.fill(x-5,4,x+Math.min(width-16,450)+5,height-4,0xCC090B0F);
+
         g.drawCenteredString(font,title,width/2,8,0xFFFFAA00);
         g.drawCenteredString(font,Component.literal("Управление сбором, не фильтр существующих записей"),
                 width/2,18,0xFFAAAAAA);
@@ -122,7 +122,7 @@ public final class CaptureTypesScreen extends Screen {
             g.drawString(font,"▼ Остальные типы ниже",x,Math.min(height-70,57+count*21),0xFF999999);
         g.drawCenteredString(font,font.plainSubstrByWidth(status,Math.max(30,width-24)),
                 width/2,height-62,lastSuccess?0xFFAAAAAA:0xFFFF6666);
-        g.drawCenteredString(font,"Выключенные события не сохраняются и не могут быть откатаны",
+        g.drawCenteredString(font,"Пауза ВЫКЛ: полная очередь задерживает серверный тик",
                 width/2,height-48,0xFFFFAA55);
         for(var widget:renderables)widget.render(g,mx,my,partial);
     }

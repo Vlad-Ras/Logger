@@ -6,7 +6,7 @@ public final class CaptureTypePolicyTest {
         int previous=CaptureTypePolicy.mask();
         try {
             CaptureTypePolicy.install(0);
-            for(int i=1;i<=12;i++)check(CaptureTypePolicy.enabled(i),"default type disabled");
+            for(int i=1;i<=CaptureTypePolicy.GROUPS;i++)check(CaptureTypePolicy.enabled(i),"default type disabled");
             int mask=CaptureTypePolicy.changed(0,11,false);
             CaptureTypePolicy.install(mask);
             String bearing=CreateContraptionKind.BEARING.source(java.util.UUID.randomUUID(),"work");
@@ -27,11 +27,17 @@ public final class CaptureTypePolicyTest {
             CaptureTypePolicy.install(CaptureTypePolicy.changed(CaptureTypePolicy.mask(),10,false));
             check(!CaptureTypePolicy.allows(ActionType.BACKPACK_PUT,"mod:backpacked",null),"backpack class not disabled");
             check(CaptureTypePolicy.allows(ActionType.CART_ROLLBACK,"create:cart:sample",null),"rollback audit must remain available");
+            CaptureTypePolicy.install(CaptureTypePolicy.changed(0,26,false));
+            check(!CaptureTypePolicy.allows(ActionType.ME_CRAFT_FINISH,"ae2:crafting",null),"AE2 craft handler survived");
+            check(CaptureTypePolicy.allows(ActionType.ME_TAKE,"ae2:menu",null),"AE2 craft switch disabled resources");
+            CaptureTypePolicy.install(CaptureTypePolicy.changed(0,13,false));
+            check(!CaptureTypePolicy.allows(ActionType.ME_TAKE,"ae2:menu",null),"full AE2 switch survived");
+            check(CaptureTypePolicy.allows(ActionType.CONTAINER_PUT,"player:menu",null),"AE2 switch disabled normal containers");
             CaptureTypePolicy.install(CaptureTypePolicy.ALL_DISABLED);
-            for(int i=1;i<=12;i++)check(!CaptureTypePolicy.enabled(i),"disable all did not take");
+            for(int i=1;i<=CaptureTypePolicy.GROUPS;i++)check(!CaptureTypePolicy.enabled(i),"disable all did not take");
             check(CaptureTypePolicy.changed(CaptureTypePolicy.ALL_DISABLED,7,true)
                     == CaptureTypePolicy.ALL_DISABLED-(1<<6),"enable one touched other types");
-            try { CaptureTypePolicy.changed(0,13,false);throw new AssertionError("untrusted type accepted");}
+            try { CaptureTypePolicy.changed(0,CaptureTypePolicy.GROUPS+1,false);throw new AssertionError("untrusted type accepted");}
             catch(IllegalArgumentException expected){}
         } finally { CaptureTypePolicy.install(previous); }
         System.out.println("CAPTURE_TYPES_2_1_24_OK atomic groups, bearing hot-path, overlapping types, rollback safety");

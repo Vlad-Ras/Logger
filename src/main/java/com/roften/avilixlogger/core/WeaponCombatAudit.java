@@ -18,7 +18,7 @@ public final class WeaponCombatAudit {
     private static final ThreadLocal<Fire> FIRE=new ThreadLocal<>();
     private static final ThreadLocal<Reload> RELOAD=new ThreadLocal<>();
     private WeaponCombatAudit() {}
-    public static boolean enabled() {return LoggerConfig.isEnabled() && !CartAuditContext.restoring();}
+    public static boolean enabled() {return LoggerConfig.isCaptureEnabled() && CaptureTypePolicy.enabled(15) && !CartAuditContext.restoring();}
     private static boolean traceEnabled() {return enabled() && CaptureTypePolicy.enabled(3)
             && (LoggerConfig.VALUES.logEntities.get() || LoggerConfig.VALUES.logPlayerLifecycle.get()
                 || CaptureTypePolicy.enabled(4) && (LoggerConfig.VALUES.logProjectileShots.get() || LoggerConfig.VALUES.logProjectileHits.get()));}
@@ -104,7 +104,7 @@ public final class WeaponCombatAudit {
         try {
             var shot=shot(source);if(shot==null)return;
             deathEvidence(death,shot,victim,source.getDirectEntity());
-            append(level,entry(shot,ActionType.WEAPON_KILL,"kill",victim,source.getDirectEntity()));
+            if (!(victim instanceof ServerPlayer)) append(level,entry(shot,ActionType.WEAPON_KILL,"kill",victim,source.getDirectEntity()));
         }catch(RuntimeException failure){failure();}
     }
     /** Detached evidence kernel; never changes the death actor or publishes a row. */

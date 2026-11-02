@@ -54,7 +54,7 @@ final class HotPathMemoryTest {
         HotPathMetrics.queued(ActionType.ME_PUT,"ae2:terminal");
         HotPathMetrics.queued(ActionType.BLOCK_BREAK,"create:bearing:fixture");
         String report=HotPathMetrics.stop();
-        check(report.contains("AE2: 1")&&report.contains("Create подшипники: 1"),"diagnostic source counts incorrect");
+        check(report.contains("AE2: 1")&&report.contains("Create: подшипники: 1"),"diagnostic source counts incorrect");
         HotPathMetrics.queued(ActionType.ME_PUT,"ae2:terminal");
         check(HotPathMetrics.report().equals(report),"stopped counters changed");
         HotPathMetrics.clear();
