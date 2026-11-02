@@ -29,7 +29,7 @@ public final class LoggerRuntime {
         var events=ASYNC;if(events!=null)states.add(events.queueStatistics());
         var journal=PENDING;if(journal!=null)states.add(journal.queueStatistics());
         if(states.isEmpty())return ServerCaptureGuard.report()+"\nОчереди Logger ещё не запущены.";
-        var text=new StringBuilder(ServerCaptureGuard.report()+"\nОчереди Logger (пики с последнего запуска замеров):\n");
+        var text=new StringBuilder(ServerCaptureGuard.report()+"\n"+(STORAGE==null?"ClickHouse ещё не подключён: записи ожидают в локальном журнале.\n":"")+"Буферы Logger:\n");
         for(var state:states) {
             String name=switch(state.name()){case "cpu"->"Обработка снимков";case "events"->"События";case "journal"->"Запись на диск";default->state.name();};
             text.append(String.format(java.util.Locale.ROOT,"%s: занято %d из %d; буфер %.1f из %.1f МБ (пик %.1f МБ).\n",

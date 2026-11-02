@@ -19,9 +19,8 @@ public final class WeaponCombatAudit {
     private static final ThreadLocal<Reload> RELOAD=new ThreadLocal<>();
     private WeaponCombatAudit() {}
     public static boolean enabled() {return LoggerConfig.isCaptureEnabled() && CaptureTypePolicy.enabled(15) && !CartAuditContext.restoring();}
-    private static boolean traceEnabled() {return enabled() && CaptureTypePolicy.enabled(3)
-            && (LoggerConfig.VALUES.logEntities.get() || LoggerConfig.VALUES.logPlayerLifecycle.get()
-                || CaptureTypePolicy.enabled(4) && (LoggerConfig.VALUES.logProjectileShots.get() || LoggerConfig.VALUES.logProjectileHits.get()));}
+    private static boolean traceEnabled() {return enabled() && (CaptureTypePolicy.enabled(29) || CaptureTypePolicy.enabled(3)
+            && (LoggerConfig.VALUES.logEntities.get() || CaptureTypePolicy.enabled(4) && (LoggerConfig.VALUES.logProjectileShots.get() || LoggerConfig.VALUES.logProjectileHits.get()))); }
     public static void failure() {AdaptiveLogDiagnostics.adapterFailure("scguns");}
     public static boolean wantsTrace(ServerLevel level){return level.getServer().isSameThread() && traceEnabled();}
     public static void logout(net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event){
@@ -110,6 +109,7 @@ public final class WeaponCombatAudit {
     /** Detached evidence kernel; never changes the death actor or publishes a row. */
     public static void deathEvidence(LogEntry death,WeaponCombatTrace.Shot shot,LivingEntity victim,Entity projectile){
         var data=WeaponCombatTrace.payload(shot,"death",victim);trajectory(data,projectile);
+        DeathLogDetails.weapon(death,shot.weaponId());
         death.source="mod:scguns:death";death.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,data);
         death.deferSnapshot(LogEntry.SnapshotField.ITEM,shot.weapon());
     }

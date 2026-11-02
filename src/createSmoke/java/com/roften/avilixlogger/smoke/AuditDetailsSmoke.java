@@ -55,7 +55,7 @@ final class AuditDetailsSmoke {
         var death=new LogEntry();death.type=ActionType.PLAYER_DEATH;death.actorName="Victim";death.extra=DeathLogDetails.capture(new ServerPlayer(level.getServer(),level,new com.mojang.authlib.GameProfile(UUID.randomUUID(),"Victim"),net.minecraft.server.level.ClientInformation.createDefault()),source,"Victim was shot by SignEditor");
         String context=DeathLogDetails.describe(death).stream().map(Component::getString).collect(java.util.stream.Collectors.joining("\n"));
         check(context.contains("minecraft:arrow")&&context.contains(arrow.getUUID().toString())&&context.contains(editor.getUUID().toString())&&context.contains("Ответственный источник"),"projectile/direct/responsible damage identities collapsed");
-        check(DeathLogDetails.message(death).equals("Victim was shot by SignEditor"),"death text lost");
+        check(DeathLogDetails.message(death).contains("Victim был убит игроком SignEditor") && context.contains("Victim was shot by SignEditor"),"death text lost");
         death.extra=DeathLogDetails.capture(editor,level.damageSources().fall(),"fall");check(!DeathLogDetails.describe(death).stream().anyMatch(c->c.getString().startsWith("Ответственный источник")),"environmental death invented a killer");
         death.extra="death_message:legacy victim";check(DeathLogDetails.message(death).equals("legacy victim"),"old death text unreadable");
         death.extra="{\"AvilixDeath\":{\"Version\":1,\"Message\":{}}}";check(DeathLogDetails.message(death)==null,"malformed context broke fallback");

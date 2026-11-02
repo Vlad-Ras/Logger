@@ -52,7 +52,7 @@ public final class LogText {
         if ((e.type == ActionType.PLAYER_DEATH || e.type == ActionType.PLAYER_KILL) && DeathLogDetails.message(e) != null) {
             String deathMessage = DeathLogDetails.message(e);
             if (!deathMessage.isBlank()) {
-                c.append(Component.literal(deathMessage).withStyle(ChatFormatting.DARK_RED));
+                c.append(DeathLogDetails.messageComponent(e).copy().withStyle(ChatFormatting.DARK_RED));
                 c.append(Component.literal(" (").withStyle(ChatFormatting.DARK_GRAY));
                 c.append(coordComponent(e));
                 c.append(Component.literal(")").withStyle(ChatFormatting.DARK_GRAY));

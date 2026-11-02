@@ -14,7 +14,13 @@ final class PlayerDeathNativeSmoke {
         var killer=new ServerPlayer(server,world,new GameProfile(UUID.randomUUID(),"Roften"),ClientInformation.createDefault());
         var victim=new ServerPlayer(server,world,new GameProfile(UUID.randomUUID(),"Viant"),ClientInformation.createDefault());
         killer.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.NETHERITE_SWORD));
+        var dispatched=new java.util.concurrent.atomic.AtomicInteger();
+        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.HIGHEST,(net.neoforged.neoforge.event.entity.living.LivingDeathEvent event)->{
+            if(event.getEntity()==victim){dispatched.incrementAndGet();event.setCanceled(true);}
+        });
         var source=world.damageSources().playerAttack(killer);
+        victim.die(source);victim.die(world.damageSources().fall());
+        check(dispatched.get()==2,"native ServerPlayer.die did not publish PvP/environment death events");
         var death=new LogEntry();death.type=ActionType.PLAYER_DEATH;death.actorUuid=victim.getUUID();death.actorName="Viant";death.dim=world.dimension().location().toString();
         death.extra=DeathLogDetails.capture(victim,source,source.getLocalizedDeathMessage(victim).getString());
         var kill=DeathLogDetails.killerRow(death,source);

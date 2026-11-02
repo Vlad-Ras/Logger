@@ -24,6 +24,7 @@ public final class DeathLogDetails {
         if(source.getEntity() instanceof LivingEntity killer && !killer.getMainHandItem().isEmpty()) {
             context.addProperty("WeaponId",net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(killer.getMainHandItem().getItem()).toString());
             context.addProperty("WeaponName",killer.getMainHandItem().getHoverName().getString());
+            context.addProperty("WeaponCustomName",killer.getMainHandItem().has(net.minecraft.core.component.DataComponents.CUSTOM_NAME));
         }
         context.addProperty("MessageId",source.getMsgId());context.addProperty("DirectDamage",source.isDirect());
         context.add("Victim",identity(victim));context.add("Direct",identity(source.getDirectEntity()));context.add("Responsible",identity(source.getEntity()));
@@ -44,18 +45,26 @@ public final class DeathLogDetails {
             return value;
         }catch(RuntimeException invalid){return null;}
     }
-    public static String message(LogEntry row){
-        if(row.extra!=null&&row.extra.startsWith("death_message:"))return row.extra.substring("death_message:".length()).trim();
+    public static void weapon(LogEntry row,String id) {
+        var context=context(row);if(context==null)return;
+        context.addProperty("WeaponId",id);context.addProperty("WeaponName",id);context.addProperty("WeaponCustomName",false);
+        var envelope=new JsonObject();envelope.add("AvilixDeath",context);row.extra=envelope.toString();
+    }
+    public static String message(LogEntry row){var component=messageComponent(row);return component==null?null:component.getString();}
+    public static Component messageComponent(LogEntry row){
+        if(row.extra!=null&&row.extra.startsWith("death_message:"))return Component.literal(row.extra.substring("death_message:".length()).trim());
         var context=context(row);if(context==null)return null;
         var killer=context.getAsJsonObject("Responsible");var victim=context.getAsJsonObject("Victim");
         if(killer!=null && "minecraft:player".equals(text(killer,"Type")) && victim!=null) {
-            String weapon=text(context,"WeaponName");String id=text(context,"WeaponId");
-            if(!id.isBlank()) {var item=net.minecraft.core.registries.BuiltInRegistries.ITEM.get(net.minecraft.resources.ResourceLocation.tryParse(id));if(item!=null)weapon=item.getDescription().getString();}
-            String with=weapon.isBlank()?"":" при помощи "+weapon;
-            if(row.type==ActionType.PLAYER_KILL)return text(killer,"Name")+" убил игрока "+text(victim,"Name")+with;
-            return text(victim,"Name")+" был убит игроком "+text(killer,"Name")+with;
+            String phrase=row.type==ActionType.PLAYER_KILL ? text(killer,"Name")+" убил игрока "+text(victim,"Name") : text(victim,"Name")+" был убит игроком "+text(killer,"Name");
+            var result=Component.literal(phrase);String name=text(context,"WeaponName");
+            var id=net.minecraft.resources.ResourceLocation.tryParse(text(context,"WeaponId"));
+            boolean custom=context.has("WeaponCustomName") && context.get("WeaponCustomName").getAsBoolean();
+            if(id!=null && !custom)result.append(Component.literal(" при помощи ")).append(net.minecraft.core.registries.BuiltInRegistries.ITEM.get(id).getDescription());
+            else if(!name.isBlank())result.append(Component.literal(" при помощи "+name));
+            return result;
         }
-        return text(context,"Message");
+        return Component.literal(text(context,"Message"));
     }
     public static List<Component> describe(LogEntry row){
         var context=context(row);if(context==null)return List.of();var lines=new ArrayList<Component>();
