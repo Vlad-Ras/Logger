@@ -301,7 +301,9 @@ public final class RollbackEngine {
 
             for (LogEntry e : batch) {
                 if (CartAuditContext.id(e.source) != null) throw new IllegalStateException("В области есть вагонеточная конструкция Create. Используйте /log cart rollback <ID> <контрольная точка>, чтобы одновременно откатить конструкцию, груз и блоки");
-                if (isBlockRestoreType(e.type)) {
+                // A slot receipt describes a delta; without a before snapshot it must not
+                // overwrite an actual checkpoint collected for the same block.
+                if (isBlockRestoreType(e.type) && hasBlockBefore(e)) {
                     BlockPos pos = new BlockPos(e.x, e.y, e.z);
                     // Overwrite as we go backwards in time; the last value wins => oldest snapshot.
                     BlockSnapshot replacement = new BlockSnapshot(e.blockBefore, e.beBefore, e.containerSlotsBefore, e.type);
@@ -496,6 +498,11 @@ public final class RollbackEngine {
                 || t == ActionType.BLOCK_ENTITY_NBT_CHANGE
                 || t == ActionType.CONTAINER_PUT
                 || t == ActionType.CONTAINER_TAKE;
+    }
+
+    private static boolean hasBlockBefore(LogEntry e){
+        return e.blockBefore!=null&&!e.blockBefore.isBlank()||e.beBefore!=null&&!e.beBefore.isBlank()
+            ||e.containerSlotsBefore!=null&&!e.containerSlotsBefore.isBlank();
     }
 
     private static int rollbackSetBlockFlags(BlockState state) {
