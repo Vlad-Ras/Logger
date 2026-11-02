@@ -14,6 +14,7 @@ public final class CaptureTypePolicyTest {
             check(!CaptureTypePolicy.allowsCreateKind(CreateContraptionKind.BEARING),"bearing hot-path allowed");
             check(CaptureTypePolicy.allowsCreateKind(CreateContraptionKind.TRAIN),"bearings muted train");
             check(!CaptureTypePolicy.allows(ActionType.BLOCK_BREAK,bearing,null),"bearing block row passed");
+            check(CaptureTypePolicy.allows(ActionType.PLAYER_DEATH,bearing,null),"bearing switch suppressed a player's death");
             check(CaptureTypePolicy.allows(ActionType.BLOCK_BREAK,"player:use",null),"nonbearing block row lost");
             mask=CaptureTypePolicy.changed(mask,11,true);
             mask=CaptureTypePolicy.changed(mask,2,false);

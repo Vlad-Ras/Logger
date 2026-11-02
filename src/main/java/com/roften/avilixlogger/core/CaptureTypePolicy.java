@@ -28,11 +28,14 @@ public final class CaptureTypePolicy {
 
     public static boolean allows(ActionType type, String source, String extra) {
         if(type!=ActionType.CAPTURE_GAP&&!ServerCaptureGuard.captureAllowed())return false;
+        if (type == ActionType.PLAYER_DEATH || type == ActionType.PLAYER_KILL) return enabled(29);
         if (type == null || disabledMask == 0 || type == ActionType.CART_ROLLBACK) return true;
         // Filter specific source families before generic action categories.
         if (source != null) {
-            for (var module : ModLogFilters.MODULES)
-                if (source.startsWith(module.sourcePrefix()) && !enabled(module.preset())) return false;
+            for (int i=0;i<ModLogFilters.MODULES.size();i++) {
+                var module=ModLogFilters.MODULES.get(i);var prefix=module.sourcePrefix();
+                if ((source.startsWith(prefix) || source.length()==prefix.length()-1 && prefix.startsWith(source)) && !enabled(module.preset())) return false;
+            }
             if (source.startsWith("create:train:") || source.equals("create:train"))
                 if (!enabled(5)) return false;
             if (source.startsWith("create:cart:") && !enabled(9)) return false;
@@ -47,7 +50,6 @@ public final class CaptureTypePolicy {
             if ((type == ActionType.ME_PUT || type == ActionType.ME_TAKE) && !enabled(27)) return false;
             if (!(type.name().startsWith("ME_CRAFT_") || type == ActionType.ME_PUT || type == ActionType.ME_TAKE) && !enabled(28)) return false;
         }
-        if (type == ActionType.PLAYER_DEATH || type == ActionType.PLAYER_KILL) return enabled(29);
         if (type.name().startsWith("TRAIN_") && !enabled(5)) return false;
         if (type.name().startsWith("CART_") && !enabled(9)
                 && (source == null || source.startsWith("create:cart:"))) return false;
