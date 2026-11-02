@@ -111,6 +111,7 @@ public final class LoggerEventHandlers {
     }
 
     private static final class ContainerCtx {
+        long captureGeneration=ServerCaptureGuard.generation();
         final String dim;
         final BlockPos pos;
         CompoundTag beforeSlots;
@@ -149,6 +150,7 @@ public final class LoggerEventHandlers {
     private static final Map<UUID, PendingBlockContainerOpen> PENDING_BLOCK_CONTAINER_OPEN = new ConcurrentHashMap<>();
 
     private static final class EntityContainerCtx {
+        long captureGeneration=ServerCaptureGuard.generation();
         final String dim;
         final UUID entityUuid;
         final String entityType;
@@ -168,6 +170,7 @@ public final class LoggerEventHandlers {
     private static final Map<UUID, EntityContainerCtx> OPEN_ENTITY_CONTAINER = new ConcurrentHashMap<>();
 
     private static final class GenericMenuCtx {
+        long captureGeneration=ServerCaptureGuard.generation();
         final String dim;
         final BlockPos playerPos;
         final int containerId;
@@ -232,7 +235,7 @@ public final class LoggerEventHandlers {
     public void onBlockBreak(BlockEvent.BreakEvent event) {
         if (!CaptureTypePolicy.enabled(1)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getPlayer())) return;
-        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
+        if (!LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Player p = event.getPlayer();
         if (p == null) return;
@@ -264,7 +267,7 @@ public final class LoggerEventHandlers {
     public void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
         if (!CaptureTypePolicy.enabled(1)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity() instanceof Player p0 ? p0 : null)) return;
-        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
+        if (!LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logBlocks.get()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Entity entity = event.getEntity();
         if (!(entity instanceof Player p)) return;
@@ -294,7 +297,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Player p = event.getEntity();
         if (p == null) return;
@@ -313,7 +316,7 @@ public final class LoggerEventHandlers {
     public void onRightClickItem(PlayerInteractEvent.RightClickItem event) {
         if (!CaptureTypePolicy.enabled(4)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -328,7 +331,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Player p = event.getEntity();
         if (p == null) return;
@@ -542,7 +545,7 @@ public final class LoggerEventHandlers {
     public void onAttackEntity(AttackEntityEvent event) {
         if (!CaptureTypePolicy.enabled(3)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
         Entity target = event.getTarget();
@@ -576,7 +579,7 @@ public final class LoggerEventHandlers {
         // Container interaction can remain enabled while entity interaction is muted.
         if (!CaptureTypePolicy.enabled(3) && !CaptureTypePolicy.enabled(2)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
         Entity target = event.getTarget();
@@ -632,7 +635,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onContainerOpen(PlayerContainerEvent.Open event) {
         if (!CaptureTypePolicy.enabled(2)) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -757,7 +760,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onEntityMount(EntityMountEvent event) {
         if (!CaptureTypePolicy.enabled(3)) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntityMounting() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -801,7 +804,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onLeftClickBlockInspect(PlayerInteractEvent.LeftClickBlock event) {
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
         if (!InspectManager.isInspecting(sp)) return;
@@ -817,7 +820,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onContainerClose(PlayerContainerEvent.Close event) {
         if (!CaptureTypePolicy.enabled(2)) return;
-        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()) return;
+        if (!LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logContainers.get()) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         Level lvl = sp.level();
         if (!(lvl instanceof ServerLevel level)) return;
@@ -827,7 +830,7 @@ public final class LoggerEventHandlers {
         // Capture the after snapshot on the server thread, then parse/diff it in the CPU worker.
         try {
             EntityContainerCtx ectx = OPEN_ENTITY_CONTAINER.remove(sp.getUUID());
-            if (ectx != null && ectx.dim.equals(level.dimension().location().toString())) {
+            if (ectx != null && ectx.captureGeneration==ServerCaptureGuard.generation() && ectx.dim.equals(level.dimension().location().toString())) {
                 Entity ent = level.getEntity(ectx.entityUuid);
                 if (ent instanceof Container cont) {
                     CompoundTag afterInv = EntityContainerSerde.snapshot(cont, level.registryAccess());
@@ -875,7 +878,7 @@ public final class LoggerEventHandlers {
         // including future mods, while deliberately excluding the player's own inventory slots.
         try {
             GenericMenuCtx generic = OPEN_GENERIC_MENU.remove(sp.getUUID());
-            if (generic != null && generic.dim.equals(level.dimension().location().toString())
+            if (generic != null && generic.captureGeneration==ServerCaptureGuard.generation() && generic.dim.equals(level.dimension().location().toString())
                     && event.getContainer() != null && event.getContainer().containerId == generic.containerId) {
                 CompoundTag after = GenericMenuSnapshot.snapshot(event.getContainer(), level.registryAccess());
                 if (after != null) {
@@ -897,7 +900,7 @@ public final class LoggerEventHandlers {
         // snapshot on close would double-count cell/upgrade changes and falsely attribute
         // changes caused by an import/export bus while someone merely had its GUI open.
         if (isAe2Menu(event.getContainer())) return;
-        if (ctx == null) return;
+        if (ctx == null || ctx.captureGeneration!=ServerCaptureGuard.generation()) return;
         if (!ctx.dim.equals(level.dimension().location().toString()) || !WorldSnapshotAccess.readable(level,ctx.pos)) return;
 
         CompoundTag afterSlotsTag = ContainerSlotSnapshot.snapshotTag(level, ctx.pos);
@@ -947,13 +950,14 @@ public final class LoggerEventHandlers {
     /** Captures only changes inside this actual click, never the entire time a GUI was open. */
     public static MenuAction beginMenuAction(ServerPlayer player) { return beginMenuAction(player,"player:container_click"); }
     public static MenuAction beginMenuAction(ServerPlayer player,String actionSource) {
-        if (!CaptureTypePolicy.enabled(2) || player==null || !player.server.isSameThread() || !LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logContainers.get()
+        if (!CaptureTypePolicy.enabled(2) || player==null || !player.server.isSameThread() || !LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logContainers.get()
                 || isAe2Menu(player.containerMenu) || com.roften.avilixlogger.compat.corpse.CorpseAudit.handles(player.containerMenu) || com.roften.avilixlogger.compat.accessories.AccessoriesAudit.handles(player.containerMenu)
                 || player.containerMenu.slots.size() > 4096) return null;
         try { return new MenuAction(player,actionSource); } catch (Throwable failure) { return null; }
     }
 
     public static final class MenuAction {
+        private final long captureGeneration=ServerCaptureGuard.generation();
         private final ServerPlayer player;
         private final net.minecraft.world.inventory.AbstractContainerMenu menu;
         private final ServerLevel level;
@@ -976,7 +980,8 @@ public final class LoggerEventHandlers {
             beforeProperties=GenericMenuSnapshot.properties(menu);
             before = snapshot(); beforeBe = block == null ? null : NbtSerde.snapshotBlockEntityAt(level,block.pos);
             CompoundTag prior = block != null ? block.beforeSlots : entity != null ? entity.beforeInv : generic != null ? generic.beforeSlots : null;
-            emit(prior, before, block == null ? null : block.beforeBe, beforeBe, false);
+            boolean sameGeneration=block!=null?block.captureGeneration==captureGeneration:entity!=null?entity.captureGeneration==captureGeneration:generic==null||generic.captureGeneration==captureGeneration;
+            if(sameGeneration)emit(prior,before,block==null?null:block.beforeBe,beforeBe,false);
         }
         private CompoundTag snapshot() {
             if (block != null) return ContainerSlotSnapshot.snapshotTag(level, block.pos);
@@ -988,14 +993,15 @@ public final class LoggerEventHandlers {
             try { finishCaptured(); } catch (Throwable ignored) {}
         }
         private void finishCaptured() {
+            if(captureGeneration!=ServerCaptureGuard.generation())return;
             if(block!=null && !WorldSnapshotAccess.readable(level,block.pos))return;
             emitProperties(GenericMenuSnapshot.properties(menu));
             CompoundTag after = snapshot();
             CompoundTag afterBe = block == null ? null : NbtSerde.snapshotBlockEntityAt(level,block.pos);
             emit(before, after, beforeBe, afterBe, true);
-            if (block != null) { block.beforeSlots = after; block.beforeBe = afterBe; }
-            if (entity != null) entity.beforeInv = after;
-            if (generic != null) generic.beforeSlots = after;
+            if (block != null) { block.beforeSlots = after; block.beforeBe = afterBe;block.captureGeneration=captureGeneration; }
+            if (entity != null) {entity.beforeInv = after;entity.captureGeneration=captureGeneration;}
+            if (generic != null) {generic.beforeSlots = after;generic.captureGeneration=captureGeneration;}
         }
         private void emitProperties(int[] after) {
             if(beforeProperties==null || after==null || java.util.Arrays.equals(beforeProperties,after))return;
@@ -1108,7 +1114,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onEntityHurtPreDeath(LivingDamageEvent.Pre event) {
         if (!CaptureTypePolicy.enabled(3)) return;
-        if (!LoggerConfig.isEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
+        if (!LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
         // Projectile hit via damage source (entity hits). This also covers player victims.
@@ -1181,7 +1187,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onEntityDeath(LivingDeathEvent event) {
         if (!CaptureTypePolicy.enabled(3)) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
         net.minecraft.world.entity.LivingEntity victim = event.getEntity();
         boolean playerDeath = victim instanceof ServerPlayer;
@@ -1275,7 +1281,7 @@ public final class LoggerEventHandlers {
 @SubscribeEvent
     public void onItemToss(ItemTossEvent event) {
         if (!CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (com.roften.avilixlogger.compat.blockpack.BlockPackJoinGiftAudit.active()) return;
         Player pl = event.getPlayer();
         if (!(pl instanceof ServerPlayer sp)) return;
@@ -1301,7 +1307,7 @@ public final class LoggerEventHandlers {
         // Item drops remain independent when generic entity capture is switched off.
         if (!CaptureTypePolicy.enabled(3) && !(event.getEntity() instanceof ItemEntity
                 && CaptureTypePolicy.enabled(4))) return;
-        if (!LoggerConfig.isEnabled() || (!LoggerConfig.VALUES.logEntities.get() && CartAuditContext.current()==null
+        if (!LoggerConfig.isCaptureEnabled() || (!LoggerConfig.VALUES.logEntities.get() && CartAuditContext.current()==null
                 && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource())==null)) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         Entity ent = event.getEntity();
@@ -1450,7 +1456,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onItemPickup(ItemEntityPickupEvent.Pre event) {
         if (!CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getPlayer().level() instanceof ServerLevel level)) return;
 
         // Some mods/edge-cases trigger multiple pickup pre-events for the same item.
@@ -1548,7 +1554,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onItemUseStart(LivingEntityUseItemEvent.Start event) {
         if (!CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
+        if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -1563,7 +1569,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onItemUseStop(LivingEntityUseItemEvent.Stop event) {
         if (!CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
+        if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -1578,7 +1584,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onItemUseFinish(LivingEntityUseItemEvent.Finish event) {
         if (!CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logItemConsume)) return;
+        if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logItemConsume)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -1607,7 +1613,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
         if (!CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
         if (event.getEntity() == null) return;
 
@@ -1633,7 +1639,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onItemSmelted(PlayerEvent.ItemSmeltedEvent event) {
         if (!CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
         ItemStack smelted = event.getSmelting();
@@ -1659,7 +1665,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
         LogEntry e = new LogEntry();
@@ -1687,7 +1693,7 @@ public final class LoggerEventHandlers {
         ChatAuditLogger.discardPlayer(playerId);
         RecentPlayerActionTracker.discard(playerId);
 
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
         LogEntry e = new LogEntry();
@@ -1707,7 +1713,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (!CaptureTypePolicy.enabled(3)) return;
-        if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
+        if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -1729,7 +1735,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
         if (!CaptureTypePolicy.enabled(3)) return;
-        if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
+        if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
         if (!(event.getEntity() instanceof ServerPlayer sp)) return;
         if (!(sp.level() instanceof ServerLevel level)) return;
 
@@ -1751,7 +1757,7 @@ public final class LoggerEventHandlers {
     @SubscribeEvent
     public void onProjectileImpact(ProjectileImpactEvent event) {
         if (!CaptureTypePolicy.enabled(3) || !CaptureTypePolicy.enabled(4)) return;
-        if (!LoggerConfig.isEnabled() || !isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
+        if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
 
         Object projectileObj = callNoArg(event, "getProjectile");
         if (!(projectileObj instanceof Projectile projectile)) return;
@@ -2010,7 +2016,7 @@ public final class LoggerEventHandlers {
 
     private static boolean isEnabled(net.neoforged.neoforge.common.ModConfigSpec.BooleanValue value) {
         try {
-            return LoggerConfig.isEnabled() && value != null && value.get();
+            return LoggerConfig.isCaptureEnabled() && value != null && value.get();
         } catch (Throwable ignored) {
             return false;
         }
@@ -2239,7 +2245,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onEntityLeave(EntityLeaveLevelEvent event) {
-        if (!LoggerConfig.isEnabled()) return;
+        if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
 
         Entity ent = event.getEntity();

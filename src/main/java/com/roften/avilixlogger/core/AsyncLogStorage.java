@@ -38,8 +38,7 @@ public final class AsyncLogStorage implements LogStorage {
         LogEntry snapshot = entry.copyForQueue();
         ActionType capturedType=snapshot.type;
         String capturedSource=snapshot.source;
-        queue.put(snapshot, PayloadSizeEstimator.estimate(snapshot));
-        HotPathMetrics.queued(capturedType,capturedSource);
+        if(ServerCaptureGuard.enqueue(queue,snapshot,PayloadSizeEstimator.estimate(snapshot)))HotPathMetrics.queued(capturedType,capturedSource);
     }
 
     private record BlockChangeEvent(SetBlockCapture before,
@@ -53,13 +52,12 @@ public final class AsyncLogStorage implements LogStorage {
                                   net.minecraft.world.level.block.state.BlockState after,
                                   String afterId, long timestamp) {
         if (!CaptureTypePolicy.allows(ActionType.BLOCK_PLACE,before.source(),null)) return;
-        appendCaptured(new BlockChangeEvent(before, after, afterId, timestamp),
-                PayloadSizeEstimator.estimateBlockChange(before, afterId));
-        HotPathMetrics.queued(SetBlockCapture.classify(before.beforeState().isAir(),after.isAir(),
-                before.beforeState()!=after,before.causeKind()),before.source());
+        if(appendCaptured(new BlockChangeEvent(before, after, afterId, timestamp),PayloadSizeEstimator.estimateBlockChange(before, afterId)))
+            HotPathMetrics.queued(SetBlockCapture.classify(before.beforeState().isAir(),after.isAir(),before.beforeState()!=after,before.causeKind()),before.source());
     }
 
-    void appendCaptured(QueuedLogEvent event, long bytes) { queue.put(event, bytes); }
+    boolean appendCaptured(QueuedLogEvent event,long bytes){return ServerCaptureGuard.enqueue(queue,event,bytes);}
+    boolean appendDiagnostic(LogEntry entry){var detached=entry.copyForQueue();return queue.offer(detached,PayloadSizeEstimator.estimate(detached))==WeightedQueue.Offer.ACCEPTED;}
 
     private void process() {
         DropAggregator drops = new DropAggregator(delegate::append);

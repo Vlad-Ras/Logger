@@ -280,6 +280,7 @@ public final class LoggerNetwork {
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
         PayloadRegistrar r = event.registrar("10").optional();
+        r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
         r.playToServer(C2SLoggerActionPayload.TYPE,C2SLoggerActionPayload.STREAM_CODEC,LoggerActionNetwork::handle);
         r.playToClient(S2CLoggerActionResultPayload.TYPE,S2CLoggerActionResultPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptActionResult",new Class<?>[]{S2CLoggerActionResultPayload.class},new Object[]{payload})));
@@ -487,6 +488,7 @@ public final class LoggerNetwork {
             if (ctx.player() instanceof ServerPlayer sp) {
                 if (!com.roften.avilixlogger.core.PermissionUtil.isAdministrator(sp)) return;
                 CLIENT_PRESENT.put(sp.getUUID(), true);
+                sendCaptureHealth(sp);
             }
         });
     }
@@ -497,9 +499,16 @@ public final class LoggerNetwork {
             if (!Boolean.TRUE.equals(CLIENT_PRESENT.get(sp.getUUID()))) return; // client addon absent
             if (!hasGuiPermission(sp)) return;
             PacketDistributor.sendToPlayer(sp, new S2COpenGuiPayload());
+            sendCaptureHealth(sp);
         });
     }
 
+    private static void sendCaptureHealth(ServerPlayer player){
+        if(player.connection.hasChannel(S2CCaptureHealthPayload.TYPE)&&hasGuiPermission(player))PacketDistributor.sendToPlayer(player,new S2CCaptureHealthPayload(com.roften.avilixlogger.core.ServerCaptureGuard.paused(),com.roften.avilixlogger.core.ServerCaptureGuard.report()));
+    }
+    public static void broadcastCaptureHealth(net.minecraft.server.MinecraftServer server){
+        for(var player:server.getPlayerList().getPlayers())if(Boolean.TRUE.equals(CLIENT_PRESENT.get(player.getUUID())))sendCaptureHealth(player);
+    }
     private static void handleCaptureTypes(C2SCaptureTypesPayload payload, IPayloadContext ctx) {
         ctx.enqueueWork(() -> {
             if (!(ctx.player() instanceof ServerPlayer sp) || !hasGuiPermission(sp)) return;

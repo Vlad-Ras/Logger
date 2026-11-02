@@ -28,8 +28,8 @@ public final class LoggerRuntime {
         var cpu=AsyncLogProcessor.queueStatistics();if(cpu!=null)states.add(cpu);
         var events=ASYNC;if(events!=null)states.add(events.queueStatistics());
         var journal=PENDING;if(journal!=null)states.add(journal.queueStatistics());
-        if(states.isEmpty())return "Очереди Logger ещё не запущены.";
-        var text=new StringBuilder("Очереди Logger (пики с последнего запуска замеров):\n");
+        if(states.isEmpty())return ServerCaptureGuard.report()+"\nОчереди Logger ещё не запущены.";
+        var text=new StringBuilder(ServerCaptureGuard.report()+"\nОчереди Logger (пики с последнего запуска замеров):\n");
         for(var state:states) {
             String name=switch(state.name()){case "cpu"->"Обработка снимков";case "events"->"События";case "journal"->"Запись на диск";default->state.name();};
             text.append(String.format(java.util.Locale.ROOT,"%s: в очереди %d, в обработке %d; пик записей %d / %d; данные %.2f MiB, пик %.2f / %.2f MiB; ожиданий %d, сейчас ждут %d, завершённый максимум %.3f ms\n",
@@ -44,6 +44,28 @@ public final class LoggerRuntime {
         var journal=PENDING;if(journal!=null)journal.resetQueueStatistics();
     }
 
+    public static String resumeCapture(){
+        if(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized())return "AuthCore не разрешил работу Logger.";
+        if(!ServerCaptureGuard.paused())return "Аварийной остановки захвата нет.";
+        var cpu=AsyncLogProcessor.queueStatistics();var events=ASYNC;var journal=PENDING;
+        if(cpu!=null&&cpu.outstanding()!=0||events!=null&&events.queueStatistics().outstanding()!=0||journal!=null&&journal.queueStatistics().outstanding()!=0)
+            return "Принятые записи ещё обрабатываются. Сначала освободите очереди; состояние видно в отчёте.";
+        var gap=ServerCaptureGuard.prepareResume();if(gap==null)return "Аварийной остановки захвата нет.";
+        if(events==null||!events.appendDiagnostic(captureGapEntry(gap)))return "Запись интервала пропуска пока не принята. Захват остаётся остановленным; повторите после освобождения очередей.";
+        ServerCaptureGuard.resume(gap);
+        java.util.concurrent.CompletableFuture.runAsync(()->AvilixLoggerMod.LOGGER.warn("[AvilixLogger] {}",ServerCaptureGuard.report()));
+        return "Захват возобновлён. Интервал пропуска будет сохранён отдельной записью журнала.\n"+ServerCaptureGuard.report();
+    }
+    public static boolean enqueueDiagnostic(LogEntry entry){
+        if(entry==null||entry.type!=ActionType.LOGGER_DIAGNOSTIC||!"logger:diagnostic".equals(entry.source)||!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized())return false;
+        var events=ASYNC;if(events==null)return false;LogIdGenerator.ensure(entry);return events.appendDiagnostic(entry);
+    }
+    static LogEntry captureGapEntry(ServerCaptureGuard.Gap gap){
+        var row=new LogEntry();row.ts=gap.until();row.type=ActionType.CAPTURE_GAP;row.dim="*";row.actorName="Система";row.source="logger:capture-gap";
+        row.extra="Пропуск захвата "+java.time.Instant.ofEpochMilli(gap.since())+" — "+java.time.Instant.ofEpochMilli(gap.until())+"; очередь "+gap.queue()+"; отклонено заданий "+gap.rejected()+"; пропущено проверок "+gap.suppressedChecks()+" (не число событий)";
+        var tag=new net.minecraft.nbt.CompoundTag();tag.putString("Kind","LoggerCaptureGap");tag.putBoolean("PositionKnown",false);tag.putLong("Since",gap.since());tag.putLong("Until",gap.until());
+        tag.putString("Queue",gap.queue());tag.putString("Reason",gap.reason());tag.putLong("RejectedSubmissions",gap.rejected());tag.putLong("SuppressedCaptureChecks",gap.suppressedChecks());row.beAfter=tag.toString();return row;
+    }
     public static LogStorage storage(Level level) {
         if (!LoggerConfig.isEnabled()) return UNAUTHORIZED;
         LogStorage events = eventStorage();

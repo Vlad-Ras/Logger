@@ -7,6 +7,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /** Bounded handoff with backpressure, including payloads currently being processed. */
 final class WeightedQueue<T> {
+    enum Offer { ACCEPTED, FULL, BUSY, OVERSIZED }
     record Work<T>(T value, long bytes) {}
     record Statistics(String name,int queued,int outstanding,long bytes,long peakBytes,int peakOutstanding,
                       int countLimit,long byteLimit,long waits,int waitingProducers,long maxWaitNanos) {}
@@ -25,6 +26,7 @@ final class WeightedQueue<T> {
     private int waitingProducers;
     private int batchWaiters;
     private boolean closed;
+    private boolean pressureRequested;
 
     WeightedQueue(int capacity, long maxBytes) {
         this("queue",capacity,maxBytes);
@@ -62,6 +64,21 @@ final class WeightedQueue<T> {
         } finally { lock.unlock(); }
     }
 
+    String name(){return name;}
+    /** No capacity wait on the server; the short queue lock has a separate finite budget. */
+    Offer offer(T value,long weight) {
+        weight=Math.max(1,weight);boolean acquired;
+        try{acquired=lock.tryLock(200,TimeUnit.MICROSECONDS);}
+        catch(InterruptedException interrupted){Thread.currentThread().interrupt();return Offer.BUSY;}
+        if(!acquired)return Offer.BUSY;
+        try{
+            if(closed)throw new IllegalStateException("Logger queue is closed");
+            if(weight>maxBytes)return Offer.OVERSIZED;
+            if(full(weight)){pressureRequested=true;ready.signalAll();return Offer.FULL;}
+            entries.addLast(new Work<>(value,weight));bytes+=weight;outstanding++;
+            peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);ready.signal();return Offer.ACCEPTED;
+        }finally{lock.unlock();}
+    }
     private boolean full(long weight) {
         return outstanding >= capacity || (outstanding > 0 && (weight > maxBytes || bytes > maxBytes - weight));
     }
@@ -79,7 +96,7 @@ final class WeightedQueue<T> {
         long remaining = TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
         lock.lockInterruptibly();
         try {
-            while (entries.isEmpty() && !closed && remaining > 0 && (!flushOnPressure || waitingProducers == 0)) {
+            while (entries.isEmpty() && !closed && remaining > 0 && (!flushOnPressure || waitingProducers == 0&&!pressureRequested)) {
                 if (flushOnPressure) batchWaiters++;
                 try { remaining = ready.awaitNanos(remaining); }
                 finally { if (flushOnPressure) batchWaiters--; }
@@ -93,6 +110,7 @@ final class WeightedQueue<T> {
         try {
             bytes -= work.bytes();
             outstanding--;
+            pressureRequested=false;
             space.signalAll();
         } finally { lock.unlock(); }
     }
@@ -143,6 +161,7 @@ final class WeightedQueue<T> {
         try { return waitingProducers > 0; } finally { lock.unlock(); }
     }
 
+    boolean hasPressure(){lock.lock();try{return waitingProducers>0||pressureRequested;}finally{lock.unlock();}}
     /** Shutdown must not discard work merely because a caller was interrupted. */
     static void join(Thread thread) {
         boolean interrupted = false;

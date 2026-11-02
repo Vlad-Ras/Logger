@@ -41,6 +41,8 @@ public final class ModAuditDetails {
         return direction+" "+operation.getLong("TransferredMB")+" mB; опыт игрока "+signed(operation.getLong("PlayerExperienceDelta"));
     }
     public static List<Component> describe(LogEntry row) {
+        if(row.type==ActionType.CAPTURE_GAP)return List.of(Component.literal("Перерыв захвата Logger для защиты TPS"),Component.literal(row.extra==null?"":row.extra),Component.literal("Счётчики заданий и проверок не равны числу игровых событий. Принятые записи сохраняются."));
+        if(row.type==ActionType.LOGGER_DIAGNOSTIC)return List.of(Component.literal("Служебная проверка доставки Logger"),Component.literal(row.extra==null?"":row.extra),Component.literal("Игровые блоки, контейнеры и механизмы этой проверкой не менялись."));
         boolean slotRow=row.extra!=null&&row.extra.startsWith("container slot ");
         if(!slotRow&&(row.source==null||!row.source.startsWith("mod:")))return List.of();
         if(row.beAfter==null||row.beAfter.length()>2_097_152||row.beBefore!=null&&row.beBefore.length()>2_097_152)return List.of();

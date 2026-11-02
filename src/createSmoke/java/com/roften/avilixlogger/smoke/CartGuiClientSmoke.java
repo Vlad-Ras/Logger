@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -94,6 +94,10 @@ public final class CartGuiClientSmoke {
                     com.roften.avilixlogger.client.gui.LoggerActionsScreen.accept(new com.roften.avilixlogger.net.S2CLoggerActionResultPayload(2,example,"",""));
                     var results=screen.getClass().getDeclaredField("results");results.setAccessible(true);results.setBoolean(screen,true);
                     var refresh=screen.getClass().getDeclaredMethod("refresh");refresh.setAccessible(true);refresh.invoke(screen);
+                }
+                else if(stage==13){
+                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptCaptureHealth(new com.roften.avilixlogger.net.S2CCaptureHealthPayload(true,"Тест отображения остановки захвата"));
+                    mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
                 }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==8){

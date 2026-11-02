@@ -23,9 +23,13 @@ public final class LogViewerClientHooks {
 
     private static java.lang.ref.WeakReference<LogViewerScreen> OPEN_SCREEN = new java.lang.ref.WeakReference<>(null);
     private static boolean serverCreateAvailable;
+    private static boolean capturePaused;
+    public static boolean capturePaused(){return capturePaused;}
+    public static void acceptCaptureHealth(com.roften.avilixlogger.net.S2CCaptureHealthPayload payload){capturePaused=payload.paused();var screen=OPEN_SCREEN.get();if(screen!=null)screen.updateCaptureHealth();}
     public static boolean createAvailable() { return serverCreateAvailable && com.roften.avilixlogger.core.CreateSupport.available(); }
 
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
+        capturePaused=false;
         OPEN_SCREEN.clear();
         LoggerActionsScreen.clear();
         LocalizedLogSearch.clear();
@@ -37,6 +41,7 @@ public final class LogViewerClientHooks {
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
+        capturePaused=false;
         OPEN_SCREEN.clear();
         LoggerActionsScreen.clear();
         LocalizedLogSearch.clear();

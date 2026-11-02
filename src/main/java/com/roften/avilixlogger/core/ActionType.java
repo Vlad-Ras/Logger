@@ -124,5 +124,9 @@ public enum ActionType {
     MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE,
 
     // Native experience and related mending evidence.
-    EXPERIENCE_CHANGE
+    EXPERIENCE_CHANGE,
+    /** Explicit audit interruption, not a world action. */
+    CAPTURE_GAP,
+    /** Explicit operator-requested delivery check. */
+    LOGGER_DIAGNOSTIC
 }

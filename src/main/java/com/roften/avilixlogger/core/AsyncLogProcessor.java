@@ -30,7 +30,7 @@ public final class AsyncLogProcessor {
         if (task == null) return;
         // Nested work is already off the world thread; avoid a full-queue self-deadlock.
         if (WORKER.get()) { task.run(); return; }
-        pool().queue.put(task, Math.max(128L, bytes));
+        ServerCaptureGuard.enqueue(pool().queue,task,Math.max(128L,bytes));
     }
 
     public static boolean awaitIdle(long deadlineNanos) throws InterruptedException { Pool current = pool; return current == null || current.queue.awaitEmpty(deadlineNanos); }

@@ -97,6 +97,18 @@ jobs:
           if ! grep -q 'AVILIX_CREATE_SMOKE_OK' create-smoke.log || grep -qE '(AVILIX_CREATE_SMOKE_FAILED|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-smoke.log; then
             exit 1
           fi
+      - name: Native storage address and protected server admission
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.profile == 'client-s4-core' }}
+        timeout-minutes: 6
+        run: |
+          mkdir -p run-storage
+          printf 'eula=true\n' > run-storage/eula.txt
+          printf 'max-tick-time=-1\n' > run-storage/server.properties
+          timeout --signal=INT --kill-after=15s 240s ./gradlew runServer -PstorageSmoke --console=plain --no-daemon > storage-admission-smoke.log 2>&1
+          tail -n 70 storage-admission-smoke.log
+          grep -q 'STORAGE_BLOCK_ADDRESS_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'SERVER_CAPTURE_GUARD_NATIVE_OK' storage-admission-smoke.log
+          if grep -qE 'STORAGE_BLOCK_ADDRESS_NATIVE_FAILED|MixinApplyError|MixinTransformerError' storage-admission-smoke.log; then exit 1; fi
       - name: Native regression without Create
         if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.fd == '1.3.4' }}
         timeout-minutes: 10

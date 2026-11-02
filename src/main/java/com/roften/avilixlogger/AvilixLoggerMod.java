@@ -113,6 +113,10 @@ public final class AvilixLoggerMod {
 
     private void onServerStarting(ServerStartingEvent event) {
         HotPathMetrics.serverThread(Thread.currentThread());
+        com.roften.avilixlogger.core.ServerCaptureGuard.start(Thread.currentThread(),gap->{
+            LOGGER.error("[AvilixLogger] ЗАХВАТ ОСТАНОВЛЕН ДЛЯ ЗАЩИТЫ TPS. since={}, queue={}, reason={}. Принятые записи сохраняются; новые события могут отсутствовать. Возобновление: /log perf resume или GUI.",java.time.Instant.ofEpochMilli(gap.since()),gap.queue(),gap.reason());
+            if(event.getServer().isRunning())event.getServer().execute(()->LoggerNetwork.broadcastCaptureHealth(event.getServer()));
+        });
         // Restore persisted switches before the first server/player tick.
         com.roften.avilixlogger.core.CaptureTypePolicy.install(
                 com.roften.avilixlogger.core.LoggerServerData.get(event.getServer().overworld()).captureMask());
@@ -153,6 +157,7 @@ public final class AvilixLoggerMod {
         RollbackCoordinator.shutdown();
         if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTrainRecovery.stop();com.roften.avilixlogger.compat.create.CreateTrainLifecycleAudit.clear();com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();com.roften.avilixlogger.compat.create.CreateDeployerTransaction.clearRetained();}
         LoggerRuntime.shutdown();
+        com.roften.avilixlogger.core.ServerCaptureGuard.stop();
         if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available()) {
             com.roften.avilixlogger.compat.backpacked.BackpackRecovery.stop();
             com.roften.avilixlogger.compat.backpacked.BackpackAudit.stop();

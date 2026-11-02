@@ -27,6 +27,7 @@ public final class CaptureTypePolicy {
     }
 
     public static boolean allows(ActionType type, String source, String extra) {
+        if(type!=ActionType.CAPTURE_GAP&&!ServerCaptureGuard.captureAllowed())return false;
         if (type == null || disabledMask == 0 || type == ActionType.CART_ROLLBACK) return true;
         // Filter specific source families before generic action categories.
         if (source != null) {
@@ -66,6 +67,7 @@ public final class CaptureTypePolicy {
 
     /** Early source-only gate before serializing any block/entity NBT. */
     public static boolean allowsCreateKind(CreateContraptionKind kind) {
+        if(!ServerCaptureGuard.captureAllowed())return false;
         return switch (kind) {
             case TRAIN -> enabled(5);
             case MINECART -> enabled(9);

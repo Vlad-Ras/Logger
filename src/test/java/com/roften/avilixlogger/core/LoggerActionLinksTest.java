@@ -24,7 +24,7 @@ public final class LoggerActionLinksTest {
         }
         var entry=LoggerActionCatalog.linkedForm(LoggerActionCatalog.ACTIONS,"/log entrypos 456");
         check(entry!=null&&entry.action().id().equals("entry_position")&&entry.values().equals(List.of("456")),"entry position lacks an exact GUI form");
-        for(String suffix:List.of(""," start"," stop")) {
+        for(String suffix:List.of(""," start"," stop"," resume"," check")) {
             var perf=LoggerActionCatalog.linkedForm(LoggerActionCatalog.ACTIONS,"/log perf"+suffix);
             check(perf!=null&&perf.values().isEmpty()&&perf.action().command(List.of()).equals("log perf"+suffix),"performance command lacks an exact GUI form");
         }

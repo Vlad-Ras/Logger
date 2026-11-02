@@ -11,6 +11,7 @@ import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks;
 import com.roften.avilixlogger.core.*;
 import com.roften.avilixlogger.integrations.WorldEditIntegration;
+import com.roften.avilixlogger.net.LoggerNetwork;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -85,6 +86,8 @@ public final class LoggerCommands {
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.command.admin", 2))
                 .executes(c -> { c.getSource().sendSystemMessage(Component.literal(HotPathMetrics.report()+"\n"+LoggerRuntime.queueReport()));return 1; })
                 .then(literal("start").executes(c -> { HotPathMetrics.start();LoggerRuntime.resetQueueStatistics();c.getSource().sendSystemMessage(Component.literal("Замеры Logger включены. /log perf — отчёт; /log perf stop — остановка."));return 1; }))
+                .then(literal("resume").executes(c->{c.getSource().sendSystemMessage(Component.literal(LoggerRuntime.resumeCapture()));LoggerNetwork.broadcastCaptureHealth(c.getSource().getServer());return 1;}))
+                .then(literal("check").executes(c->LoggerPipelineCheck.run(c.getSource())))
                 .then(literal("stop").executes(c -> { String report=HotPathMetrics.stop()+"\n"+LoggerRuntime.queueReport();c.getSource().sendSystemMessage(Component.literal(report));AvilixLoggerMod.LOGGER.info("[AvilixLogger] {}",report);return 1; })))
 
             // Short help + examples
@@ -1679,6 +1682,8 @@ public final class LoggerCommands {
             case "corpse", "corpse_change", "corpse_content_change" -> ActionType.CORPSE_CONTENT_CHANGE;
             case "claim", "claim_action", "opac" -> ActionType.CLAIM_ACTION;
             case "xp", "experience", "experience_change", "mending_xp" -> ActionType.EXPERIENCE_CHANGE;
+            case "gap", "capture_gap" -> ActionType.CAPTURE_GAP;
+            case "diagnostic", "logger_diagnostic" -> ActionType.LOGGER_DIAGNOSTIC;
             case "machine", "machine_state", "machine_state_change" -> ActionType.MACHINE_STATE_CHANGE;
             case "machine_items", "machine_content", "machine_content_change", "production" -> ActionType.MACHINE_CONTENT_CHANGE;
             case "party", "team", "party_change", "teams" -> ActionType.PARTY_CHANGE;

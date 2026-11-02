@@ -13,6 +13,8 @@ import java.util.*;
 final class CartGuiWorkflowSmoke {
     static void run(){
         String id="51000000-0000-0000-0000-000000000001";
+        var health=new S2CCaptureHealthPayload(true,"Захват остановлен");var healthBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
+        try{S2CCaptureHealthPayload.STREAM_CODEC.encode(healthBuffer,health);check(S2CCaptureHealthPayload.STREAM_CODEC.decode(healthBuffer).equals(health),"health changed on wire");}finally{healthBuffer.release();}
         var form=new C2SLoggerActionPayload(17,"cart_confirm",List.of(id,"42"));
         var formBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
         try{C2SLoggerActionPayload.STREAM_CODEC.encode(formBuffer,form);check(C2SLoggerActionPayload.STREAM_CODEC.decode(formBuffer).equals(form),"action form changed on wire");}finally{formBuffer.release();}

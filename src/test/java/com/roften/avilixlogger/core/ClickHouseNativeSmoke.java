@@ -89,6 +89,7 @@ public final class ClickHouseNativeSmoke {
         var meJobs=List.of(Ae2CraftingDetailsTest.record("i","accepted"), Ae2CraftingDetailsTest.record("f","rejected"), Ae2CraftingDetailsTest.record("g","cancelled"), Ae2CraftingDetailsTest.record("i","finished"), Ae2CraftingDetailsTest.cpuCancellation(false), Ae2CraftingDetailsTest.cpuCancellation(true), Ae2CraftingDetailsTest.linkCancellation(false), Ae2CraftingDetailsTest.linkCancellation(true));
         for(var job:meJobs)job.materializeSnapshots();
         List<LogEntry> pressureRows=List.of();
+        var releaseStorage=ReleaseStorageEvidence.rows();
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();
@@ -101,6 +102,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
+            db.appendBatch("release-storage-"+UUID.randomUUID(),releaseStorage);ReleaseStorageEvidence.verify(db,releaseStorage);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
             verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations); verifyMeJobs(db,meJobs);
             pressureRows=journalPressure(db);verifyJournalPressure(db,pressureRows);
@@ -123,6 +125,7 @@ public final class ClickHouseNativeSmoke {
             db.shutdown();
             db = new ClickHouseLogStorage();
             verifyDetails(db.queryReverse(detail), block, item);
+            ReleaseStorageEvidence.verify(db,releaseStorage);
             verifyWeapons(db,weapons);
             verifySetting(db,setting);
             verifyInteraction(db,interaction);

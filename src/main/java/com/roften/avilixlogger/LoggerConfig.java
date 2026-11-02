@@ -290,10 +290,12 @@ public final class LoggerConfig {
 
     /** Only for simulation wrappers. Event publication must use isEnabled(). */
     public static boolean isTickCaptureEnabled() {
+        if(!com.roften.avilixlogger.core.ServerCaptureGuard.captureAllowed())return false;
         try {
             return VALUES.enabled.get() && com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorizedForTick();
         } catch (Throwable ignored) { return false; }
     }
 
+    public static boolean isCaptureEnabled(){return com.roften.avilixlogger.core.ServerCaptureGuard.captureAllowed()&&isEnabled();}
     private LoggerConfig() {}
 }

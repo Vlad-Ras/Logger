@@ -370,8 +370,7 @@ public final class LogViewerScreen extends Screen {
         final int leftTop = top + leftRowH + leftGap + 2;
 
         this.titleWidget = this.addRenderableWidget(new StringWidget(0, 6, this.width, 10,
-                (title.isEmpty() ? Component.translatable("gui.avilixlogger.title") : Component.literal(title))
-                        .withStyle(ChatFormatting.GOLD),
+                headerTitle(),
                 this.font));
         // 1.21.1 StringWidget has no setCentered(); we center by positioning the widget.
 
@@ -641,6 +640,8 @@ public final class LogViewerScreen extends Screen {
         PacketDistributor.sendToServer(new C2SInspectToolPayload(C2SInspectToolPayload.Action.RESET, ""));
     }
 
+    private Component headerTitle(){return LogViewerClientHooks.capturePaused()?Component.literal("Захват остановлен · Откройте «Действия»").withStyle(ChatFormatting.RED):(title.isEmpty()?Component.translatable("gui.avilixlogger.title"):Component.literal(title)).withStyle(ChatFormatting.GOLD);}
+    public void updateCaptureHealth(){if(titleWidget!=null)titleWidget.setMessage(headerTitle());}
     public void apply(S2CLogPagePayload payload) {
         this.title = module != null ? module.title() : payload.title() == null ? "" : payload.title();
         this.pageIndex = payload.pageIndex();
@@ -660,8 +661,7 @@ public final class LogViewerScreen extends Screen {
         this.pendingCopyJson = false;
 
         if (this.titleWidget != null) {
-            this.titleWidget.setMessage((title.isEmpty() ? Component.translatable("gui.avilixlogger.title") : Component.literal(title))
-                    .withStyle(ChatFormatting.GOLD));
+            updateCaptureHealth();
         }
         updateButtons();
     }

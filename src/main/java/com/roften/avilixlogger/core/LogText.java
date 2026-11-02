@@ -355,6 +355,8 @@ public final class LogText {
             case MACHINE_STATE_CHANGE -> "изменил состояние механизма";
             case MACHINE_CONTENT_CHANGE -> "изменил содержимое механизма";
             case EXPERIENCE_CHANGE -> "изменил опыт и снаряжение";
+            case CAPTURE_GAP -> "пропуск захвата Logger";
+            case LOGGER_DIAGNOSTIC -> "проверка записи Logger";
             case CHAT_MESSAGE -> "написал";
 
             case TRAIN_ASSEMBLE -> "собрал поезд";

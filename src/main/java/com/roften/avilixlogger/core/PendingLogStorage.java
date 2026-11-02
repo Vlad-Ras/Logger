@@ -56,7 +56,7 @@ public final class PendingLogStorage implements LogStorage {
     @Override public void append(LogEntry entry) {
         if (entry == null) return;
         LogIdGenerator.ensure(entry);
-        queue.put(entry, PayloadSizeEstimator.estimate(entry));
+        ServerCaptureGuard.enqueue(queue,entry,PayloadSizeEstimator.estimate(entry));
     }
     WeightedQueue.Statistics queueStatistics(){return queue.statistics();}
     void resetQueueStatistics(){queue.resetStatistics();}
@@ -83,7 +83,7 @@ public final class PendingLogStorage implements LogStorage {
                 }
                 if (!batch.isEmpty() && (batch.size() >= batchSize || bytes >= 4L * 1024 * 1024
                         || java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) >= flushMillis
-                        || (work == null && queue.hasWaitingProducers()) || queue.exhausted())) {
+                        || (work == null && queue.hasPressure()) || queue.exhausted())) {
                     List<LogEntry> rows = batch.stream().map(WeightedQueue.Work::value).toList();
                     // Retry this exact batch on disk failure; never release its reservations early.
                     String token = journal.newToken();

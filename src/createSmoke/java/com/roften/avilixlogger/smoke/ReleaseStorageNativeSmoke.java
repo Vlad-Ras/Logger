@@ -35,6 +35,7 @@ public final class ReleaseStorageNativeSmoke {
             if(net.neoforged.fml.ModList.get().isLoaded("create_enchantment_industry"))
                 ScgunsNativeSmoke.check(com.roften.avilixlogger.compat.industry.IndustrialState.class.isAssignableFrom(Class.forName("com.simibubi.create.foundation.blockEntity.SmartBlockEntity")),"industrial mixins unavailable");
             System.out.println("STORAGE_BLOCK_ADDRESS_NATIVE_OK: physical second container, partial slot delta, GUI details and legacy rollback");
+            ServerAdmissionNativeSmoke.run(event.getServer());
         } catch(Throwable failure){failure.printStackTrace();System.out.println("STORAGE_BLOCK_ADDRESS_NATIVE_FAILED");}
         finally {event.getServer().halt(false);}
     }
