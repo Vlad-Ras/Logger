@@ -90,6 +90,13 @@ public final class LoggerActionsScreen extends Screen {
         try{action.command(values);lastRequest=++sequence;append("→ "+action.label());PacketDistributor.sendToServer(new C2SLoggerActionPayload(lastRequest,action.id(),values));results=true;textScroll=0;refresh();}
         catch(IllegalArgumentException e){append(e.getMessage());results=true;refresh();}
     }
+    static void run(Screen parent,String actionId,List<String> values) {
+        var screen=new LoggerActionsScreen(parent);
+        var action=screen.allActions.stream().filter(a->a.id().equals(actionId)).findFirst().orElse(null);
+        if(action==null)return;
+        screen.selected=screen.actions.indexOf(action);screen.values=List.copyOf(values);
+        Minecraft.getInstance().setScreen(screen);screen.execute();
+    }
     private void append(String message){append(Component.literal(message),message.length());}
     private void append(Component message,int weight){
         journal.addLast(new JournalLine(message,weight));journalChars+=weight;

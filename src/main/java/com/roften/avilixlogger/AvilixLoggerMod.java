@@ -144,6 +144,7 @@ public final class AvilixLoggerMod {
         com.roften.avilixlogger.compat.createcobblestone.CobblestoneAudit.stop(event.getServer());
         com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.clear();
         // Ensure we flush writers and stop GUI/database helper executors.
+        com.roften.avilixlogger.command.EntryPositionCommand.stop();
         com.roften.avilixlogger.core.ServerTickScheduler.finish(event.getServer());
         LoggerEventHandlers.shutdownBackground();
         ChatLogPager.shutdown();

@@ -38,7 +38,7 @@ public final class DieselAudit {
     }
     public static ModStateAudit.Action filter(ServerPlayer player) { return player==null?null:filter(player,player.containerMenu); }
     private static ModStateAudit.Action filter(ServerPlayer player,Object menu) {
-        if(!IndustrialAudit.supportsDiesel()||player==null||!player.server.isSameThread()||!menu.getClass().getName().equals("com.jesz.createdieselgenerators.content.entity_filter.EntityFilterMenu"))return null;
+        if(!IndustrialAudit.supportsDiesel()||player==null||!player.server.isSameThread()||!(menu instanceof net.minecraft.world.inventory.AbstractContainerMenu nativeMenu)||!menu.getClass().getName().equals("com.jesz.createdieselgenerators.content.entity_filter.EntityFilterMenu"))return null;
         return ModStateAudit.begin(player.server,"createdieselgenerators","entity-filter-editor",menu,"filter",ActionType.GUI_CHANGE,()->{
             var tag=new CompoundTag();tag.putString("Dimension",player.level().dimension().location().toString());
             tag.putInt("X",player.blockPosition().getX());tag.putInt("Y",player.blockPosition().getY());tag.putInt("Z",player.blockPosition().getZ());
@@ -52,7 +52,7 @@ public final class DieselAudit {
             tag.put("GhostSlots",(CompoundTag)StateAccess.call(ghost,"serializeNBT",new Class<?>[]{net.minecraft.core.HolderLookup.Provider.class},player.registryAccess()));
             var item=StateAccess.field(menu,"contentHolder");if(item instanceof net.minecraft.world.item.ItemStack stack)tag.put("FocusStack",stack.saveOptional(player.registryAccess()));
             tag.put("PlayerInventory",EntityContainerSerde.snapshot(player.getInventory(),player.registryAccess()));
-            tag.put("Cursor",menu.getCarried().saveOptional(player.registryAccess()));return tag;
+            tag.put("Cursor",nativeMenu.getCarried().saveOptional(player.registryAccess()));return tag;
         });
     }
     @SuppressWarnings("unchecked")

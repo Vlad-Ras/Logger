@@ -9,6 +9,19 @@ public final class GuiTimeFilter {
     public record Selection(int minutes, long since, long until) {}
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd.MM.uuuu", Locale.ROOT).withResolverStyle(ResolverStyle.STRICT);
     private GuiTimeFilter() {}
+    /** Validates the friendly form without requiring users to type the range separator. */
+    public static String rangeInput(String fromDate,String fromTime,String toDate,String toTime,ZonedDateTime now) {
+        fromDate=fromDate.trim();fromTime=fromTime.trim();toDate=toDate.trim();toTime=toTime.trim();
+        if(fromDate.isEmpty()&&!fromTime.isEmpty())fromDate=now.toLocalDate().format(DATE);
+        if(toDate.isEmpty()&&!toTime.isEmpty())toDate=fromDate.isEmpty()?now.toLocalDate().format(DATE):fromDate;
+        if(fromDate.isEmpty()&&toDate.isEmpty())return "0m";
+        if(fromDate.isEmpty())throw new IllegalArgumentException("Укажите дату начала периода.");
+        // A blank upper time includes that entire date. A typed minute includes its whole minute.
+        String start=fromDate+(fromTime.isEmpty()?"":" "+fromTime);
+        String end=toDate+(toTime.isEmpty()?"":" "+(toTime.length()==5?toTime+":59.999":toTime.length()==8?toTime+".999":toTime));
+        String result=start+(toDate.isEmpty()?"":".."+end);
+        parse(result,now);return result;
+    }
     public static Selection parse(String input, ZonedDateTime now) {
         String value = input == null ? "" : input.trim();
         if (value.isEmpty()) return new Selection(-1, -1, -1);

@@ -79,6 +79,7 @@ public final class LoggerCommands {
 
             .then(CartCommands.node())
             .then(CombatPositionCommand.node())
+            .then(EntryPositionCommand.node())
             .then(BackpackCommands.node())
             .then(literal("perf")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.command.admin", 2))

@@ -74,5 +74,18 @@
   "gui.avilixlogger.hint.audit_id": "ID / owner",
   "gui.avilixlogger.filter.audit_id.v": "ID / owner: %s",
   "gui.avilixlogger.type.bearing": "Create: bearing contraptions",
-  "gui.avilixlogger.type.contraption": "Create: other contraptions"
+  "gui.avilixlogger.type.contraption": "Create: other contraptions",
+  "gui.avilixlogger.type.ae2": "Applied Energistics 2",
+  "gui.avilixlogger.type.opac": "OPAC: claims and protection",
+  "gui.avilixlogger.type.scguns": "Scorched Guns",
+  "gui.avilixlogger.type.corpse": "Corpse",
+  "gui.avilixlogger.type.accessories": "Accessories",
+  "gui.avilixlogger.type.ftbteams": "FTB Teams",
+  "gui.avilixlogger.type.createcobblestone": "Create Cobblestone",
+  "gui.avilixlogger.type.vibrantvaults": "Create: Vibrant Vaults",
+  "gui.avilixlogger.type.enchantmentindustry": "Create: Enchantment Industry",
+  "gui.avilixlogger.type.dieselgenerators": "Create Diesel Generators",
+  "gui.avilixlogger.type.blockpack": "BlockPack",
+  "gui.avilixlogger.type.chipped": "Chipped",
+  "gui.avilixlogger.type.supplementaries": "Supplementaries"
 }

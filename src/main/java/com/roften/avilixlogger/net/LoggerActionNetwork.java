@@ -23,7 +23,7 @@ final class LoggerActionNetwork {
             }
             public boolean acceptsSuccess(){return true;}
             public boolean acceptsFailure(){return true;}
-            public boolean shouldInformAdmins(){return true;}
+            public boolean shouldInformAdmins(){return false;}
         });
         if(!com.roften.avilixlogger.core.PermissionUtil.isAdministrator(player))return;
         try{

@@ -84,6 +84,10 @@ neoForge {
 
         server {
             server()
+            if(project.hasProperty('storageSmoke')) {
+                systemProperty 'avilixlogger.storageSmoke','true'
+                gameDirectory = project.file('run-storage')
+            }
             if (project.hasProperty('acceptanceJfr')) jvmArgument "-XX:StartFlightRecording=name=avilix_server,settings=profile,dumponexit=true,maxsize=64m,filename=${project.file('run/avilixlogger-server-ci.jfr').absolutePath}"
             if (project.hasProperty('createSmoke')) {
                 systemProperty 'avilixlogger.createSmoke', 'true'
@@ -167,7 +171,7 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
-            if (project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke') || project.hasProperty('blockpackSmoke') || project.hasProperty('supplementariesSmoke') || project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) sourceSet(sourceSets.createSmoke)
+            if (project.hasProperty('storageSmoke') || project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke') || project.hasProperty('blockpackSmoke') || project.hasProperty('supplementariesSmoke') || project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) sourceSet(sourceSets.createSmoke)
         }
     }
 }

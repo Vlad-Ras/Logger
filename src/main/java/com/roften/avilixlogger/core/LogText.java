@@ -78,7 +78,13 @@ public final class LogText {
         c.append(Component.literal(" "));
 
         // Action label
-        c.append(Component.literal(actionLabel(e.type)).withStyle(actionColor(e.type)));
+        String action=actionLabel(e.type);
+        String auditSummary=ModAuditDetails.feedSummary(e);
+        if(e.type==ActionType.CLAIM_ACTION) {
+            if(auditSummary.startsWith("расприватил"))action="расприватил чанк";
+            else if(auditSummary.startsWith("заприватил"))action="заприватил чанк";
+        }
+        c.append(Component.literal(action).withStyle(actionColor(e.type)));
         c.append(Component.literal(" "));
 
         // Subject
@@ -115,6 +121,8 @@ public final class LogText {
         c.append(Component.literal("(").withStyle(ChatFormatting.DARK_GRAY));
         c.append(coordComponent(e));
         c.append(Component.literal(")").withStyle(ChatFormatting.DARK_GRAY));
+
+        if(!auditSummary.isEmpty())c.append(Component.literal(" · "+auditSummary).withStyle(ChatFormatting.GRAY));
 
         var blockChanges=BlockChangeDetails.changes(e);
         if(!blockChanges.isEmpty()){
@@ -365,9 +373,12 @@ public final class LogText {
         if (e == null || e.type == null) return null;
 
         return switch (e.type) {
-            case ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, EXPERIENCE_CHANGE -> EntityLogIdentity.label(e);
+            case ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE -> EntityLogIdentity.label(e);
+            case EXPERIENCE_CHANGE -> e.blockAfter==null?EntityLogIdentity.label(e):blockNameComponent(level,e.blockAfter);
             case MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE -> blockNameComponent(level, e.blockAfter);
-            case CLAIM_ACTION, PARTY_CHANGE, PROTECTION_CHANGE -> Component.literal(e.extra == null ? "настройки мода" : e.extra);
+            case CLAIM_ACTION -> Component.literal("территория OPAC");
+            case PARTY_CHANGE -> Component.literal("команда и её настройки");
+            case PROTECTION_CHANGE -> Component.literal("настройки защиты");
 
             // blocks
             case BLOCK_BREAK -> blockNameComponent(level, e.blockBefore);

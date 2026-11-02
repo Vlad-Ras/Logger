@@ -74,6 +74,15 @@ public final class LogViewerClientHooks {
         LoggerActionsScreen.accept(payload);
     }
 
+    static void openModule(net.minecraft.client.gui.screens.Screen parent,int preset) {
+        var screen=LogViewerScreen.forModule(parent,preset);
+        OPEN_SCREEN=new java.lang.ref.WeakReference<>(screen);
+        Minecraft.getInstance().setScreen(screen);screen.requestInitialData();
+    }
+    static void resume(net.minecraft.client.gui.screens.Screen screen) {
+        if(screen instanceof LogViewerScreen journal){OPEN_SCREEN=new java.lang.ref.WeakReference<>(journal);journal.requestInitialData();}
+    }
+
     public static void acceptPage(S2CLogPagePayload payload) {
         if (payload == null) return;
         var screen=OPEN_SCREEN.get();

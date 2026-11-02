@@ -1048,38 +1048,36 @@ public final class LoggerEventHandlers {
             String actorName,
             String source,
             String blockAfter, long timestamp) {
-        var aggregate = ContainerSlotDiffUtil.diffAggregated(beforeSlots, afterSlots, registryAccess);
-        long ts = timestamp;
-        if (aggregate != null && !aggregate.isEmpty()) {
-            for (var change : aggregate.entrySet()) {
-                int delta = change.getValue();
-                if (delta == 0) continue;
-                LogEntry entry = containerDeltaEntry(ts, dim, pos, actorUuid, actorName, source, blockAfter,
-                        delta > 0 ? ActionType.CONTAINER_PUT : ActionType.CONTAINER_TAKE,
-                        change.getKey(), Math.abs(delta), "container delta");
-                storage.append(entry);
-            }
-            return;
-        }
-
         for (var change : ContainerSlotDiffUtil.diffSlots(beforeSlots, afterSlots, registryAccess)) {
-            ItemStack before = change.before();
-            if (before != null && !before.isEmpty()) {
-                ItemStack normalized = before.copy();
-                normalized.setCount(1);
-                storage.append(containerDeltaEntry(ts, dim, pos, actorUuid, actorName, source, blockAfter,
-                        ActionType.CONTAINER_TAKE, NbtSerde.writeItemStackHotPath(normalized, registryAccess),
-                        before.getCount(), "container slot " + change.slot()));
-            }
-            ItemStack after = change.after();
-            if (after != null && !after.isEmpty()) {
-                ItemStack normalized = after.copy();
-                normalized.setCount(1);
-                storage.append(containerDeltaEntry(ts, dim, pos, actorUuid, actorName, source, blockAfter,
-                        ActionType.CONTAINER_PUT, NbtSerde.writeItemStackHotPath(normalized, registryAccess),
-                        after.getCount(), "container slot " + change.slot()));
+            var before=change.before();var after=change.after();
+            var address=ContainerSlotSnapshot.sourceForSlot(afterSlots,change.slot());
+            if(address==null)address=ContainerSlotSnapshot.sourceForSlot(beforeSlots,change.slot());
+            var actual=address==null?pos:new BlockPos(address.getInt("X"),address.getInt("Y"),address.getInt("Z"));
+            String actualBlock=address==null?blockAfter:address.getCompound("BlockState").toString();
+            int delta=after.getCount()-before.getCount();
+            if(!before.isEmpty()&&!after.isEmpty()&&ItemStack.isSameItemSameComponents(before,after)) {
+                if(delta!=0)appendStorageSlot(storage,registryAccess,timestamp,dim,actual,actorUuid,actorName,source,actualBlock,
+                    change.slot(),address,before,after,delta>0?ActionType.CONTAINER_PUT:ActionType.CONTAINER_TAKE,delta>0?after:before,Math.abs(delta));
+            } else {
+                if(!before.isEmpty())appendStorageSlot(storage,registryAccess,timestamp,dim,actual,actorUuid,actorName,source,actualBlock,
+                    change.slot(),address,before,after,ActionType.CONTAINER_TAKE,before,before.getCount());
+                if(!after.isEmpty())appendStorageSlot(storage,registryAccess,timestamp,dim,actual,actorUuid,actorName,source,actualBlock,
+                    change.slot(),address,before,after,ActionType.CONTAINER_PUT,after,after.getCount());
             }
         }
+    }
+
+    private static void appendStorageSlot(LogStorage storage,net.minecraft.core.HolderLookup.Provider access,long ts,String dim,BlockPos pos,
+            UUID actor,String name,String source,String block,int slot,CompoundTag address,ItemStack before,ItemStack after,ActionType type,ItemStack item,int count) {
+        var normalized=item.copy();normalized.setCount(1);
+        var row=containerDeltaEntry(ts,dim,pos,actor,name,source,block,type,NbtSerde.writeItemStackHotPath(normalized,access),count,
+            "container slot "+slot+"; before="+before.getCount()+"; after="+after.getCount()+"; position="+(address==null?"interface-target":"physical-container"));
+        var evidence=new CompoundTag();var detail=new CompoundTag();detail.putInt("Slot",slot);
+        detail.putInt("LocalSlot",address==null?slot:slot-address.getInt("FirstSlot"));detail.putBoolean("PhysicalAddressKnown",address!=null);
+        detail.putInt("BeforeCount",before.getCount());detail.putInt("AfterCount",after.getCount());
+        detail.put("Before",before.saveOptional(access));detail.put("After",after.saveOptional(access));
+        if(address!=null)detail.put("Address",address.copy());
+        evidence.put("StorageSlot",detail);row.beAfter=NbtSerde.toSnbt(evidence);storage.append(row);
     }
 
     private static LogEntry containerDeltaEntry(

@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -73,6 +73,17 @@ public final class CartGuiClientSmoke {
                 }
                 else if(stage==7)mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
                 else if(stage==8)mc.setScreen(new com.roften.avilixlogger.client.gui.CaptureTypesScreen(mc.screen));
+                else if(stage==9){
+                    var parent=new com.roften.avilixlogger.client.gui.LogViewerScreen();
+                    var constructor=Class.forName("com.roften.avilixlogger.client.gui.TimeRangeScreen").getDeclaredConstructor(parent.getClass(),java.time.ZoneId.class,String.class,java.util.function.Consumer.class);
+                    constructor.setAccessible(true);mc.setScreen((Screen)constructor.newInstance(parent,java.time.ZoneId.of("Europe/Moscow"),"01.11.2026 10:30..02.11.2026 12:45",(java.util.function.Consumer<String>)value->{}));
+                }
+                else if(stage==10){
+                    var parent=new com.roften.avilixlogger.client.gui.LogViewerScreen();
+                    var constructor=Class.forName("com.roften.avilixlogger.client.gui.ModulePickerScreen").getDeclaredConstructor(parent.getClass());constructor.setAccessible(true);
+                    mc.setScreen((Screen)constructor.newInstance(parent));
+                }
+                else if(stage==11)mc.setScreen(com.roften.avilixlogger.client.gui.LogViewerScreen.forModule(new com.roften.avilixlogger.client.gui.LogViewerScreen(),14));
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==8){
                     var capture=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;

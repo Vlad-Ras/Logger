@@ -160,6 +160,8 @@ public final class IndustrialFluids {
                             try(var cause=CauseContext.unattributed()){emit(be,before,after,threw);}return;
                         }
                         pending=new Pending(before,after,tick);binding.pending=pending;PENDING.add(binding);
+                        var scheduled=pending;
+                        ServerTickScheduler.schedule(level.getServer(),20,()->{if(binding.pending==scheduled)flush(binding);});
                     }else{pending.after=after;pending.end=tick;pending.operations++;delta(pending.flows,before,after);}
                     pending.threw|=threw;
                     if(threw)flush(binding);

@@ -158,6 +158,7 @@ public final class ContainerSlotSnapshot {
 
     private static CompoundTag normalizeSlots(CompoundTag source) {
         CompoundTag copy = source.copy();
+        copy.remove("SlotSources"); // Address metadata does not change the restorable inventory state.
         ListTag items = copy.getList("Items", Tag.TAG_COMPOUND);
         for (int i = 0; i < items.size(); i++) {
             CompoundTag item = items.getCompound(i);
@@ -187,6 +188,8 @@ public final class ContainerSlotSnapshot {
 
             CompoundTag out = new CompoundTag();
             int size = Math.max(0, h.getSlots());
+            if(h instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper)
+                return writeContainer(wrapper.getInv(),level.registryAccess());
             out.putInt("Size", size);
             ListTag items = new ListTag();
             for (int i = 0; i < size; i++) {
@@ -277,6 +280,7 @@ public final class ContainerSlotSnapshot {
                     ? facing.getClockWise()
                     : facing.getCounterClockWise();
             BlockPos other = pos.relative(offsetDir);
+            if(!WorldSnapshotAccess.readable(level,other))return null;
             BlockState otherState = level.getBlockState(other);
             if (otherState.getBlock() instanceof ChestBlock) return other;
         } catch (Throwable ignored) {
@@ -298,7 +302,31 @@ public final class ContainerSlotSnapshot {
             items.add(it);
         }
         out.put("Items", items);
+        var sources=new ListTag();appendSources(c,0,sources,0);
+        if(!sources.isEmpty())out.put("SlotSources",sources);
         return out;
+    }
+
+    private static void appendSources(Container container,int offset,ListTag sources,int depth) {
+        if(depth>8||sources.size()>=64)return;
+        if(container instanceof CompoundContainerAccess compound) {
+            appendSources(compound.avilixlogger$first(),offset,sources,depth+1);
+            appendSources(compound.avilixlogger$second(),offset+compound.avilixlogger$first().getContainerSize(),sources,depth+1);
+        } else if(container instanceof BlockEntity be&&be.getLevel()!=null) {
+            var source=new CompoundTag();source.putInt("FirstSlot",offset);source.putInt("SlotCount",container.getContainerSize());
+            source.putInt("X",be.getBlockPos().getX());source.putInt("Y",be.getBlockPos().getY());source.putInt("Z",be.getBlockPos().getZ());
+            source.putString("Dimension",be.getLevel().dimension().location().toString());
+            source.put("BlockState",net.minecraft.nbt.NbtUtils.writeBlockState(be.getBlockState()));sources.add(source);
+        }
+    }
+
+    public static CompoundTag sourceForSlot(CompoundTag snapshot,int slot) {
+        var sources=snapshot.getList("SlotSources",Tag.TAG_COMPOUND);
+        for(int i=0;i<sources.size();i++) {
+            var source=sources.getCompound(i);int first=source.getInt("FirstSlot"),count=source.getInt("SlotCount");
+            if(slot>=first&&(long)slot-first<count)return source;
+        }
+        return null;
     }
 
     private static boolean readContainer(Container c, net.minecraft.core.HolderLookup.Provider provider, CompoundTag snapshot) {

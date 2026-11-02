@@ -70,6 +70,10 @@
 -keep interface com.roften.avilixlogger.compat.ae2.Ae2LinkedCancellationState { *; }
 -keep interface com.roften.avilixlogger.core.WeaponTraceAccess { *; }
 -keep interface com.roften.avilixlogger.core.WeaponReloadAccess { *; }
+-keep interface com.roften.avilixlogger.core.CompoundContainerAccess { *; }
+-keep interface com.roften.avilixlogger.compat.industry.IndustrialState { *; }
+-keep interface com.roften.avilixlogger.compat.machines.MachineState { *; }
+-keep interface com.roften.avilixlogger.compat.opac.OpenPac* { *; }
 # Accessor interfaces are casts into classes woven after release obfuscation.
 -keep interface com.roften.avilixlogger.compat.create.mixin.** { *; }
 -keep interface com.roften.avilixlogger.mixin.CartCombinedInventoryAccessor { *; }

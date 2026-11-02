@@ -758,7 +758,7 @@ public final class LoggerNetwork {
         // Time: custom minutes override presets.
         int customTime = gf != null ? gf.customTimeMinutes() : -1;
         if (customTime >= 0) {
-            q.sinceTs = now - (customTime * 60_000L);
+            q.sinceTs = customTime == 0 ? 0 : now - (customTime * 60_000L);
         } else {
             // Presets (minutes): 5m, 30m, 2h, 1d, 7d
             int[] mins = new int[] { 5, 30, 120, 1440, 10080 };
@@ -810,7 +810,7 @@ public final class LoggerNetwork {
             q.textAliases=gf.searchIds();q.blockAliases=gf.blockIds();
             q.planeOnly = gf.typePresetIdx() == 8;
             var constructionKind = com.roften.avilixlogger.core.CreateContraptionKind.forGuiPreset(gf.typePresetIdx());
-            if ((gf.typePresetIdx() != 8 && gf.typePresetIdx() != 10 && constructionKind == com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN)
+            if ((gf.typePresetIdx() < 13 && gf.typePresetIdx() != 8 && gf.typePresetIdx() != 10 && constructionKind == com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN)
                     || constructionKind == com.roften.avilixlogger.core.CreateContraptionKind.TRAIN) q.trainNameFilter = gf.train();
             String blockNeedle = normalizeFilterNeedle(gf.blockId());
             if (!blockNeedle.isBlank()) q.blockIdFilter = blockNeedle;
@@ -823,6 +823,12 @@ public final class LoggerNetwork {
 
         // Types (preset index)
         q.types = mapTypePreset(gf != null ? gf.typePresetIdx() : 0);
+        var module = com.roften.avilixlogger.core.ModLogFilters.find(gf != null ? gf.typePresetIdx() : 0);
+        if (module != null) {
+            q.sourcePrefix = module.sourcePrefix();
+            // The existing contextual ID field becomes a module evidence search, never a train-name predicate.
+            if (gf.train() != null && !gf.train().isBlank()) q.extraTextFilter = gf.train().trim();
+        }
         if (gf != null) {
             var kind = com.roften.avilixlogger.core.CreateContraptionKind.forGuiPreset(gf.typePresetIdx());
             if (kind != com.roften.avilixlogger.core.CreateContraptionKind.UNKNOWN
@@ -887,6 +893,7 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE
             );
             case 2 -> java.util.EnumSet.of(
+                    com.roften.avilixlogger.core.ActionType.EXPERIENCE_CHANGE,
                     com.roften.avilixlogger.core.ActionType.MACHINE_CONTENT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.GUI_CHANGE,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_OPEN,
@@ -916,7 +923,6 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.WEAPON_KILL,
                     com.roften.avilixlogger.core.ActionType.ENTITY_EQUIPMENT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PARTY_CHANGE,
-                    com.roften.avilixlogger.core.ActionType.EXPERIENCE_CHANGE,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_SHOOT,
                     com.roften.avilixlogger.core.ActionType.PROJECTILE_HIT,
                     com.roften.avilixlogger.core.ActionType.PLAYER_DEATH,
@@ -1211,6 +1217,8 @@ public final class LoggerNetwork {
         if(!deployerDetails.isEmpty()){out.addAll(deployerDetails);return List.copyOf(out);}
         out.addAll(com.roften.avilixlogger.core.BlockChangeDetails.describe(first));
         out.addAll(com.roften.avilixlogger.core.ItemTransactionAudit.describe(first));
+        var modDetails=com.roften.avilixlogger.core.ModAuditDetails.describe(first);
+        if(!modDetails.isEmpty()){out.addAll(modDetails);return List.copyOf(out);}
         var cartDetails=com.roften.avilixlogger.core.CartLogDetails.describe(level,first);
         if(!cartDetails.isEmpty()){out.addAll(cartDetails);return List.copyOf(out);}
         if(first.entityUuid!=null||first.entityName!=null){

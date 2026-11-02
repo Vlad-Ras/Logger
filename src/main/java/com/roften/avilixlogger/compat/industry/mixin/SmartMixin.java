@@ -15,12 +15,13 @@ import com.roften.avilixlogger.compat.industry.*;
 @Pseudo
 @Mixin(targets = "com.simibubi.create.foundation.blockEntity.SmartBlockEntity", remap = false)
 public abstract class SmartMixin implements IndustrialState {
-    @Unique private final IndustrialAudit.Data avilixlogger$industryData = new IndustrialAudit.Data();
-    public IndustrialAudit.Data avilixlogger$industrial(){return avilixlogger$industryData;}
+    @Unique private IndustrialAudit.Data avilixlogger$industryData;
+    public IndustrialAudit.Data avilixlogger$industrial(){
+        if(avilixlogger$industryData==null)avilixlogger$industryData=new IndustrialAudit.Data();
+        return avilixlogger$industryData;
+    }
     @Inject(method = "initialize()V", at = @At("HEAD"), remap = false)
     private void avilixlogger$loaded(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci){IndustrialAudit.loaded(this);}
-    @Inject(method = "tick()V", at = @At("RETURN"), remap = false)
-    private void avilixlogger$due(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci){IndustrialFluids.due(this);}
     @Inject(method = {"setRemoved()V", "onChunkUnloaded()V"}, at = @At("HEAD"), remap = false)
     private void avilixlogger$removed(org.spongepowered.asm.mixin.injection.callback.CallbackInfo ci){IndustrialAudit.removed(this);}
     @WrapMethod(method = "loadAdditional(Lnet/minecraft/nbt/CompoundTag;Lnet/minecraft/core/HolderLookup$Provider;)V", remap = false)

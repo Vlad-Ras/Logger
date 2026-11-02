@@ -40,12 +40,12 @@ public final class CombatPositionCommand {
             server.execute(()->{
                 var current=server.getPlayerList().getPlayer(uuid);
                 if(current==null || current.connection!=connection || !allowed(current.createCommandSourceStack()))return;
-                if(captured==null){current.sendSystemMessage(Component.literal("В записи нет подтверждённой позиции для этого перехода."));return;}
+                if(captured==null){source.sendFailure(Component.literal("В записи нет подтверждённой позиции для этого перехода."));return;}
                 var level=server.getLevel(ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,ResourceLocation.parse(captured.dim())));
-                if(level==null){current.sendSystemMessage(Component.literal("Измерение из записи сейчас недоступно."));return;}
+                if(level==null){source.sendFailure(Component.literal("Измерение из записи сейчас недоступно."));return;}
                 var destination=side.equals("view")?captured.viewpoint(current.getEyeHeight()):captured;
                 current.teleportTo(level,destination.x(),destination.y(),destination.z(),destination.yaw(),destination.pitch());
-                current.sendSystemMessage(Component.literal("Позиция из записи #"+id+": "+destination.display()));
+                source.sendSystemMessage(Component.literal("Позиция из записи #"+id+": "+destination.display()));
             });
         });}catch(RejectedExecutionException busy){source.sendFailure(Component.literal("Очередь переходов занята. Повторите запрос позже."));return 0;}
         return 1;

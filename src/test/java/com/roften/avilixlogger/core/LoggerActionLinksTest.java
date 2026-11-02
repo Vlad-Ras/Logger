@@ -18,6 +18,12 @@ public final class LoggerActionLinksTest {
         check(LoggerActionCatalog.linkedForm(LoggerActionCatalog.ACTIONS,"/execute in minecraft:overworld run tp @s 1 2 3")==null,"non-logger command routed into a logger form");
         var filtered=List.of(LoggerActionCatalog.find("inspect"));
         check(LoggerActionCatalog.linkedForm(filtered,"/log cart confirm "+id+" 42")==null,"hidden form became available through a link");
+        for(String side:List.of("source","view","target")) {
+            var linked=LoggerActionCatalog.linkedForm(LoggerActionCatalog.ACTIONS,"/log combatpos 123 "+side);
+            check(linked!=null&&linked.action().id().equals("combat_"+side)&&linked.values().equals(List.of("123")),"combat transition lacks an exact GUI form");
+        }
+        var entry=LoggerActionCatalog.linkedForm(LoggerActionCatalog.ACTIONS,"/log entrypos 456");
+        check(entry!=null&&entry.action().id().equals("entry_position")&&entry.values().equals(List.of("456")),"entry position lacks an exact GUI form");
     }
     private static void check(boolean result,String message){if(!result)throw new AssertionError(message);}
 }

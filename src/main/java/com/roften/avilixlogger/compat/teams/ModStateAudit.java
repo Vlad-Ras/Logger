@@ -14,7 +14,7 @@ public final class ModStateAudit {
         if (server == null || !server.isSameThread() || !LoggerConfig.isEnabled() || !CaptureTypePolicy.allows(type, null, null) || CartAuditContext.restoring()) return false;
         return switch (type) {
             case CLAIM_ACTION, PROTECTION_CHANGE, MACHINE_STATE_CHANGE -> LoggerConfig.VALUES.logBlocks.get();
-            case MACHINE_CONTENT_CHANGE, CONTAINER_OPEN, GUI_CHANGE -> LoggerConfig.VALUES.logContainers.get();
+            case MACHINE_CONTENT_CHANGE, CONTAINER_OPEN, GUI_CHANGE, EXPERIENCE_CHANGE -> LoggerConfig.VALUES.logContainers.get();
             case ITEM_TRANSFORM -> LoggerConfig.VALUES.logItemTransactions.get();
             case ENTITY_ATTACK -> LoggerConfig.VALUES.logEntityAttacks.get();
             case CHAT_MESSAGE -> LoggerConfig.VALUES.logChat.get();
@@ -65,8 +65,12 @@ public final class ModStateAudit {
         if(!focus.isEmpty()){row.deferSnapshot(LogEntry.SnapshotField.ITEM,focus);row.count=focus.getInt("count");}
         var storage = LoggerRuntime.storage(server.overworld());
         AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after), () -> {
+            if(before.equals(after))return;
             if (before.contains("BlockState")) row.blockBefore = before.getCompound("BlockState").toString();
             if (after.contains("BlockState")) row.blockAfter = after.getCompound("BlockState").toString();
+            if(row.type==ActionType.CLAIM_ACTION)row.extra += "; " + com.roften.avilixlogger.core.ModAuditDetails.claimSummary(before,after);
+            if(after.contains("Block",Tag.TAG_STRING))row.extra += "; block="+after.getString("Block");
+            if(after.contains("StorageOperation",Tag.TAG_COMPOUND))row.extra += "; "+com.roften.avilixlogger.core.ModAuditDetails.storageSummary(after.getCompound("StorageOperation"));
             var changed = new java.util.TreeSet<String>(); changed.addAll(before.getAllKeys()); changed.addAll(after.getAllKeys());
             changed.removeIf(key -> java.util.Objects.equals(before.get(key), after.get(key)));
             row.extra += "; changed=" + String.join(",", changed);
@@ -83,6 +87,7 @@ public final class ModStateAudit {
                 if (value != null) row.extra += "; " + key + "=" + value.getAsString();
             }
             evidence.putBoolean("NativeThrew", threw || after.getBoolean("NativeThrew")); if (threw || after.getBoolean("NativeThrew")) row.extra += "; NativeThrew";
+            row.extra="ui="+com.roften.avilixlogger.core.ModAuditDetails.summary(row.type,before,after,differences.size())+"|audit|"+row.extra;
             row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE, before); row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, evidence); storage.append(row);
         });
     }
@@ -127,7 +132,7 @@ public final class ModStateAudit {
             if (done) return; done = true;
             if (ACTIVE.get() == this) { if (parent == null) ACTIVE.remove(); else ACTIVE.set(parent); }
             if (!enabled(server, row.type)) return;
-            try { var after = snapshot.read(); if (!before.equals(after)) append(server, row, before, after, threw); }
+            try { var after = snapshot.read(); append(server, row, before, after, threw); }
             catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { failure(row.source); }
         }
     }

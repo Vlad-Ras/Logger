@@ -55,6 +55,15 @@ public final class ExactModpackPreflightTest {
         test.group("avilixlogger_blockpack.mixins.json","com/blockfactory/blockpack/event/GiftSavedData");
         test.group("avilixlogger_supplementaries.mixins.json","net/mehvahdjukaar/supplementaries/common/block/TextHolder");
         test.group("avilixlogger_airplanes.mixins.json","immersive_aircraft/entity/VehicleEntity");
+        test.group("avilixlogger_core.mixins.json","net/minecraft/world/CompoundContainer");
+        test.group("avilixlogger_corpse.mixins.json","de/maxhenkel/corpse/entities/CorpseEntity");
+        test.group("avilixlogger_opac.mixins.json","xaero/pac/common/server/claims/ServerClaimsManager");
+        test.group("avilixlogger_ftbteams.mixins.json","dev/ftb/mods/ftbteams/data/Team");
+        test.group("avilixlogger_enchantmentindustry.mixins.json","plus/dragons/createenchantmentindustry/common/fluids/experience/ExperienceHatchBlock");
+        test.group("avilixlogger_dieselgenerators.mixins.json","com/jesz/createdieselgenerators/content/oil_barrel/OilBarrelBlockEntity");
+        if(test.classes.containsKey("plus/dragons/createenchantmentindustry/common/fluids/experience/ExperienceHatchBlock.class")
+            ||test.classes.containsKey("com/jesz/createdieselgenerators/content/oil_barrel/OilBarrelBlockEntity.class"))
+            test.group("avilixlogger_industry.mixins.json","com/simibubi/create/foundation/blockEntity/SmartBlockEntity");
         if(test.exactReads.isEmpty())throw new AssertionError("No supplied target bytecode was checked");
         System.out.println("EXACT_MODPACK_PREFLIGHT_OK: "+test.exactReads.size()+" supplied target classes; no mod execution; raw contracts do not prove transformed mixin conflicts or gameplay coverage");
     }

@@ -75,6 +75,17 @@ public final class LogViewerScreen extends Screen {
     private boolean hasPrev;
     private boolean hasNext;
     private String title = "";
+    private Screen moduleParent;
+    private com.roften.avilixlogger.core.ModLogFilters.Module module;
+    private boolean freshModule;
+
+    public static LogViewerScreen forModule(Screen parent,int preset) {
+        var screen=new LogViewerScreen();
+        screen.module=com.roften.avilixlogger.core.ModLogFilters.find(preset);
+        if(screen.module==null)throw new IllegalArgumentException("Неизвестный мод журнала");
+        screen.moduleParent=parent;screen.title=screen.module.title();screen.typePresetIdx=preset;screen.radiusPresetIdx=3;screen.trainFilter="";screen.freshModule=true;
+        return screen;
+    }
 
     private int selected = -1;
     private final Set<Long> expandedRows = new HashSet<>();
@@ -385,12 +396,13 @@ public final class LogViewerScreen extends Screen {
         final int boxW = sideBoxW(leftPanelW, btnW, inputGap);
 
         // Time
-        this.btnTime = addButton(Component.translatable("gui.avilixlogger.filter.time"), b -> cycleTime(),
+        this.btnTime = addButton(Component.translatable("gui.avilixlogger.filter.time"), b -> openTimeRange(),
                 leftX, y, btnW, leftRowH);
         this.timeBox = makeEditBox(leftX + btnW + inputGap, y, boxW, leftRowH, Component.translatable("gui.avilixlogger.input.time"));
         this.timeBox.setHint(Component.translatable("gui.avilixlogger.hint.time"));
         this.timeBox.setMaxLength(96);
-        this.timeBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("От даты/времени: 13.10.2026 03:00, 13.10.2026, 03:00; диапазон: начало..конец; период: 30m / 2h. Часовой пояс журнала: " + logTimeZone)));
+        this.btnTime.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Выбрать даты, время и быстрый период")));
+        this.timeBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Нажмите кнопку времени для формы С / По. Быстрый ввод: 30m / 2h. Часовой пояс: " + logTimeZone)));
         this.timeBox.setValue(savedTimeInput);
         this.addRenderableWidget(this.timeBox);
         y += leftRowH + leftGap;
@@ -407,6 +419,7 @@ public final class LogViewerScreen extends Screen {
         // Type dropdown (full width)
         this.btnType = addButton(Component.translatable("gui.avilixlogger.filter.type"), b -> toggleTypeDropdown(),
                 leftX, y, leftPanelW, leftRowH);
+        this.btnType.active = module == null;
         y += leftRowH + leftGap;
 
         // Actor
@@ -457,6 +470,7 @@ public final class LogViewerScreen extends Screen {
         this.searchBox.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Поиск в журнале: имя игрока, ID блока/предмета/сущности, источник, текст и название действия. Применить или Enter.")));
         this.searchBox.setValue(savedSearchInput);
         this.addRenderableWidget(this.searchBox);
+        if(freshModule){radiusBox.setValue("");trainBox.setValue("");freshModule=false;}
         y += leftRowH + leftGap;
 
         // Clear + Apply
@@ -518,6 +532,12 @@ public final class LogViewerScreen extends Screen {
         y2 += btnH + gap;
         addButton(Component.literal("Действия"), b -> Minecraft.getInstance().setScreen(new LoggerActionsScreen(this)),rightX,y2,half,btnH);
         addButton(Component.literal("Справка"), b -> Minecraft.getInstance().setScreen(new LoggerGuideScreen(this)),rightX+half+gap,y2,rightW-half-gap,btnH);
+        y2 += btnH + gap;
+        addButton(Component.literal(module == null ? "Моды" : "Все журналы"), b -> {
+            saveGuiStateFromInstance();
+            if(moduleParent!=null){minecraft.setScreen(moduleParent);LogViewerClientHooks.resume(this.moduleParent);}
+            else minecraft.setScreen(new ModulePickerScreen(this));
+        },rightX,y2,rightW,btnH);
         this.detailsPanelTop = y2 + btnH + gap + 2;
 
         updateButtons();
@@ -586,7 +606,8 @@ public final class LogViewerScreen extends Screen {
         saveGuiStateFromInstance();
         try { PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, currentFilters(), savedPageSize)); }
         catch (IllegalArgumentException failure) {
-            if (Minecraft.getInstance().player != null) Minecraft.getInstance().player.displayClientMessage(Component.literal(failure.getMessage()).withStyle(ChatFormatting.RED), false);
+            detailLines=List.of(Component.literal(failure.getMessage()).withStyle(ChatFormatting.RED));
+            showRawTab=false;
         }
     }
 
@@ -621,7 +642,7 @@ public final class LogViewerScreen extends Screen {
     }
 
     public void apply(S2CLogPagePayload payload) {
-        this.title = payload.title() == null ? "" : payload.title();
+        this.title = module != null ? module.title() : payload.title() == null ? "" : payload.title();
         this.pageIndex = payload.pageIndex();
         this.hasPrev = payload.hasPrev();
         this.hasNext = payload.hasNext();
@@ -724,7 +745,10 @@ public final class LogViewerScreen extends Screen {
                 int relX=Math.round((float)(mouseX-detailLeft-3)/Math.max(0.25f,logTextScale()));
                 Style style=this.font.getSplitter().componentStyleAtWidth(lines.get(index),relX);
                 if(style!=null && style.getClickEvent()!=null && style.getClickEvent().getAction()==ClickEvent.Action.RUN_COMMAND
-                        && style.getClickEvent().getValue().startsWith("/log combatpos "))return this.handleComponentClicked(style);
+                        && style.getClickEvent().getValue().startsWith("/log combatpos ")) {
+                    var form=com.roften.avilixlogger.core.LoggerActionCatalog.linkedForm(com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS,style.getClickEvent().getValue());
+                    if(form!=null){LoggerActionsScreen.run(this,form.action().id(),form.values());return true;}
+                }
             }
         }
 
@@ -1085,30 +1109,7 @@ public final class LogViewerScreen extends Screen {
     private void runSelectedTpCmd() {
         if (selected < 0 || selected >= rows.size()) return;
         LogRow r = rows.get(selected);
-        String dim = r.dim() == null ? "" : r.dim().trim();
-        String xyz = r.x() + " " + r.y() + " " + r.z();
-        String currentDim = "";
-        if (Minecraft.getInstance() != null && Minecraft.getInstance().level != null) {
-            currentDim = Minecraft.getInstance().level.dimension().location().toString();
-        }
-        String cmd = (!dim.isBlank() && !dim.equals("*") && !dim.equals(currentDim))
-                ? "execute in " + dim + " run tp @s " + xyz
-                : "tp " + xyz;
-        Minecraft mc = Minecraft.getInstance();
-
-        // Run immediately. If we can't (no connection), fall back to clipboard.
-        try {
-            if (mc != null && mc.player != null && mc.player.connection != null) {
-                mc.player.connection.sendCommand(cmd);
-                mc.player.displayClientMessage(Component.literal("TP: /" + cmd).withStyle(ChatFormatting.GRAY), true);
-                return;
-            }
-        } catch (Throwable ignored) {}
-
-        if (mc != null && mc.keyboardHandler != null) {
-            mc.keyboardHandler.setClipboard("/" + cmd);
-            if (mc.player != null) mc.player.displayClientMessage(Component.literal("Copied: /" + cmd).withStyle(ChatFormatting.GRAY), true);
-        }
+        LoggerActionsScreen.run(this,"entry_position",List.of(Long.toString(r.id())));
     }
 
     private void copyCurrentTabText() {
@@ -1130,6 +1131,13 @@ public final class LogViewerScreen extends Screen {
     }
 
     // -------- filter buttons (button-driven args) --------
+
+    private void openTimeRange() {
+        saveGuiStateFromInstance();
+        minecraft.setScreen(new TimeRangeScreen(this,logTimeZone,timeBox.getValue(),value->{
+            timeBox.setValue(value);refreshFilterButtonLabels();sendPage(C2SRequestPagePayload.Nav.FIRST);
+        }));
+    }
 
     private void cycleTime() {
         int[] mins = new int[] { 5, 30, 120, 1440, 10080 };
@@ -1170,7 +1178,7 @@ public final class LogViewerScreen extends Screen {
         }
     }
 
-    private final int[] typeOptions = java.util.stream.IntStream.range(0, 13)
+    private final int[] typeOptions = java.util.stream.IntStream.range(0, 26)
             .filter(i -> LogViewerClientHooks.createAvailable() || i != 5 && i != 6 && i != 9 && i != 11 && i != 12)
             .toArray();
 
@@ -1272,6 +1280,8 @@ public final class LogViewerScreen extends Screen {
     }
 
     private static String typeKey(int idx) {
+        var module=com.roften.avilixlogger.core.ModLogFilters.find(idx);
+        if(module!=null)return module.key();
         return switch (idx) {
             case 0 -> "all";
             case 1 -> "block";
@@ -1383,7 +1393,7 @@ public final class LogViewerScreen extends Screen {
     private void clearFilters() {
         this.timePresetIdx = GuiFilters.DEFAULT.timePresetIdx();
         this.radiusPresetIdx = GuiFilters.DEFAULT.radiusPresetIdx();
-        this.typePresetIdx = GuiFilters.DEFAULT.typePresetIdx();
+        this.typePresetIdx = module == null ? GuiFilters.DEFAULT.typePresetIdx() : module.preset();
         this.actorFilter = "";
         this.trainFilter = "";
         this.planeNameFilter = "";
@@ -1439,6 +1449,7 @@ public final class LogViewerScreen extends Screen {
 
     private String timeLabel() {
         String entered = timeBox == null ? "" : timeBox.getValue().trim();
+        if(entered.equals("0")||entered.equalsIgnoreCase("0m"))return "всё время";
         if (!entered.isEmpty() && !entered.matches("[0-9]+[mMhHdD]?")) return "от даты";
         int custom = parseTimeMinutes(timeBox != null ? timeBox.getValue() : "");
         if (custom >= 0) {
@@ -1622,7 +1633,7 @@ public final class LogViewerScreen extends Screen {
     private void saveGuiStateFromInstance() {
         savedTimePresetIdx = this.timePresetIdx;
         savedRadiusPresetIdx = this.radiusPresetIdx;
-        savedTypePresetIdx = this.typePresetIdx;
+        if(module==null)savedTypePresetIdx = this.typePresetIdx;
         savedAggregatedMode = this.aggregatedMode;
         savedActorFilter = this.actorFilter == null ? "" : this.actorFilter;
         savedTrainFilter = this.trainFilter == null ? "" : this.trainFilter;
@@ -1901,5 +1912,8 @@ public final class LogViewerScreen extends Screen {
         return false;
     }
 
-    @Override public void onClose(){LocalizedLogSearch.clear();super.onClose();}
+    @Override public void onClose(){
+        if(moduleParent!=null){minecraft.setScreen(moduleParent);LogViewerClientHooks.resume(moduleParent);return;}
+        LocalizedLogSearch.clear();super.onClose();
+    }
 }

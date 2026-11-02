@@ -74,5 +74,18 @@
   "gui.avilixlogger.hint.audit_id": "ID / владелец",
   "gui.avilixlogger.filter.audit_id.v": "ID / владелец: %s",
   "gui.avilixlogger.type.bearing": "Create: на подшипнике",
-  "gui.avilixlogger.type.contraption": "Create: другие конструкции"
+  "gui.avilixlogger.type.contraption": "Create: другие конструкции",
+  "gui.avilixlogger.type.ae2": "Applied Energistics 2",
+  "gui.avilixlogger.type.opac": "OPAC: приваты и защита",
+  "gui.avilixlogger.type.scguns": "Scorched Guns",
+  "gui.avilixlogger.type.corpse": "Corpse",
+  "gui.avilixlogger.type.accessories": "Accessories",
+  "gui.avilixlogger.type.ftbteams": "FTB Teams",
+  "gui.avilixlogger.type.createcobblestone": "Create Cobblestone",
+  "gui.avilixlogger.type.vibrantvaults": "Create: Vibrant Vaults",
+  "gui.avilixlogger.type.enchantmentindustry": "Create: Enchantment Industry",
+  "gui.avilixlogger.type.dieselgenerators": "Create Diesel Generators",
+  "gui.avilixlogger.type.blockpack": "BlockPack",
+  "gui.avilixlogger.type.chipped": "Chipped",
+  "gui.avilixlogger.type.supplementaries": "Supplementaries"
 }

@@ -48,6 +48,8 @@ public final class AsyncPipelineTest {
         CreateStructuralPlanTest.run();
         CreateCouplingPlanTest.run();
         GuiSearchTest.run();
+        ReleaseUiContractsTest.run();
+        StorageUiEvidenceTest.run();
         ClickHouseDeliveryTest.run();
         System.out.println("Async pipeline checks passed: lossless saturation, ordering, snapshots, shutdown, drops, tick deadlines, journal replay.");
     }
