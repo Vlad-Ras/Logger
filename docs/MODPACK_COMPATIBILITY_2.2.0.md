@@ -1,11 +1,18 @@
 # Совместимость серверного модпака: текущая работа
 
+30.10.2026: [новый проход из двух модов — OPAC 0.33.0 и FTB Teams 2101.1.11](OPAC_FTBTEAMS_COVERAGE_20261030.md).
+Добавлен код before/after для claims/anchors/config/groups/parties, queued actor,
+FTB lifecycle/ranks/settings/properties/extra/chat. Добавлены PARTY_CHANGE и
+PROTECTION_CHANGE, поиск/GUI/storage/rollback guards. **Компиляция и вся
+приёмка отложены**, полного игрового закрытия пары пока нет.
+
+
 30.10.2026: пользователь установил **по два мода за один проход**.
-[Текущий проход: Corpse и Accessories](CORPSE_ACCESSORIES_COVERAGE_20261030.md):
+[Предыдущий проход: Corpse и Accessories](CORPSE_ACCESSORIES_COVERAGE_20261030.md):
 дописаны native lifecycle/history, cosmetic/direct/bulk/resize/reset/death/settings/command пути,
 авторство и защита от повторной observation. Это source implementation;
 compile/native/storage/GUI/нагрузочная приёмка полностью отложена.
-OPAC остаётся следующим, его частичный статус этим проходом не меняется.
+Эта строка описывает предыдущий проход; OPAC продолжен в новой паре выше.
 
 
 30.10.2026: [первый функциональный пакет Corpse, Accessories и OPAC](MOD_ADAPTERS_20261030.md).

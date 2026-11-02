@@ -17,6 +17,7 @@ public final class OpenPacAudit {
     private OpenPacAudit() {}
 
     public static void started(ServerStartedEvent event) {
+        if (OpenPacStateAudit.available()) return; // Native mutations replace, rather than duplicate, successful-action receipts.
         var mod = ModList.get().getModContainerById("openpartiesandclaims");
         if (mod.isEmpty()) return;
         String version = mod.get().getModInfo().getVersion().toString();

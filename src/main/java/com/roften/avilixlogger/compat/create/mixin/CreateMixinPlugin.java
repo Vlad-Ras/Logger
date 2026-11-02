@@ -128,7 +128,14 @@ public final class CreateMixinPlugin implements IMixinConfigPlugin {
             }
         }
         private static boolean wrapperMatches(MethodNode handler,MethodNode target) {
-            if(!Type.getReturnType(handler.desc).equals(Type.getReturnType(target.desc)))return false;
+            if(!Type.getReturnType(handler.desc).equals(Type.getReturnType(target.desc))) {
+                Type supplied = Type.getReturnType(target.desc);
+                boolean explicitObject = Type.getReturnType(handler.desc).getDescriptor().equals("Ljava/lang/Object;")
+                        && (supplied.getSort() == Type.OBJECT || supplied.getSort() == Type.ARRAY)
+                        && annotations(handler.visibleAnnotations, handler.invisibleAnnotations).stream()
+                        .anyMatch(a -> a.desc.equals("Lorg/spongepowered/asm/mixin/injection/Coerce;"));
+                if (!explicitObject) return false;
+            }
             var declared=Type.getArgumentTypes(handler.desc);var actual=Type.getArgumentTypes(target.desc);int index=0;
             for(int i=0;i<declared.length;i++) {
                 if(declared[i].getDescriptor().equals("Lcom/llamalad7/mixinextras/injector/wrapoperation/Operation;"))continue;

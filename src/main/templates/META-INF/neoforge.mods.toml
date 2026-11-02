@@ -178,3 +178,9 @@ config="avilixlogger_corpse.mixins.json"
 
 [[mixins]]
 config="avilixlogger_accessories.mixins.json"
+
+[[mixins]]
+config="avilixlogger_opac.mixins.json"
+
+[[mixins]]
+config="avilixlogger_ftbteams.mixins.json"

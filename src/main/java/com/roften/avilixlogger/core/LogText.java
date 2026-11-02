@@ -217,7 +217,7 @@ public final class LogText {
 
             case ENTITY_SPAWN -> ChatFormatting.LIGHT_PURPLE;
             case ENTITY_INTERACT, ENTITY_ATTACK, PROJECTILE_HIT -> ChatFormatting.GOLD;
-            case ENTITY_OWNER_SET, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, CLAIM_ACTION -> ChatFormatting.YELLOW;
+            case ENTITY_OWNER_SET, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, CLAIM_ACTION, PARTY_CHANGE, PROTECTION_CHANGE -> ChatFormatting.YELLOW;
             case CHAT_MESSAGE -> ChatFormatting.AQUA;
 
             case CART_ASSEMBLE,CART_PLACE,CART_LOAD -> ChatFormatting.GREEN;
@@ -342,6 +342,8 @@ public final class LogText {
             case ENTITY_EQUIPMENT_CHANGE -> "изменилось снаряжение";
             case CORPSE_CONTENT_CHANGE -> "изменил содержимое тела";
             case CLAIM_ACTION -> "действие с территорией";
+            case PARTY_CHANGE -> "изменил команду или её настройки";
+            case PROTECTION_CHANGE -> "изменил настройки защиты";
             case CHAT_MESSAGE -> "написал";
 
             case TRAIN_ASSEMBLE -> "собрал поезд";
@@ -361,7 +363,7 @@ public final class LogText {
 
         return switch (e.type) {
             case ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE -> EntityLogIdentity.label(e);
-            case CLAIM_ACTION -> Component.literal(e.extra == null ? "территория OPAC" : e.extra);
+            case CLAIM_ACTION, PARTY_CHANGE, PROTECTION_CHANGE -> Component.literal(e.extra == null ? "настройки мода" : e.extra);
 
             // blocks
             case BLOCK_BREAK -> blockNameComponent(level, e.blockBefore);

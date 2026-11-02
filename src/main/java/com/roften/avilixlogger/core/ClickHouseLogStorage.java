@@ -59,7 +59,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.BLOCK_PLACE,
                 ActionType.BLOCK_INTERACT,
                 ActionType.BLOCK_USE,
-                ActionType.BLOCK_ENTITY_NBT_CHANGE);
+                ActionType.BLOCK_ENTITY_NBT_CHANGE, ActionType.CLAIM_ACTION, ActionType.PROTECTION_CHANGE);
         map(TableKind.CONTAINERS,
                 ActionType.CONTAINER_OPEN,
                 ActionType.CONTAINER_PUT,
@@ -80,7 +80,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ENTITY_ATTACK, ActionType.WEAPON_KILL,
                 ActionType.PROJECTILE_SHOOT,
                 ActionType.PROJECTILE_HIT,
-                ActionType.ENTITY_OWNER_SET, ActionType.ENTITY_EQUIPMENT_CHANGE);
+                ActionType.ENTITY_OWNER_SET, ActionType.ENTITY_EQUIPMENT_CHANGE, ActionType.PARTY_CHANGE);
         map(TableKind.ITEMS,
                 ActionType.ITEM_DROP,
                 ActionType.ITEM_PICKUP,
@@ -668,6 +668,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     private boolean shouldStoreDetails(LogEntry e) {
         if (e == null) return false;
         if (e.source != null && (e.source.startsWith("mod:corpse:") || e.source.startsWith("mod:accessories:"))) return true;
+        if (e.source != null && (e.source.startsWith("mod:ftbteams:") || e.source.startsWith("mod:openpartiesandclaims:"))) return true;
         // Optional equipment/corpse/claim receipts lose their meaning without exact evidence.
         if (e.type == ActionType.ENTITY_EQUIPMENT_CHANGE && e.beBefore != null && e.beAfter != null) return true;
         if (e.type == ActionType.CORPSE_CONTENT_CHANGE && e.beBefore != null && e.beAfter != null
@@ -1813,6 +1814,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
                  ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
+            case PARTY_CHANGE -> new TargetInfo("party", "", safeString(e.extra));
+            case PROTECTION_CHANGE, CLAIM_ACTION -> new TargetInfo("protection", "", safeString(e.extra));
             case CHAT_MESSAGE -> new TargetInfo("chat", "", safeString(e.extra));
             case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, TRAIN_CONTROL_START, TRAIN_CONTROL_STOP ->
                     new TargetInfo("train", extractExtraName(e.extra, "trainName", "поезд"), safeString(e.extra));
