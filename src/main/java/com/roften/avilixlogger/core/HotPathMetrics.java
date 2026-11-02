@@ -42,6 +42,7 @@ public final class HotPathMetrics {
         current.families[family].increment();
     }
     public static long beginSnapshot() { return session==null?0:System.nanoTime(); }
+    public static long snapshotCount() { var current=session;return current==null?0:current.snapshots.sum(); }
     public static void endSnapshot(long start) {
         Session current=session;if(current==null||start==0||start<current.started)return;
         long elapsed=System.nanoTime()-start;

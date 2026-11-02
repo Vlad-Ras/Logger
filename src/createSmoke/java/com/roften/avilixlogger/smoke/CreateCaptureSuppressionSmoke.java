@@ -30,7 +30,7 @@ public final class CreateCaptureSuppressionSmoke {
             check(CreateCapturePolicy.mutedEntity(entity),"muted bearing re-enters generic tick audit");
             HotPathMetrics.start();
             for(int i=0;i<1000;i++)check(CreateDeployerAudit.begin(context,BlockPos.ZERO,null,"USE")==null,"disabled actor dereferenced technical player");
-            check(HotPathMetrics.stop().contains("NBT snapshot calls: 0,"),"disabled actor created NBT");
+            check(HotPathMetrics.snapshotCount()==0,"disabled actor created NBT");HotPathMetrics.stop();
             check(!CartStorageAudit.capturing(new CartStorageAudit.Ref(new WeakReference<>(entity),BlockPos.ZERO,false)),"disabled storage still copies contents");
             CaptureTypePolicy.install(0);data.setCaptureMask(disabled);check(CaptureTypePolicy.mask()==disabled,"unchanged SavedData failed to repair policy");
             data.setCaptureMask(CaptureTypePolicy.changed(disabled,11,true));check(CreateCapturePolicy.actors(entity)&&CreateCapturePolicy.cargo(entity),"re-enable failed");

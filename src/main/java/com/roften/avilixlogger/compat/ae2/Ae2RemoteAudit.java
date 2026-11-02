@@ -16,7 +16,7 @@ import java.util.*;
 public final class Ae2RemoteAudit {
     private Ae2RemoteAudit() {}
     public static Capture begin(AEBaseMenu menu, boolean liveReads) {
-        return Ae2Audit.enabled() ? create(menu, liveReads, true) : null;
+        return Ae2Audit.enabled() && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(28) ? create(menu, liveReads, true) : null;
     }
     /** Detached evidence inspector; no production append and no authorization change. */
     public static Capture inspect(AEBaseMenu menu, boolean liveReads) { return create(menu, liveReads, false); }
