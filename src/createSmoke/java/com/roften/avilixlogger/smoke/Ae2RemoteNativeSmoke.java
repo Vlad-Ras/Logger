@@ -215,7 +215,7 @@ public final class Ae2RemoteNativeSmoke {
             public List<LogEntry> queryReverse(LogQuery query) { return query(query); }
             public void shutdown() {}
         }, 8, 1024 * 1024);
-        try { rows.forEach(storage::append); } finally { storage.shutdown(); }
+        try { DetachedPipelineSmoke.append(storage,rows); } finally { storage.shutdown(); }
         check(received.size() == rows.size(), "remote pipeline lost rows");
         for (int i = 0; i < rows.size(); i++) {
             var row = received.get(i); check(row.source.equals(rows.get(i).source) && row.type == rows.get(i).type && row.actorUuid.equals(player.getUUID()) && row.actorName.equals(player.getGameProfile().getName()), "remote FIFO/actor lost");

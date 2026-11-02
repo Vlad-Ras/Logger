@@ -200,7 +200,7 @@ public final class Ae2ProcessingNativeSmoke implements AutoCloseable {
             public List<LogEntry> queryReverse(LogQuery q) { return query(q); }
             public void shutdown() {}
         }, 2, 1024 * 1024);
-        try { rows.forEach(storage::append); } finally { storage.shutdown(); }
+        try { DetachedPipelineSmoke.append(storage,rows); } finally { storage.shutdown(); }
         check(received.size() == 3, "processing worker dropped receipts");
         for (int i = 0; i < received.size(); i++) {
             var row = received.get(i); var tag = Ae2CraftingDetails.context(row);

@@ -139,7 +139,7 @@ public final class Ae2PatternNativeSmoke {
             public List<LogEntry> queryReverse(LogQuery query) { return query(query); }
             public void shutdown() {}
         }, 8, 1024 * 1024);
-        try { rows.forEach(storage::append); } finally { storage.shutdown(); }
+        try { DetachedPipelineSmoke.append(storage,rows); } finally { storage.shutdown(); }
         check(rows.size() == received.size(), "pattern pipeline lost/duplicated rows");
         for (int i = 0; i < rows.size(); i++) {
             var row = received.get(i); check(row.type == rows.get(i).type && row.source.equals(rows.get(i).source), "pattern FIFO/source changed");

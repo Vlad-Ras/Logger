@@ -165,7 +165,7 @@ public final class Ae2TransferNativeSmoke {
             public void shutdown() {}
         };
         var storage = new AsyncLogStorage(sink, 4, 1024 * 1024);
-        try { expected.forEach(storage::append); } finally { storage.shutdown(); }
+        try { DetachedPipelineSmoke.append(storage,expected); } finally { storage.shutdown(); }
         check(actual.size() == expected.size(), "ordered native pipeline lost/duplicated ME records");
         for (int i = 0; i < actual.size(); i++) {
             var row = actual.get(i); var summary = Ae2TransferDetails.summary(row);

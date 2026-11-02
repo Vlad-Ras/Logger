@@ -234,7 +234,7 @@ public final class Ae2RequesterCancelNativeSmoke implements AutoCloseable {
             public List<LogEntry> queryReverse(LogQuery q) { return query(q); }
             public void shutdown() {}
         }, 2, 1024 * 1024);
-        try { rows.forEach(storage::append); } finally { storage.shutdown(); }
+        try { DetachedPipelineSmoke.append(storage,rows); } finally { storage.shutdown(); }
         check(received.size() == 10, "linked/CPU cancel worker dropped rows");
         var actualIds = new HashSet<UUID>();
         for (int i = 0; i < received.size(); i++) {

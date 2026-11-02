@@ -162,7 +162,7 @@ public final class Ae2CraftingNativeSmoke {
             public List<LogEntry> queryReverse(LogQuery q) { return query(q); }
             public void shutdown() {}
         }, 2, 1024 * 1024);
-        try { rows.forEach(storage::append); } finally { storage.shutdown(); }
+        try { DetachedPipelineSmoke.append(storage,rows); } finally { storage.shutdown(); }
         check(received.size() == rows.size(), "native job worker lost receipts");
         for (int i = 0; i < rows.size(); i++) {
             var row = received.get(i); var data = Ae2CraftingDetails.context(row);
