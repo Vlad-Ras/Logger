@@ -50,6 +50,7 @@ public final class CreateDeployerJointSmoke {
         }
         if(net.neoforged.fml.ModList.get().isLoaded("backpacked"))for(String participant:List.of("backpack-progress-","backpack-inventory-","feed-backpack-progress-"))for(String phase:List.of("native","cancel-first","cancel-all","conflict","unrelated","locks"))modes.add(participant+phase);
         int tested=0;
+        entityDataComparisonContract();
         for(var kind:List.of(CreateContraptionKind.MINECART,CreateContraptionKind.TRAIN,CreateContraptionKind.BEARING,CreateContraptionKind.OTHER))
         for(String mode:modes){
             var body=(AbstractContraptionEntity)factory.invoke(null,world,kind);attach.invoke(null,body);body.setPos(pos.above(5).getX(),pos.above(5).getY(),pos.above(5).getZ());
@@ -246,7 +247,7 @@ public final class CreateDeployerJointSmoke {
                     if(mode.endsWith("conflict"))check(rejected,"deployer conflict accepted");
                     else if(canceled){check(CreateDeployerTransaction.hand(context,fake).equals(a.getCompound("Hand")),"deployer compensation lost hand");for(var u:plan.blocks())check(CreateStructuralAudit.world(world,BlockPos.of(u.after().getLong("Pos"))).equals(u.after()),"deployer compensation lost world");
                         for(var u:plan.targets()){var expected=u.after();var live=world.getEntity(expected.getUUID("Entity"));var actual=live==null?null:CreateLivingRuntime.entitySnapshot(world,live);
-                            check(expected.getBoolean("Terminal")?mode.contains("removed")?live==null||live.isRemoved():live instanceof LivingEntity&&!live.isAlive():expected.getBoolean("Exists")?live!=null&&!live.isRemoved()&&actual.equals(expected.getCompound("NBT")):live==null||live.isRemoved(),"deployer compensation lost entity/drop "+kind+"/"+mode+"; expected="+expected+"; actual="+actual+"; differences="+(actual==null?"missing entity":differences("",expected.getCompound("NBT"),actual)));
+                            check(expected.getBoolean("Terminal")?mode.contains("removed")?live==null||live.isRemoved():live instanceof LivingEntity&&!live.isAlive():expected.getBoolean("Exists")?live!=null&&!live.isRemoved()&&sameEntityData(expected.getCompound("NBT"),actual,kind+"/"+mode):live==null||live.isRemoved(),"deployer compensation lost entity/drop "+kind+"/"+mode+"; expected="+expected+"; actual="+actual+"; differences="+(actual==null?"missing entity":differences("",expected.getCompound("NBT"),actual)));
                             if(expected.contains("LivingRuntime",10))check(live instanceof LivingEntity living&&CreateLivingRuntime.matches(living,fake,expected.getCompound("LivingRuntime")),"deployer compensation lost combat runtime");}}
                     else{check(field(type,"committed").getBoolean(job),"deployer transaction not committed");check(CreateDeployerTransaction.hand(context,fake).equals(before),"deployer undo lost hand/components");for(var u:plan.blocks())check(CreateStructuralAudit.world(world,BlockPos.of(u.before().getLong("Pos"))).equals(u.before()),"deployer undo lost world");if(mode.startsWith("name"))check(!target.hasCustomName(),"name target not undone");if(mode.startsWith("frame")&&!mode.startsWith("frame-break"))check(((ItemFrame)target).getItem().isEmpty(),"frame target not undone");if(mode.equals("locks")||mode.equals("name-locks")||mode.equals("feed-locks"))check(locked,"deployer locks not tested");
                         if(mode.equals("name-move"))check(target.position().equals(pose),"data-only undo teleported moving target");
@@ -317,6 +318,23 @@ public final class CreateDeployerJointSmoke {
                 &&fake.getMainHandItem().has(DataComponents.CUSTOM_NAME)&&fake.getInventory().getItem(36).getCount()==200
                 &&fake.getOffhandItem().getCount()==2048&&CreateLivingRuntime.matches(fake,fake,using),
                 "expanded active item, armor or offhand was not restored exactly");
+    }
+    private static boolean sameEntityData(CompoundTag expected,CompoundTag actual,String scenario){
+        if(actual==null)return false;if(expected.equals(actual))return true;
+        var canonicalExpected=expected.copy();var canonicalActual=actual.copy();
+        CreateLivingRuntime.normalize(canonicalExpected);CreateLivingRuntime.normalize(canonicalActual);
+        boolean same=canonicalExpected.equals(canonicalActual);
+        if(same)System.out.println("CREATE_ENTITY_NBT_ORDER_ONLY: "+scenario+"; "+differences("",expected,actual));
+        return same;
+    }
+    private static void entityDataComparisonContract(){
+        var first=new CompoundTag();first.putFloat("Health",12);first.putUUID("UUID",UUID.fromString("21000000-0000-0000-0000-000000000001"));
+        var attributes=new ListTag();for(String id:List.of("minecraft:movement_speed","minecraft:max_health")){var value=new CompoundTag();value.putString("id",id);value.putDouble("base",4);attributes.add(value);}first.put("attributes",attributes);
+        var second=first.copy();var reversed=new ListTag();reversed.add(attributes.get(1).copy());reversed.add(attributes.get(0).copy());second.put("attributes",reversed);
+        check(sameEntityData(first,second,"contract"),"native unordered attribute order treated as data loss");
+        second.putFloat("Health",11);check(!sameEntityData(first,second,"contract"),"canonical comparator hid a health mutation");
+        second=first.copy();second.getList("attributes",10).getCompound(0).putDouble("base",8);check(!sameEntityData(first,second,"contract"),"canonical comparator hid an attribute mutation");
+        check(!sameEntityData(first,null,"contract"),"missing entity accepted by canonical comparator");
     }
     private static Method method(Class<?> type,String name,Class<?>...args)throws Exception{var m=type.getDeclaredMethod(name,args);m.setAccessible(true);return m;}
     private static String differences(String path,CompoundTag expected,CompoundTag actual){
