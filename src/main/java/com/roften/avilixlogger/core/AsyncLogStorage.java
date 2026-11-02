@@ -12,7 +12,7 @@ public final class AsyncLogStorage implements LogStorage {
 
     public AsyncLogStorage(LogStorage delegate, int capacity, long maxBytes) {
         this.delegate = delegate;
-        this.queue = new WeightedQueue<>(capacity, maxBytes);
+        this.queue = new WeightedQueue<>("events",capacity, maxBytes);
         worker = new Thread(this::process, "avilixlogger-event-worker");
         worker.setDaemon(true);
         worker.setPriority(Thread.NORM_PRIORITY - 1);
@@ -116,4 +116,6 @@ public final class AsyncLogStorage implements LogStorage {
 
     long backpressureCount() { return queue.backpressureCount(); }
     long retainedBytes() { return queue.retainedBytes(); }
+    WeightedQueue.Statistics queueStatistics(){return queue.statistics();}
+    void resetQueueStatistics(){queue.resetStatistics();}
 }

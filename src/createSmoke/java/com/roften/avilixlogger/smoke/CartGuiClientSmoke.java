@@ -19,11 +19,12 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
         try{
+            if(root==null&&waitingTicks==0)java.nio.file.Files.deleteIfExists(mc.gameDirectory.toPath().resolve("gui-smoke-result.txt"));
             if(root==null){
                 if(mc.getOverlay()==null&&mc.screen instanceof net.minecraft.client.gui.screens.AccessibilityOnboardingScreen){
                     mc.options.onboardingAccessibilityFinished();mc.setScreen(new net.minecraft.client.gui.screens.TitleScreen());return;
@@ -84,6 +85,16 @@ public final class CartGuiClientSmoke {
                     mc.setScreen((Screen)constructor.newInstance(parent));
                 }
                 else if(stage==11)mc.setScreen(com.roften.avilixlogger.client.gui.LogViewerScreen.forModule(new com.roften.avilixlogger.client.gui.LogViewerScreen(),14));
+                else if(stage==12){
+                    var screen=new com.roften.avilixlogger.client.gui.LoggerActionsScreen(root);mc.setScreen(screen);
+                    var request=screen.getClass().getDeclaredField("lastRequest");request.setAccessible(true);request.setLong(screen,2);
+                    String example="Тест отображения отчёта. Числа ниже — данные fixture, не замер сервера.\n";
+                    for(String name:List.of("Обработка снимков","События","Запись на диск"))example+=name+": в очереди 100, в обработке 25; пик записей 4096 / 4096; данные 0.50 MiB, пик 16.00 / 16.00 MiB; ожиданий 4, сейчас ждут 1, завершённый максимум 100.000 ms\n";
+                    example+="Объём — оценка данных очереди, а не весь heap JVM. Один крупный снимок может превысить лимит буфера.";
+                    com.roften.avilixlogger.client.gui.LoggerActionsScreen.accept(new com.roften.avilixlogger.net.S2CLoggerActionResultPayload(2,example,"",""));
+                    var results=screen.getClass().getDeclaredField("results");results.setAccessible(true);results.setBoolean(screen,true);
+                    var refresh=screen.getClass().getDeclaredMethod("refresh");refresh.setAccessible(true);refresh.invoke(screen);
+                }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==8){
                     var capture=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;
@@ -91,9 +102,15 @@ public final class CartGuiClientSmoke {
                 }
             }else{
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);
-                System.out.println("CART_GUI_CLIENT_OK: actual history/actions/confirmation/results, shared action forms, help and journal rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks");finished=true;mc.stop();
+                String result="CART_GUI_CLIENT_OK: actual history/actions/confirmation/results, performance report, shared action forms, help and journal rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks";
+                java.nio.file.Files.writeString(mc.gameDirectory.toPath().resolve("gui-smoke-result.txt"),result+"\n");
+                com.roften.avilixlogger.AvilixLoggerMod.LOGGER.info(result);finished=true;mc.stop();
             }
-        }catch(Throwable error){error.printStackTrace();System.out.println("CART_GUI_CLIENT_FAILED");finished=true;mc.stop();}
+        }catch(Throwable error){
+            com.roften.avilixlogger.AvilixLoggerMod.LOGGER.error("CART_GUI_CLIENT_FAILED",error);
+            try{java.nio.file.Files.writeString(mc.gameDirectory.toPath().resolve("gui-smoke-result.txt"),"CART_GUI_CLIENT_FAILED: "+error+"\n");}catch(java.io.IOException ignored){}
+            finished=true;mc.stop();
+        }
     }
     private static Screen panel(String name)throws Exception{var c=Class.forName(CartHistoryScreen.class.getName()+"$"+name).getDeclaredConstructor(CartHistoryScreen.class);c.setAccessible(true);return (Screen)c.newInstance(root);}
     private static void layout(Screen screen,Minecraft mc){

@@ -83,9 +83,9 @@ public final class LoggerCommands {
             .then(BackpackCommands.node())
             .then(literal("perf")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.command.admin", 2))
-                .executes(c -> { c.getSource().sendSystemMessage(Component.literal(HotPathMetrics.report()));return 1; })
-                .then(literal("start").executes(c -> { HotPathMetrics.start();c.getSource().sendSystemMessage(Component.literal("Замеры Logger включены. /log perf — отчёт; /log perf stop — остановка."));return 1; }))
-                .then(literal("stop").executes(c -> { String report=HotPathMetrics.stop();c.getSource().sendSystemMessage(Component.literal(report));AvilixLoggerMod.LOGGER.info("[AvilixLogger] {}",report);return 1; })))
+                .executes(c -> { c.getSource().sendSystemMessage(Component.literal(HotPathMetrics.report()+"\n"+LoggerRuntime.queueReport()));return 1; })
+                .then(literal("start").executes(c -> { HotPathMetrics.start();LoggerRuntime.resetQueueStatistics();c.getSource().sendSystemMessage(Component.literal("Замеры Logger включены. /log perf — отчёт; /log perf stop — остановка."));return 1; }))
+                .then(literal("stop").executes(c -> { String report=HotPathMetrics.stop()+"\n"+LoggerRuntime.queueReport();c.getSource().sendSystemMessage(Component.literal(report));AvilixLoggerMod.LOGGER.info("[AvilixLogger] {}",report);return 1; })))
 
             // Short help + examples
             .then(literal("help").executes(LoggerCommands::help)

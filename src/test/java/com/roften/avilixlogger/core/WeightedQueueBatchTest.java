@@ -10,7 +10,7 @@ public final class WeightedQueueBatchTest {
     public static void main(String[] args)throws Exception{run();}
     static void run()throws Exception{
         for(boolean producerFirst:new boolean[]{false,true})wakeBatch(producerFirst);
-        drainBeforeFlush();closeAndInterrupt();normalPoll();
+        drainBeforeFlush();closeAndInterrupt();normalPoll();statistics();
         System.out.println("WEIGHTED_QUEUE_BATCH_OK: pressure before/during batch wait, queued drain, no early reservation release, normal poll, interrupted producer and close");
     }
     private static void await(java.util.function.BooleanSupplier ready)throws Exception{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);while(!ready.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(2);check(ready.getAsBoolean(),"fixture timed out");}
@@ -23,6 +23,7 @@ public final class WeightedQueueBatchTest {
             else{consumer.start();await(()->consumer.getState()==Thread.State.TIMED_WAITING);producer.start();}
             check(result.get(2,TimeUnit.SECONDS)==null,"empty batching poll returned a fabricated work item");
             check(producer.isAlive()&&queue.retainedBytes()==100,"flush request released in-flight bytes/permits before persistence");
+            check(queue.statistics().waitingProducers()==1&&queue.statistics().waits()==1,"active pressure missing from queue report");
             queue.complete(held);held=null;producer.join(3000);check(!producer.isAlive()&&error.get()==null,"producer did not resume");var work=queue.poll(10);check(work.value()==2,"waiting producer lost");queue.complete(work);check(queue.awaitEmpty(System.nanoTime()+TimeUnit.SECONDS.toNanos(1)),"queue did not drain");
         }finally{queue.close();if(held!=null)queue.complete(held);producer.join(3000);consumer.join(3000);}
     }
@@ -39,5 +40,15 @@ public final class WeightedQueueBatchTest {
         var queue=new WeightedQueue<Integer>(1,10);queue.put(1,10);var held=queue.poll(10);var producer=new Thread(()->{try{queue.put(2,1);}catch(IllegalStateException expected){}},"normal-poll-pressure");producer.setDaemon(true);producer.start();await(queue::hasWaitingProducers);
         var result=new FutureTask<WeightedQueue.Work<Integer>>((Callable<WeightedQueue.Work<Integer>>)()->queue.poll(60_000));var consumer=new Thread(result,"normal-poll-consumer");consumer.setDaemon(true);consumer.start();
         try{try{result.get(30,TimeUnit.MILLISECONDS);throw new AssertionError("normal consumer became a batch flush poll");}catch(TimeoutException expected){}}finally{queue.close();queue.complete(held);producer.join(3000);consumer.join(3000);}
+    }
+    private static void statistics()throws Exception {
+        var queue=new WeightedQueue<Integer>("fixture",3,100);queue.put(1,30);queue.put(2,40);
+        var held=queue.poll(10);var initial=queue.statistics();
+        check(initial.name().equals("fixture")&&initial.queued()==1&&initial.outstanding()==2&&initial.bytes()==70&&initial.peakBytes()==70&&initial.peakOutstanding()==2,"queue/in-flight/peak statistics lost reservations");
+        queue.resetStatistics();check(queue.statistics().peakBytes()==70,"reset hid already retained data");
+        queue.complete(held);held=queue.poll(10);queue.complete(held);
+        var drained=queue.statistics();check(drained.bytes()==0&&drained.outstanding()==0&&drained.queued()==0&&drained.peakBytes()==70,"drain erased peak or retained data");
+        queue.resetStatistics();check(queue.statistics().peakBytes()==0&&queue.statistics().waits()==0,"statistics reset failed");
+        check(initial.bytes()==70&&initial.queued()==1,"statistics snapshot mutated after capture");queue.close();
     }
 }

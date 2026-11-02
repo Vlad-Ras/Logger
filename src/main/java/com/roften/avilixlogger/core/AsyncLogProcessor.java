@@ -34,6 +34,8 @@ public final class AsyncLogProcessor {
     }
 
     public static boolean awaitIdle(long deadlineNanos) throws InterruptedException { Pool current = pool; return current == null || current.queue.awaitEmpty(deadlineNanos); }
+    static WeightedQueue.Statistics queueStatistics(){Pool current=pool;return current==null?null:current.queue.statistics();}
+    static void resetQueueStatistics(){Pool current=pool;if(current!=null)current.queue.resetStatistics();}
 
     public static void shutdown() {
         stopping = true;
@@ -56,7 +58,7 @@ public final class AsyncLogProcessor {
         final WeightedQueue<Runnable> queue;
         final Thread[] workers;
         Pool(int count, int capacity, long bytes) {
-            queue = new WeightedQueue<>(capacity, bytes);
+            queue = new WeightedQueue<>("cpu",capacity, bytes);
             workers = new Thread[Math.max(1, count)];
             for (int i = 0; i < workers.length; i++) {
                 workers[i] = new Thread(this::run, "avilixlogger-cpu-worker-" + (i + 1));

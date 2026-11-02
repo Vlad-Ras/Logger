@@ -22,6 +22,28 @@ public final class LoggerRuntime {
 
     private LoggerRuntime() {}
 
+    /** Inspect existing queues only. Reading diagnostics must not start a logger or storage connection. */
+    public static String queueReport() {
+        var states=new java.util.ArrayList<WeightedQueue.Statistics>(3);
+        var cpu=AsyncLogProcessor.queueStatistics();if(cpu!=null)states.add(cpu);
+        var events=ASYNC;if(events!=null)states.add(events.queueStatistics());
+        var journal=PENDING;if(journal!=null)states.add(journal.queueStatistics());
+        if(states.isEmpty())return "Очереди Logger ещё не запущены.";
+        var text=new StringBuilder("Очереди Logger (пики с последнего запуска замеров):\n");
+        for(var state:states) {
+            String name=switch(state.name()){case "cpu"->"Обработка снимков";case "events"->"События";case "journal"->"Запись на диск";default->state.name();};
+            text.append(String.format(java.util.Locale.ROOT,"%s: в очереди %d, в обработке %d; пик записей %d / %d; данные %.2f MiB, пик %.2f / %.2f MiB; ожиданий %d, сейчас ждут %d, завершённый максимум %.3f ms\n",
+                name,state.queued(),state.outstanding()-state.queued(),state.peakOutstanding(),state.countLimit(),state.bytes()/1048576.0,state.peakBytes()/1048576.0,state.byteLimit()/1048576.0,state.waits(),state.waitingProducers(),state.maxWaitNanos()/1e6));
+        }
+        text.append("Объём — оценка данных очереди, а не весь heap JVM. Один крупный снимок может превысить лимит буфера.");
+        return text.toString();
+    }
+    public static void resetQueueStatistics() {
+        AsyncLogProcessor.resetQueueStatistics();
+        var events=ASYNC;if(events!=null)events.resetQueueStatistics();
+        var journal=PENDING;if(journal!=null)journal.resetQueueStatistics();
+    }
+
     public static LogStorage storage(Level level) {
         if (!LoggerConfig.isEnabled()) return UNAUTHORIZED;
         LogStorage events = eventStorage();

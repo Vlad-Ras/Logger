@@ -38,11 +38,11 @@ public final class ExactModpackPreflightTest {
         var node=new ClassNode();new ClassReader(bytes).accept(node,ClassReader.SKIP_FRAMES);return node;
     }
     private void group(String config,String requiredClass)throws Exception {
-        if(!classes.containsKey(requiredClass+".class")) {System.out.println("EXACT_PREFLIGHT_SKIP "+config+": mod absent");return;}
+        if(requiredClass!=null&&!classes.containsKey(requiredClass+".class")) {System.out.println("EXACT_PREFLIGHT_SKIP "+config+": mod absent");return;}
         var json=JsonParser.parseReader(new InputStreamReader(Objects.requireNonNull(loader.getResourceAsStream(config)),java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
         String pkg=json.get("package").getAsString().replace('.','/');int checked=0;var checker=new Preflight(this::raw);
         for(var name:json.getAsJsonArray("mixins")) {checker.check(pkg+'/'+name.getAsString());checked++;}
-        System.out.println("EXACT_PREFLIGHT_OK "+config+": "+checked+" mixins; supplied raw bytecode");
+        System.out.println("EXACT_PREFLIGHT_OK "+config+": "+checked+" mixins; "+(requiredClass==null?"runtime Minecraft raw bytecode":"supplied mod raw bytecode"));
     }
     public static void main(String[] args)throws Exception {
         if(args.length!=1)throw new IllegalArgumentException("Expected exact mods directory");
@@ -55,10 +55,13 @@ public final class ExactModpackPreflightTest {
         test.group("avilixlogger_blockpack.mixins.json","com/blockfactory/blockpack/event/GiftSavedData");
         test.group("avilixlogger_supplementaries.mixins.json","net/mehvahdjukaar/supplementaries/common/block/TextHolder");
         test.group("avilixlogger_airplanes.mixins.json","immersive_aircraft/entity/VehicleEntity");
-        test.group("avilixlogger_core.mixins.json","net/minecraft/world/CompoundContainer");
+        test.group("avilixlogger_core.mixins.json",null);
         test.group("avilixlogger_corpse.mixins.json","de/maxhenkel/corpse/entities/CorpseEntity");
+        test.group("avilixlogger_accessories.mixins.json","io/wispforest/accessories/impl/AccessoriesHolderImpl");
+        test.group("avilixlogger_createcobblestone.mixins.json","net/createcobblestone/neoforge/blocks/MechanicalGeneratorBlockEntity");
+        test.group("avilixlogger_vibrantvaults.mixins.json","net/zlt/create_vibrant_vaults/CreateVibrantVaults");
         test.group("avilixlogger_opac.mixins.json","xaero/pac/common/server/claims/ServerClaimsManager");
-        test.group("avilixlogger_ftbteams.mixins.json","dev/ftb/mods/ftbteams/data/Team");
+        test.group("avilixlogger_ftbteams.mixins.json","dev/ftb/mods/ftbteams/data/AbstractTeam");
         test.group("avilixlogger_enchantmentindustry.mixins.json","plus/dragons/createenchantmentindustry/common/fluids/experience/ExperienceHatchBlock");
         test.group("avilixlogger_dieselgenerators.mixins.json","com/jesz/createdieselgenerators/content/oil_barrel/OilBarrelBlockEntity");
         if(test.classes.containsKey("plus/dragons/createenchantmentindustry/common/fluids/experience/ExperienceHatchBlock.class")

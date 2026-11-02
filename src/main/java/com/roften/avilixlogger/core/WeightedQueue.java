@@ -8,13 +8,18 @@ import java.util.concurrent.locks.ReentrantLock;
 /** Bounded handoff with backpressure, including payloads currently being processed. */
 final class WeightedQueue<T> {
     record Work<T>(T value, long bytes) {}
+    record Statistics(String name,int queued,int outstanding,long bytes,long peakBytes,int peakOutstanding,
+                      int countLimit,long byteLimit,long waits,int waitingProducers,long maxWaitNanos) {}
     private final ArrayDeque<Work<T>> entries = new ArrayDeque<>();
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition ready = lock.newCondition();
     private final Condition space = lock.newCondition();
     private final int capacity;
     private final long maxBytes;
+    private final String name;
     private long bytes;
+    private long peakBytes,maxWaitNanos;
+    private int peakOutstanding;
     private int outstanding;
     private long waits;
     private int waitingProducers;
@@ -22,6 +27,10 @@ final class WeightedQueue<T> {
     private boolean closed;
 
     WeightedQueue(int capacity, long maxBytes) {
+        this("queue",capacity,maxBytes);
+    }
+    WeightedQueue(String name,int capacity, long maxBytes) {
+        this.name=name;
         this.capacity = Math.max(1, capacity);
         this.maxBytes = Math.max(1, maxBytes);
     }
@@ -38,12 +47,17 @@ final class WeightedQueue<T> {
                 if (batchWaiters > 0) ready.signalAll();
                 long started = System.nanoTime();
                 try { while (!closed && full(weight)) space.awaitUninterruptibly(); }
-                finally { waitingProducers--; HotPathMetrics.waited(System.nanoTime()-started); }
+                finally {
+                    waitingProducers--;
+                    long waited=System.nanoTime()-started;maxWaitNanos=Math.max(maxWaitNanos,waited);
+                    HotPathMetrics.waited(waited);
+                }
             }
             if (closed) throw new IllegalStateException("Logger queue is closed");
             entries.addLast(new Work<>(value, weight));
             bytes += weight;
             outstanding++;
+            peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);
             ready.signal();
         } finally { lock.unlock(); }
     }
@@ -106,6 +120,17 @@ final class WeightedQueue<T> {
     long retainedBytes() {
         lock.lock();
         try { return bytes; } finally { lock.unlock(); }
+    }
+
+    Statistics statistics() {
+        lock.lock();
+        try{return new Statistics(name,entries.size(),outstanding,bytes,peakBytes,peakOutstanding,capacity,maxBytes,waits,waitingProducers,maxWaitNanos);}
+        finally{lock.unlock();}
+    }
+    void resetStatistics() {
+        lock.lock();
+        try{peakBytes=bytes;peakOutstanding=outstanding;waits=0;maxWaitNanos=0;}
+        finally{lock.unlock();}
     }
 
     long backpressureCount() {

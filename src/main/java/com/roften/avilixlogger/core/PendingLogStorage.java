@@ -28,7 +28,7 @@ public final class PendingLogStorage implements LogStorage {
     }
 
     PendingLogStorage(Path directory, int capacity, long bytes, int batchSize, long flushMillis) {
-        queue = new WeightedQueue<>(capacity, bytes);
+        queue = new WeightedQueue<>("journal",capacity, bytes);
         journal = new DiskLogJournal(directory);
         this.batchSize = Math.max(1, batchSize);
         this.flushMillis = Math.max(1, flushMillis);
@@ -58,6 +58,8 @@ public final class PendingLogStorage implements LogStorage {
         LogIdGenerator.ensure(entry);
         queue.put(entry, PayloadSizeEstimator.estimate(entry));
     }
+    WeightedQueue.Statistics queueStatistics(){return queue.statistics();}
+    void resetQueueStatistics(){queue.resetStatistics();}
 
     private void writeJournal() {
         while (!initialized) {
