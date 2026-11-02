@@ -46,6 +46,7 @@ public final class LoggerRuntime {
 
     public static String resumeCapture(){
         if(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized())return "AuthCore не разрешил работу Logger.";
+        if(!LoggerConfig.isEnabled())return "Logger отключён в основной конфигурации.";
         if(!ServerCaptureGuard.paused())return "Аварийной остановки захвата нет.";
         var cpu=AsyncLogProcessor.queueStatistics();var events=ASYNC;var journal=PENDING;
         if(cpu!=null&&cpu.outstanding()!=0||events!=null&&events.queueStatistics().outstanding()!=0||journal!=null&&journal.queueStatistics().outstanding()!=0)
@@ -57,7 +58,7 @@ public final class LoggerRuntime {
         return "Захват возобновлён. Интервал пропуска будет сохранён отдельной записью журнала.\n"+ServerCaptureGuard.report();
     }
     public static boolean enqueueDiagnostic(LogEntry entry){
-        if(entry==null||entry.type!=ActionType.LOGGER_DIAGNOSTIC||!"logger:diagnostic".equals(entry.source)||!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized())return false;
+        if(entry==null||entry.type!=ActionType.LOGGER_DIAGNOSTIC||!"logger:diagnostic".equals(entry.source)||!LoggerConfig.isEnabled())return false;
         var events=ASYNC;if(events==null)return false;LogIdGenerator.ensure(entry);return events.appendDiagnostic(entry);
     }
     static LogEntry captureGapEntry(ServerCaptureGuard.Gap gap){

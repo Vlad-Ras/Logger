@@ -129,6 +129,7 @@ public final class LoggerEventHandlers {
     private static final Map<UUID, ContainerCtx> OPEN_CONTAINER = new ConcurrentHashMap<>();
 
     private static final class PendingBlockContainerOpen {
+        final long captureGeneration=ServerCaptureGuard.generation();
         final long ts;
         final String dim;
         final BlockPos pos;
@@ -189,6 +190,7 @@ public final class LoggerEventHandlers {
     private static final Map<UUID, GenericMenuCtx> OPEN_GENERIC_MENU = new ConcurrentHashMap<>();
 
     private static final class PendingEntityContainerOpen {
+        final long captureGeneration=ServerCaptureGuard.generation();
         final long ts;
         final String dim;
         final UUID entityUuid;
@@ -657,7 +659,7 @@ public final class LoggerEventHandlers {
         try {
             if (wantContainers) {
             PendingBlockContainerOpen pending = PENDING_BLOCK_CONTAINER_OPEN.remove(sp.getUUID());
-            if (pending != null && pending.dim.equals(dim) && (System.currentTimeMillis() - pending.ts) <= 1200L) {
+            if (pending != null && pending.captureGeneration==ServerCaptureGuard.generation() && pending.dim.equals(dim) && (System.currentTimeMillis() - pending.ts) <= 1200L) {
                 if (!pending.openLogged && LoggerConfig.VALUES.logBlocks.get()) {
                     LogEntry e = new LogEntry();
                     e.ts = System.currentTimeMillis();
@@ -707,7 +709,7 @@ public final class LoggerEventHandlers {
         try {
             if (wantContainers) {
             PendingEntityContainerOpen pending = PENDING_ENTITY_CONTAINER_OPEN.remove(sp.getUUID());
-            if (pending != null && pending.dim.equals(dim) && (System.currentTimeMillis() - pending.ts) <= 1200L) {
+            if (pending != null && pending.captureGeneration==ServerCaptureGuard.generation() && pending.dim.equals(dim) && (System.currentTimeMillis() - pending.ts) <= 1200L) {
                 Entity ent = level.getEntity(pending.entityUuid);
                 if (ent instanceof Container) {
                     logEntityContainerOpen(level, sp, ent, dim, pending.entityType, pending.beforeInv);

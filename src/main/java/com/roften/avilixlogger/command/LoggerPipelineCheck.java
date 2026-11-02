@@ -17,6 +17,7 @@ public final class LoggerPipelineCheck {
             source.sendSystemMessage(Component.literal("Нужны права администратора и разрешение AuthCore."));return 0;
         }
         if(!RUNNING.compareAndSet(false,true)){source.sendSystemMessage(Component.literal("Проверка уже выполняется."));return 0;}
+        if(!com.roften.avilixlogger.LoggerConfig.isEnabled()){RUNNING.set(false);source.sendSystemMessage(Component.literal("Logger отключён в основной конфигурации."));return 0;}
         try{
             var storage=LoggerRuntime.storage(source.getLevel());
             var entry=new LogEntry();entry.type=ActionType.LOGGER_DIAGNOSTIC;entry.source="logger:diagnostic";entry.dim="*";entry.ts=System.currentTimeMillis();
