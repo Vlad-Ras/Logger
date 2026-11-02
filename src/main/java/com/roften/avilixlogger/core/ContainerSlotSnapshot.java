@@ -188,7 +188,9 @@ public final class ContainerSlotSnapshot {
 
             CompoundTag out = new CompoundTag();
             int size = Math.max(0, h.getSlots());
-            if(h instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper)
+            // Subclasses may remap or filter slots; their exposed handler remains authoritative.
+            if(h instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper
+                    && h.getClass()==net.neoforged.neoforge.items.wrapper.InvWrapper.class)
                 return writeContainer(wrapper.getInv(),level.registryAccess());
             out.putInt("Size", size);
             ListTag items = new ListTag();
