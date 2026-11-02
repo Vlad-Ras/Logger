@@ -1,5 +1,7 @@
 # Corpse, Accessories и OPAC: первый функциональный пакет
 
+Последний проход: [Create Cobblestone + Create: Vibrant Vaults](CREATE_COBBLESTONE_VIBRANT_VAULTS_COVERAGE_20261030.md). Реализация; вся приёмка отложена.
+
 Дальнейший проход: [OPAC + FTB Teams](OPAC_FTBTEAMS_COVERAGE_20261030.md).
 Его реализация расширяет OPAC; историческая таблица ниже не является текущим
 полным списком добавленных путей. Компиляция и приёмка остаются отложенными.

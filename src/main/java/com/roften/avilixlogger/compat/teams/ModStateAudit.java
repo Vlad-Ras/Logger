@@ -13,7 +13,8 @@ public final class ModStateAudit {
     public static boolean enabled(MinecraftServer server, ActionType type) {
         if (server == null || !server.isSameThread() || !LoggerConfig.isEnabled() || !CaptureTypePolicy.allows(type, null, null) || CartAuditContext.restoring()) return false;
         return switch (type) {
-            case CLAIM_ACTION, PROTECTION_CHANGE -> LoggerConfig.VALUES.logBlocks.get();
+            case CLAIM_ACTION, PROTECTION_CHANGE, MACHINE_STATE_CHANGE -> LoggerConfig.VALUES.logBlocks.get();
+            case MACHINE_CONTENT_CHANGE, CONTAINER_OPEN -> LoggerConfig.VALUES.logContainers.get();
             case CHAT_MESSAGE -> LoggerConfig.VALUES.logChat.get();
             default -> LoggerConfig.VALUES.logEntities.get();
         };
@@ -47,6 +48,10 @@ public final class ModStateAudit {
     private static void append(MinecraftServer server, LogEntry row, CompoundTag before, CompoundTag after, boolean threw) {
         if (after.contains("Dimension", Tag.TAG_STRING)) row.dim = after.getString("Dimension");
         else if (before.contains("Dimension", Tag.TAG_STRING)) row.dim = before.getString("Dimension");
+        if (after.contains("X") || before.contains("X")) {
+            var location = after.contains("X") ? after : before;
+            row.x = location.getInt("X"); row.y = location.getInt("Y"); row.z = location.getInt("Z");
+        }
         if (after.contains("ChunkX") || before.contains("ChunkX")) {
             CompoundTag location = after.contains("ChunkX") ? after : before;
             long x = (long)location.getInt("ChunkX") * 16, z = (long)location.getInt("ChunkZ") * 16;
@@ -55,6 +60,8 @@ public final class ModStateAudit {
         }
         var storage = LoggerRuntime.storage(server.overworld());
         AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after), () -> {
+            if (before.contains("BlockState")) row.blockBefore = before.getCompound("BlockState").toString();
+            if (after.contains("BlockState")) row.blockAfter = after.getCompound("BlockState").toString();
             var changed = new java.util.TreeSet<String>(); changed.addAll(before.getAllKeys()); changed.addAll(after.getAllKeys());
             changed.removeIf(key -> java.util.Objects.equals(before.get(key), after.get(key)));
             row.extra += "; changed=" + String.join(",", changed);

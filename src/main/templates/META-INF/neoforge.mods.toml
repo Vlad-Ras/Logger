@@ -184,3 +184,9 @@ config="avilixlogger_opac.mixins.json"
 
 [[mixins]]
 config="avilixlogger_ftbteams.mixins.json"
+
+[[mixins]]
+config="avilixlogger_createcobblestone.mixins.json"
+
+[[mixins]]
+config="avilixlogger_vibrantvaults.mixins.json"

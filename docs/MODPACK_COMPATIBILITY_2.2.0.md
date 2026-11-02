@@ -1,5 +1,13 @@
 # Совместимость серверного модпака: текущая работа
 
+30.10.2026: [следующая пара — Create Cobblestone и Create: Vibrant Vaults](CREATE_COBBLESTONE_VIBRANT_VAULTS_COVERAGE_20261030.md).
+Добавлены runtime production/buffer/type boundaries, физические slots/bulk/menu,
+связность, пакеты/settings/logistics и panel color. MACHINE_STATE_CHANGE и
+MACHINE_CONTENT_CHANGE подключены к поиску/storage/GUI/rollback guards.
+Это реализация по исходникам; компиляция, тесты и замеры не выполнялись.
+Две позиции из незакрытого остатка не вычитаются.
+
+
 30.10.2026: [новый проход из двух модов — OPAC 0.33.0 и FTB Teams 2101.1.11](OPAC_FTBTEAMS_COVERAGE_20261030.md).
 Добавлен код before/after для claims/anchors/config/groups/parties, queued actor,
 FTB lifecycle/ranks/settings/properties/extra/chat. Добавлены PARTY_CHANGE и

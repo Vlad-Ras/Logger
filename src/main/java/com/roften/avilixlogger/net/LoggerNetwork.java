@@ -883,9 +883,11 @@ public final class LoggerNetwork {
                     com.roften.avilixlogger.core.ActionType.BLOCK_USE,
                     com.roften.avilixlogger.core.ActionType.CLAIM_ACTION,
                     com.roften.avilixlogger.core.ActionType.PROTECTION_CHANGE,
+                    com.roften.avilixlogger.core.ActionType.MACHINE_STATE_CHANGE,
                     com.roften.avilixlogger.core.ActionType.BLOCK_ENTITY_NBT_CHANGE
             );
             case 2 -> java.util.EnumSet.of(
+                    com.roften.avilixlogger.core.ActionType.MACHINE_CONTENT_CHANGE,
                     com.roften.avilixlogger.core.ActionType.GUI_CHANGE,
                     com.roften.avilixlogger.core.ActionType.CONTAINER_OPEN,
                     com.roften.avilixlogger.core.ActionType.ENTITY_CONTAINER_OPEN,

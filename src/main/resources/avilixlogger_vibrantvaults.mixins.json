@@ -1,0 +1,25 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.vibrantvaults.mixin",
+  "plugin": "com.roften.avilixlogger.compat.vibrantvaults.mixin.VibrantVaultMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "SmartMachineMixin",
+    "SyncedMachineMixin",
+    "VaultMixin",
+    "PackagerMixin",
+    "PortMixin",
+    "FrogportMixin",
+    "RequesterMixin",
+    "PhysicalHandlerMixin",
+    "PackageHandlerMixin",
+    "ConfigurationPacketMixin",
+    "LinkBehaviourMixin",
+    "RequestSubmissionMixin",
+    "AttachMachineMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

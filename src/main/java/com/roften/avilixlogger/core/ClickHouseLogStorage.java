@@ -59,7 +59,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.BLOCK_PLACE,
                 ActionType.BLOCK_INTERACT,
                 ActionType.BLOCK_USE,
-                ActionType.BLOCK_ENTITY_NBT_CHANGE, ActionType.CLAIM_ACTION, ActionType.PROTECTION_CHANGE);
+                ActionType.BLOCK_ENTITY_NBT_CHANGE, ActionType.CLAIM_ACTION, ActionType.PROTECTION_CHANGE, ActionType.MACHINE_STATE_CHANGE);
         map(TableKind.CONTAINERS,
                 ActionType.CONTAINER_OPEN,
                 ActionType.CONTAINER_PUT,
@@ -70,7 +70,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 ActionType.ME_UPGRADE_CHANGE,
                 ActionType.ME_FILTER_CHANGE,
                 ActionType.ME_SETTING_CHANGE,
-                ActionType.ME_CELL_CHANGE, ActionType.ME_CRAFT_REQUEST, ActionType.ME_CRAFT_CANCEL, ActionType.ME_CRAFT_FINISH, ActionType.GUI_CHANGE);
+                ActionType.ME_CELL_CHANGE, ActionType.ME_CRAFT_REQUEST, ActionType.ME_CRAFT_CANCEL, ActionType.ME_CRAFT_FINISH, ActionType.GUI_CHANGE, ActionType.MACHINE_CONTENT_CHANGE);
         map(TableKind.ENTITIES,
                 ActionType.ENTITY_DEATH,
                 ActionType.ENTITY_SPAWN,
@@ -669,6 +669,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (e == null) return false;
         if (e.source != null && (e.source.startsWith("mod:corpse:") || e.source.startsWith("mod:accessories:"))) return true;
         if (e.source != null && (e.source.startsWith("mod:ftbteams:") || e.source.startsWith("mod:openpartiesandclaims:"))) return true;
+        if (e.type == ActionType.MACHINE_STATE_CHANGE || e.type == ActionType.MACHINE_CONTENT_CHANGE) return true;
         // Optional equipment/corpse/claim receipts lose their meaning without exact evidence.
         if (e.type == ActionType.ENTITY_EQUIPMENT_CHANGE && e.beBefore != null && e.beAfter != null) return true;
         if (e.type == ActionType.CORPSE_CONTENT_CHANGE && e.beBefore != null && e.beAfter != null
@@ -1814,6 +1815,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
                  ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
+            case MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE -> targetBlock(e.blockAfter, e.extra);
             case PARTY_CHANGE -> new TargetInfo("party", "", safeString(e.extra));
             case PROTECTION_CHANGE, CLAIM_ACTION -> new TargetInfo("protection", "", safeString(e.extra));
             case CHAT_MESSAGE -> new TargetInfo("chat", "", safeString(e.extra));

@@ -118,5 +118,8 @@ public enum ActionType {
     ME_CRAFT_FINISH,
 
     // Append-only: optional mod receipts; no generic item/block rollback contract.
-    CORPSE_CONTENT_CHANGE, CLAIM_ACTION, PARTY_CHANGE, PROTECTION_CHANGE
+    CORPSE_CONTENT_CHANGE, CLAIM_ACTION, PARTY_CHANGE, PROTECTION_CHANGE,
+
+    // Physical machine evidence; requires a dedicated rollback contract.
+    MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE
 }

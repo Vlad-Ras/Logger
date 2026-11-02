@@ -643,7 +643,8 @@ public final class LoggerEventHandlers {
         String dim = level.dimension().location().toString();
         boolean trackedMenu = false;
         if (wantContainers && (com.roften.avilixlogger.compat.corpse.CorpseAudit.opened(sp, event.getContainer())
-                || com.roften.avilixlogger.compat.accessories.AccessoriesAudit.opened(sp, event.getContainer()))) {
+                || com.roften.avilixlogger.compat.accessories.AccessoriesAudit.opened(sp, event.getContainer())
+                || com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.opened(sp, event.getContainer()))) {
             PENDING_BLOCK_CONTAINER_OPEN.remove(sp.getUUID()); PENDING_ENTITY_CONTAINER_OPEN.remove(sp.getUUID());
             return;
         }

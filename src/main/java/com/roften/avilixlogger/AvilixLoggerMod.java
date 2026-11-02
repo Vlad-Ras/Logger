@@ -138,6 +138,8 @@ public final class AvilixLoggerMod {
 
     private void onServerStopping(ServerStoppingEvent event) {
         com.roften.avilixlogger.core.HotPathMetrics.clear();
+        com.roften.avilixlogger.compat.createcobblestone.CobblestoneAudit.stop(event.getServer());
+        com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.clear();
         // Ensure we flush writers and stop GUI/database helper executors.
         com.roften.avilixlogger.core.ServerTickScheduler.finish(event.getServer());
         LoggerEventHandlers.shutdownBackground();

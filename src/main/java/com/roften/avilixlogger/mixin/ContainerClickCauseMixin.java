@@ -27,9 +27,10 @@ public abstract class ContainerClickCauseMixin {
             var corpse=com.roften.avilixlogger.compat.corpse.CorpseAudit.begin(player,"container-click");
             var accessories=com.roften.avilixlogger.compat.accessories.AccessoriesAudit.menu(player,"container-click");
             var transfer=corpse==null&&com.roften.avilixlogger.core.CreateSupport.available()?com.roften.avilixlogger.compat.create.CartMenuTransferAudit.begin(player):null;
-            var menuAction=corpse==null&&transfer==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player):null;
+            var vibrant=com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.menu(player,"menu-action");
+            var menuAction=corpse==null&&transfer==null&&vibrant==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player):null;
             boolean success=false;
-            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{if(menuAction!=null)menuAction.finish();}}}}
+            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{try{if(vibrant!=null)vibrant.finish(!success);}finally{if(menuAction!=null)menuAction.finish();}}}}}
         }
     }
     @WrapMethod(method="handleContainerButtonClick")
@@ -44,9 +45,10 @@ public abstract class ContainerClickCauseMixin {
             var corpse=com.roften.avilixlogger.compat.corpse.CorpseAudit.begin(player,"menu-button");
             var accessories=com.roften.avilixlogger.compat.accessories.AccessoriesAudit.menu(player,"menu-button");
             var transfer=corpse==null&&com.roften.avilixlogger.core.CreateSupport.available()?com.roften.avilixlogger.compat.create.CartMenuTransferAudit.begin(player):null;
-            var menuAction=corpse==null&&transfer==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player,"player:menu_button"):null;
+            var vibrant=com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.menu(player,"menu-action");
+            var menuAction=corpse==null&&transfer==null&&vibrant==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player,"player:menu_button"):null;
             boolean success=false;
-            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{if(menuAction!=null)menuAction.finish();}}}}
+            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{try{if(vibrant!=null)vibrant.finish(!success);}finally{if(menuAction!=null)menuAction.finish();}}}}}
         }
     }
 }
