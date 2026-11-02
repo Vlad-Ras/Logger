@@ -298,6 +298,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     ", container_slots_before String" + largeCodec() +
                     ", container_slots_after String" + largeCodec();
             case ENTITIES -> commonColumns() +
+                    ", block_before String" + largeCodec() +
+                    ", be_before String" + largeCodec() +
+                    ", block_after String" + largeCodec() +
                     ", be_after String" + largeCodec() +
                     ", entity_type LowCardinality(String)" +
                     ", entity_uuid String" +
@@ -305,12 +308,18 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     ", item_stack String" + largeCodec() +
                     ", count Int32";
             case ITEMS -> commonColumns() +
+                    ", block_before String" + largeCodec() +
+                    ", be_before String" + largeCodec() +
+                    ", block_after String" + largeCodec() +
                     ", be_after String" + largeCodec() +
                     ", item_stack String" + largeCodec() +
                     ", count Int32" +
                     ", player_inv_before String" + largeCodec() +
                     ", player_inv_after String" + largeCodec();
             case PLAYERS -> commonColumns() +
+                    ", block_before String" + largeCodec() +
+                    ", be_before String" + largeCodec() +
+                    ", block_after String" + largeCodec() +
                     ", be_after String" + largeCodec() +
                     ", entity_uuid String" +
                     ", entity_nbt String" + largeCodec() +
@@ -373,7 +382,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             String table = qualifiedSplitTable(kind);
             addCommonCompatColumns(table);
             if(kind==TableKind.ENTITIES || kind==TableKind.ITEMS || kind==TableKind.PLAYERS)
-                tryExecute("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS be_after String DEFAULT ''" + largeCodec());
+                addBlockCompatColumns(table);
             switch (kind) {
                 case BLOCKS -> addBlockCompatColumns(table);
                 case CONTAINERS -> {
@@ -730,9 +739,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             switch (kind) {
                 case BLOCKS -> addBlock(o, e);
                 case CONTAINERS -> { addBlock(o, e); addEntity(o, e, false); addItem(o, e); addContainer(o, e); }
-                case ENTITIES -> { o.addProperty("be_after",safeString(e.beAfter)); addEntity(o, e, true); addItem(o, e); }
-                case ITEMS -> { o.addProperty("be_after",safeString(e.beAfter)); addItem(o, e); addPlayerInventory(o, e); }
-                case PLAYERS -> { o.addProperty("be_after",safeString(e.beAfter)); addPlayerEntity(o, e); addPlayerInventory(o, e); }
+                case ENTITIES -> { addBlock(o,e); addEntity(o, e, true); addItem(o, e); }
+                case ITEMS -> { addBlock(o,e); addItem(o, e); addPlayerInventory(o, e); }
+                case PLAYERS -> { addBlock(o,e); addPlayerEntity(o, e); addPlayerInventory(o, e); }
                 case CHAT -> o.addProperty("message", extractMessage(e));
                 case COMPAT -> { addBlock(o, e); addEntity(o, e, true); addItem(o, e); addPlayerInventory(o, e); addContainer(o, e); }
                 default -> throw new IllegalArgumentException("Unexpected table kind: " + kind);
@@ -1052,7 +1061,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     private String selectExpr(TableKind kind, String column) {
         boolean has = switch (column) {
             case "be_after" -> kind != TableKind.CHAT;
-            case "block_before", "be_before", "block_after" -> kind == TableKind.BLOCKS || kind == TableKind.CONTAINERS || kind == TableKind.COMPAT;
+            case "block_before", "be_before", "block_after" -> kind != TableKind.CHAT;
             case "entity_type" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.COMPAT;
             case "entity_uuid" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
             case "entity_nbt" -> kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
@@ -1816,8 +1825,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                  ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, WEAPON_RELOAD, ITEM_SMELT,
                  ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, EXPERIENCE_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
+                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
+            case EXPERIENCE_CHANGE -> e.blockAfter!=null&&!e.blockAfter.isBlank()?targetBlock(e.blockAfter,e.extra):new TargetInfo("entity",safeString(e.entityType),safeString(e.entityType));
             case MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE -> targetBlock(e.blockAfter, e.extra);
             case PARTY_CHANGE -> new TargetInfo("party", "", safeString(e.extra));
             case PROTECTION_CHANGE, CLAIM_ACTION -> new TargetInfo("protection", "", safeString(e.extra));
