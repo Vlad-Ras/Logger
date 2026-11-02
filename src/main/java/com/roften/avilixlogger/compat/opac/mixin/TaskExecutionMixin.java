@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class TaskExecutionMixin {
     @WrapOperation(method = "onTick(Lxaero/pac/common/server/IServerData;)V", at = @At(value = "INVOKE", target = "Lxaero/pac/common/server/task/IServerSpreadoutTask;onTick(Lxaero/pac/common/server/IServerData;Ljava/lang/Object;ILjava/util/List;)V"), remap = false)
     private void avilixlogger$execute(@Coerce Object task, @Coerce Object data, Object holder, int budget, List<?> children, Operation<Void> original) {
-        if (!OpenPacStateAudit.available() || !com.roften.avilixlogger.LoggerConfig.isEnabled()) { original.call(task, data, holder, budget, children); return; }
+        if (!OpenPacStateAudit.available()) { original.call(task, data, holder, budget, children); return; }
         var actor = task instanceof OpenPacTaskCause bound ? bound.avilixlogger$cause() : null;
         int firstChild = children.size();
         try (var cause = actor == null ? CauseContext.unattributed() : CauseContext.push(actor)) {

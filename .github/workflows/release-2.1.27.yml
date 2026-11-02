@@ -1,8 +1,8 @@
-name: Build installable 2.1.26 binary
+name: Build installable 2.1.27 binary
 on:
   push:
     branches: [work/2.1.26-storage-gui-20261102]
-    paths: ['src/**', 'build.gradle', 'gradle.properties', 'proguard-rules.pro', '.github/workflows/release-2.1.26.yml']
+    paths: ['src/**', 'build.gradle', 'gradle.properties', 'proguard-rules.pro', '.github/workflows/release-2.1.27.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,9 +21,9 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew testAsyncPipeline testCreatePreflight verifyMixinSafety verifyObfuscatedJar --no-daemon --console=plain 2>&1 | tee release-build.log
-          test -s build/libs/avilixlogger-2.1.26.jar
+          test -s build/libs/avilixlogger-2.1.27.jar
           mkdir -p build/release-evidence
-          sha256sum build/libs/avilixlogger-2.1.26.jar > build/release-evidence/SHA256SUMS
+          sha256sum build/libs/avilixlogger-2.1.27.jar > build/release-evidence/SHA256SUMS
           printf 'source_commit=%s\nbranch=%s\nfull_pack_profile=operator_environment_required\nauthcore_positive=operator_environment_required\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" > build/release-evidence/BUILD.txt
       - name: Install clean NeoForge server for packaged JAR boot
         run: |
@@ -33,7 +33,7 @@ jobs:
           mkdir -p build/release-server
           java -jar build/neoforge-installer.jar --installServer build/release-server > installer.log 2>&1
           mkdir -p build/release-server/mods
-          cp build/libs/avilixlogger-2.1.26.jar build/release-server/mods/
+          cp build/libs/avilixlogger-2.1.27.jar build/release-server/mods/
           printf 'eula=true\n' > build/release-server/eula.txt
           printf 'server-ip=127.0.0.1\nserver-port=25579\nmax-tick-time=-1\nview-distance=2\nsimulation-distance=2\n' > build/release-server/server.properties
           printf '%s\n' '-Xms512m' '-Xmx1G' > build/release-server/user_jvm_args.txt
@@ -65,15 +65,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: AvilixLogger-2.1.26
+          name: AvilixLogger-2.1.27
           path: |
-            build/libs/avilixlogger-2.1.26.jar
+            build/libs/avilixlogger-2.1.27.jar
             build/release-evidence/*
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: release-2.1.26-validation
+          name: release-2.1.27-validation
           path: |
             release-build.log
             installer.log

@@ -1981,7 +1981,7 @@ public final class LoggerCommands {
         }
 
         CommandSourceStack src = ctx.getSource();
-        showRollbackPreview(sp, plan);
+        showRollbackPreview(src, sp, plan);
         src.sendSystemMessage(Component.literal("Считаю точный предпросмотр в ClickHouse вне серверного тика…")
                 .withStyle(ChatFormatting.YELLOW));
         RollbackCoordinator.preparePreview(src.getServer(), sp.getUUID(), plan,
@@ -2112,11 +2112,11 @@ public final class LoggerCommands {
         }
     }
 
-    private static void showRollbackPreview(ServerPlayer player, RollbackPlanManager.Plan plan) {
+    private static void showRollbackPreview(CommandSourceStack source, ServerPlayer player, RollbackPlanManager.Plan plan) {
         if (player == null || plan == null || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
         if (plan.scopes().size() != 1) {
             clearRollbackPreview(player);
-            player.sendSystemMessage(Component.literal("Глобальный план нельзя показать одной рамкой; точные измерения сохранены в плане.")
+            source.sendSystemMessage(Component.literal("Глобальный план нельзя показать одной рамкой; точные измерения сохранены в плане.")
                     .withStyle(ChatFormatting.DARK_GRAY));
             return;
         }
@@ -2125,7 +2125,7 @@ public final class LoggerCommands {
         if (scope.min().getX() <= -1_000_000 || scope.max().getX() >= 1_000_000
                 || scope.min().getZ() <= -1_000_000 || scope.max().getZ() >= 1_000_000) {
             clearRollbackPreview(player);
-            player.sendSystemMessage(Component.literal("Откат всего измерения не имеет конечной отображаемой рамки.")
+            source.sendSystemMessage(Component.literal("Откат всего измерения не имеет конечной отображаемой рамки.")
                     .withStyle(ChatFormatting.DARK_GRAY));
             return;
         }

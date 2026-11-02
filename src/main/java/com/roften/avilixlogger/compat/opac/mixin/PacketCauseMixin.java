@@ -17,7 +17,9 @@ public abstract class PacketCauseMixin {
     @WrapMethod(method = "getTask(Lxaero/pac/common/packet/type/PacketType;Ljava/lang/Object;Lnet/minecraft/server/level/ServerPlayer;)Ljava/lang/Runnable;", remap = false)
     private Runnable avilixlogger$task(@Coerce Object type, Object packet, ServerPlayer player, Operation<Runnable> original) {
         Runnable task = original.call(type, packet, player);
-        if (!OpenPacStateAudit.available() || !com.roften.avilixlogger.LoggerConfig.isEnabled()) return task;
-        return () -> { try (var cause = CauseContext.push(player, CauseContext.Kind.OTHER, player.blockPosition(), ItemStack.EMPTY)) { task.run(); } };
+        return () -> {
+            if (!OpenPacStateAudit.available()) { task.run(); return; }
+            try (var cause = CauseContext.push(player, CauseContext.Kind.OTHER, player.blockPosition(), ItemStack.EMPTY)) { task.run(); }
+        };
     }
 }

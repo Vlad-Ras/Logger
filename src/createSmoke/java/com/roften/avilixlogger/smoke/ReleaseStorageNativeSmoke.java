@@ -10,6 +10,7 @@ public final class ReleaseStorageNativeSmoke {
     @SubscribeEvent public static void started(ServerStartedEvent event) {
         if(!Boolean.getBoolean("avilixlogger.storageSmoke"))return;
         try {
+            GuiCommandOutputNativeSmoke.run(event.getServer());
             BlockMenuStorageSmoke.run(event.getServer().overworld());
             if(net.neoforged.fml.ModList.get().isLoaded("openpartiesandclaims")) {
                 ScgunsNativeSmoke.check(com.roften.avilixlogger.compat.opac.OpenPacStateAudit.available(),"OPAC mutation mixins unavailable");
@@ -31,6 +32,7 @@ public final class ReleaseStorageNativeSmoke {
                 var last=(net.minecraft.nbt.CompoundTag)snapshot.invoke(null,manager,dim,x,z);
                 ScgunsNativeSmoke.check(!last.getBoolean("Claimed"),"OPAC unclaim did not clear fixture");
                 System.out.println("OPAC_STATE_NATIVE_OK: exact chunk/owner and native claim/unclaim data kernel; not authenticated publication");
+                OpenPacActorNativeSmoke.run(event.getServer());
             }
             if(net.neoforged.fml.ModList.get().isLoaded("create_enchantment_industry"))
                 ScgunsNativeSmoke.check(com.roften.avilixlogger.compat.industry.IndustrialState.class.isAssignableFrom(Class.forName("com.simibubi.create.foundation.blockEntity.SmartBlockEntity")),"industrial mixins unavailable");

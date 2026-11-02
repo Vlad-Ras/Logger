@@ -190,6 +190,8 @@ configurations {
 }
 
 dependencies {
+    if (project.hasProperty('storageSmoke'))
+        localRuntime 'maven.modrinth:open-parties-and-claims:yWmXD7GW' // NeoForge 1.21.1, OPAC 0.33.0
     // Exact operator-supplied artifacts stay local, optional and never bundled or uploaded.
     if (project.hasProperty('scgunsSmokeMods'))
         localRuntime files(fileTree(dir: project.property('scgunsSmokeMods'), include: '*.jar'))

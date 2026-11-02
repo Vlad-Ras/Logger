@@ -16,8 +16,7 @@ import com.roften.avilixlogger.compat.opac.OpenPacTaskCause;
 public abstract class QueueCauseMixin {
     @WrapMethod(method = "addTask(Lxaero/pac/common/server/task/IServerSpreadoutQueuedTask;Lxaero/pac/common/server/IServerData;)Z", remap = false)
     private boolean avilixlogger$enqueue(@Coerce Object task, @Coerce Object data, Operation<Boolean> original) {
-        boolean added = original.call(task, data);
-        if (added && task instanceof OpenPacTaskCause bound) bound.avilixlogger$bindCause(CauseContext.peek());
-        return added;
+        if (OpenPacStateAudit.available() && task instanceof OpenPacTaskCause bound) bound.avilixlogger$bindCause(CauseContext.peek());
+        return original.call(task, data);
     }
 }
