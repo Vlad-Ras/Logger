@@ -50,8 +50,7 @@ jobs:
                   deadline=time.monotonic()+210
                   while time.monotonic()<deadline:
                       text=log.read_text(errors='replace')
-                      if 'Done (' in text:
-                          assert 'Authorization denied' in text,'AuthCore fail-closed result missing'
+                      if 'Done (' in text and 'Authorization denied' in text:
                           assert not any(token in text for token in ['MixinApplyError','MixinTransformerError','NoClassDefFoundError']),'packaged runtime error'
                           process.stdin.write('stop\n');process.stdin.flush()
                           assert process.wait(timeout=60)==0,'server did not stop cleanly'
