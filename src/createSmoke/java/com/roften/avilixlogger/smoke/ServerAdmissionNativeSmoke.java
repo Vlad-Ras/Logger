@@ -21,7 +21,7 @@ final class ServerAdmissionNativeSmoke {
             check(ServerCaptureGuard.paused()&&ServerCaptureGuard.active().queue().equals("events"),"real server did not use protected admission");
             check(elapsed<TimeUnit.SECONDS.toNanos(1)&&release.getCount()==1,"server waited for consumer release");
             check(!CaptureTypePolicy.allows(ActionType.CONTAINER_PUT,"player:menu",null),"snapshot gate not suspended");
-            var player=SupplementariesTextSmoke.player(server.overworld(),"PausedExplosion");
+            var player=PlayerDeathNativeSmoke.player(server.overworld(),"PausedExplosion");
             var source=server.overworld().damageSources().explosion(null,null);
             long observed=PlayerDeathAudit.observedCount();player.hurt(source,1000F);
             check(PlayerDeathAudit.observedCount()==observed+1,"paused native explosion was not observed");

@@ -11,12 +11,12 @@ import net.neoforged.neoforge.event.entity.living.LivingDeathEvent;
 import static com.roften.avilixlogger.smoke.ScgunsNativeSmoke.check;
 
 final class PlayerDeathNativeSmoke {
-    static void run(MinecraftServer server) {
+    static void run(MinecraftServer server)throws Exception {
         var world=server.overworld();
-        var killer=SupplementariesTextSmoke.player(world,"Roften");
+        var killer=player(world,"Roften");
         killer.setItemSlot(EquipmentSlot.MAINHAND,new ItemStack(Items.NETHERITE_SWORD));
         var sword=world.damageSources().playerAttack(killer);
-        var victim=SupplementariesTextSmoke.player(world,"Viant");
+        var victim=player(world,"Viant");
         java.util.function.Consumer<LivingDeathEvent> cancel=event->{if(event.getEntity()==victim)event.setCanceled(true);};
         NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST,cancel);
         long before=PlayerDeathAudit.observedCount();
@@ -44,8 +44,14 @@ final class PlayerDeathNativeSmoke {
         check(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(server),"fixture bypassed production authorization");
         System.out.println("PLAYER_DEATH_NATIVE_OK: completed native sword/fall/explosion deaths, LOWEST cancellation excluded, actual accepted hook, victim/killer phrases and fallback; AuthCore publication remains denied");
     }
-    private static void completed(MinecraftServer server,String name,DamageSource source) {
-        ServerPlayer player=SupplementariesTextSmoke.player(server.overworld(),name);
+    static ServerPlayer player(net.minecraft.server.level.ServerLevel level,String name)throws ReflectiveOperationException {
+        var player=SupplementariesTextSmoke.player(level,name);
+        // Only this fixture's vanilla 60-tick spawn protection, never Logger/AuthCore state.
+        var timer=ServerPlayer.class.getDeclaredField("spawnInvulnerableTime");timer.setAccessible(true);timer.setInt(player,0);
+        return player;
+    }
+    private static void completed(MinecraftServer server,String name,DamageSource source)throws Exception {
+        ServerPlayer player=player(server.overworld(),name);
         player.setPos(24,90,24);player.getInventory().setItem(0,new ItemStack(Items.DIAMOND));
         long before=PlayerDeathAudit.observedCount();
         check(player.hurt(source,1000F),"native fatal damage refused: "+name);
