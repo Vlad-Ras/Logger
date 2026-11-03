@@ -34,18 +34,6 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew compileJava compileCreateSmokeJava testAsyncPipeline testCreatePreflight verifyMixinSafety --console=plain --no-daemon 2>&1 | tee compile.log
-      - name: Native Create regression
-        timeout-minutes: 10
-        run: |
-          mkdir -p run
-          printf 'eula=true\n' > run/eula.txt
-          # Startup smoke cases run synchronously; the outer timeout bounds the stand.
-          printf 'max-tick-time=-1\n' > run/server.properties
-          timeout --signal=INT --kill-after=15s 360s ./gradlew runServer -PcreateSmoke -PfdSmokeVersion=${{ matrix.fd }} --console=plain --no-daemon > create-smoke.log 2>&1 || status=$?
-          tail -n 100 create-smoke.log
-          if ! grep -q 'AVILIX_CREATE_SMOKE_OK' create-smoke.log || grep -qE '(AVILIX_CREATE_SMOKE_FAILED|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-smoke.log; then
-            exit 1
-          fi
       - name: Native storage address and protected server admission
         if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.profile == 'client-s4-core' }}
         timeout-minutes: 6
@@ -58,10 +46,23 @@ jobs:
           grep -q 'STORAGE_BLOCK_ADDRESS_NATIVE_OK' storage-admission-smoke.log
           grep -q 'GUI_COMMAND_OUTPUT_NATIVE_OK' storage-admission-smoke.log
           grep -q 'PLAYER_DEATH_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'PLAYER_DEATH_CORPSE_NATIVE_OK: ExplosionVictim' storage-admission-smoke.log
           grep -q 'OPAC_STATE_NATIVE_OK' storage-admission-smoke.log
           grep -q 'OPAC_ACTOR_NATIVE_OK' storage-admission-smoke.log
           grep -q 'SERVER_CAPTURE_GUARD_NATIVE_OK' storage-admission-smoke.log
           if grep -qE 'STORAGE_BLOCK_ADDRESS_NATIVE_FAILED|MixinApplyError|MixinTransformerError' storage-admission-smoke.log; then exit 1; fi
+      - name: Native Create regression
+        timeout-minutes: 10
+        run: |
+          mkdir -p run
+          printf 'eula=true\n' > run/eula.txt
+          # Startup smoke cases run synchronously; the outer timeout bounds the stand.
+          printf 'max-tick-time=-1\n' > run/server.properties
+          timeout --signal=INT --kill-after=15s 360s ./gradlew runServer -PcreateSmoke -PfdSmokeVersion=${{ matrix.fd }} --console=plain --no-daemon > create-smoke.log 2>&1 || status=$?
+          tail -n 100 create-smoke.log
+          if ! grep -q 'AVILIX_CREATE_SMOKE_OK' create-smoke.log || grep -qE '(AVILIX_CREATE_SMOKE_FAILED|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-smoke.log; then
+            exit 1
+          fi
       - name: Profile attribution tools
         run: |
           mkdir -p build/profile-tools

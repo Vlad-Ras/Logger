@@ -113,6 +113,7 @@ public final class AvilixLoggerMod {
 
     private void onServerStarting(ServerStartingEvent event) {
         HotPathMetrics.serverThread(Thread.currentThread());
+        com.roften.avilixlogger.core.PlayerDeathAudit.reset();
         com.roften.avilixlogger.core.ServerCaptureGuard.start(Thread.currentThread(),gap->{
             LOGGER.error("[AvilixLogger] ЗАХВАТ ОСТАНОВЛЕН ДЛЯ ЗАЩИТЫ TPS. since={}, queue={}, reason={}. Принятые записи сохраняются; новые события могут отсутствовать. Возобновление: /log perf resume или GUI.",java.time.Instant.ofEpochMilli(gap.since()),gap.queue(),gap.reason());
             if(event.getServer().isRunning())event.getServer().execute(()->LoggerNetwork.broadcastCaptureHealth(event.getServer()));

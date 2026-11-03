@@ -54,5 +54,11 @@ final class PlayerDeathNativeSmoke {
         check(row.actorUuid.equals(player.getUUID())&&row.x==24&&row.y==90&&row.z==24&&!DeathLogDetails.message(row).isBlank(),"completed death evidence lost: "+name);
         if(name.equals("ExplosionVictim"))check(DeathLogDetails.describe(row).stream().anyMatch(c->c.getString().contains("explosion")),"explosion cause missing");
         check(player.getInventory().isEmpty(),"native death drops interrupted: "+name);
+        if(net.neoforged.fml.ModList.get().isLoaded("corpse")) {
+            var corpses=server.overworld().getEntities((net.minecraft.world.entity.Entity)null,player.getBoundingBox().inflate(3),e->net.minecraft.world.entity.EntityType.getKey(e.getType()).toString().equals("corpse:corpse"));
+            boolean found=corpses.stream().anyMatch(c->{try{return c.getClass().getMethod("getCorpseUUID").invoke(c).equals(java.util.Optional.of(player.getUUID()));}catch(ReflectiveOperationException failure){throw new AssertionError(failure);}});
+            check(found,"Corpse did not create this player's body: "+name);
+            System.out.println("PLAYER_DEATH_CORPSE_NATIVE_OK: "+name);
+        }
     }
 }

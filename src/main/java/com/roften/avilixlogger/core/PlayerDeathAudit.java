@@ -13,6 +13,7 @@ public final class PlayerDeathAudit {
     private static final LongAdder queued=new LongAdder(),rejected=new LongAdder(),errors=new LongAdder();
     private static final AtomicLong nextWarning=new AtomicLong();
     private PlayerDeathAudit(){}
+    public static void reset(){observed.reset();disabled.reset();unauthorized.reset();queued.reset();rejected.reset();errors.reset();nextWarning.set(0);}
     public static long observedCount(){return observed.sum();}
     public static void accepted(ServerPlayer victim,DamageSource source) {
         observed.increment();
