@@ -67,14 +67,24 @@ final class WeightedQueue<T> {
     String name(){return name;}
     /** No capacity wait on the server; the short queue lock has a separate finite budget. */
     Offer offer(T value,long weight) {
+        return offer(value,weight,0,0);
+    }
+    /** Small lifecycle receipts can use a bounded reserve even while bulk capture is paused. */
+    Offer offerReserved(T value,long weight,int reserveCount,long reserveBytes) {
+        if(weight>reserveBytes)return Offer.OVERSIZED;
+        return offer(value,weight,reserveCount,reserveBytes);
+    }
+    private Offer offer(T value,long weight,int reserveCount,long reserveBytes) {
         weight=Math.max(1,weight);boolean acquired;
         try{acquired=lock.tryLock(200,TimeUnit.MICROSECONDS);}
         catch(InterruptedException interrupted){Thread.currentThread().interrupt();return Offer.BUSY;}
         if(!acquired)return Offer.BUSY;
         try{
             if(closed)throw new IllegalStateException("Logger queue is closed");
-            if(weight>maxBytes && outstanding>0)return Offer.OVERSIZED;
-            if(full(weight)){pressureRequested=true;ready.signalAll();return Offer.FULL;}
+            if(weight>maxBytes+reserveBytes && outstanding>0)return Offer.OVERSIZED;
+            boolean full=reserveCount==0 ? full(weight)
+                    : outstanding >= (long)capacity+reserveCount || bytes > maxBytes+reserveBytes-weight;
+            if(full){pressureRequested=true;ready.signalAll();return Offer.FULL;}
             entries.addLast(new Work<>(value,weight));bytes+=weight;outstanding++;
             peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);ready.signal();return Offer.ACCEPTED;
         }finally{lock.unlock();}

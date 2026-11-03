@@ -21,9 +21,15 @@ final class ServerAdmissionNativeSmoke {
             check(ServerCaptureGuard.paused()&&ServerCaptureGuard.active().queue().equals("events"),"real server did not use protected admission");
             check(elapsed<TimeUnit.SECONDS.toNanos(1)&&release.getCount()==1,"server waited for consumer release");
             check(!CaptureTypePolicy.allows(ActionType.CONTAINER_PUT,"player:menu",null),"snapshot gate not suspended");
+            var player=SupplementariesTextSmoke.player(server.overworld(),"PausedExplosion");
+            var source=server.overworld().damageSources().explosion(null,null);
+            long observed=PlayerDeathAudit.observedCount();player.hurt(source,1000F);
+            check(PlayerDeathAudit.observedCount()==observed+1,"paused native explosion was not observed");
+            var death=PlayerDeathAudit.entry(player,source);storage.append(death);
+            check(ServerCaptureGuard.paused()&&release.getCount()==1,"death bypass resumed bulk or waited for consumer");
             release.countDown();check(storage.awaitVisible(System.nanoTime()+TimeUnit.SECONDS.toNanos(2)),"accepted event did not drain");
-            check(rows.size()==1&&rows.getFirst().extra.equals(accepted.extra),"accepted event lost or rejected event invented");
-            System.out.printf(Locale.ROOT,"SERVER_CAPTURE_GUARD_NATIVE_OK: admission %.3f ms; real server thread, held consumer, suspension and preserved accepted row; not authenticated hook publication%n",elapsed/1e6);
+            check(rows.size()==2&&rows.getFirst().extra.equals(accepted.extra)&&rows.get(1).type==ActionType.PLAYER_DEATH&&rows.get(1).actorUuid.equals(player.getUUID()),"accepted event lost or rejected event invented");
+            System.out.printf(Locale.ROOT,"SERVER_CAPTURE_GUARD_NATIVE_OK: admission %.3f ms; real server thread, held consumer, suspension, preserved accepted row and paused explosion death reserve; AuthCore publication remains denied%n",elapsed/1e6);
         }finally{release.countDown();storage.shutdown();}
     }
 }

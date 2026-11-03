@@ -28,7 +28,7 @@ public final class LoggerRuntime {
         var cpu=AsyncLogProcessor.queueStatistics();if(cpu!=null)states.add(cpu);
         var events=ASYNC;if(events!=null)states.add(events.queueStatistics());
         var journal=PENDING;if(journal!=null)states.add(journal.queueStatistics());
-        if(states.isEmpty())return ServerCaptureGuard.report()+"\nОчереди Logger ещё не запущены.";
+        if(states.isEmpty())return ServerCaptureGuard.report()+"\n"+PlayerDeathAudit.report()+"\nОчереди Logger ещё не запущены.";
         var text=new StringBuilder(ServerCaptureGuard.report()+"\n"+(STORAGE==null?"ClickHouse ещё не подключён: записи ожидают в локальном журнале.\n":"")+"Буферы Logger:\n");
         for(var state:states) {
             String name=switch(state.name()){case "cpu"->"Обработка снимков";case "events"->"События";case "journal"->"Запись на диск";default->state.name();};
@@ -37,7 +37,7 @@ public final class LoggerRuntime {
         }
         var runtime=Runtime.getRuntime();
         text.append(String.format(java.util.Locale.ROOT,"Память всей JVM: %.0f / %.0f МБ. Буферы выше относятся к Logger; отдельно память его объектов здесь не измеряется.",(runtime.totalMemory()-runtime.freeMemory())/1048576.0,runtime.maxMemory()/1048576.0));
-        return text.toString();
+        return text.append("\n").append(PlayerDeathAudit.report()).toString();
     }
     public static void resetQueueStatistics() {
         AsyncLogProcessor.resetQueueStatistics();

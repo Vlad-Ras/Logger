@@ -21,6 +21,16 @@ public final class AsyncLogStorage implements LogStorage {
 
     @Override public void append(LogEntry entry) {
         if (entry == null) return;
+        if(entry.type==ActionType.PLAYER_DEATH || entry.type==ActionType.PLAYER_KILL) {
+            if(!CaptureTypePolicy.enabled(29))return;
+            // Do not let an explosion's bulk rows mute or reattribute a player death.
+            LogIdGenerator.ensure(entry);
+            var snapshot=entry.copyForQueue();
+            var result=queue.offerReserved(snapshot,PayloadSizeEstimator.estimate(snapshot),256,1024*1024);
+            PlayerDeathAudit.admission(result==WeightedQueue.Offer.ACCEPTED);
+            if(result==WeightedQueue.Offer.ACCEPTED)HotPathMetrics.queued(snapshot.type,snapshot.source);
+            return;
+        }
         if (CartAuditContext.restoring()) return;
         // Decide before enriching, deep-copying or enqueuing a row.
         if (!CaptureTypePolicy.allows(entry.type,entry.source,entry.extra)) return;

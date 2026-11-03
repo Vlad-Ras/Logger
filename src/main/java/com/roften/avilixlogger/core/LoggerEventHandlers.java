@@ -1188,85 +1188,39 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onEntityDeath(LivingDeathEvent event) {
-        if (!(event.getEntity() instanceof ServerPlayer) && !CaptureTypePolicy.enabled(3)) return;
-        if (event.getEntity() instanceof ServerPlayer && !CaptureTypePolicy.enabled(29)) return;
-        if (!LoggerConfig.isCaptureEnabled()) return;
+        // Players are observed once in ServerPlayer.die, after all death cancellations.
+        if (event.getEntity() instanceof ServerPlayer || !CaptureTypePolicy.enabled(3)) return;
+        if (!LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logEntities.get()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
-        net.minecraft.world.entity.LivingEntity victim = event.getEntity();
-        boolean playerDeath = victim instanceof ServerPlayer;
-
-        // Player deaths belong to the player-lifecycle stream. Keep accepting logEntities as a
-        // compatibility switch for existing configs where deaths used to live under that option.
-        if (playerDeath) {
-            if (!CaptureTypePolicy.enabled(29)) return;
-        } else if (!LoggerConfig.VALUES.logEntities.get()) {
-            return;
-        }
-
+        var victim = event.getEntity();
         Entity killer = event.getSource().getEntity();
         UUID actorUuid = null;
         String actorName = null;
-        if (playerDeath) {
-            // The actor shown for PLAYER_DEATH must always be the victim. Previously a PvP death
-            // was displayed as if the killer had died, while environmental deaths said that the
-            // server had died.
-            ServerPlayer player = (ServerPlayer) victim;
-            actorUuid = player.getUUID();
-            actorName = player.getGameProfile().getName();
-        } else if (killer instanceof Player p) {
+        if (killer instanceof Player p) {
             if (CreateActorContext.isTechnicalPlayer(p)) {
                 var actor = CreateActorContext.current(); actorUuid = actor.owner(); actorName = actor.ownerName();
             } else { actorUuid = p.getUUID(); actorName = p.getName().getString(); }
         }
-
         LogEntry e = new LogEntry();
         e.ts = System.currentTimeMillis();
         e.dim = level.dimension().location().toString();
-        e.type = playerDeath ? ActionType.PLAYER_DEATH : ActionType.ENTITY_DEATH;
-        e.actorUuid = actorUuid;
-        e.actorName = actorName;
+        e.type = ActionType.ENTITY_DEATH;
+        e.actorUuid = actorUuid; e.actorName = actorName;
         var createOrigin = CreateEntityOrigin.read(event.getSource().getDirectEntity());
-        if(createOrigin!=null){
-            e.source=createOrigin.source();
-            if(!playerDeath){e.actorUuid=createOrigin.owner();e.actorName=createOrigin.ownerName();}
-        }
-        e.x = victim.blockPosition().getX();
-        e.y = victim.blockPosition().getY();
-        e.z = victim.blockPosition().getZ();
+        if(createOrigin!=null){e.source=createOrigin.source();e.actorUuid=createOrigin.owner();e.actorName=createOrigin.ownerName();}
+        e.x = victim.blockPosition().getX(); e.y = victim.blockPosition().getY(); e.z = victim.blockPosition().getZ();
         EntityLogIdentity.capture(e, victim);
-        // В идеале откатываем сущность к состоянию ДО смертельного урона.
         CompoundTag preNbt = null;
         if (!(victim instanceof Player)) {
             PreDeathSnapshot snap = PRE_DEATH.remove(victim.getUUID());
-            if (snap != null && snap.entityNbt != null && snap.dim != null && snap.dim.equals(e.dim) && (System.currentTimeMillis() - snap.ts) <= 5000L) {
-                preNbt = snap.entityNbt;
-            }
+            if (snap != null && snap.entityNbt != null && snap.dim != null && snap.dim.equals(e.dim) && (System.currentTimeMillis() - snap.ts) <= 5000L) preNbt = snap.entityNbt;
         }
-        if (!playerDeath) e.deferSnapshot(LogEntry.SnapshotField.ENTITY, preNbt != null ? preNbt : NbtSerde.snapshotEntity(level, victim));
-        if (playerDeath) {
-            ServerPlayer player = (ServerPlayer) victim;
-            String deathMessage = "";
-            try {
-                deathMessage = player.getCombatTracker().getDeathMessage().getString().trim();
-            } catch (Throwable ignored) {}
-            if (deathMessage.isBlank()) deathMessage = player.getGameProfile().getName() + " умер";
-            // Prefix distinguishes the new human-readable message from old `victim <name>` rows.
-            e.extra = "death_message:" + deathMessage;
-        } else {
-            e.extra = "kill " + e.entityType;
-        }
-        String message=playerDeath?e.extra.substring("death_message:".length()):event.getSource().getLocalizedDeathMessage(victim).getString();
-        e.extra=DeathLogDetails.capture(victim,event.getSource(),message);
+        e.deferSnapshot(LogEntry.SnapshotField.ENTITY, preNbt != null ? preNbt : NbtSerde.snapshotEntity(level, victim));
+        e.extra=DeathLogDetails.capture(victim,event.getSource(),event.getSource().getLocalizedDeathMessage(victim).getString());
         WeaponCombatAudit.death(e,victim,event.getSource());
         LoggerRuntime.storage(level).append(e);
-        if (playerDeath) {
-            var kill=DeathLogDetails.killerRow(e,event.getSource());
-            if(kill!=null)LoggerRuntime.storage(level).append(kill);
-        }
     }
 
-    
-    
     private static void recordPlayerDrop(ServerLevel level, ServerPlayer player, int x, int y, int z, ItemStack stack, long now) {
         if (level == null || player == null || stack == null || stack.isEmpty()) return;
         CompoundTag tag = NbtSerde.snapshotItemStack(stack, level.registryAccess());

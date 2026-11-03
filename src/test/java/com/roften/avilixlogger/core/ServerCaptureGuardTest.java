@@ -24,8 +24,27 @@ final class ServerCaptureGuardTest {
             var marker=LoggerRuntime.captureGapEntry(gap);check(marker.type==ActionType.CAPTURE_GAP&&marker.actorUuid==null&&EntryPositionEvidence.read(marker)==null,"gap fabricated actor/position");
             ServerCaptureGuard.resume(gap);check(ServerCaptureGuard.captureAllowed()&&ServerCaptureGuard.last().equals(gap),"resume lost gap");
         }finally{queue.close();ServerCaptureGuard.stop();}
-        oversized();lockContention();journalFlush();backpressureChoice();
+        oversized();lockContention();journalFlush();backpressureChoice();deathReserve();
         System.out.println("SERVER_CAPTURE_GUARD_OK: protected full/oversized/contended admission, server gate, accepted worker drain, gap and partial batch flush");
+    }
+    private static void deathReserve()throws Exception {
+        var q=new WeightedQueue<Integer>("fixture",1,100);
+        ServerCaptureGuard.start(Thread.currentThread(),gap->{});
+        int previous=CaptureTypePolicy.mask();CaptureTypePolicy.install(0);
+        try {
+            check(ServerCaptureGuard.enqueue(q,1,100),"bulk first row lost");
+            check(!ServerCaptureGuard.enqueue(q,2,1)&&ServerCaptureGuard.paused(),"bulk did not pause");
+            check(CaptureTypePolicy.allows(ActionType.PLAYER_DEATH,null,null)&&CaptureTypePolicy.allows(ActionType.PLAYER_KILL,null,null),"pause muted lifecycle policy");
+            check(q.offerReserved(3,40,2,80)==WeightedQueue.Offer.ACCEPTED,"paused death reserve refused first row");
+            check(q.offerReserved(4,40,2,80)==WeightedQueue.Offer.ACCEPTED,"paired killer row refused");
+            check(q.offerReserved(5,1,2,80)==WeightedQueue.Offer.FULL,"death reserve exceeded count/byte budget");
+            check(q.offerReserved(6,81,2,80)==WeightedQueue.Offer.OVERSIZED,"oversized receipt escaped reserve bound");
+            check(q.statistics().waits()==0&&q.retainedBytes()==180,"reserve blocked or memory accounting changed");
+            for(int value:new int[]{1,3,4}){var work=q.poll(10);check(work.value()==value,"reserve reordered accepted work");q.complete(work);}
+            check(q.retainedBytes()==0,"reserve retained payloads after drain");
+            CaptureTypePolicy.install(CaptureTypePolicy.changed(0,29,false));
+            check(!CaptureTypePolicy.allows(ActionType.PLAYER_DEATH,null,null),"reserve bypassed explicit death disable");
+        }finally{q.close();ServerCaptureGuard.stop();CaptureTypePolicy.install(previous);}
     }
     private static void backpressureChoice()throws Exception {
         int previous=CaptureTypePolicy.mask();var q=new WeightedQueue<Integer>(1,10);

@@ -27,8 +27,8 @@ public final class CaptureTypePolicy {
     }
 
     public static boolean allows(ActionType type, String source, String extra) {
-        if(type!=ActionType.CAPTURE_GAP&&!ServerCaptureGuard.captureAllowed())return false;
         if (type == ActionType.PLAYER_DEATH || type == ActionType.PLAYER_KILL) return enabled(29);
+        if(type!=ActionType.CAPTURE_GAP&&!ServerCaptureGuard.captureAllowed())return false;
         if (type == null || disabledMask == 0 || type == ActionType.CART_ROLLBACK) return true;
         // Filter specific source families before generic action categories.
         if (source != null) {

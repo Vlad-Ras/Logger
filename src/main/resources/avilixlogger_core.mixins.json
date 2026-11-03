@@ -9,6 +9,7 @@
     "ServerCommandListenerMixin",
     "GuiCommandOutputMixin",
     "ServerPlayerGameModeCauseMixin",
+    "ServerPlayerDeathAuditMixin",
     "BlockEntityTickSourceMixin",
     "BlockEntityPersistentDataMixin",
     "EntityTickSourceMixin",
