@@ -53,17 +53,29 @@ final class PlayerDeathNativeSmoke {
     private static void completed(MinecraftServer server,String name,DamageSource source)throws Exception {
         ServerPlayer player=player(server.overworld(),name);
         player.setPos(24,90,24);player.getInventory().setItem(0,new ItemStack(Items.DIAMOND));
+        server.overworld().getChunkAt(player.blockPosition());
+        var bodies=new java.util.ArrayList<net.minecraft.world.entity.Entity>();
+        java.util.function.Consumer<net.neoforged.neoforge.event.entity.EntityJoinLevelEvent> joined=event->{
+            if(net.minecraft.world.entity.EntityType.getKey(event.getEntity().getType()).toString().equals("corpse:corpse"))bodies.add(event.getEntity());
+        };
+        NeoForge.EVENT_BUS.addListener(EventPriority.LOWEST,joined);
         long before=PlayerDeathAudit.observedCount();
-        check(player.hurt(source,1000F),"native fatal damage refused: "+name);
+        boolean damaged;
+        try{damaged=player.hurt(source,1000F);}finally{NeoForge.EVENT_BUS.unregister(joined);}
+        check(damaged,"native fatal damage refused: "+name);
         check(player.isDeadOrDying()&&PlayerDeathAudit.observedCount()==before+1,"completed death did not reach observer exactly once: "+name);
         var row=PlayerDeathAudit.entry(player,source);
         check(row.actorUuid.equals(player.getUUID())&&row.x==24&&row.y==90&&row.z==24&&!DeathLogDetails.message(row).isBlank(),"completed death evidence lost: "+name);
         if(name.equals("ExplosionVictim"))check(DeathLogDetails.describe(row).stream().anyMatch(c->c.getString().contains("explosion")),"explosion cause missing");
         check(player.getInventory().isEmpty(),"native death drops interrupted: "+name);
         if(net.neoforged.fml.ModList.get().isLoaded("corpse")) {
-            var corpses=server.overworld().getEntities((net.minecraft.world.entity.Entity)null,player.getBoundingBox().inflate(3),e->net.minecraft.world.entity.EntityType.getKey(e.getType()).toString().equals("corpse:corpse"));
-            boolean found=corpses.stream().anyMatch(c->{try{return c.getClass().getMethod("getCorpseUUID").invoke(c).equals(java.util.Optional.of(player.getUUID()));}catch(ReflectiveOperationException failure){throw new AssertionError(failure);}});
-            check(found,"Corpse did not create this player's body: "+name);
+            // Startup fixtures have no online player's chunk visibility ticket. Observe the
+            // actual uncancelled world join instead of a ticking-section spatial query.
+            var body=bodies.stream().filter(c->{try{return c.getClass().getMethod("getCorpseUUID").invoke(c).equals(java.util.Optional.of(player.getUUID()));}catch(ReflectiveOperationException failure){throw new AssertionError(failure);}}).findFirst().orElse(null);
+            check(body!=null&&!body.isRemoved()&&body.level()==server.overworld(),"Corpse did not join the world: "+name+"; bodies="+bodies.size());
+            var receipt=body.getClass().getMethod("getDeath").invoke(body);
+            var items=(java.util.Collection<?>)receipt.getClass().getMethod("getAllItems").invoke(receipt);
+            check(items.stream().anyMatch(item->item instanceof ItemStack stack&&stack.is(Items.DIAMOND)),"Corpse lost the native death inventory: "+name);
             System.out.println("PLAYER_DEATH_CORPSE_NATIVE_OK: "+name);
         }
     }
