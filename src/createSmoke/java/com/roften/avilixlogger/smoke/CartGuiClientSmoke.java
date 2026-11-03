@@ -72,7 +72,9 @@ public final class CartGuiClientSmoke {
                     var values=screen.getClass().getDeclaredField("values");values.setAccessible(true);check(values.get(screen).equals(List.of(ID,"100")),"confirmation link lost ID/entry");
                     var guide=Class.forName("com.roften.avilixlogger.client.gui.LoggerGuideScreen").getDeclaredConstructor(Screen.class);guide.setAccessible(true);mc.setScreen((Screen)guide.newInstance(root));
                 }
-                else if(stage==7)mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
+                else if(stage==7){
+                    var viewer=new com.roften.avilixlogger.client.gui.LogViewerScreen();mc.setScreen(viewer);teleportReplies(mc,viewer);
+                }
                 else if(stage==8)mc.setScreen(new com.roften.avilixlogger.client.gui.CaptureTypesScreen(mc.screen));
                 else if(stage==9){
                     var parent=new com.roften.avilixlogger.client.gui.LogViewerScreen();
@@ -115,6 +117,23 @@ public final class CartGuiClientSmoke {
             try{java.nio.file.Files.writeString(mc.gameDirectory.toPath().resolve("gui-smoke-result.txt"),"CART_GUI_CLIENT_FAILED: "+error+"\n");}catch(java.io.IOException ignored){}
             finished=true;mc.stop();
         }
+    }
+    private static void teleportReplies(Minecraft mc,com.roften.avilixlogger.client.gui.LogViewerScreen viewer)throws Exception {
+        var hooks=com.roften.avilixlogger.client.gui.LogViewerClientHooks.class;
+        var owner=hooks.getDeclaredField("teleportOwner");owner.setAccessible(true);
+        var request=hooks.getDeclaredField("teleportRequest");request.setAccessible(true);
+        owner.set(null,new java.lang.ref.WeakReference<>(viewer));request.setLong(null,71);
+        hooks.getMethod("acceptEntryTeleport",com.roften.avilixlogger.net.S2CEntryTeleportPayload.class).invoke(null,new com.roften.avilixlogger.net.S2CEntryTeleportPayload(70,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.SUCCESS,"stale"));
+        check(mc.screen==viewer,"stale teleport response closed journal");
+        com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(71,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.PREPARING,"Подготовка перехода"));
+        check(mc.screen==viewer,"teleport progress opened an action screen");
+        com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(71,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,"Не найдено безопасное место"));
+        check(mc.screen==viewer,"failed teleport closed journal");
+        owner.set(null,new java.lang.ref.WeakReference<>(viewer));request.setLong(null,72);
+        com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(72,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.SUCCESS,"Запись: minecraft:the_nether · -1020 15 -820"));
+        check(mc.screen!=viewer&&!(mc.screen instanceof com.roften.avilixlogger.client.gui.LoggerActionsScreen),"confirmed teleport retained journal/action overlay");
+        mc.setScreen(viewer);
+        System.out.println("ENTRY_TELEPORT_GUI_OK: inline progress/error, stale reply ignored, successful result closes only requesting journal");
     }
     private static Screen panel(String name)throws Exception{var c=Class.forName(CartHistoryScreen.class.getName()+"$"+name).getDeclaredConstructor(CartHistoryScreen.class);c.setAccessible(true);return (Screen)c.newInstance(root);}
     private static void layout(Screen screen,Minecraft mc){

@@ -6,6 +6,25 @@ import java.util.Locale;
 
 /** Client-side, strict parsing; the wire carries only absolute bounds, never date text. */
 public final class GuiTimeFilter {
+    public enum Mode { SINCE, UNTIL, MINUTE, RANGE }
+    public static String form(Mode mode,String fromDate,String fromTime,String toDate,String toTime,ZonedDateTime now) {
+        return switch(mode) {
+            case RANGE -> rangeInput(fromDate,fromTime,toDate,toTime,now);
+            case SINCE -> {
+                if(fromDate.isBlank()&&fromTime.isBlank())throw new IllegalArgumentException("Укажите дату или время.");
+                yield rangeInput(fromDate,fromTime,"","",now);
+            }
+            case UNTIL -> {
+                if(toDate.isBlank()&&toTime.isBlank())throw new IllegalArgumentException("Укажите дату или время.");
+                yield rangeInput("","",toDate,toTime,now);
+            }
+            case MINUTE -> {
+                if(!fromTime.trim().matches("[0-9]{2}:[0-9]{2}"))throw new IllegalArgumentException("Для точной минуты укажите время ЧЧ:ММ.");
+                String date=fromDate.isBlank()?now.toLocalDate().format(DATE):fromDate;
+                yield rangeInput(date,fromTime,date,fromTime,now);
+            }
+        };
+    }
     public record Selection(int minutes, long since, long until) {}
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd.MM.uuuu", Locale.ROOT).withResolverStyle(ResolverStyle.STRICT);
     private GuiTimeFilter() {}
@@ -15,7 +34,6 @@ public final class GuiTimeFilter {
         if(fromDate.isEmpty()&&!fromTime.isEmpty())fromDate=now.toLocalDate().format(DATE);
         if(toDate.isEmpty()&&!toTime.isEmpty())toDate=fromDate.isEmpty()?now.toLocalDate().format(DATE):fromDate;
         if(fromDate.isEmpty()&&toDate.isEmpty())return "0m";
-        if(fromDate.isEmpty())throw new IllegalArgumentException("Укажите дату начала периода.");
         // A blank upper time includes that entire date. A typed minute includes its whole minute.
         String start=fromDate+(fromTime.isEmpty()?"":" "+fromTime);
         String end=toDate+(toTime.isEmpty()?"":" "+(toTime.length()==5?toTime+":59.999":toTime.length()==8?toTime+".999":toTime));
@@ -33,8 +51,8 @@ public final class GuiTimeFilter {
                 return new Selection(Math.multiplyExact(amount, last == 'd' ? 1440 : last == 'h' ? 60 : 1), -1, -1);
             }
             String[] range = value.split("\\.\\.", -1);
-            if (range.length > 2 || range[0].isBlank() || range.length == 2 && range[1].isBlank()) throw new IllegalArgumentException();
-            long since = instant(range[0].trim(), now, false);
+            if (range.length > 2 || range.length==1&&range[0].isBlank() || range.length == 2 && range[1].isBlank()) throw new IllegalArgumentException();
+            long since = range[0].isBlank()?0:instant(range[0].trim(), now, false);
             long until = range.length == 2 ? instant(range[1].trim(), now, true) : -1;
             if (since < 0 || until >= 0 && until < since) throw new IllegalArgumentException();
             return new Selection(-1, since, until);

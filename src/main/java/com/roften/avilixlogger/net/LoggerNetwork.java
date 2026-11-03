@@ -283,6 +283,8 @@ public final class LoggerNetwork {
         PayloadRegistrar r = event.registrar("10").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
+        r.playToServer(C2SEntryTeleportPayload.TYPE,C2SEntryTeleportPayload.STREAM_CODEC,LoggerNetwork::handleEntryTeleport);
+        r.playToClient(S2CEntryTeleportPayload.TYPE,S2CEntryTeleportPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptEntryTeleport",new Class<?>[]{S2CEntryTeleportPayload.class},new Object[]{payload})));
         r.playToServer(C2SLoggerActionPayload.TYPE,C2SLoggerActionPayload.STREAM_CODEC,LoggerActionNetwork::handle);
         r.playToClient(S2CLoggerActionResultPayload.TYPE,S2CLoggerActionResultPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptActionResult",new Class<?>[]{S2CLoggerActionResultPayload.class},new Object[]{payload})));
         r.playToServer(C2SCartActionPayload.TYPE,C2SCartActionPayload.STREAM_CODEC,CartHistoryNetwork::handleAction);
@@ -610,6 +612,17 @@ public final class LoggerNetwork {
 
             PacketDistributor.sendToPlayer(sp, new S2CInspectToolPayload(
                     data.getInspectToolItemId(), canEdit, success, result));
+        });
+    }
+
+    private static void handleEntryTeleport(C2SEntryTeleportPayload payload,IPayloadContext ctx) {
+        ctx.enqueueWork(()->{
+            if(!(ctx.player() instanceof ServerPlayer player))return;
+            if(!hasGuiPermission(player)) {
+                PacketDistributor.sendToPlayer(player,new S2CEntryTeleportPayload(payload.request(),S2CEntryTeleportPayload.State.FAILURE,"Нет прав на переход из журнала."));return;
+            }
+            com.roften.avilixlogger.command.EntryPositionCommand.request(player.createCommandSourceStack(),payload.entryId(),
+                    result->PacketDistributor.sendToPlayer(player,new S2CEntryTeleportPayload(payload.request(),result.state(),result.message().getString())));
         });
     }
 

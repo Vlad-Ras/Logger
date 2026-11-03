@@ -20,7 +20,14 @@ public final class ReleaseUiContractsTest {
         reject(()->GuiTimeFilter.rangeInput("31.11.2026","","","",now));
         reject(()->GuiTimeFilter.rangeInput("02.11.2026","12:00","01.11.2026","12:00",now));
         reject(()->GuiTimeFilter.rangeInput("02.11.2026","25:00","","",now));
-        reject(()->GuiTimeFilter.rangeInput("","","02.11.2026","",now));
+        var minute=GuiTimeFilter.parse(GuiTimeFilter.form(GuiTimeFilter.Mode.MINUTE,"02.11.2026","13:32","","",now),now);
+        var later=Instant.parse("2026-11-02T10:48:00Z").toEpochMilli();
+        check(minute.until()-minute.since()==59_999&&later>minute.until(),"exact minute admitted 13:48 or cut off seconds");
+        var since=GuiTimeFilter.parse(GuiTimeFilter.form(GuiTimeFilter.Mode.SINCE,"02.11.2026","13:32","","",now),now);
+        check(since.since()<later&&since.until()==-1,"since mode changed its lower-bound meaning");
+        var upper=GuiTimeFilter.parse(GuiTimeFilter.form(GuiTimeFilter.Mode.UNTIL,"","","02.11.2026","13:32",now),now);
+        check(upper.since()==0&&upper.until()==minute.until(),"upper-only time was ignored");
+        reject(()->GuiTimeFilter.form(GuiTimeFilter.Mode.MINUTE,"02.11.2026","13:32:10","","",now));
         var berlin=now.withZoneSameInstant(ZoneId.of("Europe/Berlin"));
         reject(()->GuiTimeFilter.rangeInput("29.03.2026","02:30","","",berlin));
         var ids=new HashSet<Integer>();var keys=new HashSet<String>();

@@ -676,6 +676,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private boolean shouldStoreDetails(LogEntry e) {
         if (e == null) return false;
+        if(e.type==ActionType.PLAYER_DEATH||e.type==ActionType.PLAYER_KILL)return true;
         if(e.type==ActionType.CAPTURE_GAP||e.type==ActionType.LOGGER_DIAGNOSTIC)return true;
         if((e.type==ActionType.CONTAINER_PUT||e.type==ActionType.CONTAINER_TAKE)&&e.extra!=null&&e.extra.startsWith("container slot ")&&e.beAfter!=null)return true;
         if (e.source != null && (e.source.startsWith("mod:corpse:") || e.source.startsWith("mod:accessories:"))) return true;
@@ -724,7 +725,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
 
     private static String feedExtra(LogEntry e) {
         if (e == null) return "";
-        if (e.type == ActionType.CHAT_MESSAGE) return safeString(e.extra);
+        if (e.type == ActionType.CHAT_MESSAGE || e.type==ActionType.PLAYER_DEATH || e.type==ActionType.PLAYER_KILL) return safeString(e.extra);
         if (e.extra == null || e.extra.length() <= 512) return safeString(e.extra);
         return e.extra.substring(0, 512);
     }

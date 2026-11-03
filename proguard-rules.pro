@@ -27,6 +27,7 @@
     public static void acceptPage(...);
     public static void acceptCart(...);
     public static void acceptActionResult(...);
+    public static void acceptEntryTeleport(...);
     public static void acceptDetails(...);
     public static void acceptInspectTool(...);
     public static void acceptCaptureTypes(...);

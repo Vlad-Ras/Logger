@@ -138,6 +138,7 @@ public final class LogViewerScreen extends Screen {
     private Button btnRefresh;
     private Button btnCopy;
     private Button btnTp;
+    private boolean teleportPending;
 
     private Button btnCopyFull;
     private Button btnCopyJson;
@@ -709,7 +710,7 @@ public final class LogViewerScreen extends Screen {
         if (btnPrev != null) btnPrev.active = hasPrev;
         if (btnNext != null) btnNext.active = hasNext;
         if (btnCopy != null) btnCopy.active = selected >= 0 && selected < rows.size();
-        if (btnTp != null) btnTp.active = selected >= 0 && selected < rows.size();
+        if (btnTp != null) btnTp.active = !teleportPending && selected >= 0 && selected < rows.size() && rows.get(selected).id()>0;
         if (btnCopyFull != null) btnCopyFull.active = selectedEntryId > 0;
         if (btnCopyJson != null) btnCopyJson.active = selectedEntryId > 0;
 
@@ -1128,7 +1129,13 @@ public final class LogViewerScreen extends Screen {
     private void runSelectedTpCmd() {
         if (selected < 0 || selected >= rows.size()) return;
         LogRow r = rows.get(selected);
-        LoggerActionsScreen.run(this,"entry_position",List.of(Long.toString(r.id())));
+        LogViewerClientHooks.teleport(this,r.id());
+    }
+
+    void applyEntryTeleport(com.roften.avilixlogger.net.S2CEntryTeleportPayload payload) {
+        teleportPending=payload.state()==com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.PREPARING;
+        detailLines=List.of(Component.literal(payload.message()).withStyle(payload.state()==com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE?ChatFormatting.RED:ChatFormatting.AQUA));
+        showRawTab=false;detailsScroll=0;detailLayout.clear();updateButtons();
     }
 
     private void copyCurrentTabText() {

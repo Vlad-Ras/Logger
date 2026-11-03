@@ -133,11 +133,39 @@ public final class ClickHouseNativeSmoke {
             verifyInteraction(db,interaction);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
             verifyJournalPressure(db,pressureRows); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations); verifyMeJobs(db,meJobs);
+            db.shutdown();db=null;
+            for(boolean useFeed:new boolean[]{true,false}) {
+                config.set(List.of("clickhouse","useFeedTable"),useFeed);
+                LoggerConfig.SPEC.acceptConfig((IConfigSpec.ILoadedConfig)ctor.newInstance(config,null,null));
+                db=new ClickHouseLogStorage();verifyPlayerDeathFeed(db,useFeed);db.shutdown();db=null;
+            }
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
             LoggerConfig.SPEC.acceptConfig(null);
         }
+    }
+
+    private static void verifyPlayerDeathFeed(ClickHouseLogStorage db,boolean useFeed)throws Exception {
+        var now=java.time.ZonedDateTime.of(2026,11,3,21,0,0,0,java.time.ZoneId.of("Europe/Moscow"));
+        var minute=com.roften.avilixlogger.net.GuiTimeFilter.parse(com.roften.avilixlogger.net.GuiTimeFilter.form(com.roften.avilixlogger.net.GuiTimeFilter.Mode.MINUTE,"03.11.2026","13:32","","",now),now);
+        var source="native:death-feed:"+UUID.randomUUID();
+        var context=new com.google.gson.JsonObject();context.addProperty("Version",1);context.addProperty("Message","Death message");context.addProperty("DamageType","minecraft:explosion");context.addProperty("MessageId","explosion");
+        context.addProperty("WeaponName","Именной незеритовый меч "+"длинное имя ".repeat(80));context.addProperty("WeaponCustomName",true);
+        for(String role:List.of("Victim","Responsible")){var identity=new com.google.gson.JsonObject();identity.addProperty("Type","minecraft:player");identity.addProperty("Name",role.equals("Victim")?"DeathVictim":"DeathKiller");context.add(role,identity);}
+        var envelope=new com.google.gson.JsonObject();envelope.add("AvilixDeath",context);
+        var death=AsyncPipelineTest.row("native-death-feed");death.type=ActionType.PLAYER_DEATH;death.source=source;death.ts=minute.since()+123;death.dim="minecraft:overworld";death.actorName="DeathVictim";death.extra=envelope.toString();
+        var kill=death.copyForQueue();kill.id=0;kill.type=ActionType.PLAYER_KILL;kill.actorName="DeathKiller";kill.ts=minute.until();
+        var later=AsyncPipelineTest.row("native-death-later");later.type=ActionType.BLOCK_PLACE;later.source=source;later.dim=death.dim;later.ts=minute.since()+16*60_000;later.blockBefore="minecraft:air";later.blockAfter="minecraft:stone";
+        db.appendBatch("death-feed-"+UUID.randomUUID(),List.of(death,kill,later));
+        var q=new LogQuery();q.dim="*";q.sinceTs=minute.since();q.untilTs=minute.until();q.sourcePrefix=source;q.limit=10;
+        var all=db.queryReverse(q);
+        check(all.size()==2&&all.stream().anyMatch(e->e.type==ActionType.PLAYER_DEATH)&&all.stream().anyMatch(e->e.type==ActionType.PLAYER_KILL),"ALL lost death/kill or admitted 13:48; feed="+useFeed);
+        for(var row:all){check(row.extra.equals(death.extra)&&DeathLogDetails.message(row)!=null,"death JSON truncated in general feed; feed="+useFeed);}
+        q.actorName="DeathVictim";check(db.queryReverse(q).size()==1,"player death lookup lost actor");q.actorName=null;
+        q.requireDetails=true;check(db.queryReverse(q).size()==2,"minimal policy erased death receipts");q.requireDetails=false;
+        q.untilTs=now.toInstant().toEpochMilli();check(db.queryReverse(q).size()==3,"since search wrongly excluded later records");
+        System.out.println("PLAYER_DEATH_FEED_TIME_CLICKHOUSE_OK: all types, long structured cause, player lookup, exact 13:32 minute and inclusive bounds, since includes 13:48; minimal mode, feed="+useFeed);
     }
 
     private static void verifyChunkSearch(ClickHouseLogStorage db)throws Exception {

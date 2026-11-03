@@ -23,6 +23,9 @@ final class GuiCommandOutputNativeSmoke {
             @Override public void sendSystemMessage(Component message) { chat.add(message.getString()); }
             @Override public void sendSystemMessage(Component message, boolean overlay) { chat.add(message.getString()); }
         };
+        var denied=new ArrayList<com.roften.avilixlogger.command.EntryPositionCommand.Feedback>();
+        check(com.roften.avilixlogger.command.EntryPositionCommand.request(player.createCommandSourceStack(),1880834017623801859L,denied::add)==0
+                &&denied.size()==1&&denied.getFirst().state()==com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE&&chat.isEmpty(),"direct teleport bypassed AuthCore or sent feedback to chat");
         var normal = player.createCommandSourceStack();
         normal.sendSystemMessage(Component.literal("normal-chat-before"));
         var gui = normal.withSource(new GuiCommandOutput(message -> replies.add(S2CLoggerActionResultPayload.from(17, message))));

@@ -31,6 +31,7 @@ public final class LogViewerClientHooks {
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
         capturePaused=false;
         OPEN_SCREEN.clear();
+        teleportOwner.clear();teleportRequest=0;
         LoggerActionsScreen.clear();
         LocalizedLogSearch.clear();
         serverCreateAvailable = false;
@@ -43,6 +44,7 @@ public final class LogViewerClientHooks {
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
         capturePaused=false;
         OPEN_SCREEN.clear();
+        teleportOwner.clear();teleportRequest=0;
         LoggerActionsScreen.clear();
         LocalizedLogSearch.clear();
         serverCreateAvailable = false;
@@ -73,6 +75,25 @@ public final class LogViewerClientHooks {
             if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.CONFIRM)screen.confirmation(payload.message(),payload.command());
             else screen.apply(payload);
         }
+    }
+
+    private static long teleportSequence,teleportRequest;
+    private static java.lang.ref.WeakReference<LogViewerScreen> teleportOwner=new java.lang.ref.WeakReference<>(null);
+    static void teleport(LogViewerScreen owner,long entryId) {
+        var connection=Minecraft.getInstance().getConnection();
+        if(connection==null||!connection.hasChannel(com.roften.avilixlogger.net.C2SEntryTeleportPayload.TYPE)) {
+            owner.applyEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(0,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,"Для перехода из строки обновите сервер и админклиент до 2.1.29."));return;
+        }
+        var old=teleportOwner.get();if(old!=null)old.applyEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(teleportRequest,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,"Переход заменён новым запросом."));
+        teleportOwner=new java.lang.ref.WeakReference<>(owner);teleportRequest=++teleportSequence;
+        owner.applyEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(teleportRequest,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.PREPARING,"Подготавливаю переход к выбранной записи…"));
+        PacketDistributor.sendToServer(new com.roften.avilixlogger.net.C2SEntryTeleportPayload(teleportRequest,entryId));
+    }
+    public static void acceptEntryTeleport(com.roften.avilixlogger.net.S2CEntryTeleportPayload payload) {
+        var owner=teleportOwner.get();if(owner==null||payload.request()!=teleportRequest)return;
+        owner.applyEntryTeleport(payload);
+        if(payload.state()!=com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.PREPARING)teleportOwner.clear();
+        if(payload.state()==com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.SUCCESS&&Minecraft.getInstance().screen==owner)Minecraft.getInstance().setScreen(null);
     }
 
     public static void acceptActionResult(com.roften.avilixlogger.net.S2CLoggerActionResultPayload payload) {
