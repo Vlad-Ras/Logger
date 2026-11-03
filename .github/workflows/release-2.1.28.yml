@@ -10,6 +10,8 @@ jobs:
   binary:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      ORG_GRADLE_PROJECT_compatCreateReleaseDirectory: build/compat-create-release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -17,6 +19,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare verified official Create release input
+        run: python3 tools/ci/prepare-create-release.py
       - name: Validate pipelines, mixins and production obfuscation
         run: |
           set -euo pipefail

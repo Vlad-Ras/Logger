@@ -222,7 +222,13 @@ dependencies {
     if (!project.hasProperty('ae2Absent')) localRuntime "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
     // Optional Create integration. Never embed Create or its libraries in the logger.
     def compatCreateVersion = project.findProperty('compatCreateVersion') ?: '6.0.11-313'
-    if (compatCreateVersion.startsWith('6.0.10-')) {
+    if (project.hasProperty('compatCreateReleaseDirectory')) {
+        // Official distribution + its own verified nested libraries, prepared by tools/ci.
+        def releaseDirectory=file(project.property('compatCreateReleaseDirectory'))
+        compileOnly files(fileTree(dir:releaseDirectory,include:'*.jar'))
+        if (!project.hasProperty('createAbsent') && !project.hasProperty('supplementariesCreateAbsent'))
+            localRuntime files(new File(releaseDirectory,'create-1.21.1-6.0.10.jar'))
+    } else if (compatCreateVersion.startsWith('6.0.10-')) {
         // Old Create's POM publishes all development integrations as runtime dependencies.
         // Its real required libraries are explicit here; do not pull unrelated optional mods.
         compileOnly("com.simibubi.create:create-1.21.1:${compatCreateVersion}") { transitive = false }

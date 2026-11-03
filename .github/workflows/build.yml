@@ -29,6 +29,11 @@ jobs:
         with:
           cache-read-only: false
       # check/build depend on release obfuscation. Preparation deliberately runs only these tasks.
+      - name: Prepare exact official Create release for client pack
+        if: matrix.profile == 'client-s4-core'
+        run: |
+          python3 tools/ci/prepare-create-release.py
+          echo 'ORG_GRADLE_PROJECT_compatCreateReleaseDirectory=build/compat-create-release' >> "$GITHUB_ENV"
       - name: Compile and verify detached pipelines and Create preflight
         id: compile
         run: |
@@ -51,6 +56,12 @@ jobs:
           grep -q 'OPAC_ACTOR_NATIVE_OK' storage-admission-smoke.log
           grep -q 'SERVER_CAPTURE_GUARD_NATIVE_OK' storage-admission-smoke.log
           if grep -qE 'STORAGE_BLOCK_ADDRESS_NATIVE_FAILED|MixinApplyError|MixinTransformerError' storage-admission-smoke.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && matrix.profile == 'client-s4-core' }}
+        with:
+          name: player-death-native-evidence
+          path: storage-admission-smoke.log
+          if-no-files-found: ignore
       - name: Native Create regression
         timeout-minutes: 10
         run: |
@@ -164,6 +175,7 @@ jobs:
         ports:
           - 8123:8123
     env:
+      ORG_GRADLE_PROJECT_compatCreateReleaseDirectory: build/compat-create-release
       AVILIX_CI_CLICKHOUSE_URL: http://127.0.0.1:8123
       AVILIX_CI_CLICKHOUSE_USER: avilix_ci
       AVILIX_CI_CLICKHOUSE_PASSWORD: local_ci_only
@@ -174,6 +186,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare verified official Create release input
+        run: python3 tools/ci/prepare-create-release.py
       - name: Require ready actual ClickHouse, not a mock
         shell: bash
         run: |

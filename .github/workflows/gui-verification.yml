@@ -3,6 +3,8 @@ on: [push, pull_request]
 jobs:
   gui:
     runs-on: ubuntu-latest
+    env:
+      ORG_GRADLE_PROJECT_compatCreateReleaseDirectory: build/compat-create-release
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -10,6 +12,8 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
+      - name: Prepare verified official Create release input
+        run: python3 tools/ci/prepare-create-release.py
       - uses: gradle/actions/setup-gradle@v4
       - name: Prepare software OpenGL display
         run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0
