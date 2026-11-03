@@ -30,7 +30,7 @@ jobs:
           cache-read-only: false
       # check/build depend on release obfuscation. Preparation deliberately runs only these tasks.
       - name: Prepare exact official Create release for client pack
-        if: matrix.profile == 'client-s4-core'
+        if: matrix.profile == 'client-s4-core' || matrix.profile == 'logged-pack'
         run: |
           python3 tools/ci/prepare-create-release.py
           echo 'ORG_GRADLE_PROJECT_compatCreateReleaseDirectory=build/compat-create-release' >> "$GITHUB_ENV"

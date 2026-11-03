@@ -88,7 +88,7 @@ final class TimeRangeScreen extends Screen {
         g.drawString(font,"С",left,top+46,0xFFFFFF,false);g.drawString(font,"По",left,top+82,0xFFFFFF,false);
         g.drawString(font,"Часовой пояс: "+zone.getId(),left,top-13,0xAAAAAA,false);
         String hint=error.isBlank()?switch(mode){case SINCE->"Позже указанного времени, новые сверху";case UNTIL->"Не позднее указанного времени";case MINUTE->"Только указанная минута (00–59 секунд)";case RANGE->"Обе границы включены в период";}:error;
-        int y=top+162;for(var line:font.split(Component.literal(hint),panelWidth)){g.drawString(font,line,left,y,0xFF7777,false);y+=10;}
+        int y=top+162;for(var line:font.split(Component.literal(hint),panelWidth)){g.drawString(font,line,left,y,error.isBlank()?0xAAAAAA:0xFF7777,false);y+=10;}
         for(var widget:renderables)widget.render(g,mx,my,dt);
     }
     public void renderBackground(GuiGraphics g,int x,int y,float dt) {}
