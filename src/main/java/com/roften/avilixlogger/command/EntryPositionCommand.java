@@ -41,11 +41,10 @@ public final class EntryPositionCommand {
         var player=(ServerPlayer)source.getEntity();var server=source.getServer();var uuid=player.getUUID();var token=UUID.randomUUID();
         var connection=player.connection;REQUESTS.put(uuid,token);
         var old=LOADING.remove(uuid);if(old!=null)old.release();
-        var storage=LoggerRuntime.storage(player.serverLevel());var query=new LogQuery();query.dim="*";query.sinceTs=0;
-        query.untilTs=Long.MAX_VALUE;query.exactId=id;query.limit=1;query.requireDetails=true;query.debugSource="entry-position";
+        var storage=LoggerRuntime.storage(player.serverLevel());
         try {QUERIES.execute(()->{
             EntryPositionEvidence.Position result=null;
-            try {var rows=storage.query(query);if(rows!=null&&rows.size()==1&&rows.getFirst().id==id)result=EntryPositionEvidence.read(rows.getFirst());}
+            try {result=EntryPositionResolver.resolve(storage,id);}
             catch(RuntimeException error){AdaptiveLogDiagnostics.adapterFailure("entry-position-query");}
             var row=result;server.execute(()->{
                 if(!token.equals(REQUESTS.get(uuid)))return;

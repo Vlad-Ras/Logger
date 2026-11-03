@@ -165,6 +165,16 @@ public final class ClickHouseNativeSmoke {
         q.actorName="DeathVictim";check(db.queryReverse(q).size()==1,"player death lookup lost actor");q.actorName=null;
         q.requireDetails=true;check(db.queryReverse(q).size()==2,"minimal policy erased death receipts");q.requireDetails=false;
         q.untilTs=now.toInstant().toEpochMilli();check(db.queryReverse(q).size()==3,"since search wrongly excluded later records");
+        if(useFeed) {
+            var observation=AsyncPipelineTest.row("native-feed-only-position");observation.type=ActionType.BLOCK_INTERACT;observation.source="native:feed-only-position:"+UUID.randomUUID();
+            observation.dim="minecraft:the_nether";observation.x=-1020;observation.y=15;observation.z=-820;observation.blockAfter="minecraft:chest";
+            db.appendBatch("feed-only-position-"+UUID.randomUUID(),List.of(observation));
+            var only=new LogQuery();only.exactId=observation.id;only.untilTs=Long.MAX_VALUE;only.requireDetails=true;only.limit=1;
+            check(db.query(only).isEmpty(),"observation fixture unexpectedly has heavy details");
+            var position=EntryPositionResolver.resolve(db,observation.id);
+            check(position!=null&&position.dimension().equals(observation.dim)&&position.x()==-1020&&position.y()==15&&position.z()==-820,"actual feed-only teleport lookup failed");
+            System.out.println("ENTRY_POSITION_FEED_CLICKHOUSE_OK: selected Nether coordinates resolve without optional detail rows");
+        }
         System.out.println("PLAYER_DEATH_FEED_TIME_CLICKHOUSE_OK: all types, long structured cause, player lookup, exact 13:32 minute and inclusive bounds, since includes 13:48; minimal mode, feed="+useFeed);
     }
 
