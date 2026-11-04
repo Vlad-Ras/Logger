@@ -1,8 +1,8 @@
 package com.roften.avilixlogger.core;
 
 /**
- * Server-authoritative, allocation-free hot-path policy for the twelve GUI
- * type presets. An enabled bit means the corresponding capture is DISABLED.
+ * Server-authoritative, allocation-free hot-path policy for the GUI
+ * capture controls. An enabled bit means the corresponding capture is DISABLED.
  * Query/display filters are deliberately not modified.
  *
  * Some GUI queries include generic historical events (e.g. plane filter
@@ -49,8 +49,9 @@ public final class CaptureTypePolicy {
     }
 
     public static boolean allows(ActionType type, String source, String extra) {
+        if (type == ActionType.CART_ROLLBACK) return true;
         if (suppressed()) return false;
-        if (type == null || disabledMask == 0 || type == ActionType.CART_ROLLBACK) return true;
+        if (type == null || disabledMask == 0) return true;
         // Filter specific source families before generic action categories.
         if (source != null) {
             if (source.startsWith("create:train:") || source.equals("create:train"))

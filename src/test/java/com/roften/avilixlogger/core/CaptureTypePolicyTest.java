@@ -35,6 +35,7 @@ public final class CaptureTypePolicyTest {
             boolean outer = CaptureTypePolicy.suppress(true);
             try {
                 check(!CaptureTypePolicy.allows(ActionType.BLOCK_BREAK, "mod:create", null), "muted generic callback captured");
+                check(CaptureTypePolicy.allows(ActionType.CART_ROLLBACK, "create:cart:sample", null), "committed rollback audit muted");
                 boolean inner = CaptureTypePolicy.suppress(false);
                 try { check(CaptureTypePolicy.suppressed(), "nested callback reenabled capture"); }
                 finally { CaptureTypePolicy.restoreSuppression(inner); }
