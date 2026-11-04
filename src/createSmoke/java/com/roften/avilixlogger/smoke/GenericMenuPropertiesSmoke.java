@@ -19,7 +19,7 @@ final class GenericMenuPropertiesSmoke {
         if(before==null||before.length!=1||before[0]!=0)throw new AssertionError("Vanilla menu property accessor missing");
         menu.clickMenuButton(null,73);int[] after=GenericMenuSnapshot.properties(menu);
         if(before[0]!=0||after[0]!=73)throw new AssertionError("Menu property capture is live or misses button changes");
-        int old=CaptureTypePolicy.mask();try{
+        long old = CaptureTypePolicy.mask();try{
             CaptureTypePolicy.install(CaptureTypePolicy.changed(old,2,false));
             if(CaptureTypePolicy.allows(ActionType.GUI_CHANGE,"player:menu_button",null))throw new AssertionError("Menu change bypasses disabled containers");
         }finally{CaptureTypePolicy.install(old);}

@@ -9,11 +9,11 @@ import java.util.*;
 final class DiskLogJournal {
     private static final String HEADER = "avilixlogger-journal-v1";
     private final Path directory;
-    private long sequence;
+    private long sequence, tokenClock;
 
     DiskLogJournal(Path directory) { this.directory = directory; }
 
-    void initialize() throws IOException {
+    long initialize() throws IOException {
         Files.createDirectories(directory);
         // A .tmp is a batch whose publication was interrupted. Never delete an incomplete one.
         try (var files = Files.newDirectoryStream(directory, "*.tmp")) {
@@ -29,10 +29,22 @@ final class DiskLogJournal {
                 }
             }
         }
+        long count = 0;
+        try (var files = Files.newDirectoryStream(directory, "*.jsonl")) {
+            for (var file : files) {
+                count++;
+                String name = file.getFileName().toString();
+                try { tokenClock = Math.max(tokenClock, Long.parseLong(name.substring(0,19))); }
+                catch (RuntimeException malformed) { throw new IOException("Invalid journal batch name: " + name, malformed); }
+            }
+        }
+        return count;
     }
 
     String newToken() {
-        return String.format(java.util.Locale.ROOT, "%019d-%06d-%s", System.currentTimeMillis(), sequence++, UUID.randomUUID());
+        // New batches sort after startup backlog even if the wall clock moved back.
+        tokenClock = Math.max(System.currentTimeMillis(), tokenClock + 1);
+        return String.format(java.util.Locale.ROOT, "%019d-%06d-%s", tokenClock, sequence++, UUID.randomUUID());
     }
 
     Path write(String name, List<LogEntry> rows) throws IOException {

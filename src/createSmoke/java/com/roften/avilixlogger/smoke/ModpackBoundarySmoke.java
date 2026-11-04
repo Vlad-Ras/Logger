@@ -38,7 +38,7 @@ final class ModpackBoundarySmoke {
         var item=new net.minecraft.world.entity.item.ItemEntity(level,0,80,0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE));
         check(java.util.concurrent.CompletableFuture.supplyAsync(()->NbtSerde.snapshotEntity(level,item)).join()==null,"entity serializer ran off-thread");
         GenericMenuPropertiesSmoke.run(level);
-        int old=CaptureTypePolicy.mask();
+        long old = CaptureTypePolicy.mask();
         try {
             CaptureTypePolicy.install(CaptureTypePolicy.changed(old,2,false));
             check(LoggerEventHandlers.beginMenuAction(null)==null,"disabled container capture dereferenced player/menu");

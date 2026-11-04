@@ -30,7 +30,7 @@ final class ServerCaptureGuardTest {
     private static void deathReserve()throws Exception {
         var q=new WeightedQueue<Integer>("fixture",1,100);
         ServerCaptureGuard.start(Thread.currentThread(),gap->{});
-        int previous=CaptureTypePolicy.mask();CaptureTypePolicy.install(0);
+        long previous = CaptureTypePolicy.mask();CaptureTypePolicy.install(0);
         try {
             check(ServerCaptureGuard.enqueue(q,1,100),"bulk first row lost");
             check(!ServerCaptureGuard.enqueue(q,2,1)&&ServerCaptureGuard.paused(),"bulk did not pause");
@@ -47,7 +47,7 @@ final class ServerCaptureGuardTest {
         }finally{q.close();ServerCaptureGuard.stop();CaptureTypePolicy.install(previous);}
     }
     private static void backpressureChoice()throws Exception {
-        int previous=CaptureTypePolicy.mask();var q=new WeightedQueue<Integer>(1,10);
+        long previous = CaptureTypePolicy.mask();var q=new WeightedQueue<Integer>(1,10);
         CaptureTypePolicy.install(CaptureTypePolicy.changed(0,30,false));ServerCaptureGuard.start(Thread.currentThread(),gap->{});
         try {
             q.put(1,5);var held=q.poll(100);

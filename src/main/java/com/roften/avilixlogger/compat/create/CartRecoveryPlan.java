@@ -11,7 +11,8 @@ public record CartRecoveryPlan(UUID id,long entry,long timestamp,String side,Com
     /** Replay only the construction's own state, bounded by the requested row/capture ID. */
     public static CartRecoveryPlan prepare(LogStorage storage,UUID id,long entry,net.minecraft.core.HolderLookup.Provider registries){
         if(entry<0)throw new IllegalArgumentException("Неверный entry");
-        var q=new LogQuery();q.dim="*";q.cartId=id;q.requireDetails=true;q.untilTs=Long.MAX_VALUE;q.limit=256;
+        var q=new LogQuery();q.dim="*";q.cartId=id;q.requireDetails=true;q.untilTs=Long.MAX_VALUE;q.limit=1;
+        if(entry>0)q.exactId=entry;
         if(entry>0&&entry<Long.MAX_VALUE)q.beforeId=entry+1;
         var changes=new ArrayList<LogEntry>();long bytes=0,target=entry,time=0;int examined=0;
         while(true){var rows=storage.queryReverse(q);if(rows.isEmpty())break;long next=Long.MAX_VALUE;
@@ -27,6 +28,7 @@ public record CartRecoveryPlan(UUID id,long entry,long timestamp,String side,Com
                     var base=fromSnapshot(id,row.id,row.ts,side,envelope);
                     // Before a removal/disassembly is the last recoverable whole construction.
                     if(side.equals("before")&&!CartRollbackPlan.checkpoint(row.type))throw new IllegalStateException("Неизвестный переход полного снимка");
+                    if(changes.isEmpty())return new CartRecoveryPlan(id,target,time,side,base.item(),base.blocks(),row.id,0);
                     Collections.reverse(changes);
                     var replay=new CartStateReplay(base.item(),registries);
                     for(var change:changes)replay.apply(change);
@@ -34,10 +36,15 @@ public record CartRecoveryPlan(UUID id,long entry,long timestamp,String side,Com
                     var result=fromSnapshot(id,target,time,side,wrapped);
                     return new CartRecoveryPlan(id,target,time,side,result.item(),result.blocks(),row.id,replay.applied());
                 }
+                if (row.type == ActionType.CART_TRANSFER) {
+                    var gap = NbtSerde.fromSnbt(row.beAfter);
+                    if (gap != null && gap.getBoolean("CaptureDisabled"))
+                        throw new IllegalStateException("В этом периоде логирование механизмов было выключено. Выберите полный снимок упаковки, удаления или разборки после него");
+                }
                 if(CartRollbackPlan.checkpoint(row.type))throw new IllegalStateException("Переход entry="+row.id+" не содержит полного снимка; восстановление устаревшего состояния остановлено");
                 if(row.type==ActionType.CART_CONTENT_CHANGE||row.type==ActionType.CART_STRUCTURE_CHANGE||row.type==ActionType.CART_STATUS)changes.add(row);
             }
-            if(rows.size()<q.limit)break;q.beforeId=next;
+            if(rows.size()<q.limit)break;q.beforeId=next;q.exactId=0;q.limit=256;
         }
         throw new IllegalStateException("Полного снимка нет. Для восстановления нужен сохранённый NBT конструкции");
     }

@@ -280,7 +280,7 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
-        PayloadRegistrar r = event.registrar("10").optional();
+        PayloadRegistrar r = event.registrar("11").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
         r.playToServer(C2SEntryTeleportPayload.TYPE,C2SEntryTeleportPayload.STREAM_CODEC,LoggerNetwork::handleEntryTeleport);
@@ -401,6 +401,7 @@ public final class LoggerNetwork {
                     LastQueryManager.State current = LastQueryManager.get(livePlayer);
                     if (current != null) {
                         current.nextCursorCandidate = snapshotState.nextCursorCandidate();
+                        current.nextCursorTsCandidate = snapshotState.nextCursorTsCandidate;
                         current.hasNext = snapshotState.hasNext();
                     }
 
@@ -520,7 +521,7 @@ public final class LoggerNetwork {
             boolean editor = hasAdminPermission(sp);
             boolean success = true;
             String message = "";
-            int current = data.captureMask();
+            long current = data.captureMask();
             com.roften.avilixlogger.core.CaptureTypePolicy.install(current);
             if (payload.action() != C2SCaptureTypesPayload.Action.QUERY) {
                 if (!editor) {
@@ -530,7 +531,7 @@ public final class LoggerNetwork {
                     success = false;
                     message = "Настройки изменены другим администратором: обновите состояние";
                 } else {
-                    int next = current;
+                    long next = current;
                     switch (payload.action()) {
                         case SET -> {
                             if (payload.preset() < 1 || payload.preset() > com.roften.avilixlogger.core.CaptureTypePolicy.GROUPS) {
@@ -695,6 +696,8 @@ public final class LoggerNetwork {
                     new ArrayDeque<>(liveState.cursors),
                     liveState.title
             );
+            snapshotState.cursorTimes.putAll(liveState.cursorTimes);
+            snapshotState.nextCursorTsCandidate = liveState.nextCursorTsCandidate;
             snapshotState.nextCursorCandidate = liveState.nextCursorCandidate();
             snapshotState.hasNext = liveState.hasNext();
             ServerLevel finalLvl = lvl;
@@ -791,6 +794,7 @@ public final class LoggerNetwork {
         }
 
         if (gf != null && gf.absoluteSinceTs() >= 0) {
+            q.chronological = gf.absoluteSinceTs() > 0;
             q.sinceTs = gf.absoluteSinceTs(); q.untilTs = gf.absoluteUntilTs() >= 0 ? Math.min(now, gf.absoluteUntilTs()) : now;
         }
 
@@ -1016,7 +1020,8 @@ public final class LoggerNetwork {
         int size = C2SRequestPagePayload.clampPageSize(requestedPageSize);
 
         LogQuery q = state.baseQuery.copy();
-        q.beforeId = state.currentBeforeId();
+        if(q.chronological)q.afterId=state.currentBeforeId();else q.beforeId=state.currentBeforeId();
+        q.cursorTs=state.currentCursorTs();
 
         var slice = com.roften.avilixlogger.core.GuiPageLoader.load(LoggerRuntime.storage(level), q, size, aggregated, cancelled,
                 candidates -> aggregateForGui(level, candidates, size).hasNext);
@@ -1056,6 +1061,8 @@ public final class LoggerNetwork {
         }
 
         state.nextCursorCandidate = nextCursorCandidate;
+        state.nextCursorTsCandidate = 0;
+        for(var entry:filtered)if(entry.id==nextCursorCandidate){state.nextCursorTsCandidate=entry.ts;break;}
         state.hasNext = hasNext;
 
         boolean hasPrev = state.cursors.size() > 1;
@@ -1116,40 +1123,14 @@ public final class LoggerNetwork {
 
     private static List<LogEntry> fetchByIdsBestEffort(ServerLevel level, long anchorId, long[] ids) {
         if (level == null) return List.of();
-        if (ids == null || ids.length == 0) {
-            LogQuery q = new LogQuery();
-            q.dim = level.dimension().location().toString();
-            q.beforeId = anchorId + 1;
-            q.limit = 64;
-            q.requireDetails = true;
-            List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
-            if (got == null || got.isEmpty()) {
-                q.requireDetails = false;
-                got = LoggerRuntime.storage(level).queryReverse(q);
-            }
-            if (got == null) return List.of();
-            for (LogEntry e : got) if (e.id == anchorId) return List.of(e);
-            return got.isEmpty() ? List.of() : List.of(got.get(0));
-        }
-
-        long max = anchorId;
-        for (long id : ids) if (id > max) max = id;
-        LogQuery q = new LogQuery();
-        q.dim = level.dimension().location().toString();
-        q.beforeId = max + 1;
-        q.limit = Math.min(2000, Math.max(64, ids.length * 16));
-        q.requireDetails = true;
-        List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
-        if (got == null || got.isEmpty()) {
-            q.requireDetails = false;
-            got = LoggerRuntime.storage(level).queryReverse(q);
-        }
-        if (got == null || got.isEmpty()) return List.of();
-        java.util.Set<Long> want = new java.util.HashSet<>();
-        for (long id : ids) want.add(id);
-        java.util.ArrayList<LogEntry> out = new java.util.ArrayList<>(ids.length);
-        for (LogEntry e : got) if (want.contains(e.id)) out.add(e);
-        return out;
+        var q = new LogQuery(); q.dim="*"; q.untilTs=Long.MAX_VALUE; q.requireDetails=true;
+        if(ids==null || ids.length==0){ q.exactId=anchorId;q.limit=1; }
+        else { q.exactIds=java.util.Arrays.stream(ids).filter(id->id>0).distinct().limit(2000).toArray();q.limit=q.exactIds.length; }
+        if(q.limit<=0)return List.of();
+        List<LogEntry> got=LoggerRuntime.storage(level).queryReverse(q);
+        if(got==null||got.isEmpty()){q.requireDetails=false;got=LoggerRuntime.storage(level).queryReverse(q);}
+        if(got==null)return List.of();
+        return got.stream().filter(row->q.exactIds==null?row.id==q.exactId:java.util.Arrays.stream(q.exactIds).anyMatch(id->id==row.id)).toList();
     }
 
     private static List<Component> buildRawLines(ServerLevel level, long entryId, long[] rawIds) {
@@ -1313,7 +1294,7 @@ public final class LoggerNetwork {
         if (level == null) return List.of(Component.literal("{}").withStyle(net.minecraft.ChatFormatting.GRAY));
         LogQuery q = new LogQuery();
         q.dim = "*";q.untilTs=Long.MAX_VALUE;
-        q.beforeId = entryId==Long.MAX_VALUE?0:entryId+1;
+        q.exactId = entryId;
         q.limit = 1;
         q.requireDetails = true;
         List<LogEntry> got = LoggerRuntime.storage(level).queryReverse(q);
@@ -1603,8 +1584,7 @@ public final class LoggerNetwork {
             if (!k.equals(this.key)) return false;
             if (this.key.kind == BurstKind.SYSTEM) return true;
             // Window based on newest event time.
-            long dt = this.newestTs - e.ts;
-            if (dt < 0) dt = 0;
+            long dt = Math.abs(this.newestTs - e.ts);
             return dt <= GUI_BURST_WINDOW_MS && (this.newestTs - this.oldestTs) <= GUI_BURST_MAX_MS;
         }
 
@@ -1616,7 +1596,7 @@ public final class LoggerNetwork {
                 newestId = oldestId = e.id;
             } else {
                 // list is newest->older; we append in that order
-                oldestTs = e.ts;
+                oldestTs = Math.min(oldestTs,e.ts); newestTs = Math.max(newestTs,e.ts);
                 oldestId = e.id;
             }
         }

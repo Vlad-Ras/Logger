@@ -66,6 +66,10 @@ public final class LogQuery {
 
     /** Optional exact persisted record; kept through every query fallback. */
     public long exactId;
+    public long[] exactIds;
+    /** Explicit From/Range GUI searches use chronological keyset pagination. */
+    public boolean chronological;
+    public long cursorTs;
 
     /** Internal paging: id cursor (exclusive). */
     public long afterId;
@@ -102,6 +106,8 @@ public final class LogQuery {
         q.types = this.types != null ? this.types.clone() : null;
         q.requireDetails = this.requireDetails;
         q.exactId = this.exactId;
+        q.exactIds = this.exactIds == null ? null : this.exactIds.clone();
+        q.chronological = this.chronological; q.cursorTs = this.cursorTs;
         q.afterId = this.afterId;
         q.beforeId = this.beforeId;
         return q;

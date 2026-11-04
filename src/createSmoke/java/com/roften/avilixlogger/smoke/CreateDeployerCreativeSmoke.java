@@ -81,7 +81,7 @@ public final class CreateDeployerCreativeSmoke {
                 }finally{if(nested!=null)nested.finish(true);}
                 if(mode.equals("noop")){check(row==null,"creative no-op invented journal row");tested++;continue;}
                 check(row!=null,"creative deployer IO not captured");row.materializeSnapshots();var b=NbtSerde.fromSnbt(row.beBefore);var a=NbtSerde.fromSnbt(row.beAfter);
-                check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"creative deployer blamed owner");
+                check(settings.getUUID("Owner").equals(row.actorUuid)&&!"SYSTEM".equals(row.actorName),"creative deployer blamed owner");
                 if(mode.equals("failure")||mode.equals("external-item")||mode.startsWith("nested-")){check(!a.getBoolean("Complete"),"failed/unsupported creative hand IO enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported creative hand IO accepted");tested++;continue;}
                 check(a.getBoolean("Complete"),"creative deployer capture incomplete: "+kind+"/"+exchange+"/"+mode+" "+a);
                 var io=a.getList("Cargo",10).stream().map(t->(CompoundTag)t).filter(t->t.getString("Kind").equals("storage_io")).findFirst().orElseThrow();

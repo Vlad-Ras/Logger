@@ -125,7 +125,7 @@ public final class ScgunsNativeSmoke {
             var after=NbtSerde.snapshotItemStack(reloadGun,level.registryAccess());
             var reload=WeaponCombatAudit.reloadEntry(loader,WeaponCombatTrace.Pose.capture(loader),"ammo_transfer",before,after,0,transferred);reload.materializeSnapshots();
             check(reload.type==ActionType.WEAPON_RELOAD && WeaponCombatTrace.context(reload).getInt("AmmoAfter")==transferred,"reload payload lost confirmed ammo");
-            int mask=CaptureTypePolicy.mask();try{CaptureTypePolicy.install(CaptureTypePolicy.changed(mask,4,false));
+            long mask = CaptureTypePolicy.mask();try{CaptureTypePolicy.install(CaptureTypePolicy.changed(mask,4,false));
                 check(!CaptureTypePolicy.allows(ActionType.WEAPON_RELOAD,"mod:scguns",null),"reload bypassed items mask");
                 check(WeaponCombatAudit.beginReload(loader,reloadGun,"disabled")==null,"disabled reload retained scope");
             }finally{CaptureTypePolicy.install(mask);}

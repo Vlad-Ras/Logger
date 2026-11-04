@@ -23,6 +23,7 @@ public final class CreateCargoAudit {
     private CreateCargoAudit() {}
     private static Capture captureFor(AbstractContraptionEntity entity){for(var capture=CAPTURE.get();capture!=null;capture=capture.previous)if(capture.entity==entity)return capture;return null;}
     public static boolean active(AbstractContraptionEntity entity) {
+        if (CaptureTypePolicy.suppressed()) { CreateCaptureGaps.remember(entity); return false; }
         var capture = captureFor(entity);
         return CreateCapturePolicy.cargo(entity)
                 && entity.level() instanceof ServerLevel level && level.getServer().isSameThread()
@@ -72,7 +73,18 @@ public final class CreateCargoAudit {
         row.actorUuid = null; row.actorName = "SYSTEM";
         var cause = CauseContext.peek();
         if (cause != null && cause.actorUuid() != null) { row.actorUuid = cause.actorUuid(); row.actorName = cause.actorName(); }
+        else {
+            // Only this exact deployer operation has an explicit owner. Never promote
+            // a general FakePlayer UUID or a nearby/previous player into an actor.
+            var mechanism = CreateActorContext.current();
+            if (mechanism != null && mechanism.owner() != null
+                    && mechanism.technicalPlayer() instanceof com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer) {
+                row.actorUuid = mechanism.owner();
+                row.actorName = mechanism.ownerName() == null ? mechanism.owner().toString() : mechanism.ownerName();
+            }
+        }
         row.source = CreateMechanismContext.decorate(cart != null ? cart.stamp(phase).source() : kind.source(id, phase));
+        CreateActorContext.attribute(row);
         row.extra = "construction=" + id + "; " + detail;
         row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE, metadata(entity, before));
         row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, metadata(entity, after));
@@ -98,6 +110,11 @@ public final class CreateCargoAudit {
         if (!CreateCapturePolicy.action(entity,type) || !CreateCartAudit.enabled() || !(entity.level() instanceof ServerLevel level)) return;
         LoggerRuntime.storage(level).append(row(entity, type, phase, before, after, detail));
     }
+    static void safetyBarrier(AbstractContraptionEntity entity, LogEntry row) {
+        var capture = captureFor(entity);
+        if (capture != null) { if (capture.rows.size() < 512) capture.rows.add(row); else capture.complete = false; }
+        else if (CreateCartAudit.enabled()) LoggerRuntime.storage((ServerLevel)entity.level()).append(row);
+    }
     static void deliver(AbstractContraptionEntity entity,LogEntry row){
         if (!CreateCapturePolicy.action(entity,row.type)) return;
         var capture=captureFor(entity);
@@ -107,7 +124,7 @@ public final class CreateCargoAudit {
     /** Only native, verified block-breaking collection passes internal=true. */
     public static OperationScope operation(MovementContext context, String reason, boolean internal) {
         var entity = context.contraption.entity;
-        if (entity == null || !active(entity) || !CreateCapturePolicy.actors(entity)) return null;
+        if (entity == null || !active(entity) || !CreateCapturePolicy.actor(context)) return null;
         return new OperationScope(context, reason, internal);
     }
     public static final class Capture implements AutoCloseable {

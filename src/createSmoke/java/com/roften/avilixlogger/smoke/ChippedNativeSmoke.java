@@ -55,7 +55,7 @@ public final class ChippedNativeSmoke {
             check(NbtSerde.fromSnbt(row.playerInvBefore).getList("Items",10).size()==3&&NbtSerde.fromSnbt(row.playerInvAfter).getList("Items",10).size()==3,"inventory proof was not detached");
             check(ChippedCraftAudit.capture(player,before,before,output,1,all)==null&&ChippedCraftAudit.capture(player,before,after,output,0,all)==null,"no-op/refused conversion emitted");
         }
-        int mask=CaptureTypePolicy.mask();try {
+        long mask = CaptureTypePolicy.mask();try {
             CaptureTypePolicy.install(CaptureTypePolicy.changed(mask,4,false));
             check(ChippedCraftAudit.begin(null,ItemStack.EMPTY,false)==null,"disabled capture touched player");
             check(!CaptureTypePolicy.allows(ActionType.ITEM_TRANSFORM,"mod:chipped:workbench",null),"conversion bypassed items mask");

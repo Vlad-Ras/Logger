@@ -20,6 +20,8 @@ public final class PendingLogStorage implements LogStorage {
     private volatile boolean initialized;
     private volatile boolean sending = true;
     private volatile Throwable journalFailure;
+    private volatile long publishedBatches;
+    private final java.util.concurrent.atomic.AtomicLong deliveredBatches = new java.util.concurrent.atomic.AtomicLong();
 
     public PendingLogStorage() {
         this(configuredDirectory(), LoggerConfig.VALUES.clickHouseQueueCapacity.get(),
@@ -63,7 +65,7 @@ public final class PendingLogStorage implements LogStorage {
 
     private void writeJournal() {
         while (!initialized) {
-            try { journal.initialize(); initialized = true; signal(); }
+            try { publishedBatches = journal.initialize(); initialized = true; signal(); }
             catch (Exception error) {
                 if (queue.exhausted() && queue.retainedBytes() == 0) return;
                 reportJournalError(error); pause(1000);
@@ -91,6 +93,7 @@ public final class PendingLogStorage implements LogStorage {
                         try { journal.write(token, rows); journalFailure = null; break; }
                         catch (Exception error) { reportJournalError(error); pause(1000); }
                     }
+                    publishedBatches++;
                     for (var accepted : batch) queue.complete(accepted);
                     batch.clear(); bytes = 0;
                     signal();
@@ -113,6 +116,7 @@ public final class PendingLogStorage implements LogStorage {
                     List<LogEntry> rows = DiskLogJournal.read(file);
                     current.appendBatch(file.getFileName().toString(), rows);
                     DiskLogJournal.acknowledge(file);
+                    deliveredBatches.incrementAndGet();
                     retryMillis = 250;
                 }
             } catch (Exception failure) {
@@ -164,11 +168,14 @@ public final class PendingLogStorage implements LogStorage {
     }
 
     @Override public boolean awaitVisible(long deadline) throws InterruptedException {
-        if (!queue.awaitEmpty(deadline)) return false;
+        if (!queue.awaitThrough(queue.fence(),deadline)) return false;
+        // Single journal writer + monotonically ordered file names make this a
+        // finite prefix, including startup backlog. Later batches do not extend it.
+        long target = publishedBatches;
         while (System.nanoTime() < deadline) {
-            try { if (initialized && delegate != null && !journal.hasPending()) return true; }
-            catch (java.io.IOException e) { throw new IllegalStateException("Журнал недоступен",e); }
-            Thread.sleep(25);
+            if (initialized && delegate != null && deliveredBatches.get() >= target) return true;
+            if (journalFailure != null) throw new IllegalStateException("Журнал недоступен",journalFailure);
+            Thread.sleep(5);
         }
         return false;
     }

@@ -45,7 +45,7 @@ public final class SupplementariesAutomationAuditTest {
         check(!SupplementariesAutomationAudit.changed(before,before.copy())&&!SupplementariesAutomationAudit.changed(before,null),"no-op/null accepted");
         var row=record();var copy=GzipJson.fromGzippedJsonBytes(GzipJson.toGzippedJsonBytes(row),LogEntry.class);
         check(copy.actorUuid==null&&copy.actorName.equals(row.actorName)&&copy.source.equals(row.source)&&copy.x==64&&copy.extra.contains("@60,104,45")&&copy.beBefore.equals(row.beBefore)&&copy.beAfter.equals(row.beAfter),"automation journal lost actor/positions/full book");
-        int mask=CaptureTypePolicy.mask();try{for(int group:new int[]{1,2}){CaptureTypePolicy.install(CaptureTypePolicy.changed(0,group,false));check(SupplementariesAutomationAudit.enter(0,null)==null&&SupplementariesAutomationAudit.current()==null,"disabled display capture retained frame or dereferenced native arguments");}}finally{CaptureTypePolicy.install(mask);}
+        long mask = CaptureTypePolicy.mask();try{for(int group:new int[]{1,2}){CaptureTypePolicy.install(CaptureTypePolicy.changed(0,group,false));check(SupplementariesAutomationAudit.enter(0,null)==null&&SupplementariesAutomationAudit.current()==null,"disabled display capture retained frame or dereferenced native arguments");}}finally{CaptureTypePolicy.install(mask);}
         row.beBefore="{";check(SupplementariesTextAudit.describe(null,row).isEmpty(),"malformed automation payload broke detail fallback");
         System.out.println("SUPPLEMENTARIES_DISPLAY_EVIDENCE_OK: book conversion/filter/pages/no-op, reservation-only separation, system actor + target/mechanism, full journal, disabled capture and malformed details");
     }

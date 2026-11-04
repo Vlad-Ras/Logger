@@ -137,7 +137,7 @@ public final class CreateDeployerJointSmoke {
                 }
                 if(mode.equals("noop")||mode.startsWith("self-noop-fd/")){check(row==null,"idle/no-op activation invented a row");if(mode.startsWith("self-noop-fd/"))check(fake.getRemainingFireTicks()==100&&fake.getMainHandItem().is(held.getItem())&&fake.getMainHandItem().getCount()==heldCount,"native self-food refusal changed state");tested++;continue;}
                 check(row!=null,"native deployer action not captured: "+kind+"/"+mode);row.materializeSnapshots();var b=NbtSerde.fromSnbt(row.beBefore);var a=NbtSerde.fromSnbt(row.beAfter);
-                check(row.actorUuid==null&&"SYSTEM".equals(row.actorName),"deployer blamed its owner");check(CreateContraptionKind.id(row.source).equals(CreateContraptionSources.id(body)),"deployer root ID lost");
+                check(settings.getUUID("Owner").equals(row.actorUuid)&&!"SYSTEM".equals(row.actorName),"deployer blamed its owner");check(CreateContraptionKind.id(row.source).equals(CreateContraptionSources.id(body)),"deployer root ID lost");
                 if(mode.equals("failure")||mode.endsWith("/barrier")){check(!a.getBoolean("Complete"),"partial/unsupported attack enabled undo");reject(()->CreateTransferRollbackPlan.prepare(b,a),"partial/unsupported deployer accepted");tested++;continue;}
                 check(a.getBoolean("Complete"),"capture incomplete: "+kind+"/"+mode+" reason="+a.getString("JointFailure"));
                 if(mode.equals("feed-natural-ticks")){var human=(net.minecraft.server.level.ServerPlayer)target;for(int t=0;t<20;t++){human.doTick();world.tickNonPassenger(human);}}

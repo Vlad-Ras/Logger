@@ -55,7 +55,7 @@ public final class WeaponCombatTraceTest {
         var invalidOwner=machine.tag();invalidOwner.getCompound("Mechanism").putString("Owner","bad");check(WeaponCombatTrace.Shot.read(invalidOwner)==null,"malformed mechanism owner accepted");
         var noOwner=machine.tag();noOwner.getCompound("Mechanism").remove("Owner");check(WeaponCombatTrace.Shot.read(noOwner)!=null,"ownerless turret rejected");
         var disguised=machine.tag();disguised.putInt("Version",1);disguised.putUUID("Shooter",actor);check(WeaponCombatTrace.Shot.read(disguised)==null,"v1 silently stripped mechanism identity");
-        int mask=CaptureTypePolicy.mask();try{
+        long mask = CaptureTypePolicy.mask();try{
             CaptureTypePolicy.install(CaptureTypePolicy.changed(0,3,false));check(!CaptureTypePolicy.allows(ActionType.WEAPON_KILL,"mod:scguns",null),"kills bypass entities mask");
             CaptureTypePolicy.install(CaptureTypePolicy.changed(0,4,false));check(!CaptureTypePolicy.allows(ActionType.WEAPON_RELOAD,"mod:scguns",null),"reload bypass items mask");
         }finally{CaptureTypePolicy.install(mask);}

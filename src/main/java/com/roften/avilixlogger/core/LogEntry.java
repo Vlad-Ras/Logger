@@ -31,6 +31,9 @@ public final class LogEntry implements QueuedLogEvent {
     public long ts;                // epoch millis
     public String dim;             // dimension id, e.g. "minecraft:overworld"
     public ActionType type;
+    /** Nullable derived checkpoint header; absent on historical rows. */
+    public Boolean fullSnapshot;
+    public transient boolean lightweight;
 
     public UUID actorUuid;         // may be null (e.g. explosions)
     public String actorName;       // best-effort
@@ -114,6 +117,10 @@ public final class LogEntry implements QueuedLogEvent {
     public void deferSnapshot(SnapshotField field, net.minecraft.nbt.Tag tag) {
         if (tag == null) return;
         if (snapshots == null) snapshots = new net.minecraft.nbt.Tag[SNAPSHOT_FIELDS.length];
+        if ((field==SnapshotField.BE_BEFORE||field==SnapshotField.BE_AFTER)
+                && tag instanceof net.minecraft.nbt.CompoundTag header && header.getInt("Format")==1
+                && (header.getString("Form").equals("item")&&header.contains("Item",10)
+                    ||header.getString("Form").equals("entity")&&header.getCompound("Entity").contains("Contraption",10)))fullSnapshot=Boolean.TRUE;
         int index = field.ordinal();
         net.minecraft.nbt.Tag previous = snapshots[index];
         if (previous == tag) return;
@@ -191,7 +198,7 @@ public final class LogEntry implements QueuedLogEvent {
         copy.id = id;
         copy.ts = ts;
         copy.dim = dim;
-        copy.type = type;
+        copy.type = type;copy.fullSnapshot=fullSnapshot;copy.lightweight=lightweight;
         copy.actorUuid = actorUuid;
         copy.actorName = actorName;
         copy.source = source;

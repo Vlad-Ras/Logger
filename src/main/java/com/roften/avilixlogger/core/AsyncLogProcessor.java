@@ -33,7 +33,7 @@ public final class AsyncLogProcessor {
         ServerCaptureGuard.enqueue(pool().queue,task,Math.max(128L,bytes));
     }
 
-    public static boolean awaitIdle(long deadlineNanos) throws InterruptedException { Pool current = pool; return current == null || current.queue.awaitEmpty(deadlineNanos); }
+    public static boolean awaitIdle(long deadlineNanos) throws InterruptedException { Pool current = pool; return current == null || current.queue.awaitThrough(current.queue.fence(),deadlineNanos); }
     static WeightedQueue.Statistics queueStatistics(){Pool current=pool;return current==null?null:current.queue.statistics();}
     static void resetQueueStatistics(){Pool current=pool;if(current!=null)current.queue.resetStatistics();}
 

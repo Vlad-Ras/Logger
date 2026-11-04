@@ -9,6 +9,41 @@ import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 public final class CreateCapturePolicy {
     private CreateCapturePolicy() {}
 
+    public static int mechanismGroup(net.minecraft.resources.ResourceLocation block) {
+        if (block == null) return 0;
+        if ("minecraft".equals(block.getNamespace()))
+            return block.getPath().equals("dispenser") || block.getPath().equals("dropper") ? com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_DISPENSER : 0;
+        if (!"create".equals(block.getNamespace())) return 0;
+        return switch (block.getPath()) {
+            case "deployer" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_DEPLOYER;
+            case "mechanical_drill" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_DRILL;
+            case "mechanical_saw" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_SAW;
+            case "mechanical_harvester" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_HARVESTER;
+            case "mechanical_plough" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_PLOUGH;
+            case "mechanical_roller" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_ROLLER;
+            case "chute", "smart_chute" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_CHUTE;
+            case "andesite_funnel", "brass_funnel", "andesite_belt_funnel", "brass_belt_funnel" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_FUNNEL;
+            case "portable_storage_interface", "portable_fluid_interface" -> com.roften.avilixlogger.core.CaptureTypePolicy.CREATE_PORTABLE_STORAGE;
+            default -> 0;
+        };
+    }
+    public static boolean mechanismEnabled(net.minecraft.world.level.block.state.BlockState state) {
+        if (state == null) return true;
+        int group = mechanismGroup(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()));
+        return group == 0 || com.roften.avilixlogger.core.CaptureTypePolicy.enabled(group);
+    }
+    public static boolean actor(com.simibubi.create.content.contraptions.behaviour.MovementContext context) {
+        return context != null && context.contraption != null && actors(context.contraption.entity)
+                && mechanismEnabled(context.state);
+    }
+    /** Called around native callbacks; Create itself always continues executing. */
+    public static boolean enterActor(com.simibubi.create.content.contraptions.behaviour.MovementContext context) {
+        boolean muted = context != null && !context.world.isClientSide && !actor(context);
+        if (muted && context.contraption != null && context.contraption.entity != null
+                && lifecycle(context.contraption.entity)) CreateCaptureGaps.remember(context.contraption.entity);
+        return com.roften.avilixlogger.core.CaptureTypePolicy.suppress(muted);
+    }
+
     public static boolean kindEnabled(CreateContraptionKind kind) {
         if (!com.roften.avilixlogger.core.CaptureTypePolicy.allowsCreateKind(kind)) return false;
         return switch (kind) {
@@ -47,11 +82,13 @@ public final class CreateCapturePolicy {
     }
 
     public static boolean actors(AbstractContraptionEntity entity) {
-        return LoggerConfig.VALUES.logCreateActorWork.get() && allows(entity);
+        return !com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()
+                && LoggerConfig.VALUES.logCreateActorWork.get() && allows(entity);
     }
 
     public static boolean cargo(AbstractContraptionEntity entity) {
-        return LoggerConfig.VALUES.logCreateCargoTransfers.get() && allows(entity);
+        return !com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()
+                && LoggerConfig.VALUES.logCreateCargoTransfers.get() && allows(entity);
     }
 
     public static boolean lifecycle(AbstractContraptionEntity entity) {
@@ -63,6 +100,7 @@ public final class CreateCapturePolicy {
     }
 
     public static boolean action(AbstractContraptionEntity entity, ActionType action) {
+        if (com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()) return false;
         if (!allows(entity)) return false;
         return switch (action) {
             case CART_MOVE, CART_STATUS -> LoggerConfig.VALUES.logCreateMovement.get();

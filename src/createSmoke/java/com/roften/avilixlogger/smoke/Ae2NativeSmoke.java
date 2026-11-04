@@ -100,7 +100,7 @@ public final class Ae2NativeSmoke {
         target.settings.putSetting(Settings.SORT_DIRECTION, SortDir.DESCENDING);
         check(before.slots().get(0).stack().getCount() == 7 && !before.settings().equals(target.settings.exportSettings()), "snapshot retained mutable native contents/settings");
         menu.items.reads = 0; target.reads = 0;
-        int mask = CaptureTypePolicy.mask();
+        long mask = CaptureTypePolicy.mask();
         try {
             CaptureTypePolicy.install(CaptureTypePolicy.ALL_DISABLED);
             check(Ae2Audit.capture(menu) == null, "disabled capture returned snapshot");

@@ -23,9 +23,9 @@ public final class CreateCaptureSuppressionSmoke {
         var body=new BearingContraption(false,Direction.UP);body.anchor=BlockPos.ZERO;body.bounds=new net.minecraft.world.phys.AABB(BlockPos.ZERO);
         var setter=ControlledContraptionEntity.class.getDeclaredMethod("setContraption",Contraption.class);setter.setAccessible(true);setter.invoke(entity,body);
         var info=new StructureBlockInfo(BlockPos.ZERO,AllBlocks.DEPLOYER.getDefaultState(),new CompoundTag());
-        var context=new MovementContext(world,info,body);var data=LoggerServerData.get(world.getServer().overworld());int previous=data.captureMask();
+        var context=new MovementContext(world,info,body);var data=LoggerServerData.get(world.getServer().overworld());long previous = data.captureMask();
         try{
-            int disabled=CaptureTypePolicy.changed(previous,11,false);data.setCaptureMask(disabled);
+            long disabled = CaptureTypePolicy.changed(previous,11,false);data.setCaptureMask(disabled);
             check(!CreateCapturePolicy.actors(entity)&&!CreateCapturePolicy.cargo(entity),"disabled bearing still captures");
             check(CreateCapturePolicy.mutedEntity(entity),"muted bearing re-enters generic tick audit");
             HotPathMetrics.start();

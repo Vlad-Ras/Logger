@@ -20,10 +20,14 @@ public abstract class BlockEntityTickSourceMixin {
         if (com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(blockEntity.getLevel(),blockEntity.getBlockPos())) return;
         if (blockEntity.getLevel() instanceof ServerLevel
                 && com.roften.avilixlogger.core.CreateSupport.available()
-                && com.roften.avilixlogger.compat.create.CreateCapturePolicy.mutedController(blockEntity)) {
+                && (com.roften.avilixlogger.compat.create.CreateCapturePolicy.mutedController(blockEntity)
+                    || "create".equals(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(blockEntity.getBlockState().getBlock()).getNamespace())
+                    && !com.roften.avilixlogger.compat.create.CreateCapturePolicy.mechanismEnabled(blockEntity.getBlockState()))) {
+            boolean previousCapture = com.roften.avilixlogger.core.CaptureTypePolicy.suppress(true);
             String previous=MutationSourceResolver.enter(MutationSourceResolver.VANILLA_SIMULATION);
             try(var ignored=com.roften.avilixlogger.core.CauseContext.unattributed()){original.call();}
-            finally{MutationSourceResolver.restore(previous);}return;
+            finally{MutationSourceResolver.restore(previous);
+                com.roften.avilixlogger.core.CaptureTypePolicy.restoreSuppression(previousCapture);}return;
         }
         if (!(blockEntity.getLevel() instanceof ServerLevel) || !LoggerConfig.isTickCaptureEnabled()) {
             original.call();

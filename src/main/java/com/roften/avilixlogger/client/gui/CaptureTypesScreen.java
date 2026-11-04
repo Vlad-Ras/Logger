@@ -20,7 +20,7 @@ public final class CaptureTypesScreen extends Screen {
     };
     private final Screen parent;
     private final List<Button> switches = new ArrayList<>();
-    private int disabledMask;
+    private long disabledMask;
     private int revision;
     private boolean loaded;
     private boolean canEdit;
@@ -69,7 +69,7 @@ public final class CaptureTypesScreen extends Screen {
             boolean shown=i>=scroll&&i<scroll+visible;
             button.visible=shown;
             button.setY(54+(i-scroll)*21);
-            boolean enabled=loaded&&(disabledMask&(1<<i))==0;
+            boolean enabled=loaded&&(disabledMask&(1L<<i))==0;
             button.setMessage(Component.literal((enabled?"●  ":"○  ")+
                     (CaptureTypePolicy.title(i+1) != null ? CaptureTypePolicy.title(i+1) : Component.translatable("gui.avilixlogger.type."+KEYS[i+1]).getString())
                     +(enabled?"  —  ВКЛ":"  —  ВЫКЛ")));
@@ -82,7 +82,7 @@ public final class CaptureTypesScreen extends Screen {
     private void toggle(int preset) {
         if(!loaded||!canEdit||pending)return;
         pending=true;relayout();
-        boolean enabled=(disabledMask & (1<<(preset-1)))!=0;
+        boolean enabled=(disabledMask & (1L<<(preset-1)))!=0;
         PacketDistributor.sendToServer(new C2SCaptureTypesPayload(
                 C2SCaptureTypesPayload.Action.SET,preset,enabled,revision));
     }
@@ -122,7 +122,7 @@ public final class CaptureTypesScreen extends Screen {
             g.drawString(font,"▼ Остальные типы ниже",x,Math.min(height-70,57+count*21),0xFF999999);
         g.drawCenteredString(font,font.plainSubstrByWidth(status,Math.max(30,width-24)),
                 width/2,height-62,lastSuccess?0xFFAAAAAA:0xFFFF6666);
-        String overflow=!loaded?"Получение режима переполнения…":(disabledMask&(1<<29))==0
+        String overflow=!loaded?"Получение режима переполнения…":(disabledMask&(1L<<29))==0
                 ?"Переполнение: пауза и автоматическое возобновление"
                 :"Без паузы: полная очередь задерживает серверный тик";
         g.drawCenteredString(font,overflow,

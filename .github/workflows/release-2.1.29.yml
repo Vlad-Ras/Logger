@@ -1,7 +1,7 @@
 name: Build installable 2.1.29 binary
 on:
   push:
-    branches: [work/2.1.26-storage-gui-20261102]
+    branches: [work/2.1.26-storage-gui-20261102, work/2.1.29-performance-20261105]
     paths: ['src/**', 'build.gradle', 'gradle.properties', 'proguard-rules.pro', '.github/workflows/release-2.1.29.yml']
   workflow_dispatch:
 permissions:

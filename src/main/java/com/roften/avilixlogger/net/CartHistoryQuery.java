@@ -11,6 +11,6 @@ public final class CartHistoryQuery {
         if(p.before()<0||p.actor().length()>64)throw new IllegalArgumentException("Неверный фильтр истории");
         q.actorName=p.actor().isBlank()?null:p.actor().trim();
         if(p.checkpointsOnly())q.types=EnumSet.of(ActionType.CART_ASSEMBLE,ActionType.CART_PLACE,ActionType.CART_PACK,ActionType.CART_DISASSEMBLE,ActionType.CART_REMOVE,ActionType.CART_ROLLBACK);
-        q.sinceTs=0;q.untilTs=Long.MAX_VALUE;q.beforeId=p.before();q.requireDetails=true;q.limit=13;return q;
+        q.sinceTs=0;q.untilTs=Long.MAX_VALUE;q.beforeId=p.before();q.requireDetails=false;q.limit=13;return q;
     }
 }

@@ -87,5 +87,15 @@
   "gui.avilixlogger.type.dieselgenerators": "Create Diesel Generators",
   "gui.avilixlogger.type.blockpack": "BlockPack",
   "gui.avilixlogger.type.chipped": "Chipped",
-  "gui.avilixlogger.type.supplementaries": "Supplementaries"
+  "gui.avilixlogger.type.supplementaries": "Supplementaries",
+  "gui.avilixlogger.type.create_deployer": "Create: deployers",
+  "gui.avilixlogger.type.create_drill": "Create: drills",
+  "gui.avilixlogger.type.create_saw": "Create: saws",
+  "gui.avilixlogger.type.create_harvester": "Create: harvesters",
+  "gui.avilixlogger.type.create_plough": "Create: ploughs",
+  "gui.avilixlogger.type.create_roller": "Create: rollers",
+  "gui.avilixlogger.type.create_chute": "Create: chutes and smart chutes",
+  "gui.avilixlogger.type.create_funnel": "Create: funnels",
+  "gui.avilixlogger.type.create_portable_storage": "Create: portable storage interfaces",
+  "gui.avilixlogger.type.create_dispenser": "Create: contraption dispensers and droppers"
 }

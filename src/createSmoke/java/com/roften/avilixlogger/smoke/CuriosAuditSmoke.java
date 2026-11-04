@@ -30,7 +30,7 @@ final class CuriosAuditSmoke {
         check(NbtSerde.readItemStack(after.getCompound("Item"),level.registryAccess()).getCount()==1024,"detached equipment count lost");
         check(player.getUUID().equals(row.entityUuid)&&"EquipmentTarget".equals(row.entityName),"equipment target identity lost");
         check(CuriosAudit.capture(new CurioChangeEvent(player,"ring",2,item,item.copy()))==null,"unchanged equipment generated an event");
-        int old=CaptureTypePolicy.mask();try{CaptureTypePolicy.install(CaptureTypePolicy.changed(old,3,false));check(!CaptureTypePolicy.allows(row.type,row.source,row.extra),"disabled equipment category bypassed");}finally{CaptureTypePolicy.install(old);}
+        long old = CaptureTypePolicy.mask();try{CaptureTypePolicy.install(CaptureTypePolicy.changed(old,3,false));check(!CaptureTypePolicy.allows(row.type,row.source,row.extra),"disabled equipment category bypassed");}finally{CaptureTypePolicy.install(old);}
         var attachment=new top.theillusivec4.curios.common.capability.CurioInventory();
         var nonempty=new net.minecraft.nbt.CompoundTag();var rows=new net.minecraft.nbt.ListTag();var stored=new net.minecraft.nbt.CompoundTag();stored.putString("Identifier","missing-slot");stored.put("StacksHandler",after.getCompound("Item").copy());rows.add(stored);nonempty.put("Curios",rows);
         attachment.deserializeNBT(level.registryAccess(),nonempty.copy());

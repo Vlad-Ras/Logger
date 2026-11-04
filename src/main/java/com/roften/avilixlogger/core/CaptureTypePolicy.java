@@ -1,8 +1,8 @@
 package com.roften.avilixlogger.core;
 
 /**
- * Server-authoritative, allocation-free hot-path policy for the twelve GUI
- * type presets. An enabled bit means the corresponding capture is DISABLED.
+ * Server-authoritative, allocation-free hot-path policy for the GUI
+ * capture controls. An enabled bit means the corresponding capture is DISABLED.
  * Query/display filters are deliberately not modified.
  *
  * Some GUI queries include generic historical events (e.g. plane filter
@@ -10,25 +10,48 @@ package com.roften.avilixlogger.core;
  * planes from ordinary entities, avoiding accidental global suppression.
  */
 public final class CaptureTypePolicy {
-    public static final int GROUPS = 30;
-    public static final int ALL_DISABLED = (1 << GROUPS) - 1;
-    private static volatile int disabledMask;
+    // IDs 1..30 are already persisted by 2.1.28. Never reuse them for mechanisms.
+    public static final int GROUPS = 40;
+    public static final int CREATE_DEPLOYER = 31, CREATE_DRILL = 32, CREATE_SAW = 33,
+            CREATE_HARVESTER = 34, CREATE_PLOUGH = 35, CREATE_ROLLER = 36,
+            CREATE_CHUTE = 37, CREATE_FUNNEL = 38, CREATE_PORTABLE_STORAGE = 39,
+            CREATE_DISPENSER = 40;
+    public static final long ALL_DISABLED = (1L << GROUPS) - 1;
+    private static volatile long disabledMask;
+    private static volatile long generation;
+    private static final ThreadLocal<Boolean> SUPPRESSED = ThreadLocal.withInitial(() -> Boolean.FALSE);
     private CaptureTypePolicy() {}
 
-    public static int mask() { return disabledMask; }
-    public static void install(int mask) { disabledMask = mask & ALL_DISABLED; }
-    public static boolean enabled(int preset) {
-        return preset >= 1 && preset <= GROUPS && (disabledMask & (1 << (preset - 1))) == 0;
+    public static long mask() { return disabledMask; }
+    public static void install(long mask) {
+        long next = mask & ALL_DISABLED;
+        if (disabledMask != next) { disabledMask = next; generation++; }
     }
-    public static int changed(int mask, int preset, boolean enabled) {
+    public static long generation() { return generation; }
+    public static boolean suppressed() { return Boolean.TRUE.equals(SUPPRESSED.get()); }
+    /** Nested callbacks may suppress capture, but cannot re-enable an outer muted operation. */
+    public static boolean suppress(boolean value) {
+        boolean previous = suppressed();
+        if (value && !previous) SUPPRESSED.set(Boolean.TRUE);
+        return previous;
+    }
+    public static void restoreSuppression(boolean previous) {
+        if (suppressed() != previous) SUPPRESSED.set(previous);
+    }
+    public static void clearSuppression() { SUPPRESSED.remove(); }
+    public static boolean enabled(int preset) {
+        return preset >= 1 && preset <= GROUPS && (disabledMask & (1L << (preset - 1))) == 0;
+    }
+    public static long changed(long mask, int preset, boolean enabled) {
         if (preset < 1 || preset > GROUPS) throw new IllegalArgumentException("Invalid GUI type preset");
-        int bit = 1 << (preset - 1);
+        long bit = 1L << (preset - 1);
         return enabled ? mask & ~bit : mask | bit;
     }
 
     public static boolean allows(ActionType type, String source, String extra) {
         if (type == ActionType.PLAYER_DEATH || type == ActionType.PLAYER_KILL) return enabled(29);
-        if(type!=ActionType.CAPTURE_GAP&&!ServerCaptureGuard.captureAllowed())return false;
+        if(type==ActionType.CART_ROLLBACK || type==ActionType.CAPTURE_GAP)return true;
+        if (suppressed() || !ServerCaptureGuard.captureAllowed()) return false;
         if (type == null || disabledMask == 0 || type == ActionType.CART_ROLLBACK) return true;
         // Filter specific source families before generic action categories.
         if (source != null) {
@@ -85,6 +108,16 @@ public final class CaptureTypePolicy {
             case 28 -> "AE2: настройки, фильтры, ячейки и улучшения";
             case 29 -> "Смерти и убийства игроков";
             case 30 -> "Переполнение: пауза записи для защиты TPS";
+            case CREATE_DEPLOYER -> "Create: активаторы";
+            case CREATE_DRILL -> "Create: буры";
+            case CREATE_SAW -> "Create: пилы";
+            case CREATE_HARVESTER -> "Create: комбайны";
+            case CREATE_PLOUGH -> "Create: плуги";
+            case CREATE_ROLLER -> "Create: катки";
+            case CREATE_CHUTE -> "Create: желоба и умные желоба";
+            case CREATE_FUNNEL -> "Create: воронки";
+            case CREATE_PORTABLE_STORAGE -> "Create: переносные интерфейсы";
+            case CREATE_DISPENSER -> "Create: раздатчики на штуковинах";
             default -> null;
         };
     }

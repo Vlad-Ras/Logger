@@ -63,7 +63,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         return CreateCartAudit.enabled()?authorizedTick(source):null;
     }
     @Override public CartAutomationHooks.Capture authorizedTick(BlockEntity source){
-        if(!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
+        if(CaptureTypePolicy.suppressed() || !com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
                 ||current!=null||publishing||CartAuditContext.restoring()
                 ||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
         var blockType = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType());
@@ -80,7 +80,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     static boolean capturingChanges(){return current!=null&&serverThread();}
     public static Scope mounted(com.simibubi.create.content.contraptions.behaviour.MovementContext context,BlockPos pos){
         var entity=context.contraption.entity;
-        if(current!=null||entity==null||!CreateCargoAudit.active(entity))return null;
+        if(current!=null||entity==null||!CreateCapturePolicy.actor(context)||!CreateCargoAudit.active(entity))return null;
         activeServer=((ServerLevel)entity.level()).getServer();var scope=new Scope();
         scope.reset(null);scope.mounted=true;scope.entity=entity;
         scope.machine=BuiltInRegistries.BLOCK.getKey(context.state.getBlock()).toString();
@@ -291,11 +291,13 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     private record Change(AbstractContraptionEntity entity,CompoundTag before,CompoundTag after,String detail,LogEntry prepared) {}
     private record Cell(String dimension,long pos,String kind,int slot) {}
     private record Pair(CompoundTag before,CompoundTag after) {}
+    private record RawExternal(Object handler,String kind,int slot,Object before,Object after,Endpoint endpoint,boolean direct) {}
     public static final class Scope implements CartAutomationHooks.Capture {
         private BlockEntity source;private AbstractContraptionEntity entity;private UUID id;
         private String machine,machineDim;private BlockPos machinePos;private boolean mounted,direct,cargoDelivery;
         private List<Change> changes=new ArrayList<>();
         private final LinkedHashMap<Cell,Pair> external=new LinkedHashMap<>();
+        private final ArrayList<RawExternal> rawExternal=new ArrayList<>();
         private Map<Object,Endpoint> addresses=new IdentityHashMap<>();
         private Set<Object> directHandlers=Collections.newSetFromMap(new IdentityHashMap<>());
         private final Map<net.minecraft.world.entity.Entity,CompoundTag> worldBefore=new LinkedHashMap<>();
@@ -313,16 +315,34 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
             var e=ref.entity().get();if(e==null)return false;
             if(entity!=null&&entity.level()!=e.level()){complete=false;return false;}
             if(changes.size()>=512){complete=false;return false;}
-            if(entity==null)entity=e;
+            if(entity==null){entity=e;flushExternal();}
             boolean io=after.getString("Kind").equals("storage_io");
             var prepared=CreateCargoAudit.row(e,io?ActionType.CART_TRANSFER:ActionType.CART_CONTENT_CHANGE,io?"storage_io":"cargo",before,after,detail);
             changes.add(new Change(e,CreateCargoAudit.metadata(e,before),CreateCargoAudit.metadata(e,after),detail,prepared));return true;
         }
         private void external(Object handler,String kind,int slot,Object before,Object after){
+            Endpoint endpoint=addresses.get(handler);if(endpoint==null)endpoint=ADDRESSES.get(handler);
+            boolean direct=directHandlers.contains(handler);
+            if(entity==null){
+                // Most Create ticks never touch a contraption. Keep small detached
+                // values until a mounted endpoint or creative IO proves relevance.
+                // No world metadata, reflection or NBT is read for discarded scopes.
+                if(rawExternal.size()>=512){complete=false;return;}
+                Object b=before instanceof ItemStack i?i.copy():before instanceof FluidStack f?f.copy():before;
+                Object a=after instanceof ItemStack i?i.copy():after instanceof FluidStack f?f.copy():after;
+                rawExternal.add(new RawExternal(handler,kind,slot,b,a,endpoint,direct));return;
+            }
+            encodeExternal(handler,kind,slot,before,after,endpoint,direct);
+        }
+        private void flushExternal(){
+            for(var raw:rawExternal)encodeExternal(raw.handler(),raw.kind(),raw.slot(),raw.before(),raw.after(),raw.endpoint(),raw.direct());
+            rawExternal.clear();
+        }
+        private void encodeExternal(Object handler,String kind,int slot,Object before,Object after,Endpoint endpoint,boolean direct){
             if(external.size()>=512){complete=false;return;}
-            Endpoint endpoint=addresses.get(handler);if(endpoint==null)endpoint=ADDRESSES.get(handler);ServerLevel level=endpoint==null?null:endpoint.level.get();
+            ServerLevel level=endpoint==null?null:endpoint.level.get();
             if(level==null||!level.hasChunkAt(endpoint.pos)){complete=false;return;}
-            var metadata=directHandlers.contains(handler)&&handler instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper
+            var metadata=direct&&handler instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper
                     ?CartAutomationStorage.describeContainer(level,endpoint.pos,endpoint.side,slot,wrapper.getInv())
                     :CartAutomationStorage.describe(level,endpoint.pos,endpoint.side,kind,slot,handler);
             if(metadata==null){
@@ -346,6 +366,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         }
         /** Returns detached rows; production publishes them, native fixtures exercise the same protocol. */
         private List<LogEntry> rows(boolean success){
+            if(entity!=null || !worldCreative.isEmpty() || !unverifiedCreative.isEmpty())flushExternal();
             if(entity==null)return worldCreative.isEmpty()&&unverifiedCreative.isEmpty()?List.of():worldCreativeRows();
             if(changes.isEmpty()&&external.isEmpty()&&worldBefore.isEmpty()&&worldCreative.isEmpty()&&unverifiedCreative.isEmpty())return List.of();
             if(changes.isEmpty())complete=false;
@@ -356,7 +377,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
             }
             if(mounted&&!direct&&external.isEmpty()&&beforeEntities.isEmpty()&&worldCreative.isEmpty()&&unverifiedCreative.isEmpty()
                     &&changes.stream().allMatch(c->c.entity==entity&&!c.after.getString("Kind").equals("storage_io"))){
-                for(var change:changes){change.prepared.actorUuid=null;change.prepared.actorName="SYSTEM";}
+                for(var change:changes)CreateActorContext.attribute(change.prepared);
                 return changes.stream().map(Change::prepared).toList();
             }
             id=UUID.randomUUID();ListTag beforeSlots=new ListTag(),afterSlots=new ListTag();
@@ -374,7 +395,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
             for(int i=0;i<changes.size();i++){
                 Change change=changes.get(i);for(var tag:new CompoundTag[]{change.before,change.after}){tag.putUUID("Transfer",id);tag.putInt("TransferIndex",i);tag.putString("TransferKind","automation");}
                 boolean io=change.after.getString("Kind").equals("storage_io");
-                if(change.prepared!=null){change.prepared.actorUuid=null;change.prepared.actorName="SYSTEM";change.prepared.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,change.before);change.prepared.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,change.after);rows.add(change.prepared);}
+                if(change.prepared!=null){CreateActorContext.attribute(change.prepared);change.prepared.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,change.before);change.prepared.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,change.after);rows.add(change.prepared);}
                 else rows.add(row(io?ActionType.CART_TRANSFER:ActionType.CART_CONTENT_CHANGE,io?"storage_io":"cargo",change.before,change.after,change.detail));
             }
             var participants=new LinkedHashMap<UUID,AbstractContraptionEntity>();
@@ -458,10 +479,11 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         }
         private LogEntry row(ActionType type,String phase,CompoundTag before,CompoundTag after,String detail){
             var row=CreateCargoAudit.row(entity,type,phase,before,after,"automation; "+detail);
-            row.actorUuid=null;row.actorName="SYSTEM";
+            CreateActorContext.attribute(row);
             return row;
         }
         private void clear(){
+            rawExternal.clear();
             source=null;entity=null;id=null;machine=null;machineDim=null;machinePos=null;
             if(changes.size()>64)changes=new ArrayList<>();else if(!changes.isEmpty())changes.clear();
             if(!external.isEmpty())external.clear();

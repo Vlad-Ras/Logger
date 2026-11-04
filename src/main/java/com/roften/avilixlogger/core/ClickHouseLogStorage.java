@@ -726,8 +726,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     private static String feedExtra(LogEntry e) {
         if (e == null) return "";
         if (e.type == ActionType.CHAT_MESSAGE || e.type==ActionType.PLAYER_DEATH || e.type==ActionType.PLAYER_KILL) return safeString(e.extra);
-        if (e.extra == null || e.extra.length() <= 512) return safeString(e.extra);
-        return e.extra.substring(0, 512);
+        String extra=safeString(e.extra);
+        if(extra.length()>512)extra=extra.substring(0,512);
+        return Boolean.TRUE.equals(e.fullSnapshot)?extra+"; full_snapshot=1":extra;
     }
 
     private void insertSplitBatch(TableKind kind, List<LogEntry> batch) throws IOException {
@@ -822,6 +823,34 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         return select(q, true);
     }
 
+    private static String queryOrder(LogQuery q, boolean reverse) {
+        String direction = reverse ? "DESC" : "ASC";
+        return q.chronological ? " ORDER BY ts_ms " + direction + ", id " + direction : " ORDER BY id " + direction;
+    }
+    private static java.util.Comparator<LogEntry> queryComparator(LogQuery q, boolean reverse) {
+        java.util.Comparator<LogEntry> order = q.chronological
+                ? java.util.Comparator.comparingLong((LogEntry row)->row.ts).thenComparingLong(row->row.id)
+                : java.util.Comparator.comparingLong(row->row.id);
+        return reverse ? order.reversed() : order;
+    }
+    private static void appendRecordCursor(StringBuilder sql, LogQuery q, boolean reverse) {
+        if (q.exactId > 0) sql.append(" AND id = ").append(q.exactId);
+        if (q.exactIds != null && q.exactIds.length > 0) {
+            if (q.exactIds.length > 2000) throw new IllegalArgumentException("Too many selected record IDs");
+            sql.append(" AND id IN (");
+            for (int i=0;i<q.exactIds.length;i++) {
+                if(q.exactIds[i]<=0)throw new IllegalArgumentException("Invalid selected record ID");
+                if(i>0)sql.append(',');sql.append(q.exactIds[i]);
+            }
+            sql.append(')');
+        }
+        long id = reverse ? q.beforeId : q.afterId;
+        if (id <= 0) return;
+        String compare = reverse ? " < " : " > ";
+        if(q.chronological) sql.append(" AND (ts_ms").append(compare).append(q.cursorTs)
+                .append(" OR (ts_ms = ").append(q.cursorTs).append(" AND id").append(compare).append(id).append("))");
+        else sql.append(" AND id").append(compare).append(id);
+    }
     private List<LogEntry> select(LogQuery q, boolean reverse) {
         if (q == null) return List.of();
         if (!splitSchema) return selectLegacy(q, reverse);
@@ -833,7 +862,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     merged.addAll(selectLegacy(q, reverse));
                     merged = dedupeById(merged);
                 }
-                merged.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+                merged.sort(queryComparator(q, reverse));
                 int limit = Math.max(1, q.limit);
                 if (merged.size() > limit) return new ArrayList<>(merged.subList(0, limit));
                 return merged;
@@ -858,7 +887,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 out.addAll(selectFeed(q, true));
                 out = dedupeById(out);
             }
-            out.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+            out.sort(queryComparator(q, reverse));
             int limit = Math.max(1, q.limit);
             if (out.size() > limit) return new ArrayList<>(out.subList(0, limit));
             markHealthy();
@@ -880,7 +909,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             try {
                 StringBuilder sql = new StringBuilder(2048);
                 sql.append(selectFromSplitTable(kind, q, reverse))
-                        .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                        .append(queryOrder(q, reverse))
                         .append(" LIMIT ").append(Math.max(1, q.limit))
                         .append(" FORMAT JSONEachRow");
                 out.addAll(parseSplitJsonEachRow(execute(sql.toString(), queryTimeoutSec(q))));
@@ -889,7 +918,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     try {
                         StringBuilder retrySql = new StringBuilder(2048);
                         retrySql.append(selectFromSplitTable(kind, q, reverse))
-                                .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                                .append(queryOrder(q, reverse))
                                 .append(" LIMIT ").append(Math.max(1, q.limit))
                                 .append(" FORMAT JSONEachRow");
                         out.addAll(parseSplitJsonEachRow(execute(retrySql.toString(), queryTimeoutSec(q))));
@@ -901,7 +930,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 try {
                     StringBuilder minimalSql = new StringBuilder(2048);
                     minimalSql.append(selectFromSplitTableMinimal(kind, q, reverse))
-                            .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                            .append(queryOrder(q, reverse))
                             .append(" LIMIT ").append(Math.max(1, q.limit))
                             .append(" FORMAT JSONEachRow");
                     out.addAll(parseSplitJsonEachRow(execute(minimalSql.toString(), queryTimeoutSec(q))));
@@ -916,7 +945,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             out.addAll(selectLegacy(q, reverse));
             out = dedupeById(out);
         }
-        out.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+        out.sort(queryComparator(q, reverse));
         int limit = Math.max(1, q.limit);
         if (out.size() > limit) return new ArrayList<>(out.subList(0, limit));
         if (!out.isEmpty()) markHealthy();
@@ -929,7 +958,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         sql.append("SELECT id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, target_kind, target_id, item_count, source, short_text, extra, has_details ")
                 .append("FROM ").append(qualifiedFeedTable());
         appendFeedWhere(sql, q, reverse);
-        sql.append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+        sql.append(queryOrder(q, reverse))
                 .append(" LIMIT ").append(Math.max(1, q.limit))
                 .append(" FORMAT JSONEachRow");
         try {
@@ -956,7 +985,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     .append("'' AS target_kind, '' AS target_id, 0 AS item_count, '' AS source, '' AS short_text, '' AS extra, 0 AS has_details ")
                     .append("FROM ").append(qualifiedFeedTable());
             appendFeedWhere(sql, q, reverse, false);
-            sql.append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+            sql.append(queryOrder(q, reverse))
                     .append(" LIMIT ").append(Math.max(1, q.limit))
                     .append(" FORMAT JSONEachRow");
             List<LogEntry> rows = parseFeedJsonEachRow(execute(sql.toString(), queryTimeoutSec(q)));
@@ -1002,11 +1031,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             if (i > 0) sql.append(" UNION ALL ");
             sql.append("(")
                     .append(selectFromSplitTable(kinds.get(i), q, reverse))
-                    .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                    .append(queryOrder(q, reverse))
                     .append(" LIMIT ").append(Math.max(1, q.limit))
                     .append(")");
         }
-        sql.append(") ORDER BY id ").append(reverse ? "DESC" : "ASC")
+        sql.append(")").append(queryOrder(q, reverse))
                 .append(" LIMIT ").append(Math.max(1, q.limit))
                 .append(" FORMAT JSONEachRow");
         return sql.toString();
@@ -1110,12 +1139,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         appendPositionWhere(sql, q);
         appendFeedOptionalFilters(sql, q);
 
-        if(q.exactId>0)sql.append(" AND id = ").append(q.exactId);
-        if (reverse) {
-            if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
-        } else {
-            if (q.afterId > 0) sql.append(" AND id > ").append(q.afterId);
-        }
+        appendRecordCursor(sql,q,reverse);
     }
 
     private void appendWhere(StringBuilder sql, LogQuery q, boolean reverse, TableKind kind) {
@@ -1152,12 +1176,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         appendPositionWhere(sql, q);
         appendSplitOptionalFilters(sql, q, kind);
 
-        if(q.exactId>0)sql.append(" AND id = ").append(q.exactId);
-        if (reverse) {
-            if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
-        } else {
-            if (q.afterId > 0) sql.append(" AND id > ").append(q.afterId);
-        }
+        appendRecordCursor(sql,q,reverse);
     }
 
 
@@ -1323,6 +1342,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             if(raw.size()<scan.limit)break;
             long cursor=raw.getLast().id;if(cursor<=0||cursor==(reverse?scan.beforeId:scan.afterId))throw new IllegalStateException("Неверный курсор старого журнала");
             if(reverse)scan.beforeId=cursor;else scan.afterId=cursor;
+            scan.cursorTs=raw.getLast().ts;
         }
         return out;
     }
@@ -1362,14 +1382,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             ChunkLogSearch.appendBounds(sql,q,min,max);
         }
 
-        if(q.exactId>0)sql.append(" AND id = ").append(q.exactId);
-        if (reverse) {
-            if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
-            sql.append(" ORDER BY id DESC");
-        } else {
-            if (q.afterId > 0) sql.append(" AND id > ").append(q.afterId);
-            sql.append(" ORDER BY id ASC");
-        }
+        appendRecordCursor(sql,q,reverse);
+        sql.append(queryOrder(q,reverse));
         sql.append(" LIMIT ").append(Math.max(1, q.limit));
         sql.append(" FORMAT TabSeparated");
 
@@ -1497,6 +1511,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 e.count = (int) getLong(o, "item_count");
                 hydrateFeedTarget(e, targetKind, targetId, shortText);
                 e.extra = nullIfBlank(getString(o, "extra"));
+                e.lightweight=true;e.fullSnapshot=e.extra!=null&&e.extra.contains("; full_snapshot=1")?Boolean.TRUE:null;
                 EntityLogIdentity.restoreExtra(e);
                 if (e.type == ActionType.CHAT_MESSAGE && e.extra == null) e.extra = shortText;
                 out.add(e);

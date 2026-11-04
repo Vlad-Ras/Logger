@@ -33,7 +33,7 @@ public final class CartItemRecovery {
         var storage=LoggerRuntime.storage(source.getLevel());var registries=source.getServer().registryAccess();long request=generation;
         boolean queued=submit(source,()->{try{
             long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(15);
-            if(!AsyncLogProcessor.awaitIdle(deadline)||!storage.awaitVisible(deadline))throw new IllegalStateException("Журнал ещё не подтверждён. Повторите запрос");
+            if(entry<=0 && (!AsyncLogProcessor.awaitIdle(deadline)||!storage.awaitVisible(deadline)))throw new IllegalStateException("Журнал ещё не подтверждён. Повторите запрос");
             var plan=CartRecoveryPlan.prepare(storage,id,entry,registries);
             var stack=ItemStack.CODEC.parse(registries.createSerializationContext(NbtOps.INSTANCE),plan.item()).getOrThrow();
             if(stack.isEmpty()||stack.getCount()!=1||!id.equals(CreateCartAudit.itemId(stack)))throw new IllegalStateException("Предмет не прочитан полностью");

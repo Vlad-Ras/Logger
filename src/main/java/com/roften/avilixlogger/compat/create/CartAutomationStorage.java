@@ -21,31 +21,35 @@ import java.util.*;
 
 /** Explicit standard storage contracts; unknown and sided adapters fail closed. */
 public final class CartAutomationStorage {
-    private static final java.lang.reflect.Field[] CHEST_PARTS=chestParts();
     private CartAutomationStorage(){}
-    private static java.lang.reflect.Field[] chestParts(){
-        try{
-            var first=CompoundContainer.class.getDeclaredField("container1");var second=CompoundContainer.class.getDeclaredField("container2");
-            first.setAccessible(true);second.setAccessible(true);return new java.lang.reflect.Field[]{first,second};
-        }catch(ReflectiveOperationException|RuntimeException unavailable){return null;}
-    }
+    private static final ClassValue<Boolean> ITEMS = new ClassValue<>() {
+        protected Boolean computeValue(Class<?> type) {
+            try {
+                for(var method:List.of(type.getMethod("getSlots"),type.getMethod("getStackInSlot",int.class),type.getMethod("insertItem",int.class,ItemStack.class,boolean.class),type.getMethod("extractItem",int.class,int.class,boolean.class),type.getMethod("setStackInSlot",int.class,ItemStack.class),type.getMethod("getSlotLimit",int.class),type.getMethod("isItemValid",int.class,ItemStack.class))) {
+                    var owner=method.getDeclaringClass();if(owner!=ItemStackHandler.class&&owner!=InvWrapper.class)return false;
+                }
+                return true;
+            } catch(ReflectiveOperationException failure){return false;}
+        }
+    };
+    private static final ClassValue<Boolean> FLUIDS = new ClassValue<>() {
+        protected Boolean computeValue(Class<?> type) {
+            try {
+                var setter=type.getMethod("setFluid",FluidStack.class).getDeclaringClass();
+                if(setter!=FluidTank.class&&setter!=com.simibubi.create.foundation.fluid.SmartFluidTank.class)return false;
+                for(var method:List.of(type.getMethod("getTanks"),type.getMethod("getFluidInTank",int.class),type.getMethod("getTankCapacity",int.class),type.getMethod("isFluidValid",int.class,FluidStack.class),type.getMethod("isFluidValid",FluidStack.class),type.getMethod("fill",FluidStack.class,IFluidHandler.FluidAction.class),type.getMethod("drain",int.class,IFluidHandler.FluidAction.class),type.getMethod("drain",FluidStack.class,IFluidHandler.FluidAction.class)))
+                    if(method.getDeclaringClass()!=FluidTank.class)return false;
+                return true;
+            } catch(ReflectiveOperationException failure){return false;}
+        }
+    };
     public static boolean itemSupported(IItemHandler handler){
         if(!(handler instanceof IItemHandlerModifiable))return false;
-        if(handler instanceof InvWrapper wrapper&&!(wrapper.getInv() instanceof BlockEntity)
-                &&wrapper.getInv().getClass()!=CompoundContainer.class)return false;
-        try{
-            for(var method:List.of(handler.getClass().getMethod("getSlots"),handler.getClass().getMethod("getStackInSlot",int.class),handler.getClass().getMethod("insertItem",int.class,ItemStack.class,boolean.class),handler.getClass().getMethod("extractItem",int.class,int.class,boolean.class),handler.getClass().getMethod("setStackInSlot",int.class,ItemStack.class),handler.getClass().getMethod("getSlotLimit",int.class),handler.getClass().getMethod("isItemValid",int.class,ItemStack.class))){
-                var owner=method.getDeclaringClass();if(owner!=ItemStackHandler.class&&owner!=InvWrapper.class)return false;
-            }
-            return true;
-        }catch(ReflectiveOperationException e){return false;}
+        if(handler instanceof InvWrapper wrapper&&!(wrapper.getInv() instanceof BlockEntity)&&wrapper.getInv().getClass()!=CompoundContainer.class)return false;
+        return ITEMS.get(handler.getClass());
     }
     public static boolean fluidSupported(IFluidHandler handler){
-        if(!(handler instanceof FluidTank tank)||handler.getTanks()!=1)return false;
-        try{
-            var setter=handler.getClass().getMethod("setFluid",FluidStack.class).getDeclaringClass();
-            return (setter==FluidTank.class||setter==com.simibubi.create.foundation.fluid.SmartFluidTank.class)&&handler.getClass().getMethod("getTanks").getDeclaringClass()==FluidTank.class&&handler.getClass().getMethod("getFluidInTank",int.class).getDeclaringClass()==FluidTank.class&&handler.getClass().getMethod("getTankCapacity",int.class).getDeclaringClass()==FluidTank.class&&handler.getClass().getMethod("isFluidValid",int.class,FluidStack.class).getDeclaringClass()==FluidTank.class&&handler.getClass().getMethod("isFluidValid",FluidStack.class).getDeclaringClass()==FluidTank.class&&handler.getClass().getMethod("fill",FluidStack.class,IFluidHandler.FluidAction.class).getDeclaringClass()==FluidTank.class&&handler.getClass().getMethod("drain",int.class,IFluidHandler.FluidAction.class).getDeclaringClass()==FluidTank.class&&handler.getClass().getMethod("drain",FluidStack.class,IFluidHandler.FluidAction.class).getDeclaringClass()==FluidTank.class;
-        }catch(ReflectiveOperationException e){return false;}
+        return handler instanceof FluidTank&&handler.getTanks()==1&&FLUIDS.get(handler.getClass());
     }
     public static CompoundTag describe(ServerLevel level,BlockPos pos,String side,String kind,int slot,Object handler){
         if(!level.hasChunkAt(pos))return null;
@@ -135,10 +139,8 @@ public final class CartAutomationStorage {
                 ||b.getClass()!=nativeType||a.isRemoved()||b.isRemoved()||!combined.contains(first)||!combined.contains(second)
                 ||first.getContainerSize()!=27||second.getContainerSize()!=27||combined.getContainerSize()!=54)return null;
         var ordered=state.getValue(ChestBlock.TYPE)==ChestType.RIGHT?new ChestBlockEntity[]{first,second}:new ChestBlockEntity[]{second,first};
-        // Membership alone cannot distinguish reversed delegation when both halves are empty.
-        // If native field access is unavailable, disable this adapter rather than guessing.
-        try{if(CHEST_PARTS==null||CHEST_PARTS[0].get(combined)!=ordered[0]||CHEST_PARTS[1].get(combined)!=ordered[1])return null;}
-        catch(IllegalAccessException|RuntimeException unavailable){return null;}
+        if(!(combined instanceof com.roften.avilixlogger.core.CompoundContainerAccess access)
+                ||access.avilixlogger$first()!=ordered[0]||access.avilixlogger$second()!=ordered[1])return null;
         return ordered;
     }
     public static boolean sameAddress(CompoundTag a,CompoundTag b){

@@ -19,6 +19,14 @@ public final class CartHistoryNetwork {
     private static final Set<UUID> VIEWERS=new HashSet<>();
     private static final Map<UUID,String> LAST_RESULT=new HashMap<>();
     private static long sequence;
+    private static final java.util.concurrent.ThreadPoolExecutor PAGES=new java.util.concurrent.ThreadPoolExecutor(
+            2,2,30,java.util.concurrent.TimeUnit.SECONDS,new java.util.concurrent.ArrayBlockingQueue<>(16),r->{
+                var t=new Thread(r,"avilixlogger-cart-pages");t.setDaemon(true);return t;
+            });
+    static { PAGES.allowCoreThreadTimeOut(true); }
+    private static boolean queryPage(Runnable task){
+        try{PAGES.execute(task);return true;}catch(java.util.concurrent.RejectedExecutionException full){return false;}
+    }
     private static final DateTimeFormatter TIME=DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss");
     private CartHistoryNetwork(){}
     public static boolean viewing(CommandSourceStack source){return source.getPlayer()!=null&&allowed(source.getPlayer())&&VIEWERS.contains(source.getPlayer().getUUID())&&LoggerNetwork.isClientPresent(source.getPlayer());}
@@ -57,11 +65,11 @@ public final class CartHistoryNetwork {
         if(LAST_REQUEST.containsKey(p.getUUID())){pageError(p,payload.request(),"Предыдущая страница ещё загружается");return;}
         long token=++sequence;LAST_REQUEST.put(p.getUUID(),token);
         var storage=LoggerRuntime.storage(p.serverLevel());var server=p.getServer();boolean canRestore=restore(p);var zone=ZoneId.systemDefault();
-        try{boolean queued=CartRollbackCoordinator.query(p.createCommandSourceStack(),()->{try{
+        try{boolean queued=queryPage(()->{try{
             var found=storage.queryReverse(q);var rows=new ArrayList<S2CCartHistoryPayload.Row>();
             for(var e:found.subList(0,Math.min(12,found.size()))){var cart=CartAuditContext.id(e.source);if(cart==null||q.cartId!=null&&!q.cartId.equals(cart))throw new IllegalStateException("Чужая строка в истории штуковины");
-                var before=NbtSerde.fromSnbt(e.beBefore);var after=NbtSerde.fromSnbt(e.beAfter);boolean snapshot=CartRecoveryPlan.full(after)||CartRecoveryPlan.full(before);
-                String detail="entry="+e.id+"\nID: "+cart+"\n"+(snapshot?"Есть полный снимок состояния.":"Состояние запрашивается из предшествующего полного снимка и записанных изменений.")+"\n"+Objects.toString(e.extra,"");
+                var before=e.lightweight?null:NbtSerde.fromSnbt(e.beBefore);var after=e.lightweight?null:NbtSerde.fromSnbt(e.beAfter);boolean snapshot=Boolean.TRUE.equals(e.fullSnapshot)||CartRecoveryPlan.full(after)||CartRecoveryPlan.full(before);
+                String detail="entry="+e.id+"\nID: "+cart+"\n"+(snapshot?"Есть полный снимок состояния.":"Наличие снимка и сохранённое состояние проверяются при восстановлении.")+"\n"+Objects.toString(e.extra,"");
                 if(before!=null)detail+="\nДо: "+before.getString("Form");if(after!=null)detail+="\nПосле: "+after.getString("Form");
                 rows.add(new S2CCartHistoryPayload.Row(cart.toString(),e.id,TIME.format(Instant.ofEpochMilli(e.ts).atZone(zone)),LogText.actionLabel(e.type),Objects.toString(e.actorName,"SYSTEM"),e.dim+" · "+e.x+" "+e.y+" "+e.z,clip(detail,4000),CartRollbackPlan.checkpoint(e.type),snapshot));
             }
@@ -90,5 +98,5 @@ public final class CartHistoryNetwork {
     }
     private static String clip(String s,int max){return s==null?"":s.substring(0,Math.min(s.length(),max));}
     public static void logout(UUID id){LAST_REQUEST.remove(id);VIEWERS.remove(id);LAST_RESULT.remove(id);if(com.roften.avilixlogger.core.CreateSupport.available()){CartItemRecovery.logout(id);CartRollbackCoordinator.logout(id);com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.logout(id);CreateTrainRecovery.logout(id);}}
-    public static void stop(){LAST_REQUEST.clear();VIEWERS.clear();LAST_RESULT.clear();}
+    public static void stop(){PAGES.getQueue().clear();LAST_REQUEST.clear();VIEWERS.clear();LAST_RESULT.clear();}
 }

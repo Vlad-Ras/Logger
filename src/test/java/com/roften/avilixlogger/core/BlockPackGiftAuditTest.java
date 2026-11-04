@@ -14,7 +14,7 @@ public final class BlockPackGiftAuditTest {
         var before=NbtSerde.fromSnbt(roundTrip.beBefore);var after=NbtSerde.fromSnbt(roundTrip.beAfter);
         check(before.getBoolean("Value")&&!after.getBoolean("Value")&&after.getString("Scope").equals("server")&&after.getString("StorageDimension").equals("minecraft:overworld"),"global setting confused with actor dimension or lost actual values");
         check(before.getString("Key").equals("giftEnabled")&&roundTrip.extra.contains("true -> false"),"settings details/summary lost semantic key or transition");
-        int mask=CaptureTypePolicy.mask();try{
+        long mask = CaptureTypePolicy.mask();try{
             CaptureTypePolicy.install(CaptureTypePolicy.changed(0,2,false));
             var poison=(net.neoforged.neoforge.network.handling.IPayloadContext)java.lang.reflect.Proxy.newProxyInstance(BlockPackGiftAuditTest.class.getClassLoader(),new Class[]{net.neoforged.neoforge.network.handling.IPayloadContext.class},(p,m,a)->{throw new AssertionError("disabled capture called payload context");});
             check(BlockPackGiftAudit.begin(poison)==null&&!CaptureTypePolicy.allows(ActionType.GUI_CHANGE,row.source,null),"setting bypassed containers mask");

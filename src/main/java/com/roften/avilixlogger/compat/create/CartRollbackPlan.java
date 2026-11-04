@@ -22,7 +22,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
         return t == ActionType.CART_ASSEMBLE || t == ActionType.CART_PLACE || t == ActionType.CART_PACK || t == ActionType.CART_DISASSEMBLE || t == ActionType.CART_REMOVE || t == ActionType.CART_ROLLBACK;
     }
     public static CartRollbackPlan prepare(LogStorage storage, UUID id, long checkpointId) {
-        LogQuery q = new LogQuery(); q.dim = "*"; q.cartId = id; q.requireDetails = true; q.afterId = checkpointId - 1; q.untilTs=Long.MAX_VALUE; q.limit = 1;
+        LogQuery q = new LogQuery(); q.dim = "*"; q.cartId = id; q.requireDetails = true; q.exactId=checkpointId;q.types=java.util.EnumSet.of(ActionType.CART_ASSEMBLE,ActionType.CART_PLACE,ActionType.CART_PACK,ActionType.CART_DISASSEMBLE,ActionType.CART_REMOVE,ActionType.CART_ROLLBACK); q.afterId = checkpointId - 1; q.untilTs=Long.MAX_VALUE; q.limit = 1;
         List<LogEntry> found = storage.query(q);
         if (found.isEmpty() || found.getFirst().id != checkpointId || !id.equals(CartAuditContext.id(found.getFirst().source))) throw new IllegalArgumentException("Контрольная точка не найдена");
         LogEntry checkpoint = found.getFirst();
@@ -39,7 +39,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
         CreateMixedDropTransferPlan mixed=new CreateMixedDropTransferPlan(id,world,transfers);
         List<Runnable> worldHistory=new ArrayList<>();
         // Cursor IDs follow capture order even when the system clock moves backward.
-        q.afterId = 0; q.sinceTs = 0; q.untilTs = Long.MAX_VALUE; q.beforeId = Long.MAX_VALUE; q.limit = PAGE;
+        q.exactId=0;q.types=null;q.afterId = 0; q.sinceTs = 0; q.untilTs = Long.MAX_VALUE; q.beforeId = Long.MAX_VALUE; q.limit = PAGE;
         long bytes = target.sizeInBytes(), cutoff = checkpointId; int rows = 0; boolean latestFound = false;
         scan: while (true) {
             List<LogEntry> page = storage.queryReverse(q);
@@ -54,6 +54,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                 if (e.type == ActionType.CREATE_DEPLOYER_ACTION) throw new IllegalStateException("В периоде работал активатор: нужен совместный откат механизма, предметов и его целей");
                 if(e.type==ActionType.CART_TRANSFER && CartAuditContext.phase(e.source).equals("actor_result")){
                     var result=NbtSerde.fromSnbt(e.beAfter);
+                    if (result != null && result.getBoolean("CaptureDisabled")) throw new IllegalStateException("В периоде отключалось логирование механизмов: отмена незаписанных действий невозможна. Используйте восстановление из полного снимка");
                     if(result!=null&&Set.of("world_item_merge","mixed_world_item_pickup").contains(result.getString("Operation"))){
                         var old=NbtSerde.fromSnbt(e.beBefore);String dimension=e.dim;long position=new BlockPos(e.x,e.y,e.z).asLong();
                         if(old==null)throw new IllegalStateException("Нет исходного снимка смешанного дропа");

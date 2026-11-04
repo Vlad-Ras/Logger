@@ -20,7 +20,7 @@ public final class CreateDeployerAudit {
     private static final ThreadLocal<Session> CURRENT = new ThreadLocal<>();
     private CreateDeployerAudit() {}
     public static Session begin(MovementContext context, BlockPos target, DeployerFakePlayer player, String mode) {
-        if (context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+        if (context.contraption == null || !CreateCapturePolicy.actor(context)
                 || !CreateCartAudit.enabled()) return null;
         return capture(context, target, player, mode);
     }
@@ -65,7 +65,7 @@ public final class CreateDeployerAudit {
     }
     /** An incomplete history barrier prevents a later undo from crossing a failed capture. */
     public static void captureFailed(MovementContext context, BlockPos pos, String mode) {
-        if (context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+        if (context.contraption == null || !CreateCapturePolicy.actor(context)
                 || !CreateCartAudit.enabled() || !(context.world instanceof ServerLevel level)) return;
         var kind = CreateContraptionSources.kind(context.contraption.entity);
         if (kind == CreateContraptionKind.UNKNOWN) return;
@@ -135,7 +135,7 @@ public final class CreateDeployerAudit {
             var heldAfter = player.getMainHandItem().copy(); var blockAfter = level.getBlockState(target);
             if (result == null && ItemStack.matches(heldBefore, heldAfter) && blockBefore == blockAfter && !transaction.changed()) return null;
             var row = new LogEntry(); row.ts = System.currentTimeMillis(); row.dim = level.dimension().location().toString();
-            row.type = ActionType.CREATE_DEPLOYER_ACTION; row.source = source; row.actorUuid = null; row.actorName = "SYSTEM";
+            row.type = ActionType.CREATE_DEPLOYER_ACTION; row.source = source; row.actorUuid = owner; row.actorName = ownerName == null ? "SYSTEM" : ownerName;
             row.x = target.getX(); row.y = target.getY(); row.z = target.getZ();
             row.entityUuid = entityId; row.entityType = entityType;
             row.entityName = entityName;

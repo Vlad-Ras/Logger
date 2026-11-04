@@ -28,7 +28,7 @@ public final class CreateEntityOrigin {
                 cause==null?null:cause.actorUuid(),cause==null?null:cause.actorName());
     }
     public static void capture(Entity entity) {
-        if (CartAuditContext.restoring() || !supported(entity) || !(entity.level() instanceof ServerLevel level) || !level.getServer().isSameThread()) return;
+        if (CaptureTypePolicy.suppressed() || CartAuditContext.restoring() || !supported(entity) || !(entity.level() instanceof ServerLevel level) || !level.getServer().isSameThread()) return;
         if(entity instanceof net.minecraft.world.entity.item.ItemEntity drop
                 && drop instanceof CreateOriginDataAccess access && access.avilixlogger$originData()!=null
                 && access.avilixlogger$originData().contains(MIXED_DROP))return;

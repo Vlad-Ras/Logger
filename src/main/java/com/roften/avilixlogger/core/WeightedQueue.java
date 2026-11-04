@@ -8,10 +8,12 @@ import java.util.concurrent.locks.ReentrantLock;
 /** Bounded handoff with backpressure, including payloads currently being processed. */
 final class WeightedQueue<T> {
     enum Offer { ACCEPTED, FULL, BUSY, OVERSIZED }
-    record Work<T>(T value, long bytes) {}
+    record Work<T>(T value, long bytes, long ticket) {}
     record Statistics(String name,int queued,int outstanding,long bytes,long peakBytes,int peakOutstanding,
                       int countLimit,long byteLimit,long waits,int waitingProducers,long maxWaitNanos) {}
     private final ArrayDeque<Work<T>> entries = new ArrayDeque<>();
+    private final java.util.IdentityHashMap<Work<T>,Boolean> inFlight = new java.util.IdentityHashMap<>();
+    private long accepted;
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition ready = lock.newCondition();
     private final Condition space = lock.newCondition();
@@ -56,7 +58,7 @@ final class WeightedQueue<T> {
                 }
             }
             if (closed) throw new IllegalStateException("Logger queue is closed");
-            entries.addLast(new Work<>(value, weight));
+            entries.addLast(new Work<>(value, weight, ++accepted));
             bytes += weight;
             outstanding++;
             peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);
@@ -85,7 +87,7 @@ final class WeightedQueue<T> {
             boolean full=reserveCount==0 ? full(weight)
                     : outstanding >= (long)capacity+reserveCount || bytes > maxBytes+reserveBytes-weight;
             if(full){pressureRequested=true;ready.signalAll();return Offer.FULL;}
-            entries.addLast(new Work<>(value,weight));bytes+=weight;outstanding++;
+            entries.addLast(new Work<>(value,weight,++accepted));bytes+=weight;outstanding++;
             peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);ready.signal();return Offer.ACCEPTED;
         }finally{lock.unlock();}
     }
@@ -111,13 +113,16 @@ final class WeightedQueue<T> {
                 try { remaining = ready.awaitNanos(remaining); }
                 finally { if (flushOnPressure) batchWaiters--; }
             }
-            return entries.pollFirst();
+            var work = entries.pollFirst();
+            if (work != null) inFlight.put(work, Boolean.TRUE);
+            return work;
         } finally { lock.unlock(); }
     }
 
     void complete(Work<T> work) {
         lock.lock();
         try {
+            if (inFlight.remove(work) == null) throw new IllegalStateException("Work was not in flight");
             bytes -= work.bytes();
             outstanding--;
             pressureRequested=false;
@@ -125,6 +130,26 @@ final class WeightedQueue<T> {
         } finally { lock.unlock(); }
     }
 
+    /** Finite visibility fence: later producers never postpone work already accepted. */
+    long fence() { lock.lock(); try { return accepted; } finally { lock.unlock(); } }
+    private boolean pendingThrough(long ticket) {
+        if (!entries.isEmpty() && entries.peekFirst().ticket() <= ticket) return true;
+        for (var work : inFlight.keySet()) if (work.ticket() <= ticket) return true;
+        return false;
+    }
+    boolean awaitThrough(long ticket, long deadlineNanos) throws InterruptedException {
+        lock.lockInterruptibly();
+        try {
+            // A journal holding a partial batch must flush before its ordinary timer.
+            pressureRequested = true; ready.signalAll();
+            while (pendingThrough(ticket)) {
+                long remaining = deadlineNanos - System.nanoTime();
+                if (remaining <= 0) return false;
+                space.awaitNanos(remaining);
+            }
+            return true;
+        } finally { lock.unlock(); }
+    }
     boolean awaitEmpty(long deadlineNanos) throws InterruptedException {
         lock.lockInterruptibly();
         try {

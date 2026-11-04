@@ -26,7 +26,7 @@ public abstract class DeployerCargoAuditMixin {
     }
     @Unique private void avilixlogger$exchange(MovementContext context, String reason, Operation<Void> original) {
         var entity=context.contraption==null?null:context.contraption.entity;
-        if (!com.roften.avilixlogger.compat.create.CreateCapturePolicy.actors(entity)
+        if (!com.roften.avilixlogger.compat.create.CreateCapturePolicy.actor(context)
                 || !com.roften.avilixlogger.compat.create.CreateCapturePolicy.cargo(entity)) {
             original.call(context);return;
         }

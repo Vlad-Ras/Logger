@@ -3,11 +3,11 @@ package com.roften.avilixlogger.core;
 /** All twelve GUI categories use a single runtime/server-side policy. */
 public final class CaptureTypePolicyTest {
     public static void run() {
-        int previous=CaptureTypePolicy.mask();
+        long previous = CaptureTypePolicy.mask();
         try {
             CaptureTypePolicy.install(0);
             for(int i=1;i<=CaptureTypePolicy.GROUPS;i++)check(CaptureTypePolicy.enabled(i),"default type disabled");
-            int mask=CaptureTypePolicy.changed(0,11,false);
+            long mask = CaptureTypePolicy.changed(0,11,false);
             CaptureTypePolicy.install(mask);
             String bearing=CreateContraptionKind.BEARING.source(java.util.UUID.randomUUID(),"work");
             check(!CaptureTypePolicy.enabled(11),"bearing switch did not take");
@@ -34,6 +34,20 @@ public final class CaptureTypePolicyTest {
             CaptureTypePolicy.install(CaptureTypePolicy.changed(0,13,false));
             check(!CaptureTypePolicy.allows(ActionType.ME_TAKE,"ae2:menu",null),"full AE2 switch survived");
             check(CaptureTypePolicy.allows(ActionType.CONTAINER_PUT,"player:menu",null),"AE2 switch disabled normal containers");
+            long mechanism = CaptureTypePolicy.changed(0, CaptureTypePolicy.CREATE_DEPLOYER, false);
+            CaptureTypePolicy.install(mechanism);
+            check(!CaptureTypePolicy.enabled(CaptureTypePolicy.CREATE_DEPLOYER) && CaptureTypePolicy.enabled(CaptureTypePolicy.CREATE_DRILL), "mechanism switches not independent");
+            check(CaptureTypePolicy.allowsCreateKind(CreateContraptionKind.MINECART), "mechanism switch disabled lifecycle");
+            check(CaptureTypePolicy.allows(ActionType.CART_PACK, "create:cart:sample", null), "mechanism switch disabled pack snapshot");
+            boolean outer = CaptureTypePolicy.suppress(true);
+            try {
+                check(!CaptureTypePolicy.allows(ActionType.BLOCK_BREAK, "mod:create", null), "muted generic callback captured");
+                check(CaptureTypePolicy.allows(ActionType.CART_ROLLBACK, "create:cart:sample", null), "committed rollback audit muted");
+                boolean inner = CaptureTypePolicy.suppress(false);
+                try { check(CaptureTypePolicy.suppressed(), "nested callback reenabled capture"); }
+                finally { CaptureTypePolicy.restoreSuppression(inner); }
+            } finally { CaptureTypePolicy.restoreSuppression(outer); }
+            check(!CaptureTypePolicy.suppressed(), "capture suppression leaked");
             CaptureTypePolicy.install(CaptureTypePolicy.ALL_DISABLED);
             for(int i=1;i<=CaptureTypePolicy.GROUPS;i++)check(!CaptureTypePolicy.enabled(i),"disable all did not take");
             check(CaptureTypePolicy.changed(CaptureTypePolicy.ALL_DISABLED,7,true)

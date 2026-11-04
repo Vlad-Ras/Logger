@@ -132,6 +132,20 @@ public final class CreateMechanismActionsSmoke {
                     check(row.actorUuid == null && !metadata(row).hasUUID("Owner"), "unknown mechanism owner was guessed");
                 }
                 scenarios++;
+                if (kind == CreateContraptionKind.MINECART) {
+                    var cartState = CreateCartAudit.state(entity);
+                    cartState.owner = OWNER; cartState.ownerName = "OfflineCartOwner";
+                    world.setBlock(target, Blocks.LEVER.defaultBlockState().setValue(FaceAttachedHorizontalDirectionalBlock.FACE, AttachFace.FLOOR), 3);
+                    try (var capture = CreateDeployerAudit.capture(context, target, anonymous, "USE")) {
+                        check(OWNER.equals(CreateActorContext.current().owner()), "active technical player lost cart owner");
+                        check(CauseContext.actorUuid(anonymous) == null, "technical player UUID leaked as real actor");
+                        var unrelatedFake = new DeployerFakePlayer(world, UUID.randomUUID());
+                        check(CauseContext.actorUuid(unrelatedFake) == null, "unrelated fake inherited cart owner");
+                        actor.visitNewPosition(context, target); var row = capture.finish(true);
+                        check(row != null && OWNER.equals(row.actorUuid) && "OfflineCartOwner".equals(row.actorName), "offline cart owner name lost");
+                    }
+                    cartState.owner = null; cartState.ownerName = ""; scenarios++;
+                }
             }
             check(CreateActorContext.current() == null && CreateMechanismContext.current() == null && CauseContext.peek() == null, "actor/cause scope leaked");
             System.out.println("CREATE_MECHANISM_ACTIONS_NATIVE_OK: " + scenarios + " scenarios; real deployer place+lever+milk+attack+cancel+harvest+tool-wear and drill cargo+spill, cart/train/bearing, detached hand states+owner+mechanism");
@@ -155,7 +169,7 @@ public final class CreateMechanismActionsSmoke {
     }
     private static void checkIdentity(LogEntry row, CreateContraptionKind kind, AbstractContraptionEntity entity) {
         check(row.type == ActionType.CREATE_DEPLOYER_ACTION && CreateContraptionKind.fromSource(row.source) == kind && CreateContraptionSources.id(entity).equals(CreateContraptionKind.id(row.source)), "deployer construction identity incorrect");
-        check(row.actorUuid == null && "SYSTEM".equals(row.actorName) && OWNER.equals(metadata(row).getUUID("Owner")), "deployer fake actor persisted");
+        check(OWNER.equals(row.actorUuid) && OWNER.equals(metadata(row).getUUID("Owner")) && !"SYSTEM".equals(row.actorName), "deployer fake actor persisted");
         check("create:deployer@2,0,1".equals(CreateMechanismContext.description(row.source)), "deployer local mechanism identity absent");
     }
     private static CompoundTag metadata(LogEntry row) { return NbtSerde.fromSnbt(row.beAfter); }

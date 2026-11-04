@@ -77,7 +77,7 @@ final class Ae2CraftingDetailsTest {
         check(Ae2CraftingDetails.context(mismatch) == null, "unknown job quantity meaning accepted");
         mismatch = rows.getFirst().copyForQueue(); mismatch.type = ActionType.ME_CRAFT_CANCEL;
         check(Ae2CraftingDetails.summary(mismatch) == null, "accepted submission read as confirmed cancellation");
-        int mask = CaptureTypePolicy.mask();
+        long mask = CaptureTypePolicy.mask();
         try { CaptureTypePolicy.install(CaptureTypePolicy.changed(mask, 2, false));
             check(!CaptureTypePolicy.allows(ActionType.ME_CRAFT_REQUEST, "ae2:crafting", null)
                     && !CaptureTypePolicy.allows(ActionType.ME_CRAFT_CANCEL, "ae2:crafting", null)

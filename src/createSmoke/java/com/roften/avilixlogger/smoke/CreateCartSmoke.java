@@ -28,6 +28,7 @@ public final class CreateCartSmoke {
             CreateContraptionKindsSmoke.run(world);
             CreateCompletionSmoke.run(world);
             CreateMechanismActionsSmoke.run(world);
+            CreateMechanismSwitchesSmoke.run(world);
             CreateCargoSmoke.run(world);
             MountedContraption c=new MountedContraption();c.anchor=BlockPos.ZERO;c.bounds=new net.minecraft.world.phys.AABB(BlockPos.ZERO);
             c.getBlocks().put(BlockPos.ZERO,new StructureBlockInfo(BlockPos.ZERO,Blocks.STONE.defaultBlockState(),null));
@@ -115,6 +116,16 @@ public final class CreateCartSmoke {
         var overflow=fluidAfter.copy();overflow.put("Fluid",new net.neoforged.neoforge.fluids.FluidStack(net.minecraft.world.level.material.Fluids.LAVA,5000).save(registries));
         change=smokeRow(id,5,com.roften.avilixlogger.core.ActionType.CART_CONTENT_CHANGE);change.beBefore=fluidAfter.toString();change.beAfter=overflow.toString();rows.add(change);
         recoveryReject(()->CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries),"over-capacity fluid accepted");rows.removeLast();
+        var gap = smokeRow(id,5,com.roften.avilixlogger.core.ActionType.CART_TRANSFER);
+        gap.source=com.roften.avilixlogger.core.CartAuditContext.prefix(id)+"actor_result:0";
+        var gapTag=new net.minecraft.nbt.CompoundTag();gapTag.putBoolean("CaptureDisabled",true);gapTag.putBoolean("Complete",false);
+        gap.beAfter=gapTag.toString();rows.add(gap);
+        recoveryReject(()->CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries),"recovery crossed muted history and invented state");
+        recoveryReject(()->CartRollbackPlan.prepare(new SmokeHistory(rows),id,1),"period undo crossed muted history");
+        var full = smokeRow(id,6,com.roften.avilixlogger.core.ActionType.CART_PACK);
+        full.beAfter=source.toString();rows.add(full);
+        check(CartRecoveryPlan.prepare(new SmokeHistory(rows),id,0,registries).snapshotEntry()==6,"fresh whole snapshot did not recover after muted history");
+        rows.removeLast();rows.removeLast();
         var malformed=plan.item().copy();malformed.getCompound("components").getCompound("create:minecart_contraption_data").getList("items",10).getCompound(0).getCompound("storage").putString("type","missing_mod:storage");
         recoveryReject(()->CartRecoveryContents.validate(malformed,registries),"missing storage silently erased inventory");
         System.out.println("CART_STATE_RECOVERY_NATIVE_OK: latest+selected+item-components+fluid-type+controls+contents-summary+chain-conflict+unknown-codec+capacity; world_changes=0");

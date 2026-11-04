@@ -9,6 +9,8 @@ public final class AsyncLogStorage implements LogStorage {
     private final WeightedQueue<QueuedLogEvent> queue;
     private final Thread worker;
     private volatile int pendingDrops;
+    private final java.util.concurrent.atomic.AtomicLong flushRequests = new java.util.concurrent.atomic.AtomicLong();
+    private volatile long flushedRequest;
 
     public AsyncLogStorage(LogStorage delegate, int capacity, long maxBytes) {
         this.delegate = delegate;
@@ -40,6 +42,7 @@ public final class AsyncLogStorage implements LogStorage {
         if (CreateContraptionKind.fromSource(entry.source) == CreateContraptionKind.UNKNOWN
                 && CreateContraptionKind.id(constructionSource) != null) entry.source = constructionSource;
         entry.source = CreateMechanismContext.decorate(entry.source);
+        CreateActorContext.attribute(entry);
         // The current CartAuditContext may have supplied the definitive source.
         // Recheck before item-identity snapshots to prevent typed-source bypasses.
         if (!CaptureTypePolicy.allows(entry.type,entry.source,entry.extra)) return;
@@ -76,7 +79,9 @@ public final class AsyncLogStorage implements LogStorage {
             try {
                 var work = queue.poll(250);
                 long now = System.currentTimeMillis();
-                drops.flush(now, false);
+                long requested = flushRequests.get();
+                drops.flush(now, requested > flushedRequest);
+                flushedRequest = requested;
                 pendingDrops=drops.pendingCount();
                 if (now >= nextMaintenance) {
                     LoggerEventHandlers.cleanupBackground(now);
@@ -104,14 +109,15 @@ public final class AsyncLogStorage implements LogStorage {
     @Override public List<LogEntry> queryReverse(LogQuery query) { return delegate.queryReverse(query); }
 
     @Override public boolean awaitVisible(long deadline) throws InterruptedException {
-        while(queue.awaitEmpty(deadline)){
-            // Queue completion alone does not publish an active aggregation burst.
-            // The worker's normal 250 ms flush handles it; callers wait off-thread.
-            if(pendingDrops==0)return delegate.awaitVisible(deadline);
-            long remaining=deadline-System.nanoTime();if(remaining<=0)return false;
-            java.util.concurrent.TimeUnit.NANOSECONDS.sleep(Math.min(remaining,10_000_000L));
+        if (!queue.awaitThrough(queue.fence(), deadline)) return false;
+        // All pre-fence rows are now resolved. Flush their drop bursts on the owning
+        // worker, then fence downstream delivery rather than waiting for new traffic.
+        long request = flushRequests.incrementAndGet();
+        while (flushedRequest < request) {
+            long remaining = deadline - System.nanoTime(); if (remaining <= 0) return false;
+            java.util.concurrent.TimeUnit.NANOSECONDS.sleep(Math.min(remaining,5_000_000L));
         }
-        return false;
+        return delegate.awaitVisible(deadline);
     }
 
     @Override public void shutdown() {

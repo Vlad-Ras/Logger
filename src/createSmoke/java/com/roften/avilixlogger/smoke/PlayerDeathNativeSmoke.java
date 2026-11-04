@@ -37,7 +37,7 @@ final class PlayerDeathNativeSmoke {
         };
         var fallback=PlayerDeathAudit.entry(victim,broken);
         check(DeathLogDetails.message(fallback)!=null&&fallback.actorUuid.equals(victim.getUUID())&&fallback.entityNbt==null,"basic fallback lost");
-        int previous=CaptureTypePolicy.mask();try{
+        long previous = CaptureTypePolicy.mask();try{
             CaptureTypePolicy.install(CaptureTypePolicy.changed(0,3,false));
             check(CaptureTypePolicy.allows(ActionType.PLAYER_DEATH,null,null)&&CaptureTypePolicy.allows(ActionType.PLAYER_KILL,null,null),"entity switch muted player deaths");
         }finally{CaptureTypePolicy.install(previous);}

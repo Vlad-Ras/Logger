@@ -70,7 +70,7 @@ final class SnapshotDeltaWorkerTest {
     }
     private static void workerOnlyAndOrdered()throws Exception{
         var rows=new CopyOnWriteArrayList<LogEntry>();var storage=new AsyncLogStorage(sink(rows),8,256*1024);
-        var dropped=new ArrayList<ProbeTag>();var accepted=new ArrayList<ProbeTag>();int mask=CaptureTypePolicy.mask();
+        var dropped=new ArrayList<ProbeTag>();var accepted=new ArrayList<ProbeTag>();long mask = CaptureTypePolicy.mask();
         try{
             for(var rule:SnapshotDeltaPolicy.values())for(int i=0;i<40;i++){
                 CompoundTag before=rule==SnapshotDeltaPolicy.SIGN_TEXT?vanilla("before",null):rule==SnapshotDeltaPolicy.SUPPLEMENTARIES_TEXT?SupplementariesTextAuditTest.text("before",null):book("before");
