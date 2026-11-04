@@ -310,7 +310,7 @@ public final class CreateCargoSmoke {
             try(var capture=CreateCargoAudit.captureChanges(entity)){
                 dropper.visitNewPosition(context,origin);var rows=capture.rows();check(rows.size()==2,"direct recipient rows missing: "+type+" "+rows.size());
                 linkedRows(rows,entity,true);var a=after(rows.getLast());var b=NbtSerde.fromSnbt(rows.getLast().beBefore);
-                check(rows.stream().allMatch(row->row.actorUuid==null && "SYSTEM".equals(row.actorName)&&row.source.contains("minecraft:dropper@3,0,0")),"mounted direct transfer owner/mechanism lost");
+                check(rows.stream().allMatch(row->OWNER.equals(row.actorUuid) && !"SYSTEM".equals(row.actorName)&&row.source.contains("minecraft:dropper@3,0,0")),"mounted direct transfer owner/mechanism lost");
                 check(a.getBoolean("Mounted")&&a.getList("Slots",10).size()==1,"direct manifest not sparse/mounted");
                 var address=a.getList("Slots",10).getCompound(0);check(address.getInt("Slot")==slot&&address.getLong("Pos")==target.asLong(),"direct recipient address lost");
                 check(address.getCompound("Item").getCompound("components").contains("minecraft:custom_name"),"direct recipient components lost");
