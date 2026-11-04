@@ -73,6 +73,16 @@ public final class CreateCargoAudit {
         row.actorUuid = null; row.actorName = "SYSTEM";
         var cause = CauseContext.peek();
         if (cause != null && cause.actorUuid() != null) { row.actorUuid = cause.actorUuid(); row.actorName = cause.actorName(); }
+        else {
+            // Only this exact deployer operation has an explicit owner. Never promote
+            // a general FakePlayer UUID or a nearby/previous player into an actor.
+            var mechanism = CreateActorContext.current();
+            if (mechanism != null && mechanism.owner() != null
+                    && mechanism.technicalPlayer() instanceof com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer) {
+                row.actorUuid = mechanism.owner();
+                row.actorName = mechanism.ownerName() == null ? mechanism.owner().toString() : mechanism.ownerName();
+            }
+        }
         row.source = CreateMechanismContext.decorate(cart != null ? cart.stamp(phase).source() : kind.source(id, phase));
         row.extra = "construction=" + id + "; " + detail;
         row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE, metadata(entity, before));
@@ -156,8 +166,7 @@ public final class CreateCargoAudit {
                 var technical = context.temporaryData instanceof Player p ? p : null;
                 CreateActorContext.enter(new CreateActorContext.Stamp(owner, ownerName, technical));
                 OPERATION.set(this);
-                installedCause = technical == null ? CauseContext.unattributed()
-                        : CauseContext.push(technical, CauseContext.Kind.OTHER, entity.blockPosition(), ItemStack.EMPTY);
+                installedCause = CauseContext.unattributed();
             } catch (Throwable failure) {
                 if (installedCause != null) installedCause.close();
                 restore(); throw failure;

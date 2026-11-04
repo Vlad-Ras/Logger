@@ -43,23 +43,15 @@ public final class CauseContext {
     private CauseContext() {}
 
     public static UUID actorUuid(Player player) {
-        var mechanism = CreateActorContext.current();
-        if (mechanism != null && mechanism.technicalPlayer() == player && player != null) return mechanism.owner();
         return player == null || player instanceof net.neoforged.neoforge.common.util.FakePlayer ? null : player.getUUID();
     }
-    public static String actorName(Player player) {
-        if (actorUuid(player) == null) return "SYSTEM";
-        var mechanism = CreateActorContext.current();
-        return mechanism != null && mechanism.technicalPlayer() == player
-                ? mechanism.ownerName() == null ? mechanism.owner().toString() : mechanism.ownerName()
-                : player.getName().getString();
-    }
+    public static String actorName(Player player) { return actorUuid(player)==null ? "SYSTEM" : player.getName().getString(); }
 
     public static Scope push(Player player, Kind kind, BlockPos pos, ItemStack used) {
-        boolean real = actorUuid(player) != null;
+        boolean real = player != null && !(player instanceof net.neoforged.neoforge.common.util.FakePlayer);
         if (!real) return unattributed();
-        UUID u = actorUuid(player);
-        String n = actorName(player);
+        UUID u = real ? player.getUUID() : null;
+        String n = real ? player.getName().getString() : null;
         String itemKey = null;
         try {
             if (used != null && !used.isEmpty()) itemKey = String.valueOf(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(used.getItem()));

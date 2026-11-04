@@ -104,14 +104,14 @@ public final class CreateCargoSmoke {
         try(var capture=CreateCargoAudit.captureChanges(entity)){
             actor.visitNewPosition(deployer,target);check(world.getBlockState(target).is(Blocks.STONE),"deployer did not place cargo item");
             var rows=capture.rows();check(rows.size()==1,"grab duplicated or missed: "+rows.size());var row=rows.getFirst();row.materializeSnapshots();
-            check(after(row).getString("Operation").equals("deployer_take")&&row.actorUuid==null && "SYSTEM".equals(row.actorName),"grab reason/owner missing");
+            check(after(row).getString("Operation").equals("deployer_take")&&OWNER.equals(row.actorUuid) && !"SYSTEM".equals(row.actorName),"grab reason/owner missing");
             check("create:deployer@2,0,1".equals(CreateMechanismContext.description(row.source)),"grab mechanism missing");cell(row,world,entity,CHEST,0,"Item",2,1);scenarios++;
         }
         world.setBlock(target,Blocks.AIR.defaultBlockState(),3);fake.setItemInHand(InteractionHand.MAIN_HAND,new ItemStack(Items.STONE));fake.getInventory().setItem(1,new ItemStack(Items.EMERALD,2));
         try(var capture=CreateCargoAudit.captureChanges(entity)){
             actor.visitNewPosition(deployer,target);check(fake.getInventory().getItem(1).isEmpty(),"deployer did not dispose extra item");
             check(capture.rows().size()==1,"return duplicated or missed");var row=capture.rows().getFirst();row.materializeSnapshots();
-            check(after(row).getString("Operation").equals("deployer_return")&&after(row).getBoolean("External")&&row.actorUuid==null && "SYSTEM".equals(row.actorName),"return lost endpoints/owner");scenarios++;
+            check(after(row).getString("Operation").equals("deployer_return")&&after(row).getBoolean("External")&&OWNER.equals(row.actorUuid) && !"SYSTEM".equals(row.actorName),"return lost endpoints/owner");scenarios++;
         }
         world.setBlock(target,Blocks.STONE.defaultBlockState(),3);
         var drill=new MovementContext(world,new StructureBlockInfo(ACTOR,AllBlocks.MECHANICAL_DRILL.getDefaultState().setValue(DrillBlock.FACING,Direction.EAST),new CompoundTag()),entity.getContraption());drill.position=Vec3.atCenterOf(target);

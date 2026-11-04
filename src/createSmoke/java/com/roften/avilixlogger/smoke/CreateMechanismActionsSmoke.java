@@ -137,7 +137,8 @@ public final class CreateMechanismActionsSmoke {
                     cartState.owner = OWNER; cartState.ownerName = "OfflineCartOwner";
                     world.setBlock(target, Blocks.LEVER.defaultBlockState().setValue(FaceAttachedHorizontalDirectionalBlock.FACE, AttachFace.FLOOR), 3);
                     try (var capture = CreateDeployerAudit.capture(context, target, anonymous, "USE")) {
-                        check(OWNER.equals(CauseContext.actorUuid(anonymous)), "active technical player lost cart owner");
+                        check(OWNER.equals(CreateActorContext.current().owner()), "active technical player lost cart owner");
+                        check(CauseContext.actorUuid(anonymous) == null, "technical player UUID leaked as real actor");
                         var unrelatedFake = new DeployerFakePlayer(world, UUID.randomUUID());
                         check(CauseContext.actorUuid(unrelatedFake) == null, "unrelated fake inherited cart owner");
                         actor.visitNewPosition(context, target); var row = capture.finish(true);
@@ -153,13 +154,13 @@ public final class CreateMechanismActionsSmoke {
     private static LogEntry action(DeployerMovementBehaviour actor, MovementContext context, BlockPos target, DeployerFakePlayer player, String mode) {
         context.blockEntityData.putString("Mode", mode); context.stall = false;
         try (var capture = CreateDeployerAudit.capture(context, target, player, mode)) {
-            check(capture != null && CauseContext.peek() != null && OWNER.equals(CauseContext.peek().actorUuid()), "technical player replaced the known owner");
+            check(capture != null && CauseContext.peek() == null, "technical player replaced the known owner");
             var other = new net.minecraft.server.level.ServerPlayer(context.world.getServer(), (ServerLevel)context.world,
                     new com.mojang.authlib.GameProfile(UUID.randomUUID(), "bystander"), net.minecraft.server.level.ClientInformation.createDefault());
             try (var unrelated = CauseContext.push(other, CauseContext.Kind.USE_BLOCK, target, ItemStack.EMPTY)) {
                 check(other.getUUID().equals(CauseContext.peek().actorUuid()), "mechanism context replaced a real player's actor");
             }
-            check(CauseContext.peek() != null && OWNER.equals(CauseContext.peek().actorUuid()), "nested cause did not restore mechanism owner");
+            check(CauseContext.peek() == null, "nested cause did not restore mechanism owner");
             actor.visitNewPosition(context, target);
             for (int ticks = 0; context.stall && ticks < 100; ticks++) actor.tick(context);
             check(!context.stall, "native deployer did not finish its multi-tick action");
