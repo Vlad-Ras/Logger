@@ -29,51 +29,36 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 /** Optional AE2 integration. All entry points run on the server thread, after a real mutation. */
 public final class Ae2Audit {
-    // A third-party storage can throw from a powered transfer before its RETURN hook runs.
-    // Expiring such an orphaned scope avoids suppressing all later network audit entries
-    // for the life of the server thread.
-    private static final long POWERED_SCOPE_TIMEOUT_NANOS = 30_000_000_000L;
+    // Only the WrapMethod hooks enter this scope, and both close it in finally.
+    // A primitive-only holder can remain empty without retaining game objects.
     private static final ThreadLocal<PoweredScope> POWERED_SCOPE = new ThreadLocal<>();
-
-    private static final class PoweredScope {
-        int depth;
-        long lastTouched;
-    }
+    private static final class PoweredScope { int depth; }
 
     private Ae2Audit() {}
 
     public static void enterPowered() {
-        PoweredScope scope = activeScope();
+        PoweredScope scope = POWERED_SCOPE.get();
         if (scope == null) {
             scope = new PoweredScope();
             POWERED_SCOPE.set(scope);
         }
         scope.depth++;
-        scope.lastTouched = System.nanoTime();
     }
 
     public static void leavePowered() {
-        PoweredScope scope = activeScope();
-        if (scope == null || --scope.depth <= 0) POWERED_SCOPE.remove();
-        else scope.lastTouched = System.nanoTime();
+        PoweredScope scope = POWERED_SCOPE.get();
+        if (scope != null && scope.depth > 0) scope.depth--;
     }
 
     public static boolean insidePowered() {
-        return activeScope() != null;
-    }
-
-    private static PoweredScope activeScope() {
         PoweredScope scope = POWERED_SCOPE.get();
-        if (scope != null && System.nanoTime() - scope.lastTouched > POWERED_SCOPE_TIMEOUT_NANOS) {
-            POWERED_SCOPE.remove();
-            return null;
-        }
-        return scope;
+        return scope != null && scope.depth > 0;
     }
 
     public static boolean enabled() {
         try {
-            return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logAe2.get();
+            return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(13) && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(2)
+                    && LoggerConfig.isCaptureEnabled() && LoggerConfig.VALUES.logAe2.get();
         } catch (Throwable ignored) {
             return false;
         }
@@ -81,58 +66,80 @@ public final class Ae2Audit {
 
     /** The returned amount, never the simulated/requested amount, is what entered the ME network. */
     public static void transfer(AEKey key, long amount, Actionable mode, IActionSource source, boolean insert) {
-        if (mode != Actionable.MODULATE || amount <= 0 || key == null || source == null || !enabled()) return;
+        if (mode != Actionable.MODULATE || amount <= 0 || key == null || source == null || !enabled() || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(27)) return;
         try {
-            ServerPlayer player = source.player().filter(ServerPlayer.class::isInstance)
-                    .map(ServerPlayer.class::cast).orElse(null);
-            IActionHost machine = source.machine().orElse(null);
-            BlockEntity machineBlock = blockEntity(machine);
-            if (player == null && machineBlock == null) return; // No honest actor or position to record.
-
-            ServerLevel level = machineBlock != null && machineBlock.getLevel() instanceof ServerLevel sl
-                    ? sl : player != null && player.level() instanceof ServerLevel sl ? sl : null;
-            if (level == null) return;
-            BlockPos pos = machineBlock != null ? machineBlock.getBlockPos() : targetPos(player);
-            String origin = machine != null ? machineName(machine) : "terminal";
-            LogEntry e = entry(level, pos, player, insert ? ActionType.ME_PUT : ActionType.ME_TAKE,
-                    "ae2:" + origin);
-            if (key instanceof AEItemKey item) {
-                e.itemStackNbt = NbtSerde.writeItemStack(item.toStack(), level.registryAccess());
-                e.count = (int) Math.min(Integer.MAX_VALUE, amount);
-                e.extra = "resource=" + key.getId() + "; amount=" + amount;
-            } else {
-                e.extra = key.getDisplayName().getString() + " [" + key.getId() + "] " + amount + " mB";
-            }
-            LoggerRuntime.storage(level).append(e);
-        } catch (Throwable ignored) {
-            // Audit must not prevent an AE2 transfer if a third-party key refuses to serialize.
+            Transfer captured = captureTransfer(key, amount, mode, source, insert);
+            if (captured != null) LoggerRuntime.storage(captured.level()).append(captured.row());
+        } catch (Throwable failure) {
+            com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("ae2-transfer");
         }
     }
 
-    private static BlockEntity blockEntity(IActionHost machine) {
-        if (machine instanceof BlockEntity be) return be;
-        if (machine instanceof AEBasePart part) return part.getBlockEntity();
-        // InterfaceLogic uses a lambda IActionHost backed by a grid node. The node owner
-        // identifies the actual interface or bus; otherwise its automated transfers vanish.
-        try {
-            IGridNode node = machine == null ? null : machine.getActionableNode();
-            Object owner = node == null ? null : node.getOwner();
-            if (owner instanceof BlockEntity be) return be;
-            if (owner instanceof AEBasePart part) return part.getBlockEntity();
-        } catch (Throwable ignored) {}
-        return null;
+    /** Native data kernel only: no append or authorization change. Production must pass enabled(). */
+    public static LogEntry transferRow(AEKey key, long amount, Actionable mode, IActionSource source, boolean insert) {
+        Transfer captured = captureTransfer(key, amount, mode, source, insert);
+        return captured == null ? null : captured.row();
     }
 
-    private static String machineName(IActionHost machine) {
+    private record Transfer(ServerLevel level, LogEntry row) {}
+    private static Transfer captureTransfer(AEKey key, long amount, Actionable mode, IActionSource source, boolean insert) {
+        if (mode != Actionable.MODULATE || amount <= 0 || key == null || source == null) return null;
+        var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null || !server.isSameThread()) return null;
+        ServerPlayer player = source.player().filter(ServerPlayer.class::isInstance).map(ServerPlayer.class::cast).orElse(null);
+        IActionHost machine = source.machine().orElse(null);
+        Origin origin = origin(machine);
+        BlockEntity machineBlock = origin == null ? null : origin.block();
+        if (player == null && machineBlock == null) return null;
+        ServerLevel level;
+        if (machineBlock != null) level = machineBlock.getLevel() instanceof ServerLevel sl ? sl : null;
+        else level = player != null && player.level() instanceof ServerLevel sl ? sl : null;
+        if (level == null || level.getServer() != server) return null;
+        BlockPos pos = machineBlock == null ? targetPos(player) : machineBlock.getBlockPos();
+        LogEntry row = entry(level, pos, player, insert ? ActionType.ME_PUT : ActionType.ME_TAKE,
+                "ae2:" + (origin == null ? "terminal" : origin.name()));
+        var type = key.getType();
+        String kind = key instanceof AEItemKey ? "i" : key instanceof appeng.api.stacks.AEFluidKey ? "f" : "g";
+        net.minecraft.nbt.CompoundTag keyTag = null;
+        if (key instanceof AEItemKey item) {
+            var snapshot = NbtSerde.snapshotItemStack(item.toStack(), level.registryAccess());
+            if (snapshot == null) throw new IllegalStateException("AE2 item snapshot unavailable");
+            row.deferSnapshot(LogEntry.SnapshotField.ITEM, snapshot);
+            row.count = (int) Math.min(Integer.MAX_VALUE, amount);
+        } else {
+            keyTag = key.toTagGeneric(level.registryAccess()).copy();
+        }
+        com.roften.avilixlogger.core.Ae2TransferDetails.attach(row, kind, key.getId().toString(), type.getId().toString(),
+                amount, type.getUnitSymbol(), type.getAmountPerUnit(), keyTag);
+        return new Transfer(level, row);
+    }
+
+    private record Origin(BlockEntity block, String name) {}
+    private static Origin origin(IActionHost machine) {
+        if (machine == null) return null;
         try {
-            IGridNode node = machine.getActionableNode();
-            if (node != null && node.getOwner() != null) return node.getOwner().getClass().getSimpleName();
-        } catch (Throwable ignored) {}
-        return machine.getClass().getSimpleName();
+            Object owner = machine;
+            if (!(owner instanceof BlockEntity) && !(owner instanceof AEBasePart)) {
+                IGridNode node = machine.getActionableNode();
+                owner = node == null ? null : node.getOwner();
+            }
+            if (owner instanceof BlockEntity be) return new Origin(be, owner.getClass().getSimpleName());
+            if (owner instanceof AEBasePart part) {
+                BlockEntity be = part.getBlockEntity();
+                if (be != null) return new Origin(be, owner.getClass().getSimpleName() + ":" + part.getSide());
+            }
+        } catch (RuntimeException | LinkageError failure) {
+            com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("ae2-transfer-origin");
+        }
+        return new Origin(null, machine.getClass().getSimpleName());
     }
 
     private static BlockPos targetPos(ServerPlayer player) {
-        if (player.containerMenu instanceof AEBaseMenu menu) {
+        return targetPos(player.containerMenu instanceof AEBaseMenu menu ? menu : null, player);
+    }
+
+    private static BlockPos targetPos(AEBaseMenu menu, ServerPlayer player) {
+        if (menu != null) {
             Object target = menu.getTarget();
             if (target instanceof BlockEntity be) return be.getBlockPos();
             if (target instanceof AEBasePart part && part.getBlockEntity() != null)
@@ -151,8 +158,8 @@ public final class Ae2Audit {
         e.type = type;
         e.source = source;
         if (player != null) {
-            e.actorUuid = player.getUUID();
-            e.actorName = player.getName().getString();
+            e.actorUuid = com.roften.avilixlogger.core.CauseContext.actorUuid(player);
+            e.actorName = com.roften.avilixlogger.core.CauseContext.actorName(player);
         }
         return e;
     }
@@ -160,9 +167,28 @@ public final class Ae2Audit {
     public record SlotValue(String semantic, ItemStack stack) {}
     public record Snapshot(Map<Integer, SlotValue> slots, Map<String, String> settings) {}
 
+    public static boolean onServerThread(AEBaseMenu menu) {
+        return menu.getPlayer() instanceof ServerPlayer player && player.server.isSameThread();
+    }
+
     /** Capture only the menu's external slots. Never mistake player inventory for ME storage. */
     public static Snapshot capture(AEBaseMenu menu) {
-        if (!enabled() || !(menu.getPlayer() instanceof ServerPlayer)) return null;
+        if (!enabled() || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(28) || !onServerThread(menu)) return null;
+        return snapshot(menu);
+    }
+
+    /** Data-only native snapshot kernel; production capture must pass enabled() first. */
+    public static Snapshot snapshot(AEBaseMenu menu) {
+        return snapshot(menu, null);
+    }
+
+    /** Action-local follow-up. Unchanged values reuse the detached, read-only baseline; no live stack is retained. */
+    public static Snapshot followUpSnapshot(AEBaseMenu menu, Snapshot before) {
+        return snapshot(menu, before);
+    }
+
+    private static Snapshot snapshot(AEBaseMenu menu, Snapshot before) {
+        if (!onServerThread(menu)) return null;
         Map<Integer, SlotValue> slots = new HashMap<>();
         try {
             for (int i = 0; i < menu.slots.size(); i++) {
@@ -175,12 +201,29 @@ public final class Ae2Audit {
                 if (!id.equals("UPGRADE") && !id.equals("CONFIG") && !id.equals("VIEW_CELL")
                         && !id.equals("STORAGE_CELL") && !id.equals("STORAGE") && !id.equals("MACHINE_INPUT")
                         && !id.equals("MACHINE_OUTPUT") && !id.equals("BLANK_PATTERN")
+                        && !id.equals("INSCRIBER_PLATE_TOP") && !id.equals("INSCRIBER_PLATE_BOTTOM")
                         && !id.equals("ENCODED_PATTERN") && !id.equals("PROCESSING_INPUTS")
                         && !id.equals("PROCESSING_OUTPUTS")) continue;
-                slots.put(i, new SlotValue(id, slot.getItem().copy()));
+                var live = slot.getItem();
+                var previous = before == null ? null : before.slots().get(i);
+                slots.put(i, previous != null && id.equals(previous.semantic()) && ItemStack.matches(previous.stack(), live)
+                        ? previous : new SlotValue(id, live.copy()));
             }
-            Map<String, String> settings = menu.getTarget() instanceof IConfigurableObject configurable
-                    ? new HashMap<>(configurable.getConfigManager().exportSettings()) : Map.of();
+            Object target = menu.getTarget();
+            Map<String, String> settings = target instanceof IConfigurableObject configurable
+                    ? new HashMap<>(configurable.getConfigManager().exportSettings()) : new HashMap<>();
+            if (menu instanceof appeng.menu.implementations.PriorityMenu && target instanceof appeng.helpers.IPriorityHost host)
+                settings.put("avilixlogger:priority", Integer.toString(host.getPriority()));
+            if (menu instanceof appeng.menu.implementations.StorageLevelEmitterMenu && target instanceof appeng.parts.automation.StorageLevelEmitterPart emitter)
+                settings.put("avilixlogger:reporting_value", Long.toString(emitter.getReportingValue()));
+            if (menu instanceof appeng.menu.me.items.PatternEncodingTermMenu && target instanceof appeng.helpers.IPatternTerminalMenuHost host) {
+                var logic = host.getLogic();
+                settings.put("avilixlogger:pattern_mode", logic.getMode().name());
+                settings.put("avilixlogger:pattern_substitution", Boolean.toString(logic.isSubstitution()));
+                settings.put("avilixlogger:pattern_fluid_substitution", Boolean.toString(logic.isFluidSubstitution()));
+                var recipe = logic.getStonecuttingRecipeId();
+                if (recipe != null) settings.put("avilixlogger:stonecutting_recipe", recipe.toString());
+            }
             return new Snapshot(slots, settings);
         } catch (Throwable ignored) {
             return null;
@@ -188,78 +231,130 @@ public final class Ae2Audit {
     }
 
     public static void compare(AEBaseMenu menu, Snapshot before) {
-        if (before == null || !enabled() || !(menu.getPlayer() instanceof ServerPlayer player)
-                || !(player.level() instanceof ServerLevel level)) return;
-        Snapshot after = capture(menu);
+        if (before == null || !enabled() || !onServerThread(menu)) return;
+        Snapshot after = followUpSnapshot(menu, before);
         if (after == null) return;
-        BlockPos pos = targetPos(player);
-        String source = "ae2:" + menu.getClass().getSimpleName();
+        ServerPlayer player = (ServerPlayer) menu.getPlayer();
+        MenuTarget target = menuTarget(menu, player);
+        if (target != null) visitChanges(target, player, "ae2:" + menu.getClass().getSimpleName(), before, after, null);
+    }
+
+    /** Native data kernel; it never appends or enables production capture. */
+    public static java.util.List<LogEntry> changes(AEBaseMenu menu, Snapshot before, Snapshot after) {
+        if (before == null || after == null || !onServerThread(menu)) return java.util.List.of();
+        ServerPlayer player = (ServerPlayer) menu.getPlayer();
+        MenuTarget target = menuTarget(menu, player);
+        if (target == null) return java.util.List.of();
+        var rows = new java.util.ArrayList<LogEntry>();
+        visitChanges(target, player, "ae2:" + menu.getClass().getSimpleName(), before, after, rows);
+        return java.util.List.copyOf(rows);
+    }
+
+    private record MenuTarget(ServerLevel level, BlockPos pos) {}
+    public static String menuAddress(AEBaseMenu menu) {
+        if (!onServerThread(menu)) return null;
+        var target = menuTarget(menu, (ServerPlayer)menu.getPlayer());
+        return target == null ? null : target.level().dimension().location() + "@" + target.pos().getX() + ',' + target.pos().getY() + ',' + target.pos().getZ();
+    }
+
+    /** The inspector collector never appends; production must still pass enabled(). */
+    public static void remoteChange(ServerPlayer player, BlockEntity host, String source, ItemStack before, ItemStack after,
+                                     java.util.List<LogEntry> collector) {
+        if (player == null || !(host.getLevel() instanceof ServerLevel level) || level.getServer() != player.server
+                || !level.getServer().isSameThread() || collector == null && !enabled() || ItemStack.matches(before, after)) return;
+        physicalChange(new MenuTarget(level, host.getBlockPos()), player, source, before, after, collector);
+    }
+    private static MenuTarget menuTarget(AEBaseMenu menu, ServerPlayer player) {
+        Object host = menu.getTarget();
+        BlockEntity be = host instanceof BlockEntity block ? block : host instanceof AEBasePart part ? part.getBlockEntity() : null;
+        ServerLevel level = be == null ? player.level() instanceof ServerLevel sl ? sl : null
+                : be.getLevel() instanceof ServerLevel sl ? sl : null;
+        if (level == null || !level.getServer().isSameThread()) return null;
+        return new MenuTarget(level, be == null ? player.blockPosition() : be.getBlockPos());
+    }
+
+    /** Production emits each detached row immediately, before serializing the next slot's pair. */
+    private static void visitChanges(MenuTarget target, ServerPlayer player, String source, Snapshot before, Snapshot after, java.util.List<LogEntry> collector) {
         for (var previous : before.slots().entrySet()) {
-            int slot = previous.getKey();
-            SlotValue old = previous.getValue();
-            SlotValue now = after.slots().get(slot);
-            if (now == null || ItemStack.matches(old.stack(), now.stack())) continue;
-            String id = old.semantic();
-            if (id.equals("CONFIG") || id.equals("PROCESSING_INPUTS") || id.equals("PROCESSING_OUTPUTS")) {
-                change(level, pos, player, source, ActionType.ME_FILTER_CHANGE, slot, old.stack(), now.stack());
-            } else if (id.equals("UPGRADE")) {
-                change(level, pos, player, source, ActionType.ME_UPGRADE_CHANGE, slot, old.stack(), now.stack());
-            } else if (id.equals("VIEW_CELL") || id.equals("STORAGE_CELL")) {
-                change(level, pos, player, source, ActionType.ME_CELL_CHANGE, slot, old.stack(), now.stack());
-            } else {
-                physicalChange(level, pos, player, source + ":" + id + ":slot=" + slot, old.stack(), now.stack());
-            }
+            int slot = previous.getKey(); SlotValue old = previous.getValue(); SlotValue now = after.slots().get(slot);
+            // A changed menu layout is not evidence that an absent slot became empty.
+            if (now == null || old == now || !old.semantic().equals(now.semantic()) || ItemStack.matches(old.stack(), now.stack())) continue;
+            ActionType type = configurationType(old.semantic());
+            if (type != null) {
+                LogEntry row = configurationRow(target, player, source, type, old.semantic(), slot, old.stack(), now.stack());
+                if (row != null) emit(target, row, collector);
+            } else physicalChange(target, player, source + ":" + old.semantic() + ":slot=" + slot, old.stack(), now.stack(), collector);
         }
-        for (var setting : before.settings().entrySet()) {
-            String newValue = after.settings().get(setting.getKey());
-            if (newValue == null || setting.getValue().equals(newValue)) continue;
-            LogEntry e = entry(level, pos, player, ActionType.ME_SETTING_CHANGE, source);
-            e.extra = setting.getKey() + ": " + setting.getValue() + " → " + newValue;
-            LoggerRuntime.storage(level).append(e);
+        var settings = new java.util.LinkedHashSet<>(before.settings().keySet()); settings.addAll(after.settings().keySet());
+        for (String name : settings) {
+            String old = before.settings().get(name), now = after.settings().get(name);
+            if (java.util.Objects.equals(old, now)) continue;
+            LogEntry row = entry(target.level(), target.pos(), player, ActionType.ME_SETTING_CHANGE, source);
+            com.roften.avilixlogger.core.Ae2ConfigurationDetails.setting(row, name, old, now); emit(target, row, collector);
         }
+    }
+    private static void emit(MenuTarget target, LogEntry row, java.util.List<LogEntry> collector) {
+        if (row == null) return;
+        if (collector == null) LoggerRuntime.storage(target.level()).append(row);
+        else collector.add(row);
     }
 
     public static void stockAmount(AEBaseMenu menu, int slot, ItemStack before, ItemStack after) {
-        if (!enabled() || !(menu.getPlayer() instanceof ServerPlayer player)
-                || !(player.level() instanceof ServerLevel level) || ItemStack.matches(before, after)) return;
-        change(level, targetPos(player), player, "ae2:" + menu.getClass().getSimpleName(),
-                ActionType.ME_FILTER_CHANGE, slot, before, after);
+        if (!enabled() || !onServerThread(menu)) return;
+        ServerPlayer player = (ServerPlayer) menu.getPlayer(); MenuTarget target = menuTarget(menu, player);
+        if (target == null || ItemStack.matches(before, after)) return;
+        LogEntry row = configurationRow(target, player, "ae2:" + menu.getClass().getSimpleName(), ActionType.ME_FILTER_CHANGE, "CONFIG", slot, before, after);
+        if (row != null) LoggerRuntime.storage(target.level()).append(row);
     }
 
-    private static void change(ServerLevel level, BlockPos pos, ServerPlayer player, String source,
-                               ActionType type, int slot, ItemStack old, ItemStack now) {
-        LogEntry e = entry(level, pos, player, type, source);
-        e.extra = "slot " + slot + ": " + describe(old) + " → " + describe(now);
-        e.itemStackNbt = NbtSerde.writeItemStack(now.isEmpty() ? old : now, level.registryAccess());
-        LoggerRuntime.storage(level).append(e);
+    /** Data-only slot kernel for stock submenus and native fixtures. */
+    public static LogEntry configurationRow(AEBaseMenu menu, String semantic, int slot, ItemStack before, ItemStack after) {
+        if (!onServerThread(menu) || before == null || after == null || ItemStack.matches(before, after)) return null;
+        ActionType type = configurationType(semantic); if (type == null) return null;
+        ServerPlayer player = (ServerPlayer) menu.getPlayer(); MenuTarget target = menuTarget(menu, player);
+        return target == null ? null : configurationRow(target, player, "ae2:" + menu.getClass().getSimpleName(), type, semantic, slot, before, after);
     }
-
-    private static String describe(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return "пусто";
+    private static ActionType configurationType(String semantic) {
+        return com.roften.avilixlogger.core.Ae2ConfigurationDetails.typeForSemantic(semantic);
+    }
+    private static LogEntry configurationRow(MenuTarget target, ServerPlayer player, String source, ActionType type,
+                                              String semantic, int slot, ItemStack before, ItemStack after) {
+        var old = before.isEmpty() ? null : NbtSerde.snapshotItemStack(before, target.level().registryAccess());
+        var now = after.isEmpty() ? null : NbtSerde.snapshotItemStack(after, target.level().registryAccess());
+        if ((!before.isEmpty() && old == null) || (!after.isEmpty() && now == null)) {
+            com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("ae2-config-snapshot"); return null;
+        }
+        LogEntry row = entry(target.level(), target.pos(), player, type, source);
+        com.roften.avilixlogger.core.Ae2ConfigurationDetails.slot(row, semantic, slot, resource(before), resource(after), old, now);
+        return row;
+    }
+    private static com.roften.avilixlogger.core.Ae2ConfigurationDetails.Resource resource(ItemStack stack) {
+        if (stack.isEmpty()) return new com.roften.avilixlogger.core.Ae2ConfigurationDetails.Resource("empty", "", 0);
         GenericStack wrapped = GenericStack.fromItemStack(stack);
-        if (wrapped != null) return wrapped.what().getDisplayName().getString() + " ["
-                + wrapped.what().getId() + "] x" + wrapped.amount();
-        return stack.getHoverName().getString() + " x" + stack.getCount();
+        if (wrapped != null) return new com.roften.avilixlogger.core.Ae2ConfigurationDetails.Resource(
+                wrapped.what() instanceof AEItemKey ? "i" : wrapped.what() instanceof appeng.api.stacks.AEFluidKey ? "f" : "g", wrapped.what().getId().toString(), wrapped.amount());
+        return new com.roften.avilixlogger.core.Ae2ConfigurationDetails.Resource("i", net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount());
     }
 
-    private static void physicalChange(ServerLevel level, BlockPos pos, ServerPlayer player, String source,
-                                       ItemStack old, ItemStack now) {
+    private static void physicalChange(MenuTarget target, ServerPlayer player, String source, ItemStack old, ItemStack now, java.util.List<LogEntry> collector) {
         if (ItemStack.isSameItemSameComponents(old, now)) {
             int delta = now.getCount() - old.getCount();
-            if (delta != 0) physicalRow(level, pos, player, source,
-                    delta > 0 ? ActionType.ME_PUT : ActionType.ME_TAKE, delta > 0 ? now : old, Math.abs(delta));
+            if (delta != 0) emit(target, physicalRow(target.level(), target.pos(), player, source,
+                    delta > 0 ? ActionType.ME_PUT : ActionType.ME_TAKE, delta > 0 ? now : old, Math.abs(delta)), collector);
         } else {
-            if (!old.isEmpty()) physicalRow(level, pos, player, source, ActionType.ME_TAKE, old, old.getCount());
-            if (!now.isEmpty()) physicalRow(level, pos, player, source, ActionType.ME_PUT, now, now.getCount());
+            if (!old.isEmpty()) emit(target, physicalRow(target.level(), target.pos(), player, source, ActionType.ME_TAKE, old, old.getCount()), collector);
+            if (!now.isEmpty()) emit(target, physicalRow(target.level(), target.pos(), player, source, ActionType.ME_PUT, now, now.getCount()), collector);
         }
     }
-
-    private static void physicalRow(ServerLevel level, BlockPos pos, ServerPlayer player,
-                                    String source, ActionType type, ItemStack stack, int count) {
-        LogEntry e = entry(level, pos, player, type, source);
-        e.itemStackNbt = NbtSerde.writeItemStack(stack, level.registryAccess());
-        e.count = count;
-        e.extra = "device inventory " + source;
-        LoggerRuntime.storage(level).append(e);
+    private static LogEntry physicalRow(ServerLevel level, BlockPos pos, ServerPlayer player,
+                                        String source, ActionType type, ItemStack stack, int count) {
+        LogEntry row = entry(level, pos, player, type, source);
+        var item = NbtSerde.snapshotItemStack(stack, level.registryAccess());
+        if (item == null) {
+            com.roften.avilixlogger.core.AdaptiveLogDiagnostics.adapterFailure("ae2-device-snapshot"); return null;
+        }
+        com.roften.avilixlogger.core.Ae2TransferDetails.device(row,
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), count, item);
+        row.count = count; return row;
     }
 }

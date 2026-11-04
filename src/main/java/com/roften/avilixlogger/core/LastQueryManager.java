@@ -25,7 +25,9 @@ public final class LastQueryManager {
          * Calculated after rendering a page: the cursor value to use for the next page
          * (i.e., the smallest id shown on the current page).
          */
-        public volatile long nextCursorCandidate;
+        public volatile long nextCursorCandidate, nextCursorTsCandidate;
+        public final Map<Long,Long> cursorTimes = new java.util.HashMap<>();
+        public long currentCursorTs() { return cursorTimes.getOrDefault(currentBeforeId(),0L); }
 
         /** Whether the rendered page indicates that there is at least one more page. */
         public volatile boolean hasNext;
@@ -87,6 +89,7 @@ public final class LastQueryManager {
         if (s == null) return;
         if (nextCursorBeforeId <= 0) return;
         s.cursors.addLast(nextCursorBeforeId);
+        s.cursorTimes.put(nextCursorBeforeId,s.nextCursorTsCandidate);
     }
 
     public static boolean prev(Player player) {
@@ -94,7 +97,7 @@ public final class LastQueryManager {
         State s = STATES.get(player.getUUID());
         if (s == null) return false;
         if (s.cursors.size() <= 1) return false;
-        s.cursors.removeLast();
+        s.cursorTimes.remove(s.cursors.removeLast());
         return true;
     }
 
@@ -102,7 +105,7 @@ public final class LastQueryManager {
         if (player == null) return;
         State s = STATES.get(player.getUUID());
         if (s == null) return;
-        s.cursors.clear();
+        s.cursors.clear();s.cursorTimes.clear();
         s.cursors.addLast(0L);
     }
 }

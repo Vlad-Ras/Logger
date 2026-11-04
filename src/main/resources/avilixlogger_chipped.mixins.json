@@ -1,0 +1,10 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.chipped.mixin",
+  "plugin": "com.roften.avilixlogger.compat.chipped.mixin.ChippedMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": ["WorkbenchMenuMixin"],
+  "client": [],
+  "injectors": {"defaultRequire": 1}
+}

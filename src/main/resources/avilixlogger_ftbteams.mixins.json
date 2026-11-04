@@ -1,0 +1,19 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.ftbteams.mixin",
+  "plugin": "com.roften.avilixlogger.compat.ftbteams.mixin.FtbTeamsMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ManagerMixin",
+    "PacketCauseMixin",
+    "PartyMixin",
+    "PlayerTeamMixin",
+    "PropertiesMixin",
+    "TeamBaseMixin",
+    "TeamMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

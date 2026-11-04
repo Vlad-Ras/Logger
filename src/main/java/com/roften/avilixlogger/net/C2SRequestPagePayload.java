@@ -28,25 +28,9 @@ public record C2SRequestPagePayload(Nav nav, boolean aggregated, GuiFilters filt
             buf -> {
                 int o = buf.readByte();
                 Nav nav = (o >= 0 && o < Nav.values().length) ? Nav.values()[o] : Nav.FIRST;
-                boolean aggregated = true;
-                try {
-                    aggregated = buf.readBoolean();
-                } catch (Throwable ignored) {
-                    // backward compat
-                }
-                GuiFilters filters = GuiFilters.DEFAULT;
-                try {
-                    filters = GuiFilters.STREAM_CODEC.decode(buf);
-                } catch (Throwable ignored) {
-                    // backward compat
-                }
-                int pageSize = DEFAULT_PAGE_SIZE;
-                try {
-                    if (buf.readableBytes() > 0) pageSize = buf.readVarInt();
-                } catch (Throwable ignored) {
-                    // backward compat with clients that do not send the per-page setting
-                }
-                return new C2SRequestPagePayload(nav, aggregated, filters, clampPageSize(pageSize));
+                boolean aggregated = buf.readBoolean();
+                GuiFilters filters = GuiFilters.STREAM_CODEC.decode(buf);
+                return new C2SRequestPagePayload(nav, aggregated, filters, clampPageSize(buf.readVarInt()));
             }
     );
 

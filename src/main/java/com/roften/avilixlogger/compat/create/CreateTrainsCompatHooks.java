@@ -16,21 +16,29 @@ import java.util.UUID;
 public final class CreateTrainsCompatHooks {
 
     private CreateTrainsCompatHooks() {}
+    public static UUID actorUuid(net.minecraft.world.entity.player.Player player){
+        return player == null || player instanceof net.neoforged.neoforge.common.util.FakePlayer
+                || com.roften.avilixlogger.core.CreateActorContext.isTechnicalPlayer(player) ? null : player.getUUID();
+    }
+    public static String actorName(net.minecraft.world.entity.player.Player player){
+        return actorUuid(player)==null ? "SYSTEM" : player.getScoreboardName();
+    }
 
     public static void logTrainAssembled(ServerLevel level, Object train, BlockPos at) {
-        if (!enabled()) return;
+        if (!enabled(ActionType.TRAIN_ASSEMBLE)) return;
         try {
             UUID owner = readUuidField(train, "owner");
             String ownerName = resolvePlayerName(level, owner);
 
-            LogEntry e = base(level, ActionType.TRAIN_ASSEMBLE, owner, ownerName, at);
+            var cause = com.roften.avilixlogger.core.CauseContext.peek();
+            LogEntry e = base(level, ActionType.TRAIN_ASSEMBLE, cause==null?null:cause.actorUuid(), cause==null?"SYSTEM":cause.actorName(), at);
             fillTrainExtra(e, "train_assemble", train, null);
             LoggerRuntime.storage(level).append(e);
         } catch (Throwable ignored) {}
     }
 
     public static void logTrainDisassembled(ServerLevel level, Object train, UUID actorUuid, String actorName, BlockPos at) {
-        if (!enabled()) return;
+        if (!enabled(ActionType.TRAIN_DISASSEMBLE)) return;
         try {
             LogEntry e = base(level, ActionType.TRAIN_DISASSEMBLE, actorUuid, actorName, at);
             fillTrainExtra(e, "train_disassemble", train, null);
@@ -39,12 +47,12 @@ public final class CreateTrainsCompatHooks {
     }
 
     public static void logScheduleTaken(ServerLevel level, Object train, UUID actorUuid, String actorName, BlockPos at, ItemStack returnedSchedule) {
-        if (!enabled()) return;
+        if (!enabled(ActionType.TRAIN_SCHEDULE_TAKE)) return;
         try {
             LogEntry e = base(level, ActionType.TRAIN_SCHEDULE_TAKE, actorUuid, actorName, at);
 
             if (returnedSchedule != null && !returnedSchedule.isEmpty()) {
-                e.itemStackNbt = NbtSerde.writeItemStack(returnedSchedule, level.registryAccess());
+                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(returnedSchedule, level.registryAccess()));
                 e.count = returnedSchedule.getCount();
             }
 
@@ -54,12 +62,12 @@ public final class CreateTrainsCompatHooks {
     }
 
     public static void logSchedulePut(ServerLevel level, Object train, UUID actorUuid, String actorName, BlockPos at, ItemStack scheduleItem) {
-        if (!enabled()) return;
+        if (!enabled(ActionType.TRAIN_SCHEDULE_PUT)) return;
         try {
             LogEntry e = base(level, ActionType.TRAIN_SCHEDULE_PUT, actorUuid, actorName, at);
 
             if (scheduleItem != null && !scheduleItem.isEmpty()) {
-                e.itemStackNbt = NbtSerde.writeItemStack(scheduleItem, level.registryAccess());
+                e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(scheduleItem, level.registryAccess()));
                 e.count = scheduleItem.getCount();
             }
 
@@ -69,7 +77,7 @@ public final class CreateTrainsCompatHooks {
     }
 
     public static void logControlStart(ServerLevel level, Object train, UUID actorUuid, String actorName, BlockPos at) {
-        if (!enabled()) return;
+        if (!enabled(ActionType.TRAIN_CONTROL_START)) return;
         try {
             LogEntry e = base(level, ActionType.TRAIN_CONTROL_START, actorUuid, actorName, at);
             fillTrainExtra(e, "train_control_start", train, null);
@@ -78,7 +86,7 @@ public final class CreateTrainsCompatHooks {
     }
 
     public static void logControlStop(ServerLevel level, Object train, UUID actorUuid, String actorName, BlockPos at) {
-        if (!enabled()) return;
+        if (!enabled(ActionType.TRAIN_CONTROL_STOP)) return;
         try {
             LogEntry e = base(level, ActionType.TRAIN_CONTROL_STOP, actorUuid, actorName, at);
             fillTrainExtra(e, "train_control_stop", train, null);
@@ -86,9 +94,19 @@ public final class CreateTrainsCompatHooks {
         } catch (Throwable ignored) {}
     }
 
-    private static boolean enabled() {
+    private static boolean enabled(ActionType event) {
         try {
-            return LoggerConfig.isEnabled() && LoggerConfig.VALUES.logEntities.get();
+            // Cheap category checks precede authorization, item NBT and train reflection.
+            if (!LoggerConfig.VALUES.logCreateTrains.get()
+                    || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(5)) return false;
+            boolean category = switch (event) {
+                case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE -> LoggerConfig.VALUES.logCreateLifecycle.get();
+                case TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> LoggerConfig.VALUES.logCreateCargoTransfers.get();
+                case TRAIN_CONTROL_START, TRAIN_CONTROL_STOP -> LoggerConfig.VALUES.logCreateMovement.get();
+                default -> true;
+            };
+            return category && com.roften.avilixlogger.core.CreateSupport.available()
+                    && LoggerConfig.isEnabled() && LoggerConfig.VALUES.logEntities.get();
         } catch (Throwable t) {
             return false;
         }
@@ -113,6 +131,7 @@ public final class CreateTrainsCompatHooks {
 
     private static void fillTrainExtra(LogEntry e, String kind, Object train, String note) {
         UUID trainUuid = readUuidField(train, "id");
+        if (trainUuid != null) e.source = com.roften.avilixlogger.core.CreateContraptionKind.TRAIN.source(trainUuid, kind);
         UUID ownerUuid = readUuidField(train, "owner");
         String trainName = safeStr(readTrainName(train));
 

@@ -5,7 +5,7 @@
 -dontoptimize
 -dontwarn
 
--keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations,AnnotationDefault,Signature,Exceptions,InnerClasses,EnclosingMethod,Record,PermittedSubclasses
+-keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations,RuntimeVisibleParameterAnnotations,RuntimeInvisibleParameterAnnotations,RuntimeVisibleTypeAnnotations,RuntimeInvisibleTypeAnnotations,AnnotationDefault,Signature,Exceptions,InnerClasses,EnclosingMethod,Record,PermittedSubclasses
 -adaptclassstrings
 -adaptresourcefilecontents META-INF/services/**
 
@@ -23,10 +23,15 @@
     public static void init(...);
 }
 -keep class com.roften.avilixlogger.client.gui.LogViewerClientHooks {
-    public static void open();
+    public static void open(...);
     public static void acceptPage(...);
+    public static void acceptCart(...);
+    public static void acceptActionResult(...);
+    public static void acceptEntryTeleport(...);
     public static void acceptDetails(...);
     public static void acceptInspectTool(...);
+    public static void acceptCaptureTypes(...);
+    public static void acceptCaptureHealth(...);
     public static void acceptRollbackPreview(...);
 }
 
@@ -45,3 +50,33 @@
 }
 
 -repackageclasses 'com.roften.avilixlogger.o'
+
+# Stable on-disk journal and legacy JSON field names across obfuscated releases.
+-keepclassmembers class com.roften.avilixlogger.core.LogEntry {
+    public <fields>;
+}
+-keepclassmembers enum com.roften.avilixlogger.core.ActionType {
+    public static <fields>;
+}
+
+# Implementations are woven into external Create classes after obfuscation.
+-keep interface com.roften.avilixlogger.compat.create.CartAuditAccess { *; }
+-keep interface com.roften.avilixlogger.compat.create.CartEntityAccess { *; }
+-keep interface com.roften.avilixlogger.compat.create.ContraptionIdentity { *; }
+-keep interface com.roften.avilixlogger.compat.create.Create*RuntimeAccess { *; }
+-keep interface com.roften.avilixlogger.compat.create.CreateCooldownEntryAccess { *; }
+-keep interface com.roften.avilixlogger.core.CreateOriginDataAccess { *; }
+-keep interface com.roften.avilixlogger.core.BlockEntityPersistentDataAccess { *; }
+-keep interface com.roften.avilixlogger.compat.supplementaries.TextHolderAuditAccess { *; }
+-keep interface com.roften.avilixlogger.compat.ae2.Ae2CpuCancellationSource { *; }
+-keep interface com.roften.avilixlogger.compat.ae2.Ae2LinkedCancellationState { *; }
+-keep interface com.roften.avilixlogger.core.WeaponTraceAccess { *; }
+-keep interface com.roften.avilixlogger.core.WeaponReloadAccess { *; }
+-keep interface com.roften.avilixlogger.core.CompoundContainerAccess { *; }
+-keep interface com.roften.avilixlogger.compat.industry.IndustrialState { *; }
+-keep interface com.roften.avilixlogger.compat.machines.MachineState { *; }
+-keep interface com.roften.avilixlogger.compat.opac.OpenPac* { *; }
+# Accessor interfaces are casts into classes woven after release obfuscation.
+-keep interface com.roften.avilixlogger.compat.create.mixin.** { *; }
+-keep interface com.roften.avilixlogger.mixin.CartCombinedInventoryAccessor { *; }
+-keep interface com.roften.avilixlogger.compat.backpacked.mixin.** { *; }

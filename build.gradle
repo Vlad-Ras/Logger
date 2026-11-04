@@ -32,6 +32,15 @@ repositories {
 
     // Modrinth Maven (LDLib2, etc.)
     maven { url = uri("https://api.modrinth.com/maven") }
+    maven { url = uri("https://maven.createmod.net") }
+    maven { url = uri("https://maven.ithundxr.dev/snapshots") }
+    maven { url = uri("https://raw.githubusercontent.com/Fuzss/modresources/main/maven") }
+    ivy {
+        url = uri('https://github.com/MrCrayfish')
+        patternLayout { artifact '[module]/releases/download/v[revision]/[artifact]-[revision]-signed.[ext]' }
+        metadataSources { artifact() }
+        content { includeGroup 'com.mrcrayfish.release' }
+    }
 }
 
 base {
@@ -40,6 +49,14 @@ base {
 
 // Mojang ships Java 21 to end users in 1.21.1, so mods should target Java 21.
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+sourceSets.create("createSmoke")
+if (project.hasProperty('ae2Smoke')) sourceSets.createSmoke.java.include('**/DetachedPipelineSmoke.java', '**/Ae2NativeSmoke.java', '**/Ae2TransferNativeSmoke.java', '**/Ae2DeviceSettingsNativeSmoke.java', '**/Ae2PatternNativeSmoke.java', '**/Ae2RemoteNativeSmoke.java', '**/Ae2GridNativeSmoke.java', '**/Ae2CraftingNativeSmoke.java', '**/Ae2AssemblyNativeSmoke.java', '**/Ae2LifecycleNativeSmoke.java', '**/Ae2ProcessingNativeSmoke.java', '**/Ae2RequesterCancelNativeSmoke.java', '**/Ae2TerminalCostNativeSmoke.java')
+if (project.hasProperty('ae2Absent')) sourceSets.createSmoke.java.include('**/Ae2AbsentSmoke.java')
+if (project.hasProperty('createAbsent')) sourceSets.createSmoke.java.include('**/CreateAbsentSmoke.java')
+if (project.hasProperty('supplementariesCreateAbsent')) sourceSets.createSmoke.java.include('**/SupplementariesTextSmoke.java', '**/AuditDetailsSmoke.java', '**/SnapshotDeltaNativeSmoke.java')
+sourceSets.createSmoke.compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+sourceSets.createSmoke.runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
 
 neoForge {
     // Specify the version of NeoForge to use.
@@ -58,6 +75,8 @@ neoForge {
     runs {
         client {
             client()
+            if (project.hasProperty('acceptanceJfr')) jvmArgument "-XX:StartFlightRecording=name=avilix_client,settings=profile,dumponexit=true,maxsize=64m,filename=${project.file('run/avilixlogger-client-ci.jfr').absolutePath}"
+            if (project.hasProperty('guiSmoke')) systemProperty 'avilixlogger.guiSmoke', 'true'
 
             // Comma-separated list of namespaces to load gametests from. Empty = all namespaces.
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
@@ -65,6 +84,49 @@ neoForge {
 
         server {
             server()
+            if(project.hasProperty('storageSmoke')) {
+                systemProperty 'avilixlogger.storageSmoke','true'
+                gameDirectory = project.file('run-storage')
+            }
+            if (project.hasProperty('acceptanceJfr')) jvmArgument "-XX:StartFlightRecording=name=avilix_server,settings=profile,dumponexit=true,maxsize=64m,filename=${project.file('run/avilixlogger-server-ci.jfr').absolutePath}"
+            if (project.hasProperty('createSmoke')) {
+                systemProperty 'avilixlogger.createSmoke', 'true'
+                jvmArgument '-Xmx4G'
+                jvmArgument '-XX:+ExitOnOutOfMemoryError'
+            }
+            if (project.hasProperty('trainStateSmoke')) {
+                systemProperty 'avilixlogger.createSmoke', 'false'
+                systemProperty 'avilixlogger.trainRollbackSmoke', 'true'
+                systemProperty 'avilixlogger.trainSmokeRepeats', project.findProperty('trainSmokeRepeats') ?: '1'
+                if(project.hasProperty('trainSmokeCase')) systemProperty 'avilixlogger.trainSmokeCase', project.property('trainSmokeCase')
+            }
+            if (project.hasProperty('createAbsent')) {
+                systemProperty 'avilixlogger.createAbsentSmoke', 'true'
+                gameDirectory = project.file('run-create-absent')
+            }
+            if (project.hasProperty('backpackSmoke')) systemProperty 'avilixlogger.backpackSmoke', 'true'
+            if (project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) {
+                systemProperty 'avilixlogger.ae2Smoke', 'true'
+                systemProperty 'avilixlogger.ae2Absent', project.hasProperty('ae2Absent').toString()
+                gameDirectory = project.file('run-ae2')
+            }
+            if (project.hasProperty('ae2Lifecycle')) {
+                if (!project.hasProperty('ae2Smoke')) throw new GradleException('ae2Lifecycle requires ae2Smoke')
+                systemProperty 'avilixlogger.ae2Lifecycle', project.property('ae2Lifecycle')
+                gameDirectory = project.file('run-ae2-lifecycle')
+            }
+            if (project.hasProperty('scgunsSmoke')) systemProperty 'avilixlogger.scgunsSmoke', 'true'
+            if (project.hasProperty('chippedSmoke')) systemProperty 'avilixlogger.chippedSmoke', 'true'
+            if (project.hasProperty('supplementariesSmoke')) {
+                systemProperty 'avilixlogger.supplementariesSmoke', 'true'
+                gameDirectory = project.file('run-supplementaries')
+            }
+            if (project.hasProperty('blockpackSmoke')) {
+                systemProperty 'avilixlogger.blockpackSmoke', 'true'
+                gameDirectory = project.file('run-blockpack')
+            }
+            if (project.hasProperty('backpackAbsent')) systemProperty 'avilixlogger.backpackAbsent', 'true'
+            if (project.hasProperty('actorSmoke')) systemProperty 'avilixlogger.actorSmoke', 'true'
             programArgument '--nogui'
             systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
         }
@@ -109,12 +171,15 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
+            if (project.hasProperty('storageSmoke') || project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke') || project.hasProperty('blockpackSmoke') || project.hasProperty('supplementariesSmoke') || project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) sourceSet(sourceSets.createSmoke)
         }
     }
 }
 
 // Include resources generated by data generators.
 sourceSets.main.resources { srcDir 'src/generated/resources' }
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
 
 // Sets up a dependency configuration called 'localRuntime'.
 // This configuration should be used instead of 'runtimeOnly' to declare
@@ -125,9 +190,67 @@ configurations {
 }
 
 dependencies {
+    if (project.hasProperty('storageSmoke')) {
+        localRuntime 'maven.modrinth:open-parties-and-claims:yWmXD7GW' // NeoForge 1.21.1, OPAC 0.33.0
+        localRuntime 'maven.modrinth:corpse:peeqqFlX' // Official NeoForge 1.21.1-1.1.21, native death/drop regression
+    }
+    // Exact operator-supplied artifacts stay local, optional and never bundled or uploaded.
+    if (project.hasProperty('scgunsSmokeMods'))
+        localRuntime files(fileTree(dir: project.property('scgunsSmokeMods'), include: '*.jar'))
+    if (project.hasProperty('supplementariesSmokeMods'))
+        localRuntime files(fileTree(dir: project.property('supplementariesSmokeMods'), include: '*.jar'))
+    if (project.hasProperty('blockpackSmokeMods'))
+        localRuntime files(fileTree(dir: project.property('blockpackSmokeMods'), include: '*.jar'))
+    if (project.hasProperty('chippedSmokeMods'))
+        localRuntime files(fileTree(dir: project.property('chippedSmokeMods'), include: '*.jar'))
+    if (project.hasProperty('actorSmoke') && !project.hasProperty('aircraftAbsent')) {
+        localRuntime 'maven.modrinth:immersive-aircraft:RkWu0N4D' // NeoForge 1.21.1, IA 1.4.6
+    }
+    // Native food/container contract regression; optional and never bundled in production.
+    if (project.hasProperty('createSmoke') && !project.hasProperty('createAbsent')) {
+        def foodVersions = ['1.3.2': 'GbNuOZ4S', '1.3.4': 'XTVZDOol']
+        def foodVersion = project.findProperty('fdSmokeVersion') ?: '1.3.4'
+        if (!foodVersions.containsKey(foodVersion)) throw new GradleException("Unsupported FD smoke version: ${foodVersion}")
+        localRuntime "maven.modrinth:farmers-delight:${foodVersions[foodVersion]}"
+    }
+    compileOnly 'maven.modrinth:curios:yohfFbgD' // Curios 9.5.1, NeoForge 1.21.1, never bundled.
+    if (project.hasProperty('createSmoke') && !project.hasProperty('createAbsent'))
+        localRuntime 'maven.modrinth:curios:yohfFbgD'
     // Optional integration: never ship AE2 classes inside the logger JAR.
-    compileOnly 'org.appliedenergistics:appliedenergistics2:19.2.12'
-    localRuntime 'org.appliedenergistics:appliedenergistics2:19.2.12'
+    def compatAe2Version = project.findProperty('compatAe2Version') ?: '19.2.12'
+    compileOnly "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
+    if (!project.hasProperty('ae2Absent')) localRuntime "org.appliedenergistics:appliedenergistics2:${compatAe2Version}"
+    // Optional Create integration. Never embed Create or its libraries in the logger.
+    def compatCreateVersion = project.findProperty('compatCreateVersion') ?: '6.0.11-313'
+    if (project.hasProperty('compatCreateReleaseDirectory')) {
+        // Official distribution + its own verified nested libraries, prepared by tools/ci.
+        def releaseDirectory=file(project.property('compatCreateReleaseDirectory'))
+        compileOnly files(fileTree(dir:releaseDirectory,include:'*.jar'))
+        if (!project.hasProperty('createAbsent') && !project.hasProperty('supplementariesCreateAbsent'))
+            localRuntime files(new File(releaseDirectory,'create-1.21.1-6.0.10.jar'))
+    } else if (compatCreateVersion.startsWith('6.0.10-')) {
+        // Old Create's POM publishes all development integrations as runtime dependencies.
+        // Its real required libraries are explicit here; do not pull unrelated optional mods.
+        compileOnly("com.simibubi.create:create-1.21.1:${compatCreateVersion}") { transitive = false }
+        compileOnly 'com.tterrag.registrate:Registrate:MC1.21-1.3.0+67'
+        compileOnly 'net.createmod.ponder:ponder-neoforge:1.0.82+mc1.21.1'
+        compileOnly 'dev.engine-room.flywheel:flywheel-neoforge-api-1.21.1:1.0.6'
+        if (!project.hasProperty('createAbsent') && !project.hasProperty('supplementariesCreateAbsent')) {
+            localRuntime("com.simibubi.create:create-1.21.1:${compatCreateVersion}") { transitive = false }
+            localRuntime 'com.tterrag.registrate:Registrate:MC1.21-1.3.0+67'
+            localRuntime 'net.createmod.ponder:ponder-neoforge:1.0.82+mc1.21.1'
+            localRuntime 'dev.engine-room.flywheel:flywheel-neoforge-1.21.1:1.0.6'
+        }
+    } else {
+        compileOnly "com.simibubi.create:create-1.21.1:${compatCreateVersion}"
+        if (!project.hasProperty('createAbsent') && !project.hasProperty('supplementariesCreateAbsent')) localRuntime "com.simibubi.create:create-1.21.1:${compatCreateVersion}"
+    }
+    // Official release artifacts, compile-only. Neither mod is bundled or required in production.
+    [Backpacked: ['backpacked-neoforge', '1.21.1-3.0.5'], Framework: ['framework-neoforge', project.findProperty('compatFrameworkVersion') ?: '1.21.1-0.13.10']].each { module, spec ->
+        def external = { artifact { name = spec[0]; type = 'jar' }; transitive = false }
+        compileOnly("com.mrcrayfish.release:${module}:${spec[1]}", external)
+        if ((project.hasProperty('backpackSmoke') || project.hasProperty('createSmoke') || project.hasProperty('guiSmoke')) && !project.hasProperty('backpackAbsent') && !project.hasProperty('createAbsent')) localRuntime("com.mrcrayfish.release:${module}:${spec[1]}", external)
+    }
     // --- ClickHouse backend ---
     // Uses ClickHouse HTTP API via JDK HttpURLConnection. No ClickHouse JDBC dependency is needed.
 
@@ -252,15 +375,36 @@ tasks.register('verifyObfuscatedJar') {
             throw new GradleException('ActionType is missing from the ProGuard mapping')
         }
 
+        // Network/client boundaries invoke these methods by literal names after obfuscation.
+        def hookClass = 'com.roften.avilixlogger.client.gui.LogViewerClientHooks'
+        def hookStart = mappingText.indexOf(hookClass + ' -> ')
+        if (hookStart < 0) throw new GradleException('Client hooks missing from ProGuard mapping')
+        def hookEnd = mappingText.indexOf('\ncom.', hookStart + 1)
+        def hookMapping = mappingText.substring(hookStart, hookEnd < 0 ? mappingText.length() : hookEnd)
+        def networkSource = file('src/main/java/com/roften/avilixlogger/net/LoggerNetwork.java').getText('UTF-8')
+        def hookCalls = networkSource =~ /invokeClientHook\("([^"\n]+)"/
+        hookCalls.each { call ->
+            def name = call[1]
+            if (!(hookMapping =~ /(?m)\b${name}\([^\n]* -> ${name}\s*$/).find())
+                throw new GradleException("Client hook renamed/missing after obfuscation: ${name}")
+        }
+
         def actionTypeName = actionTypeMapping.group(1)
         def jarUrl = releaseJar.get().asFile.toURI().toURL()
-        def loader = new URLClassLoader([jarUrl] as URL[], ClassLoader.getPlatformClassLoader())
+        def loader = new URLClassLoader(([jarUrl] + sourceSets.main.runtimeClasspath.files.collect { it.toURI().toURL() }) as URL[], ClassLoader.getPlatformClassLoader())
         try {
             def actionType = Class.forName(actionTypeName, true, loader)
             def constants = actionType.getEnumConstants()
             if (!actionType.isEnum() || constants == null || constants.length == 0) {
                 throw new GradleException('ProGuard broke ActionType enum reflection required by EnumMap/EnumSet')
             }
+            def rowMapping = mappingText =~ /(?m)^com\.roften\.avilixlogger\.core\.LogEntry -> ([\w.$]+):$/
+            if (!rowMapping.find()) throw new GradleException('LogEntry missing from ProGuard mapping')
+            def rowType = Class.forName(rowMapping.group(1), false, loader)
+            ['id', 'ts', 'dim', 'type', 'actorUuid', 'actorName', 'source', 'x', 'y', 'z',
+             'blockBefore', 'beBefore', 'blockAfter', 'beAfter', 'entityType', 'entityUuid', 'entityNbt',
+             'itemStackNbt', 'count', 'playerInvBefore', 'playerInvAfter', 'containerSlotsBefore',
+             'containerSlotsAfter', 'extra'].each { rowType.getField(it) }
         } finally {
             loader.close()
         }
@@ -277,6 +421,18 @@ tasks.register('verifyMixinSafety') {
             include '**/*Mixin.java'
         }.findAll { unsafePattern.matcher(it.getText('UTF-8')).find() }
 
+        def networkSource = file('src/main/java/com/roften/avilixlogger/net/LoggerNetwork.java').getText('UTF-8')
+        def rules = file('proguard-rules.pro').getText('UTF-8')
+        def hooks = networkSource =~ /invokeClientHook\("([^"\n]+)"/
+        hooks.each { call ->
+            if (!rules.contains("public static void ${call[1]}(...);"))
+                throw new GradleException("Reflection client hook lacks keep rule: ${call[1]}")
+        }
+
+        fileTree('src/main/java/com/roften/avilixlogger/compat/create/mixin') { include '**/*.java' }.each { source ->
+            if(source.getText('UTF-8').contains('CreateDeployerAudit.capture('))
+                throw new GradleException("Production mixin bypasses live capture policy: ${source.name}")
+        }
         if (!unsafeFiles.isEmpty()) {
             throw new GradleException('Unsafe mixin instance collection initializer(s): '
                     + unsafeFiles.collect { project.relativePath(it) }.join(', '))
@@ -291,4 +447,42 @@ tasks.named('assemble').configure {
 tasks.named('check').configure {
     dependsOn tasks.named('verifyObfuscatedJar')
     dependsOn tasks.named('verifyMixinSafety')
+    dependsOn 'testAsyncPipeline'
+}
+
+tasks.register('testNativeClickHouse', JavaExec) {
+    group = 'verification'
+    description = 'Runs a real ClickHouse schema/flush/lookup/restart integration, with no AuthCore bypass.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.roften.avilixlogger.core.ClickHouseNativeSmoke'
+}
+
+tasks.register('testAsyncPipeline', JavaExec) {
+    group = 'verification'
+    description = 'Checks bounded asynchronous handoff without a database or Minecraft server.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.roften.avilixlogger.core.AsyncPipelineTest'
+    systemProperty 'avilixlogger.ae2Version', project.findProperty('compatAe2Version') ?: '19.2.12'
+}
+
+tasks.register('testCreatePreflight', JavaExec) {
+    group = 'verification'
+    description = 'Checks raw Create mixin targets and injected compatibility faults without initializing Minecraft.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'com.roften.avilixlogger.core.CreatePreflightTest'
+}
+
+tasks.register('testExactModpackPreflight', JavaExec) {
+    group = 'verification'
+    description = 'Checks Logger mixin contracts against local operator JAR bytecode without executing those mods.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'com.roften.avilixlogger.core.ExactModpackPreflightTest'
+    doFirst {
+        if (!project.hasProperty('exactModpackDir')) throw new GradleException('Specify -PexactModpackDir=/absolute/path/to/mods')
+        args project.property('exactModpackDir')
+    }
 }

@@ -11,6 +11,7 @@ import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks;
 import com.roften.avilixlogger.core.*;
 import com.roften.avilixlogger.integrations.WorldEditIntegration;
+import com.roften.avilixlogger.net.LoggerNetwork;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -77,8 +78,21 @@ public final class LoggerCommands {
             .requires(LoggerCommands::hasAnyLoggerPermission)
             .executes(LoggerCommands::lookupDefaultRoot)
 
+            .then(CartCommands.node())
+            .then(CombatPositionCommand.node())
+            .then(EntryPositionCommand.node())
+            .then(BackpackCommands.node())
+            .then(literal("perf")
+                .requires(s -> PermissionUtil.has(s, "avilixlogger.command.admin", 2))
+                .executes(c -> { c.getSource().sendSystemMessage(Component.literal(HotPathMetrics.report()+"\n"+LoggerRuntime.queueReport()));return 1; })
+                .then(literal("start").executes(c -> { HotPathMetrics.start();LoggerRuntime.resetQueueStatistics();c.getSource().sendSystemMessage(Component.literal("Замеры Logger включены. /log perf — отчёт; /log perf stop — остановка."));return 1; }))
+                .then(literal("resume").executes(c->{c.getSource().sendSystemMessage(Component.literal(LoggerRuntime.resumeCapture()));LoggerNetwork.broadcastCaptureHealth(c.getSource().getServer());return 1;}))
+                .then(literal("check").executes(c->LoggerPipelineCheck.run(c.getSource())))
+                .then(literal("stop").executes(c -> { String report=HotPathMetrics.stop()+"\n"+LoggerRuntime.queueReport();c.getSource().sendSystemMessage(Component.literal(report));AvilixLoggerMod.LOGGER.info("[AvilixLogger] {}",report);return 1; })))
+
             // Short help + examples
-            .then(literal("help").executes(LoggerCommands::help))
+            .then(literal("help").executes(LoggerCommands::help)
+                .then(argument("topic",StringArgumentType.word()).executes(c->{sendGuide(c.getSource(),StringArgumentType.getString(c,"topic"));return 1;})))
 
             // Optional GUI (requires the client to have the mod installed)
             .then(literal("gui")
@@ -219,7 +233,7 @@ public final class LoggerCommands {
     }
 
     private static boolean hasAnyPlanePermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
+        return net.neoforged.fml.ModList.get().isLoaded("immersive_aircraft") && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.plane",
                 "avilixlogger.command.plane.find",
                 "avilixlogger.command.plane.find.offline",
@@ -230,7 +244,7 @@ public final class LoggerCommands {
     }
 
     private static boolean hasAnyPlaneOwnerPermission(CommandSourceStack source) {
-        return com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
+        return net.neoforged.fml.ModList.get().isLoaded("immersive_aircraft") && com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized(source.getServer())
                 && com.roften.avilixlogger.core.PermissionUtil.hasAny(source, 2,
                 "avilixlogger.command.plane",
                 "avilixlogger.command.plane.owner.info",
@@ -382,13 +396,13 @@ public final class LoggerCommands {
         }
         ItemStack plane = getPlaneItem(sp);
         if (plane.isEmpty()) {
-            sp.sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
+            ctx.getSource().sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
             return 0;
         }
 
         var tag = AirplanesCompatHooks.getOwnerTag(plane);
         if (tag == null) {
-            sp.sendSystemMessage(Component.literal("У этого самолёта владелец не задан.").withStyle(ChatFormatting.YELLOW));
+            ctx.getSource().sendSystemMessage(Component.literal("У этого самолёта владелец не задан.").withStyle(ChatFormatting.YELLOW));
             return 1;
         }
 
@@ -404,7 +418,7 @@ public final class LoggerCommands {
         if (uuid != null && !uuid.isBlank()) {
             msg.append(Component.literal(" (" + uuid + ")").withStyle(ChatFormatting.DARK_GRAY));
         }
-        sp.sendSystemMessage(msg);
+        ctx.getSource().sendSystemMessage(msg);
         return 1;
     }
 
@@ -415,7 +429,7 @@ public final class LoggerCommands {
         }
         ItemStack plane = getPlaneItem(sp);
         if (plane.isEmpty()) {
-            sp.sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
+            ctx.getSource().sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
             return 0;
         }
 
@@ -432,7 +446,7 @@ public final class LoggerCommands {
         AirplanesCompatHooks.clearOwnerOnItem(plane);
 
         logPlaneOwnerChange(sp, plane, oldName, oldUuid, null, null);
-        sp.sendSystemMessage(Component.literal("Владелец сброшен.").withStyle(ChatFormatting.YELLOW));
+        ctx.getSource().sendSystemMessage(Component.literal("Владелец сброшен.").withStyle(ChatFormatting.YELLOW));
         return 1;
     }
 
@@ -443,7 +457,7 @@ public final class LoggerCommands {
         }
         ItemStack plane = getPlaneItem(sp);
         if (plane.isEmpty()) {
-            sp.sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
+            ctx.getSource().sendSystemMessage(Component.literal("Возьми самолёт (VehicleItem) в руку.").withStyle(ChatFormatting.RED));
             return 0;
         }
 
@@ -486,7 +500,7 @@ public final class LoggerCommands {
         AirplanesCompatHooks.setOwnerOnItem(plane, newName, newUuid);
         logPlaneOwnerChange(sp, plane, oldName, oldUuid, newName, newUuid);
 
-        sp.sendSystemMessage(Component.literal("Владелец установлен: ").withStyle(ChatFormatting.GRAY)
+        ctx.getSource().sendSystemMessage(Component.literal("Владелец установлен: ").withStyle(ChatFormatting.GRAY)
                 .append(Component.literal(newName).withStyle(ChatFormatting.AQUA))
                 .append(newUuid != null ? Component.literal(" (" + newUuid + ")").withStyle(ChatFormatting.DARK_GRAY) : Component.empty()));
         return 1;
@@ -509,7 +523,7 @@ public final class LoggerCommands {
             e.y = pos.getY();
             e.z = pos.getZ();
 
-            e.itemStackNbt = NbtSerde.writeItemStack(plane, level.registryAccess());
+            e.deferSnapshot(LogEntry.SnapshotField.ITEM, NbtSerde.snapshotItemStack(plane, level.registryAccess()));
             e.count = plane.getCount();
 
             String planeName = null;
@@ -724,14 +738,14 @@ public final class LoggerCommands {
                     if (!sp.isAlive() || sp.connection == null) return;
 
                     if (total == 0) {
-                        sp.sendSystemMessage(Component.literal("Офлайн-поиск завершён: самолёты владельца не найдены. (регионов просмотрено: " + scanned + ")")
+                        ctx.getSource().sendSystemMessage(Component.literal("Офлайн-поиск завершён: самолёты владельца не найдены. (регионов просмотрено: " + scanned + ")")
                                 .withStyle(ChatFormatting.RED));
-                        sp.sendSystemMessage(Component.literal("Подсказка: если мод самолётов хранит owner не в сущности/Entities, а в Tile/Capabilities, тогда нужно будет другой парсер.")
+                        ctx.getSource().sendSystemMessage(Component.literal("Подсказка: если мод самолётов хранит owner не в сущности/Entities, а в Tile/Capabilities, тогда нужно будет другой парсер.")
                                 .withStyle(ChatFormatting.DARK_GRAY));
                         return;
                     }
 
-                    sp.sendSystemMessage(Component.literal("Офлайн-поиск завершён. Найдено самолётов: ")
+                    ctx.getSource().sendSystemMessage(Component.literal("Офлайн-поиск завершён. Найдено самолётов: ")
                             .withStyle(ChatFormatting.GRAY)
                             .append(Component.literal(String.valueOf(total)).withStyle(ChatFormatting.GREEN))
                             .append(Component.literal(" | владелец: ").withStyle(ChatFormatting.GRAY))
@@ -757,16 +771,16 @@ public final class LoggerCommands {
                                                 .append(Component.literal("\nКлик: телепорт").withStyle(ChatFormatting.GRAY))))
                                 .withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, tpCmd)));
 
-                        sp.sendSystemMessage(line);
+                        ctx.getSource().sendSystemMessage(line);
                     }
 
                     if (total > 30) {
-                        sp.sendSystemMessage(Component.literal("Показаны первые 30. Всего: " + total).withStyle(ChatFormatting.DARK_GRAY));
+                        ctx.getSource().sendSystemMessage(Component.literal("Показаны первые 30. Всего: " + total).withStyle(ChatFormatting.DARK_GRAY));
                     }
                 });
 
             } catch (Throwable t) {
-                server.execute(() -> sp.sendSystemMessage(Component.literal("Офлайн-поиск упал с ошибкой: " + t.getClass().getSimpleName())
+                server.execute(() -> ctx.getSource().sendSystemMessage(Component.literal("Офлайн-поиск упал с ошибкой: " + t.getClass().getSimpleName())
                         .withStyle(ChatFormatting.RED)));
             }
         }, "avilixlogger-plane-offline-scan");
@@ -998,6 +1012,22 @@ public final class LoggerCommands {
         return 1;
     }
 
+    private static void queryConsole(CommandSourceStack source, ServerLevel level, LogQuery query, Component title) {
+        ChatLogPager.queryConsole(source, level, query, title);
+    }
+
+    private static int startLegacyRollback(CommandSourceStack source, long from, long until, String actor,
+                                            List<RollbackPlanManager.Scope> scopes) {
+        UUID owner = source.getEntity() instanceof ServerPlayer player ? player.getUUID() : new UUID(0, 0);
+        RollbackPlanManager.Plan plan = RollbackPlanManager.save(owner, from, until, actor, null, scopes);
+        source.sendSystemMessage(Component.literal("[Логгер] Подготовка отката...").withStyle(ChatFormatting.AQUA));
+        RollbackCoordinator.startRollback(source.getServer(), owner, plan,
+                () -> source.sendSystemMessage(Component.literal("[Логгер] Откат выполняется по частям.")),
+                report -> sendRollbackSummary(source, false, report),
+                error -> source.sendFailure(Component.literal(error)));
+        return 1;
+    }
+
     private enum PageNav { NEXT, PREV, FIRST }
 
     private static int inspectBlock(CommandContext<CommandSourceStack> ctx) {
@@ -1045,16 +1075,7 @@ public final class LoggerCommands {
 
         // Console / command blocks: no interactive pagination.
         q.limit = Math.min(50, LoggerConfig.VALUES.lookupDefaultLimit.get() * 2);
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        src.sendSystemMessage(Component.literal("--- Логи для " + q.dim + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ() + " ---"));
-        if (entries.isEmpty()) {
-            src.sendSystemMessage(Component.literal("(нет записей)"));
-            return;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            src.sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(src, level, q, Component.literal("--- Логи для " + q.dim + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ() + " ---"));
     }
 
     private static int lookup(CommandContext<CommandSourceStack> ctx, int seconds, int radius, String actor) {
@@ -1097,16 +1118,7 @@ public final class LoggerCommands {
 
         // Console / command blocks: print without interactive pagination.
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Поиск (" + formatDuration(seconds) + ", r=" + radius + ") ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Поиск (" + formatDuration(seconds) + ", r=" + radius + ") ---"));
         return 1;
     }
 
@@ -1185,9 +1197,8 @@ public final class LoggerCommands {
         BlockPos min = center.offset(-radius, -radius, -radius);
         BlockPos max = center.offset(radius, radius, radius);
 
-        int changed = RollbackEngine.rollbackBox(level, min, max, sinceTs, actor);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback complete. affected=" + changed), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), sinceTs, System.currentTimeMillis(), actor,
+                List.of(new RollbackPlanManager.Scope(level.dimension().location().toString(), min, max)));
     }
 
     private static int rollbackDateRadius(CommandContext<CommandSourceStack> ctx, String date, int radius, String actor) {
@@ -1205,9 +1216,8 @@ public final class LoggerCommands {
         BlockPos min = center.offset(-radius, -radius, -radius);
         BlockPos max = center.offset(radius, radius, radius);
 
-        int changed = RollbackEngine.rollbackBoxRange(level, min, max, range[0], range[1], actor);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback complete. affected=" + changed + " (date=" + date + ")"), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), range[0], range[1], actor,
+                List.of(new RollbackPlanManager.Scope(level.dimension().location().toString(), min, max)));
     }
 
     private static int rollbackDateAll(CommandContext<CommandSourceStack> ctx, String date, String actor) {
@@ -1220,17 +1230,12 @@ public final class LoggerCommands {
             ctx.getSource().sendFailure(Component.literal("Сервер недоступен."));
             return 0;
         }
-        int changed = 0;
+        List<RollbackPlanManager.Scope> scopes = new java.util.ArrayList<>();
         for (ServerLevel lvl : ctx.getSource().getServer().getAllLevels()) {
-            // World border hard limits (safe integers, avoids DB overflow).
-            BlockPos min = new BlockPos(-30_000_000, -2048, -30_000_000);
-            BlockPos max = new BlockPos(30_000_000, 4096, 30_000_000);
-            changed += RollbackEngine.rollbackBoxRange(lvl, min, max, range[0], range[1], actor);
+            scopes.add(new RollbackPlanManager.Scope(lvl.dimension().location().toString(),
+                    new BlockPos(-30_000_000, -2048, -30_000_000), new BlockPos(30_000_000, 4096, 30_000_000)));
         }
-        final int affected = changed;
-        final String dateStr = date;
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback complete. affected=" + affected + " (date=" + dateStr + ", all dims)"), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), range[0], range[1], actor, scopes);
     }
 
     private static int rollbackBlock(CommandContext<CommandSourceStack> ctx, int seconds) {
@@ -1247,19 +1252,14 @@ public final class LoggerCommands {
         BlockPos pos = hit.getBlockPos();
         long sinceTs = System.currentTimeMillis() - (seconds * 1000L);
 
-        // If chest: rollback both halves if double chest.
-        BlockState state = level.getBlockState(pos);
-        if (state.getBlock() instanceof ChestBlock) {
-            BlockPos other = ChestUtil.getConnectedChestPos(level, pos, state);
-            int c1 = RollbackEngine.rollbackExact(level, pos, sinceTs, null);
-            int c2 = other != null && !other.equals(pos) ? RollbackEngine.rollbackExact(level, other, sinceTs, null) : 0;
-            ctx.getSource().sendSuccess(() -> Component.literal("Rollback chest complete. affected=" + (c1 + c2)), true);
-            return 1;
+        List<RollbackPlanManager.Scope> scopes = new java.util.ArrayList<>();
+        scopes.add(new RollbackPlanManager.Scope(level.dimension().location().toString(), pos, pos));
+        if (level.getBlockState(pos).getBlock() instanceof ChestBlock) {
+            BlockPos other = ChestUtil.getConnectedChestPos(level, pos, level.getBlockState(pos));
+            if (other != null && !other.equals(pos))
+                scopes.add(new RollbackPlanManager.Scope(level.dimension().location().toString(), other, other));
         }
-
-        int changed = RollbackEngine.rollbackExact(level, pos, sinceTs, null);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback block complete. affected=" + changed), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), sinceTs, System.currentTimeMillis(), null, scopes);
     }
 
     private static int rollbackWorldEditSelection(CommandContext<CommandSourceStack> ctx, int seconds) {
@@ -1274,9 +1274,8 @@ public final class LoggerCommands {
             return 0;
         }
         long sinceTs = System.currentTimeMillis() - (seconds * 1000L);
-        int changed = RollbackEngine.rollbackBox(level, sel[0], sel[1], sinceTs, null);
-        ctx.getSource().sendSuccess(() -> Component.literal("Rollback WorldEdit selection complete. affected=" + changed), true);
-        return 1;
+        return startLegacyRollback(ctx.getSource(), sinceTs, System.currentTimeMillis(), null,
+                List.of(new RollbackPlanManager.Scope(level.dimension().location().toString(), sel[0], sel[1])));
     }
 
     private static int setInspectTool(CommandContext<CommandSourceStack> ctx, String itemId) {
@@ -1335,16 +1334,7 @@ public final class LoggerCommands {
         }
 
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Игрок: " + (actor == null ? "все" : actor) + " (" + formatDuration(seconds) + ") ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Игрок: " + (actor == null ? "все" : actor) + " (" + formatDuration(seconds) + ") ---"));
         return 1;
     }
 
@@ -1388,16 +1378,7 @@ public final class LoggerCommands {
         }
 
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Поиск (дата=" + date + ", r=" + radius + ") ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Поиск (дата=" + date + ", r=" + radius + ") ---"));
         return 1;
     }
 
@@ -1427,16 +1408,7 @@ public final class LoggerCommands {
         }
 
         q.limit = Math.min(200, LoggerConfig.VALUES.lookupDefaultLimit.get());
-        List<LogEntry> entries = LoggerRuntime.storage(level).queryReverse(q);
-        ctx.getSource().sendSystemMessage(Component.literal("--- Поиск (дата=" + date + ", все миры) ---"));
-        if (entries.isEmpty()) {
-            ctx.getSource().sendSystemMessage(Component.literal("(нет записей)"));
-            return 1;
-        }
-        for (LogEntry e : entries) {
-            if (e != null && e.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && e.extra != null && e.extra.startsWith("container change")) continue;
-            ctx.getSource().sendSystemMessage(LogText.toChatLine(level, e));
-        }
+        queryConsole(ctx.getSource(), level, q, Component.literal("--- Поиск (дата=" + date + ", все миры) ---"));
         return 1;
     }
 
@@ -1468,27 +1440,16 @@ public final class LoggerCommands {
     }
 
     private static void sendShortHelp(CommandSourceStack src) {
-        src.sendSystemMessage(Component.literal("AvilixLogger — /log").withStyle(ChatFormatting.GOLD));
-
-        src.sendSystemMessage(Component.literal("Просмотр").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --t 30m --r 10 --m theft").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --d 2026-01-25 --r 20 --p Steve").withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log --d 2026-01-25 --ad   (все миры)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log i [флаги...]   |   /log last [флаги...]" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Откат").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log rollback --t 2h --r 30 --m grief   (состояние 2 часа назад)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log rollback --at 2026-08-27T12:30 --we   (состояние на точный момент)" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  /log rollback --confirm   |   /log rollback --cancel" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Флаги (коротко)").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  --t time | --at yyyy-MM-ddTHH:mm | --d date (00:00) | --r radius | --we | --block" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  mode: grief | theft | combat | planes | all   |   types: --ty break,place,container_take" ).withStyle(ChatFormatting.GRAY));
-        src.sendSystemMessage(Component.literal("  dim: overworld | nether | end   (или полный id: minecraft:overworld)" ).withStyle(ChatFormatting.GRAY));
-
-        src.sendSystemMessage(Component.literal("Пресеты").withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("  /log preset save <name> <args...>   |   /log preset run <name> [args...]" ).withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("AvilixLogger — /log gui · «Действия» · «Справка»").withStyle(ChatFormatting.GOLD));
+        src.sendSystemMessage(Component.literal("Поиск: /log --t 30m --r 20 --p Steve · осмотр: /log i").withStyle(ChatFormatting.GRAY));
+        src.sendSystemMessage(Component.literal("Откат: /log rollback --t 2h --r 20, затем --confirm или --cancel").withStyle(ChatFormatting.GRAY));
+        for(var topic:com.roften.avilixlogger.core.LoggerUserGuide.TOPICS)
+            src.sendSystemMessage(Component.literal("/log help "+topic.id()+" — "+topic.title()).withStyle(style->style.withColor(ChatFormatting.AQUA).withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND,"/log help "+topic.id()))));
+    }
+    private static void sendGuide(CommandSourceStack src,String topic) {
+        var guide=com.roften.avilixlogger.core.LoggerUserGuide.topic(topic);
+        src.sendSystemMessage(Component.literal(guide.title()).withStyle(ChatFormatting.GOLD));
+        for(String line:guide.text().lines().toList())src.sendSystemMessage(Component.literal(line).withStyle(ChatFormatting.GRAY));
     }
 
     private static final class ParsedFlags {
@@ -1706,6 +1667,9 @@ public final class LoggerCommands {
             case "item_drop", "drop" -> ActionType.ITEM_DROP;
             case "item_pickup", "pickup" -> ActionType.ITEM_PICKUP;
             case "craft", "item_craft" -> ActionType.ITEM_CRAFT;
+            case "weapon_kill", "gun_kill" -> ActionType.WEAPON_KILL;
+            case "weapon_reload", "reload" -> ActionType.WEAPON_RELOAD;
+            case "transform", "item_transform" -> ActionType.ITEM_TRANSFORM;
             case "smelt", "item_smelt" -> ActionType.ITEM_SMELT;
             case "item_use", "use_item" -> ActionType.ITEM_USE;
             case "item_use_start", "use_start", "charge", "draw", "start_use" -> ActionType.ITEM_USE_START;
@@ -1713,6 +1677,17 @@ public final class LoggerCommands {
             case "item_consume", "consume", "drink", "eat" -> ActionType.ITEM_CONSUME;
             case "projectile_shoot", "shoot", "shot", "bow", "crossbow", "arrow" -> ActionType.PROJECTILE_SHOOT;
             case "projectile_hit", "hit", "arrow_hit", "impact" -> ActionType.PROJECTILE_HIT;
+            case "gui_change", "menu_change" -> ActionType.GUI_CHANGE;
+            case "equipment", "equipment_change" -> ActionType.ENTITY_EQUIPMENT_CHANGE;
+            case "corpse", "corpse_change", "corpse_content_change" -> ActionType.CORPSE_CONTENT_CHANGE;
+            case "claim", "claim_action", "opac" -> ActionType.CLAIM_ACTION;
+            case "xp", "experience", "experience_change", "mending_xp" -> ActionType.EXPERIENCE_CHANGE;
+            case "gap", "capture_gap" -> ActionType.CAPTURE_GAP;
+            case "diagnostic", "logger_diagnostic" -> ActionType.LOGGER_DIAGNOSTIC;
+            case "machine", "machine_state", "machine_state_change" -> ActionType.MACHINE_STATE_CHANGE;
+            case "machine_items", "machine_content", "machine_content_change", "production" -> ActionType.MACHINE_CONTENT_CHANGE;
+            case "party", "team", "party_change", "teams" -> ActionType.PARTY_CHANGE;
+            case "protection", "permissions", "protection_change", "opac_config" -> ActionType.PROTECTION_CHANGE;
             case "gui", "gui_open", "menu", "interface" -> ActionType.GUI_OPEN;
             case "player_death" -> ActionType.PLAYER_DEATH;
             case "join", "player_join" -> ActionType.PLAYER_JOIN;
@@ -1735,9 +1710,9 @@ public final class LoggerCommands {
         return switch (m) {
             case "grief", "build" -> EnumSet.of(ActionType.BLOCK_BREAK, ActionType.BLOCK_PLACE, ActionType.BLOCK_INTERACT);
             case "theft", "steal" -> EnumSet.of(ActionType.CONTAINER_OPEN, ActionType.CONTAINER_PUT, ActionType.CONTAINER_TAKE, ActionType.ITEM_PICKUP, ActionType.ITEM_DROP, ActionType.GUI_OPEN);
-            case "combat", "pvp" -> EnumSet.of(ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
-            case "items", "item" -> EnumSet.of(ActionType.ITEM_DROP, ActionType.ITEM_PICKUP, ActionType.ITEM_CRAFT, ActionType.ITEM_SMELT, ActionType.ITEM_USE, ActionType.ITEM_USE_START, ActionType.ITEM_USE_STOP, ActionType.ITEM_CONSUME, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
-            case "gui", "menus", "interfaces" -> EnumSet.of(ActionType.GUI_OPEN, ActionType.CONTAINER_OPEN, ActionType.ENTITY_CONTAINER_OPEN);
+            case "combat", "pvp" -> EnumSet.of(ActionType.WEAPON_KILL, ActionType.ENTITY_DEATH, ActionType.PLAYER_DEATH, ActionType.PLAYER_KILL, ActionType.ENTITY_SPAWN, ActionType.ENTITY_ATTACK, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
+            case "items", "item" -> EnumSet.of(ActionType.WEAPON_RELOAD, ActionType.ITEM_DROP, ActionType.ITEM_PICKUP, ActionType.ITEM_CRAFT, ActionType.ITEM_TRANSFORM, ActionType.ITEM_SMELT, ActionType.ITEM_USE, ActionType.ITEM_USE_START, ActionType.ITEM_USE_STOP, ActionType.ITEM_CONSUME, ActionType.PROJECTILE_SHOOT, ActionType.PROJECTILE_HIT);
+            case "gui", "menus", "interfaces" -> EnumSet.of(ActionType.GUI_CHANGE, ActionType.GUI_OPEN, ActionType.CONTAINER_OPEN, ActionType.ENTITY_CONTAINER_OPEN);
             case "planes", "plane", "aircraft" -> EnumSet.of(
                     ActionType.PLANE_PLACE, ActionType.PLANE_REMOVE, ActionType.PLANE_MOUNT, ActionType.PLANE_PICKUP, ActionType.ENTITY_OWNER_SET,
                     ActionType.ENTITY_SPAWN, ActionType.ENTITY_DEATH, ActionType.ENTITY_MOUNT, ActionType.ENTITY_DISMOUNT, ActionType.ENTITY_INTERACT
@@ -2006,7 +1981,7 @@ public final class LoggerCommands {
         }
 
         CommandSourceStack src = ctx.getSource();
-        showRollbackPreview(sp, plan);
+        showRollbackPreview(src, sp, plan);
         src.sendSystemMessage(Component.literal("Считаю точный предпросмотр в ClickHouse вне серверного тика…")
                 .withStyle(ChatFormatting.YELLOW));
         RollbackCoordinator.preparePreview(src.getServer(), sp.getUUID(), plan,
@@ -2137,11 +2112,11 @@ public final class LoggerCommands {
         }
     }
 
-    private static void showRollbackPreview(ServerPlayer player, RollbackPlanManager.Plan plan) {
+    private static void showRollbackPreview(CommandSourceStack source, ServerPlayer player, RollbackPlanManager.Plan plan) {
         if (player == null || plan == null || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
         if (plan.scopes().size() != 1) {
             clearRollbackPreview(player);
-            player.sendSystemMessage(Component.literal("Глобальный план нельзя показать одной рамкой; точные измерения сохранены в плане.")
+            source.sendSystemMessage(Component.literal("Глобальный план нельзя показать одной рамкой; точные измерения сохранены в плане.")
                     .withStyle(ChatFormatting.DARK_GRAY));
             return;
         }
@@ -2150,7 +2125,7 @@ public final class LoggerCommands {
         if (scope.min().getX() <= -1_000_000 || scope.max().getX() >= 1_000_000
                 || scope.min().getZ() <= -1_000_000 || scope.max().getZ() >= 1_000_000) {
             clearRollbackPreview(player);
-            player.sendSystemMessage(Component.literal("Откат всего измерения не имеет конечной отображаемой рамки.")
+            source.sendSystemMessage(Component.literal("Откат всего измерения не имеет конечной отображаемой рамки.")
                     .withStyle(ChatFormatting.DARK_GRAY));
             return;
         }

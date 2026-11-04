@@ -98,4 +98,11 @@ public final class RollbackPlanManager {
     public static Plan clear(UUID playerId) {
         return playerId == null ? null : PLANS.remove(playerId);
     }
+
+    public static void expire(long now) {
+        if(PLANS.isEmpty())return;
+        PLANS.forEach((id,plan)->{if(plan.expiresAt()<=now)PLANS.remove(id,plan);});
+    }
+
+    public static void clearAll() { PLANS.clear(); }
 }

@@ -22,5 +22,10 @@ eclipse
 run
 runs
 run-data
+run-local-create
+run-create-absent
+run-blockpack
+run-storage
+logs
 
 repo

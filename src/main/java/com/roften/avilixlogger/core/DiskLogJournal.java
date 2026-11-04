@@ -1,0 +1,124 @@
+package com.roften.avilixlogger.core;
+
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
+import java.util.*;
+
+/** Immutable, versioned batches. Only fully written files are visible to the sender. */
+final class DiskLogJournal {
+    private static final String HEADER = "avilixlogger-journal-v1";
+    private final Path directory;
+    private long sequence, tokenClock;
+
+    DiskLogJournal(Path directory) { this.directory = directory; }
+
+    long initialize() throws IOException {
+        Files.createDirectories(directory);
+        // A .tmp is a batch whose publication was interrupted. Never delete an incomplete one.
+        try (var files = Files.newDirectoryStream(directory, "*.tmp")) {
+            for (Path file : files) {
+                try {
+                    read(file);
+                    publish(file, directory.resolve(file.getFileName().toString().replace(".tmp", ".jsonl")));
+                } catch (IOException | RuntimeException incomplete) {
+                    Path retained = file.resolveSibling(file.getFileName() + ".incomplete");
+                    Files.move(file, retained);
+                    com.roften.avilixlogger.AvilixLoggerMod.LOGGER.error(
+                            "[AvilixLogger] Interrupted journal batch retained for recovery: {}", retained, incomplete);
+                }
+            }
+        }
+        long count = 0;
+        try (var files = Files.newDirectoryStream(directory, "*.jsonl")) {
+            for (var file : files) {
+                count++;
+                String name = file.getFileName().toString();
+                try { tokenClock = Math.max(tokenClock, Long.parseLong(name.substring(0,19))); }
+                catch (RuntimeException malformed) { throw new IOException("Invalid journal batch name: " + name, malformed); }
+            }
+        }
+        return count;
+    }
+
+    String newToken() {
+        // New batches sort after startup backlog even if the wall clock moved back.
+        tokenClock = Math.max(System.currentTimeMillis(), tokenClock + 1);
+        return String.format(java.util.Locale.ROOT, "%019d-%06d-%s", tokenClock, sequence++, UUID.randomUUID());
+    }
+
+    Path write(String name, List<LogEntry> rows) throws IOException {
+        Path temporary = directory.resolve(name + ".tmp");
+        Path ready = directory.resolve(name + ".jsonl");
+        if (Files.exists(ready)) return ready;
+        try (FileOutputStream stream = new FileOutputStream(temporary.toFile());
+             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8), 64 * 1024)) {
+            writer.write(HEADER); writer.newLine();
+            writer.write(Integer.toString(rows.size())); writer.newLine();
+            for (LogEntry row : rows) {
+                GzipJson.GSON.toJson(row, writer);
+                writer.newLine();
+            }
+            writer.flush();
+            stream.getChannel().force(true);
+        } catch (IOException | RuntimeException error) {
+            // This live process still owns all rows and retries the same batch in memory.
+            try { Files.deleteIfExists(temporary); } catch (IOException ignored) {}
+            throw error;
+        }
+        publish(temporary, ready);
+        return ready;
+    }
+
+    private static void publish(Path from, Path to) throws IOException {
+        try { Files.move(from, to, StandardCopyOption.ATOMIC_MOVE); }
+        catch (AtomicMoveNotSupportedException ignored) { Files.move(from, to); }
+    }
+
+    List<Path> pending() throws IOException {
+        return pending(Integer.MAX_VALUE);
+    }
+
+    /** Visibility needs existence, not an oldest-file selection over the entire backlog. */
+    boolean hasPending() throws IOException {
+        try (var files = Files.newDirectoryStream(directory, "*.jsonl")) {
+            return files.iterator().hasNext();
+        }
+    }
+
+    /** Delivery needs only the oldest window, even after a long database outage. */
+    List<Path> pending(int limit) throws IOException {
+        if (limit < 1) throw new IllegalArgumentException("Invalid journal window");
+        Comparator<Path> order = Comparator.comparing(path -> path.getFileName().toString());
+        PriorityQueue<Path> oldest = new PriorityQueue<>(Math.min(limit, 64), order.reversed());
+        try (var files = Files.newDirectoryStream(directory, "*.jsonl")) {
+            for (Path file : files) {
+                if (oldest.size() < limit) oldest.add(file);
+                else if (order.compare(file, oldest.peek()) < 0) { oldest.poll(); oldest.add(file); }
+            }
+        }
+        ArrayList<Path> paths = new ArrayList<>(oldest);
+        paths.sort(order);
+        return paths;
+    }
+
+    static List<LogEntry> read(Path path) throws IOException {
+        try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            if (!HEADER.equals(reader.readLine())) throw new IOException("Unknown journal version: " + path);
+            int count = Integer.parseInt(reader.readLine());
+            if (count < 1 || count > 1_000_000) throw new IOException("Invalid batch size: " + count);
+            ArrayList<LogEntry> rows = new ArrayList<>(Math.min(count, 10_000));
+            for (int i = 0; i < count; i++) {
+                String line = reader.readLine();
+                if (line == null) throw new EOFException("Incomplete journal batch: " + path);
+                LogEntry row = GzipJson.GSON.fromJson(line, LogEntry.class);
+                if (row == null || row.type == null || row.id <= 0) throw new IOException("Invalid journal row: " + path);
+                rows.add(row);
+            }
+            if (reader.readLine() != null) throw new IOException("Unexpected trailing journal data: " + path);
+            return rows;
+        } catch (RuntimeException malformed) { throw new IOException("Malformed journal batch: " + path, malformed); }
+    }
+
+    static void acknowledge(Path path) throws IOException { Files.delete(path); }
+}

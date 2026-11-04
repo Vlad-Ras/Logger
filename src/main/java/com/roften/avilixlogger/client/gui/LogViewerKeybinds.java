@@ -37,7 +37,8 @@ public final class LogViewerKeybinds {
 
         while (OPEN_GUI.consumeClick()) {
             // Ask the server to open the GUI (permission checked server-side).
-            PacketDistributor.sendToServer(new C2SOpenGuiPayload());
+            if(mc.getConnection()!=null&&mc.getConnection().hasChannel(C2SOpenGuiPayload.TYPE))PacketDistributor.sendToServer(new C2SOpenGuiPayload());
+            else mc.gui.getChat().addMessage(net.minecraft.network.chat.Component.literal("GUI логгера недоступен: установите одинаковую версию на клиент и сервер или используйте /log help."));
         }
     }
 }

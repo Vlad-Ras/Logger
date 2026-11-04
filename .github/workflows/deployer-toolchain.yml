@@ -1,0 +1,49 @@
+name: Export Deployer development toolchain
+on:
+  push:
+    paths: ['.github/workflows/deployer-toolchain.yml']
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Prepare native server and classpaths
+        run: |
+          cat > /tmp/deployer-export.gradle <<'EOF'
+          allprojects { afterEvaluate {
+            tasks.register('exportDeployerClasspath') {
+              dependsOn 'compileCreateSmokeJava', 'testClasses', 'prepareServerRun'
+              doLast {
+                project.file('build/deployer-classpath.txt').text = (project.sourceSets.main.compileClasspath + project.sourceSets.main.runtimeClasspath + project.sourceSets.createSmoke.runtimeClasspath + project.sourceSets.test.runtimeClasspath).asPath
+              }
+            }
+          } }
+          EOF
+          ./gradlew -I /tmp/deployer-export.gradle exportDeployerClasspath -PcreateSmoke --console=plain --no-daemon
+      - name: Package reproducible local compiler and native runtime
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, tarfile, re
+          project = pathlib.Path.cwd()
+          jars = set(pathlib.Path(p) for p in (project/'build/deployer-classpath.txt').read_text().split(os.pathsep) if p.endswith('.jar'))
+          for args in (project/'build/moddev').rglob('*.txt'):
+              jars.update(pathlib.Path(p) for p in re.findall(r'/[^\s:\";]+\.jar', args.read_text()))
+          jars.update(p for p in (pathlib.Path.home()/'.gradle/caches').rglob('*.jar') if 'devlaunch' in p.name.lower())
+          with tarfile.open('deployer-toolchain.tar.gz', 'w:gz', compresslevel=1) as archive:
+              for source in list(jars) + [pathlib.Path(os.environ['JAVA_HOME']).resolve(), project/'build/classes', project/'build/resources', project/'build/moddev']:
+                  if source.exists(): archive.add(source, arcname=str(source).lstrip('/'))
+              archive.add(project/'build/deployer-classpath.txt', arcname='classpath.txt')
+          print('Packed jars:', len(jars))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deployer-development-toolchain
+          path: deployer-toolchain.tar.gz
+          retention-days: 3

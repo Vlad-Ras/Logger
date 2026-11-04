@@ -16,6 +16,7 @@ public final class LogQuery {
 
     /** If set, filter by axis-aligned bounding box (inclusive). */
     public BlockPos minPos;
+    public boolean includeIntersectingClaims;
     public BlockPos maxPos;
 
     /** Optional player name filter (case-insensitive exact match). */
@@ -32,6 +33,18 @@ public final class LogQuery {
 
     /** Optional text marker filter for compat logs such as trains/cannons. */
     public String extraTextFilter;
+    public String textFilter;
+    public java.util.List<String> textAliases=java.util.List.of(),blockAliases=java.util.List.of();
+    public String trainNameFilter;
+    public String backpackNeedle;
+    public boolean planeOnly;
+
+    /** Exact logical Create cart; required filter, never removed on query fallback. */
+    public java.util.UUID cartId;
+    /** Exact logical ID across all known Create kinds; preserved in every SQL fallback. */
+    public java.util.UUID constructionId;
+    public java.util.UUID backpackId;
+    public String sourcePrefix;
 
     /** Optional source label for diagnostics (chat/gui/rollback). */
     public String debugSource;
@@ -51,6 +64,13 @@ public final class LogQuery {
      */
     public boolean requireDetails;
 
+    /** Optional exact persisted record; kept through every query fallback. */
+    public long exactId;
+    public long[] exactIds;
+    /** Explicit From/Range GUI searches use chronological keyset pagination. */
+    public boolean chronological;
+    public long cursorTs;
+
     /** Internal paging: id cursor (exclusive). */
     public long afterId;
     public long beforeId;
@@ -67,16 +87,27 @@ public final class LogQuery {
         q.limit = this.limit;
         q.exactPos = this.exactPos;
         q.minPos = this.minPos;
+        q.includeIntersectingClaims = this.includeIntersectingClaims;
         q.maxPos = this.maxPos;
         q.actorName = this.actorName;
         q.owner = this.owner;
         q.blockIdFilter = this.blockIdFilter;
         q.planeNameFilter = this.planeNameFilter;
         q.extraTextFilter = this.extraTextFilter;
+        q.textAliases=java.util.List.copyOf(this.textAliases);q.blockAliases=java.util.List.copyOf(this.blockAliases);
+        q.textFilter = this.textFilter; q.trainNameFilter = this.trainNameFilter;
+        q.backpackNeedle = this.backpackNeedle; q.planeOnly = this.planeOnly;
+        q.cartId = this.cartId;
+        q.constructionId = this.constructionId;
+        q.backpackId = this.backpackId;
+        q.sourcePrefix = this.sourcePrefix;
         q.debugSource = this.debugSource;
         q.type = this.type;
         q.types = this.types != null ? this.types.clone() : null;
         q.requireDetails = this.requireDetails;
+        q.exactId = this.exactId;
+        q.exactIds = this.exactIds == null ? null : this.exactIds.clone();
+        q.chronological = this.chronological; q.cursorTs = this.cursorTs;
         q.afterId = this.afterId;
         q.beforeId = this.beforeId;
         return q;

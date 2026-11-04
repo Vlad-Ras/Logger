@@ -25,12 +25,14 @@ public final class InspectManager {
     private InspectManager() {}
 
     public static boolean isInspecting(Player player) {
-        return player != null && INSPECTING.contains(player.getUUID());
+        return player instanceof net.minecraft.server.level.ServerPlayer admin
+                && PermissionUtil.isAdministrator(admin) && INSPECTING.contains(admin.getUUID());
     }
 
     public static boolean toggle(Player player) {
-        if (player == null) return false;
-        UUID id = player.getUUID();
+        if (!(player instanceof net.minecraft.server.level.ServerPlayer admin)
+                || !PermissionUtil.isAdministrator(admin)) return false;
+        UUID id = admin.getUUID();
         if (INSPECTING.contains(id)) {
             INSPECTING.remove(id);
             return false;
@@ -41,6 +43,8 @@ public final class InspectManager {
 
     public static void set(Player player, boolean enabled) {
         if (player == null) return;
+        if (enabled && (!(player instanceof net.minecraft.server.level.ServerPlayer admin)
+                || !PermissionUtil.isAdministrator(admin))) return;
         if (enabled) INSPECTING.add(player.getUUID());
         else INSPECTING.remove(player.getUUID());
     }

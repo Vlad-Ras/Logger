@@ -27,23 +27,48 @@ import java.util.HashSet;
  */
 public final class ContainerSlotSnapshot {
 
+    private static final Direction[] SIDES = Direction.values();
     private ContainerSlotSnapshot() {}
+
+    /** A menu can use a different block's inventory (for example a BlockPack cluster root).
+     * Read the container already selected by the native menu, without resolving a cluster again.
+     * Null refuses a stale/cross-world block entity; compound and generic menus keep their locator.
+     */
+    public static BlockPos menuStoragePos(ServerLevel level, net.minecraft.world.inventory.AbstractContainerMenu menu, BlockPos clicked) {
+        if (menu instanceof net.minecraft.world.inventory.ChestMenu chest && chest.getContainer() instanceof BlockEntity be) {
+            BlockPos actual = be.getBlockPos();
+            if (be.isRemoved() || be.getLevel() != level || !WorldSnapshotAccess.readable(level, actual)
+                    || level.getBlockEntity(actual) != be) return null;
+            return actual.immutable();
+        }
+        return clicked;
+    }
 
     /** Snapshot for a block storage at pos. Returns SNBT string or null if nothing could be snapshotted. */
     public static String snapshot(ServerLevel level, BlockPos pos) {
-        if (level == null || pos == null) return null;
+        return NbtSerde.toSnbt(snapshotTag(level, pos));
+    }
 
+    public static CompoundTag snapshotTag(ServerLevel level, BlockPos pos) {
+        if (!WorldSnapshotAccess.readable(level, pos)) return null;
+
+        BlockState state = level.getBlockState(pos);
+        return snapshotTag(level, pos, state, state.hasBlockEntity() ? level.getBlockEntity(pos) : null);
+    }
+
+    /** Reuses the already captured world lookup; capabilities still resolve afresh per snapshot. */
+    public static CompoundTag snapshotTag(ServerLevel level, BlockPos pos, BlockState state, BlockEntity be) {
+        if (!WorldSnapshotAccess.readable(level, pos)) return null;
         // 1) Prefer capability (modded storages)
-        BlockEntity be = level.getBlockEntity(pos);
         if (be != null) {
-            String cap = snapshotFromCapability(level, pos, be);
+            CompoundTag cap = snapshotFromCapability(level, pos, state, be);
             if (cap != null) return cap;
         }
 
         // 2) Vanilla/container fallback (supports chest, barrel, shulker, etc.)
-        Container cont = containerForPos(level, pos);
+        Container cont = containerForPos(level, pos, state, be);
         if (cont != null) {
-            return NbtSerde.toSnbt(writeContainer(cont, level.registryAccess()));
+            return writeContainer(cont, level.registryAccess());
         }
 
         return null;
@@ -51,21 +76,23 @@ public final class ContainerSlotSnapshot {
 
     /** Apply snapshot to block storage at pos. Returns true if applied successfully. */
     public static boolean apply(ServerLevel level, BlockPos pos, String snapshotSnbt) {
+        return apply(level, pos, NbtSerde.fromSnbt(snapshotSnbt));
+    }
+
+    public static boolean apply(ServerLevel level, BlockPos pos, CompoundTag tag) {
         if (level == null || pos == null) return false;
-        if (snapshotSnbt == null || snapshotSnbt.isBlank()) return false;
-        CompoundTag tag = NbtSerde.fromSnbt(snapshotSnbt);
         if (!isStructurallyValid(tag)) return false;
 
         // A capability may reject a write after several slots were already changed. Keep a
         // local backup and verify the resulting snapshot byte-for-byte at the NBT level.
-        CompoundTag backup = NbtSerde.fromSnbt(snapshot(level, pos));
+        CompoundTag backup = snapshotTag(level, pos);
         if (!isStructurallyValid(backup)) return false;
 
         if (!applyUnchecked(level, pos, tag)) {
             applyUnchecked(level, pos, backup);
             return false;
         }
-        CompoundTag actual = NbtSerde.fromSnbt(snapshot(level, pos));
+        CompoundTag actual = snapshotTag(level, pos);
         if (equivalent(tag, actual)) return true;
 
         applyUnchecked(level, pos, backup);
@@ -107,6 +134,8 @@ public final class ContainerSlotSnapshot {
         return false;
     }
 
+    public static boolean isValid(CompoundTag tag) { return isStructurallyValid(tag); }
+
     private static boolean isStructurallyValid(CompoundTag tag) {
         if (tag == null || !tag.contains("Size", Tag.TAG_INT) || !tag.contains("Items", Tag.TAG_LIST)) return false;
         int size = tag.getInt("Size");
@@ -124,11 +153,12 @@ public final class ContainerSlotSnapshot {
 
     private static boolean equivalent(CompoundTag expected, CompoundTag actual) {
         if (!isStructurallyValid(expected) || !isStructurallyValid(actual)) return false;
-        return normalizeSlots(expected).equals(normalizeSlots(actual));
+        return expected.equals(actual) || normalizeSlots(expected).equals(normalizeSlots(actual));
     }
 
     private static CompoundTag normalizeSlots(CompoundTag source) {
         CompoundTag copy = source.copy();
+        copy.remove("SlotSources"); // Address metadata does not change the restorable inventory state.
         ListTag items = copy.getList("Items", Tag.TAG_COMPOUND);
         for (int i = 0; i < items.size(); i++) {
             CompoundTag item = items.getCompound(i);
@@ -146,32 +176,34 @@ public final class ContainerSlotSnapshot {
 
     // ---------------- internals ----------------
 
-    private static String snapshotFromCapability(ServerLevel level, BlockPos pos, BlockEntity be) {
+    private static CompoundTag snapshotFromCapability(ServerLevel level, BlockPos pos, BlockState state, BlockEntity be) {
         try {
-            // NeoForge 21.1+: BlockEntity no longer exposes getCapability().
-            // Query it through the level using reflection so we stay compatible across minor versions.
-            IItemHandler h = getItemHandlerCompat(level, pos, be, null);
-            if (h == null) for (Direction d : Direction.values()) {
-                h = getItemHandlerCompat(level, pos, be, d);
+            // Query NeoForge directly, reusing the captured state for all sided fallbacks.
+            IItemHandler h = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, state, be, null);
+            if (h == null) for (Direction d : SIDES) {
+                h = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, state, be, d);
                 if (h != null) break;
             }
             if (h == null) return null;
 
             CompoundTag out = new CompoundTag();
             int size = Math.max(0, h.getSlots());
+            // Subclasses may remap or filter slots; their exposed handler remains authoritative.
+            if(h instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper
+                    && h.getClass()==net.neoforged.neoforge.items.wrapper.InvWrapper.class)
+                return writeContainer(wrapper.getInv(),level.registryAccess());
             out.putInt("Size", size);
             ListTag items = new ListTag();
             for (int i = 0; i < size; i++) {
                 ItemStack st = h.getStackInSlot(i);
                 if (st == null || st.isEmpty()) continue;
-                CompoundTag it = new CompoundTag();
+                CompoundTag it = NbtSerde.snapshotItemStack(st, level.registryAccess());
+                if (it == null) return null;
                 it.putInt("Slot", i);
-                Tag saved = st.save(level.registryAccess());
-                if (saved instanceof CompoundTag ct) it.merge(ct);
                 items.add(it);
             }
             out.put("Items", items);
-            return NbtSerde.toSnbt(out);
+            return out;
         } catch (Throwable ignored) {
             return null;
         }
@@ -180,7 +212,7 @@ public final class ContainerSlotSnapshot {
     private static boolean applyToCapability(ServerLevel level, BlockPos pos, BlockEntity be, CompoundTag snapshot) {
         try {
             IItemHandler h = getItemHandlerCompat(level, pos, be, null);
-            if (h == null) for (Direction d : Direction.values()) {
+            if (h == null) for (Direction d : SIDES) {
                 h = getItemHandlerCompat(level, pos, be, d);
                 if (h != null) break;
             }
@@ -197,7 +229,7 @@ public final class ContainerSlotSnapshot {
                 CompoundTag it = items.getCompound(i);
                 int slot = readSlot(it);
                 if (slot < 0 || slot >= size) return false;
-                ItemStack st = ItemStack.parse(level.registryAccess(), it).orElse(ItemStack.EMPTY);
+                ItemStack st = NbtSerde.readItemStack(it, level.registryAccess());
                 if (st.isEmpty()) return false;
                 mh.setStackInSlot(slot, st);
             }
@@ -207,46 +239,22 @@ public final class ContainerSlotSnapshot {
         }
     }
 
-    @SuppressWarnings({"unchecked", "rawtypes"})
     private static IItemHandler getItemHandlerCompat(ServerLevel level, BlockPos pos, BlockEntity be, Direction side) {
-        try {
-            Object cap = Capabilities.ItemHandler.BLOCK;
-            BlockState state = level.getBlockState(pos);
-
-            // Try the most common signatures first.
-            for (java.lang.reflect.Method m : level.getClass().getMethods()) {
-                if (!m.getName().equals("getCapability")) continue;
-                Class<?>[] p = m.getParameterTypes();
-                try {
-                    Object out = null;
-                    if (p.length == 5) {
-                        // (cap, pos, state, be, context)
-                        out = m.invoke(level, cap, pos, state, be, side);
-                    } else if (p.length == 4) {
-                        // (cap, pos, state, context) OR (cap, pos, be, context)
-                        if (p[2].isAssignableFrom(BlockState.class)) out = m.invoke(level, cap, pos, state, side);
-                        else out = m.invoke(level, cap, pos, be, side);
-                    } else if (p.length == 3) {
-                        // (cap, pos, context)
-                        out = m.invoke(level, cap, pos, side);
-                    }
-                    if (out instanceof IItemHandler ih) return ih;
-                } catch (Throwable ignored) {
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return null;
+        return level.getCapability(Capabilities.ItemHandler.BLOCK, pos, level.getBlockState(pos), be, side);
     }
 
     private static Container containerForPos(ServerLevel level, BlockPos pos) {
         try {
             BlockState state = level.getBlockState(pos);
+            return containerForPos(level, pos, state, state.hasBlockEntity() ? level.getBlockEntity(pos) : null);
+        } catch (Throwable ignored) { return null; }
+    }
 
+    private static Container containerForPos(ServerLevel level, BlockPos pos, BlockState state, BlockEntity be) {
+        try {
             // Double chest: combine both halves into one deterministic container (pos first, then other).
             if (state.getBlock() instanceof ChestBlock) {
-                BlockEntity be0 = level.getBlockEntity(pos);
-                if (!(be0 instanceof Container c0)) return null;
+                if (!(be instanceof Container c0)) return null;
                 BlockPos other = otherHalfChestPos(level, pos, state);
                 if (other != null) {
                     BlockEntity be1 = level.getBlockEntity(other);
@@ -257,7 +265,6 @@ public final class ContainerSlotSnapshot {
                 return c0;
             }
 
-            BlockEntity be = level.getBlockEntity(pos);
             if (be instanceof Container c) return c;
         } catch (Throwable ignored) {
         }
@@ -275,6 +282,7 @@ public final class ContainerSlotSnapshot {
                     ? facing.getClockWise()
                     : facing.getCounterClockWise();
             BlockPos other = pos.relative(offsetDir);
+            if(!WorldSnapshotAccess.readable(level,other))return null;
             BlockState otherState = level.getBlockState(other);
             if (otherState.getBlock() instanceof ChestBlock) return other;
         } catch (Throwable ignored) {
@@ -290,14 +298,37 @@ public final class ContainerSlotSnapshot {
         for (int i = 0; i < size; i++) {
             ItemStack st = c.getItem(i);
             if (st == null || st.isEmpty()) continue;
-            CompoundTag it = new CompoundTag();
+            CompoundTag it = NbtSerde.snapshotItemStack(st, provider);
+            if (it == null) return null;
             it.putInt("Slot", i);
-            Tag saved = st.save(provider);
-            if (saved instanceof CompoundTag ct) it.merge(ct);
             items.add(it);
         }
         out.put("Items", items);
+        var sources=new ListTag();appendSources(c,0,sources,0);
+        if(!sources.isEmpty())out.put("SlotSources",sources);
         return out;
+    }
+
+    private static void appendSources(Container container,int offset,ListTag sources,int depth) {
+        if(depth>8||sources.size()>=64)return;
+        if(container instanceof CompoundContainerAccess compound) {
+            appendSources(compound.avilixlogger$first(),offset,sources,depth+1);
+            appendSources(compound.avilixlogger$second(),offset+compound.avilixlogger$first().getContainerSize(),sources,depth+1);
+        } else if(container instanceof BlockEntity be&&be.getLevel()!=null) {
+            var source=new CompoundTag();source.putInt("FirstSlot",offset);source.putInt("SlotCount",container.getContainerSize());
+            source.putInt("X",be.getBlockPos().getX());source.putInt("Y",be.getBlockPos().getY());source.putInt("Z",be.getBlockPos().getZ());
+            source.putString("Dimension",be.getLevel().dimension().location().toString());
+            source.put("BlockState",net.minecraft.nbt.NbtUtils.writeBlockState(be.getBlockState()));sources.add(source);
+        }
+    }
+
+    public static CompoundTag sourceForSlot(CompoundTag snapshot,int slot) {
+        var sources=snapshot.getList("SlotSources",Tag.TAG_COMPOUND);
+        for(int i=0;i<sources.size();i++) {
+            var source=sources.getCompound(i);int first=source.getInt("FirstSlot"),count=source.getInt("SlotCount");
+            if(slot>=first&&(long)slot-first<count)return source;
+        }
+        return null;
     }
 
     private static boolean readContainer(Container c, net.minecraft.core.HolderLookup.Provider provider, CompoundTag snapshot) {
@@ -311,7 +342,7 @@ public final class ContainerSlotSnapshot {
             CompoundTag it = items.getCompound(i);
             int slot = readSlot(it);
             if (slot < 0 || slot >= size) return false;
-            ItemStack st = ItemStack.parse(provider, it).orElse(ItemStack.EMPTY);
+            ItemStack st = NbtSerde.readItemStack(it, provider);
             if (st.isEmpty()) return false;
             c.setItem(slot, st);
         }

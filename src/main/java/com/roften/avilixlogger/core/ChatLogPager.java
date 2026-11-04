@@ -40,9 +40,9 @@ public final class ChatLogPager {
             thread.setPriority(Thread.NORM_PRIORITY - 1);
             return thread;
         };
-        ThreadPoolExecutor result = new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS,
+        ThreadPoolExecutor result = new ThreadPoolExecutor(2, 2, 30L, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(128), factory, new ThreadPoolExecutor.AbortPolicy());
-        result.prestartAllCoreThreads();
+        result.allowCoreThreadTimeOut(true);
         return result;
     }
 
@@ -93,6 +93,35 @@ public final class ChatLogPager {
         } catch (java.util.concurrent.RejectedExecutionException rejected) {
             player.sendSystemMessage(Component.literal("Очередь запросов логов занята. Повтори через несколько секунд.")
                     .withStyle(ChatFormatting.RED));
+        }
+    }
+
+    public static void queryConsole(net.minecraft.commands.CommandSourceStack source, ServerLevel level,
+                                    LogQuery query, Component title) {
+        LogStorage storage = LoggerRuntime.storage(level);
+        LogQuery snapshot = query.copy();
+        MinecraftServer server = source.getServer();
+        source.sendSystemMessage(Component.literal("[Логгер] Загрузка записей..."));
+        try {
+            executor().execute(() -> {
+                try {
+                    List<LogEntry> entries = storage.queryReverse(snapshot);
+                    server.execute(() -> {
+                        source.sendSystemMessage(title);
+                        if (entries.isEmpty()) source.sendSystemMessage(Component.literal("(нет записей)"));
+                        for (LogEntry entry : entries) {
+                            if (entry != null && entry.type == ActionType.BLOCK_ENTITY_NBT_CHANGE
+                                    && entry.extra != null && entry.extra.startsWith("container change")) continue;
+                            source.sendSystemMessage(LogText.toChatLine(level, entry));
+                        }
+                    });
+                } catch (Throwable failure) {
+                    AvilixLoggerMod.LOGGER.error("[AvilixLogger] Console query failed", failure);
+                    server.execute(() -> source.sendFailure(Component.literal("Ошибка запроса логов; смотри server log.")));
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException busy) {
+            source.sendFailure(Component.literal("Очередь запросов занята. Повтори позже."));
         }
     }
 

@@ -25,8 +25,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.TimeUnit;
 
 /**
  * ClickHouse storage backend using the HTTP API.
@@ -36,7 +34,7 @@ import java.util.concurrent.TimeUnit;
  * compressed JSON blob for every filter. A previous unified ClickHouse table can optionally remain
  * readable, but MySQL is never read or migrated.
  */
-public final class ClickHouseLogStorage implements HealthAwareLogStorage {
+public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchLogStorage {
 
     private enum TableKind {
         FEED("feed"),
@@ -53,6 +51,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         TableKind(String suffix) { this.suffix = suffix; }
     }
 
+    private static final ActionType[] ACTION_TYPES = ActionType.values();
     private static final EnumMap<ActionType, TableKind> ACTION_TABLE = new EnumMap<>(ActionType.class);
     static {
         map(TableKind.BLOCKS,
@@ -60,7 +59,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 ActionType.BLOCK_PLACE,
                 ActionType.BLOCK_INTERACT,
                 ActionType.BLOCK_USE,
-                ActionType.BLOCK_ENTITY_NBT_CHANGE);
+                ActionType.BLOCK_ENTITY_NBT_CHANGE, ActionType.CLAIM_ACTION, ActionType.PROTECTION_CHANGE, ActionType.MACHINE_STATE_CHANGE);
         map(TableKind.CONTAINERS,
                 ActionType.CONTAINER_OPEN,
                 ActionType.CONTAINER_PUT,
@@ -71,28 +70,28 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 ActionType.ME_UPGRADE_CHANGE,
                 ActionType.ME_FILTER_CHANGE,
                 ActionType.ME_SETTING_CHANGE,
-                ActionType.ME_CELL_CHANGE);
+                ActionType.ME_CELL_CHANGE, ActionType.ME_CRAFT_REQUEST, ActionType.ME_CRAFT_CANCEL, ActionType.ME_CRAFT_FINISH, ActionType.GUI_CHANGE, ActionType.MACHINE_CONTENT_CHANGE);
         map(TableKind.ENTITIES,
                 ActionType.ENTITY_DEATH,
                 ActionType.ENTITY_SPAWN,
                 ActionType.ENTITY_MOUNT,
                 ActionType.ENTITY_DISMOUNT,
                 ActionType.ENTITY_INTERACT,
-                ActionType.ENTITY_ATTACK,
+                ActionType.ENTITY_ATTACK, ActionType.WEAPON_KILL,
                 ActionType.PROJECTILE_SHOOT,
                 ActionType.PROJECTILE_HIT,
-                ActionType.ENTITY_OWNER_SET);
+                ActionType.ENTITY_OWNER_SET, ActionType.ENTITY_EQUIPMENT_CHANGE, ActionType.PARTY_CHANGE, ActionType.EXPERIENCE_CHANGE);
         map(TableKind.ITEMS,
                 ActionType.ITEM_DROP,
                 ActionType.ITEM_PICKUP,
-                ActionType.ITEM_CRAFT,
+                ActionType.ITEM_CRAFT, ActionType.ITEM_TRANSFORM, ActionType.ITEM_GIFT, ActionType.ITEM_TRADE, ActionType.WEAPON_RELOAD,
                 ActionType.ITEM_SMELT,
                 ActionType.ITEM_USE,
                 ActionType.ITEM_USE_START,
                 ActionType.ITEM_USE_STOP,
                 ActionType.ITEM_CONSUME);
         map(TableKind.PLAYERS,
-                ActionType.PLAYER_DEATH,
+                ActionType.PLAYER_DEATH, ActionType.PLAYER_KILL,
                 ActionType.PLAYER_JOIN,
                 ActionType.PLAYER_LEAVE,
                 ActionType.PLAYER_DIMENSION_CHANGE,
@@ -117,8 +116,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         for (ActionType t : types) ACTION_TABLE.put(t, kind);
     }
 
-    private final ArrayBlockingQueue<LogEntry> queue;
-    private final Thread writer;
+    private String deliveryToken;
     private final Thread retentionWorker;
     private final String endpoint;
     private final String user;
@@ -135,13 +133,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private final boolean storeNonRollbackDetails;
     private final String detailMode;
     private final boolean addSkippingIndexes;
-    private final boolean asyncInsert;
-    private final boolean waitForAsyncInsert;
 
     private volatile boolean running = true;
-    private final java.util.concurrent.atomic.AtomicLong queuedPayloadBytes = new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicLong dropped = new java.util.concurrent.atomic.AtomicLong();
-    private final long maxQueuedPayloadBytes;
     private volatile long written;
     private volatile long unhealthyUntilMs;
     private volatile Throwable lastFailure;
@@ -164,28 +157,20 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         this.storeNonRollbackDetails = LoggerConfig.VALUES.clickHouseStoreNonRollbackDetails.get();
         this.detailMode = safeString(LoggerConfig.VALUES.clickHouseDetailMode.get()).trim().toLowerCase(Locale.ROOT);
         this.addSkippingIndexes = LoggerConfig.VALUES.clickHouseAddSkippingIndexes.get();
-        this.asyncInsert = LoggerConfig.VALUES.clickHouseAsyncInsert.get();
-        this.waitForAsyncInsert = LoggerConfig.VALUES.clickHouseWaitForAsyncInsert.get();
-        this.queue = new ArrayBlockingQueue<>(Math.max(10_000, LoggerConfig.VALUES.clickHouseQueueCapacity.get()));
-        this.maxQueuedPayloadBytes = Math.max(16L, LoggerConfig.VALUES.clickHouseMaxQueuedPayloadMiB.get()) * 1024L * 1024L;
 
         ensureSchema();
         initializeLegacyCompatibilityRead();
-        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse connected successfully. endpoint={}, database={}, schemaMode={}, feed={}, queueCapacity={}, queuePayloadMiB={}, batchSize={}",
-                endpoint, database, splitSchema ? "split" : "legacy", useFeedTable,
-                queue.remainingCapacity() + queue.size(), maxQueuedPayloadBytes / (1024L * 1024L),
-                LoggerConfig.VALUES.clickHouseBatchSize.get());
+        ensureRetryDeduplication();
+        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse connected. endpoint={}, database={}, schemaMode={}, feed={}, durable delivery=true",
+                endpoint, database, splitSchema ? "split" : "legacy", useFeedTable);
 
         // Retention DDL is maintenance, not a prerequisite for reading/writing logs. On a large
         // table ClickHouse may need longer than the HTTP timeout to acknowledge MODIFY TTL even
         // though the core schema and normal queries are healthy. Keep it on its own daemon so a
         // slow ALTER cannot disable storage initialization or pause the insert writer.
-        this.writer = new Thread(this::runWriter, "avilixlogger-clickhouse-writer");
-        this.writer.setDaemon(true);
         this.retentionWorker = new Thread(this::runRetentionMaintenance, "avilixlogger-clickhouse-retention");
         this.retentionWorker.setDaemon(true);
 
-        this.writer.start();
         this.retentionWorker.start();
     }
 
@@ -313,17 +298,29 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                     ", container_slots_before String" + largeCodec() +
                     ", container_slots_after String" + largeCodec();
             case ENTITIES -> commonColumns() +
+                    ", block_before String" + largeCodec() +
+                    ", be_before String" + largeCodec() +
+                    ", block_after String" + largeCodec() +
+                    ", be_after String" + largeCodec() +
                     ", entity_type LowCardinality(String)" +
                     ", entity_uuid String" +
                     ", entity_nbt String" + largeCodec() +
                     ", item_stack String" + largeCodec() +
                     ", count Int32";
             case ITEMS -> commonColumns() +
+                    ", block_before String" + largeCodec() +
+                    ", be_before String" + largeCodec() +
+                    ", block_after String" + largeCodec() +
+                    ", be_after String" + largeCodec() +
                     ", item_stack String" + largeCodec() +
                     ", count Int32" +
                     ", player_inv_before String" + largeCodec() +
                     ", player_inv_after String" + largeCodec();
             case PLAYERS -> commonColumns() +
+                    ", block_before String" + largeCodec() +
+                    ", be_before String" + largeCodec() +
+                    ", block_after String" + largeCodec() +
+                    ", be_after String" + largeCodec() +
                     ", entity_uuid String" +
                     ", entity_nbt String" + largeCodec() +
                     ", player_inv_before String" + largeCodec() +
@@ -384,6 +381,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         for (TableKind kind : splitKinds()) {
             String table = qualifiedSplitTable(kind);
             addCommonCompatColumns(table);
+            if(kind==TableKind.ENTITIES || kind==TableKind.ITEMS || kind==TableKind.PLAYERS)
+                addBlockCompatColumns(table);
             switch (kind) {
                 case BLOCKS -> addBlockCompatColumns(table);
                 case CONTAINERS -> {
@@ -504,87 +503,37 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
     @Override
     public void append(LogEntry entry) {
-        if (!running || entry == null) return;
-        long weight = PayloadSizeEstimator.estimate(entry);
-        if (!reservePayload(weight)) {
-            onDropped("payload budget");
-            return;
-        }
-        boolean ok = queue.offer(entry);
-        if (!ok) {
-            queuedPayloadBytes.addAndGet(-weight);
-            onDropped("row capacity");
-        }
+        if (entry == null) return;
+        LogIdGenerator.ensure(entry);
+        try { appendBatch("single-" + entry.id, List.of(entry)); }
+        catch (IOException error) { throw new IllegalStateException("ClickHouse insert failed", error); }
     }
 
-    private boolean reservePayload(long bytes) {
-        while (true) {
-            long current = queuedPayloadBytes.get();
-            if (bytes > maxQueuedPayloadBytes || current > maxQueuedPayloadBytes - bytes) return false;
-            if (queuedPayloadBytes.compareAndSet(current, current + bytes)) return true;
-        }
+    @Override
+    public synchronized void appendBatch(String token, List<LogEntry> entries) throws IOException {
+        if (!running) throw new IOException("ClickHouse storage is stopped");
+        for (LogEntry entry : entries) LogIdGenerator.ensure(entry);
+        deliveryToken = token;
+        try {
+            insertBatch(entries);
+            written += entries.size();
+        } catch (IOException failure) {
+            markUnhealthy(failure);
+            throw failure;
+        } finally { deliveryToken = null; }
     }
 
-    private void onDropped(String reason) {
-        long count = dropped.incrementAndGet();
-        if (count == 1L || count % 1_000L == 0L) {
-            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse queue rejected {} log rows ({}). queuedRows={}, estimatedPayloadMiB={}",
-                    count, reason, queue.size(), queuedPayloadBytes.get() / (1024L * 1024L));
-        }
-    }
-
-    private void runWriter() {
-        final int batchSize = Math.max(100, LoggerConfig.VALUES.clickHouseBatchSize.get());
-        final long flushEveryMs = Math.max(100, LoggerConfig.VALUES.clickHouseFlushIntervalMs.get());
-        final List<LogEntry> batch = new ArrayList<>(batchSize);
-        long lastFlush = System.currentTimeMillis();
-        long retryDelayMs = 250L;
-
-        while (running || !queue.isEmpty()) {
-            try {
-                LogEntry first = queue.poll(50, TimeUnit.MILLISECONDS);
-                if (first != null) {
-                    batch.add(first);
-                    queuedPayloadBytes.addAndGet(-PayloadSizeEstimator.estimate(first));
-                }
-                int room = Math.max(0, batchSize - batch.size());
-                if (room > 0) {
-                    java.util.ArrayList<LogEntry> drained = new java.util.ArrayList<>(room);
-                    queue.drainTo(drained, room);
-                    for (LogEntry entry : drained) {
-                        batch.add(entry);
-                        queuedPayloadBytes.addAndGet(-PayloadSizeEstimator.estimate(entry));
-                    }
-                }
-
-                long now = System.currentTimeMillis();
-                boolean timeFlush = (now - lastFlush) >= flushEveryMs;
-                if (!batch.isEmpty() && (batch.size() >= batchSize || timeFlush)) {
-                    insertBatch(batch);
-                    written += batch.size();
-                    batch.clear();
-                    lastFlush = now;
-                    retryDelayMs = 250L;
-                }
-
-            } catch (InterruptedException ignored) {
-                // shutdown wakes the writer up
-            } catch (Throwable t) {
-                markUnhealthy(t);
-                AvilixLoggerMod.LOGGER.error("[AvilixLogger] ClickHouse writer failure", t);
-                try { Thread.sleep(retryDelayMs); } catch (InterruptedException ignored) {}
-                retryDelayMs = Math.min(5_000L, retryDelayMs * 2L);
-            }
-        }
-
-        if (!batch.isEmpty()) {
-            try {
-                insertBatch(batch);
-                written += batch.size();
-            } catch (Throwable t) {
-                markUnhealthy(t);
-                AvilixLoggerMod.LOGGER.error("[AvilixLogger] ClickHouse final flush failure", t);
-            }
+    private void ensureRetryDeduplication() {
+        ArrayList<String> tables = new ArrayList<>();
+        if (splitSchema) {
+            if (useFeedTable) tables.add(qualifiedFeedTable());
+            for (TableKind kind : splitKinds()) tables.add(qualifiedSplitTable(kind));
+        } else tables.add(qualifiedLegacyTable());
+        try {
+            for (String table : tables) execute("ALTER TABLE " + table
+                    + " MODIFY SETTING non_replicated_deduplication_window = 1024", timeoutSec());
+        } catch (IOException error) {
+            throw new IllegalStateException("Cannot enable retry deduplication; queued journal is retained", error);
         }
     }
 
@@ -683,7 +632,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             o.addProperty("data", Base64.getEncoder().encodeToString(GzipJson.toGzippedJsonBytes(e)));
             body.append(GzipJson.GSON.toJson(o)).append('\n');
         }
-        execute(body.toString(), timeoutSec(), asyncInsert, waitForAsyncInsert, true);
+        execute(body.toString(), timeoutSec(), false, true, true);
     }
 
 
@@ -716,17 +665,41 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             o.addProperty("item_count", e.count);
             o.addProperty("source", safeString(e.source));
             o.addProperty("short_text", target.shortText);
-            o.addProperty("extra", feedExtra(e));
+            o.addProperty("extra", EntityLogIdentity.storageExtra(e,feedExtra(e)));
             o.addProperty("has_details", shouldStoreDetails(e) ? 1 : 0);
             o.addProperty("source_table", kind.suffix);
             o.addProperty("source_id", e.id);
             body.append(GzipJson.GSON.toJson(o)).append('\n');
         }
-        execute(body.toString(), timeoutSec(), asyncInsert, waitForAsyncInsert, true);
+        execute(body.toString(), timeoutSec(), false, true, true);
     }
 
     private boolean shouldStoreDetails(LogEntry e) {
         if (e == null) return false;
+        if(e.type==ActionType.PLAYER_DEATH||e.type==ActionType.PLAYER_KILL)return true;
+        if(e.type==ActionType.CAPTURE_GAP||e.type==ActionType.LOGGER_DIAGNOSTIC)return true;
+        if((e.type==ActionType.CONTAINER_PUT||e.type==ActionType.CONTAINER_TAKE)&&e.extra!=null&&e.extra.startsWith("container slot ")&&e.beAfter!=null)return true;
+        if (e.source != null && (e.source.startsWith("mod:corpse:") || e.source.startsWith("mod:accessories:"))) return true;
+        if (e.source != null && (e.source.startsWith("mod:ftbteams:") || e.source.startsWith("mod:openpartiesandclaims:"))) return true;
+        if (e.type == ActionType.MACHINE_STATE_CHANGE || e.type == ActionType.MACHINE_CONTENT_CHANGE) return true;
+        if(e.source!=null&&(e.source.startsWith("mod:create_enchantment_industry:")||e.source.startsWith("mod:createdieselgenerators:")))return true;
+        // Optional equipment/corpse/claim receipts lose their meaning without exact evidence.
+        if (e.type == ActionType.ENTITY_EQUIPMENT_CHANGE && e.beBefore != null && e.beAfter != null) return true;
+        if (e.type == ActionType.CORPSE_CONTENT_CHANGE && e.beBefore != null && e.beAfter != null
+                && e.playerInvBefore != null && e.playerInvAfter != null) return true;
+        if (e.type == ActionType.CLAIM_ACTION && e.beAfter != null) return true;
+        if (Ae2CraftingDetails.summary(e) != null && e.beAfter != null) return true;
+        if ((e.type==ActionType.ITEM_GIFT||e.type==ActionType.ITEM_TRADE)&&e.beAfter!=null)return true;
+        // Conversion inventory states are the meaning of the transaction, although audit-only.
+        if(e.type==ActionType.ITEM_TRANSFORM&&e.playerInvBefore!=null&&e.playerInvAfter!=null)return true;
+        // The exact ME resource key is the transaction evidence, including fluid components.
+        if ((e.type==ActionType.ME_PUT || e.type==ActionType.ME_TAKE) && e.beAfter!=null && Ae2TransferDetails.summary(e)!=null) return true;
+        // Both sides define the actual filter/upgrade/cell/setting change, even in minimal mode.
+        if (Ae2ConfigurationDetails.structured(e) && e.beBefore!=null && e.beAfter!=null) return true;
+        // Historical weapon positions must survive non-rollback detail pruning.
+        if(e.source!=null && e.source.startsWith("mod:scguns:") && e.beAfter!=null)return true;
+        // The before/after values are the meaning of a settings event, even though it is audit-only.
+        if(e.type==ActionType.GUI_CHANGE && e.beBefore!=null && e.beAfter!=null)return true;
         if ("full".equals(detailMode) || "debug".equals(detailMode)) return true;
         if ("minimal".equals(detailMode)) return isRollbackCritical(e) && storeRollbackDetails;
         if (isRollbackCritical(e)) return storeRollbackDetails;
@@ -735,22 +708,27 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
     private static boolean isRollbackCritical(LogEntry e) {
         if (e == null || e.type == null) return false;
+        // Successful state mutations (wrenches, levers, mod settings) are restorable.
+        // Observation-only interactions with just an after snapshot remain optional.
+        if (e.type == ActionType.BLOCK_INTERACT && e.blockBefore != null && e.blockAfter != null) return true;
+        if (e.type.name().startsWith("CART_") || e.type.name().startsWith("BACKPACK_")) return true;
         return switch (e.type) {
             case BLOCK_BREAK, BLOCK_PLACE, BLOCK_ENTITY_NBT_CHANGE,
                  CONTAINER_PUT, CONTAINER_TAKE,
                  ITEM_DROP, ITEM_PICKUP,
                  ENTITY_DEATH, ENTITY_SPAWN,
                  PLANE_PLACE, PLANE_REMOVE, PLANE_PICKUP,
-                 TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE -> true;
+                 TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, CREATE_DEPLOYER_ACTION -> true;
             default -> false;
         };
     }
 
     private static String feedExtra(LogEntry e) {
         if (e == null) return "";
-        if (e.type == ActionType.CHAT_MESSAGE) return safeString(e.extra);
-        if (e.extra == null || e.extra.length() <= 512) return safeString(e.extra);
-        return e.extra.substring(0, 512);
+        if (e.type == ActionType.CHAT_MESSAGE || e.type==ActionType.PLAYER_DEATH || e.type==ActionType.PLAYER_KILL) return safeString(e.extra);
+        String extra=safeString(e.extra);
+        if(extra.length()>512)extra=extra.substring(0,512);
+        return Boolean.TRUE.equals(e.fullSnapshot)?extra+"; full_snapshot=1":extra;
     }
 
     private void insertSplitBatch(TableKind kind, List<LogEntry> batch) throws IOException {
@@ -763,16 +741,16 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             switch (kind) {
                 case BLOCKS -> addBlock(o, e);
                 case CONTAINERS -> { addBlock(o, e); addEntity(o, e, false); addItem(o, e); addContainer(o, e); }
-                case ENTITIES -> { addEntity(o, e, true); addItem(o, e); }
-                case ITEMS -> { addItem(o, e); addPlayerInventory(o, e); }
-                case PLAYERS -> { addPlayerEntity(o, e); addPlayerInventory(o, e); }
+                case ENTITIES -> { addBlock(o,e); addEntity(o, e, true); addItem(o, e); }
+                case ITEMS -> { addBlock(o,e); addItem(o, e); addPlayerInventory(o, e); }
+                case PLAYERS -> { addBlock(o,e); addPlayerEntity(o, e); addPlayerInventory(o, e); }
                 case CHAT -> o.addProperty("message", extractMessage(e));
                 case COMPAT -> { addBlock(o, e); addEntity(o, e, true); addItem(o, e); addPlayerInventory(o, e); addContainer(o, e); }
                 default -> throw new IllegalArgumentException("Unexpected table kind: " + kind);
             }
             body.append(GzipJson.GSON.toJson(o)).append('\n');
         }
-        execute(body.toString(), timeoutSec(), asyncInsert, waitForAsyncInsert, true);
+        execute(body.toString(), timeoutSec(), false, true, true);
     }
 
     private JsonObject baseJson(LogEntry e) {
@@ -792,7 +770,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         o.addProperty("actor_name_lc", safeString(e.actorName).toLowerCase(Locale.ROOT));
         o.addProperty("actor_uuid", e.actorUuid == null ? "" : e.actorUuid.toString());
         o.addProperty("source", safeString(e.source));
-        o.addProperty("extra", safeString(e.extra));
+        o.addProperty("extra", EntityLogIdentity.storageExtra(e,safeString(e.extra)));
         return o;
     }
 
@@ -845,6 +823,34 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         return select(q, true);
     }
 
+    private static String queryOrder(LogQuery q, boolean reverse) {
+        String direction = reverse ? "DESC" : "ASC";
+        return q.chronological ? " ORDER BY ts_ms " + direction + ", id " + direction : " ORDER BY id " + direction;
+    }
+    private static java.util.Comparator<LogEntry> queryComparator(LogQuery q, boolean reverse) {
+        java.util.Comparator<LogEntry> order = q.chronological
+                ? java.util.Comparator.comparingLong((LogEntry row)->row.ts).thenComparingLong(row->row.id)
+                : java.util.Comparator.comparingLong(row->row.id);
+        return reverse ? order.reversed() : order;
+    }
+    private static void appendRecordCursor(StringBuilder sql, LogQuery q, boolean reverse) {
+        if (q.exactId > 0) sql.append(" AND id = ").append(q.exactId);
+        if (q.exactIds != null && q.exactIds.length > 0) {
+            if (q.exactIds.length > 2000) throw new IllegalArgumentException("Too many selected record IDs");
+            sql.append(" AND id IN (");
+            for (int i=0;i<q.exactIds.length;i++) {
+                if(q.exactIds[i]<=0)throw new IllegalArgumentException("Invalid selected record ID");
+                if(i>0)sql.append(',');sql.append(q.exactIds[i]);
+            }
+            sql.append(')');
+        }
+        long id = reverse ? q.beforeId : q.afterId;
+        if (id <= 0) return;
+        String compare = reverse ? " < " : " > ";
+        if(q.chronological) sql.append(" AND (ts_ms").append(compare).append(q.cursorTs)
+                .append(" OR (ts_ms = ").append(q.cursorTs).append(" AND id").append(compare).append(id).append("))");
+        else sql.append(" AND id").append(compare).append(id);
+    }
     private List<LogEntry> select(LogQuery q, boolean reverse) {
         if (q == null) return List.of();
         if (!splitSchema) return selectLegacy(q, reverse);
@@ -856,7 +862,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                     merged.addAll(selectLegacy(q, reverse));
                     merged = dedupeById(merged);
                 }
-                merged.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+                merged.sort(queryComparator(q, reverse));
                 int limit = Math.max(1, q.limit);
                 if (merged.size() > limit) return new ArrayList<>(merged.subList(0, limit));
                 return merged;
@@ -881,7 +887,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 out.addAll(selectFeed(q, true));
                 out = dedupeById(out);
             }
-            out.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+            out.sort(queryComparator(q, reverse));
             int limit = Math.max(1, q.limit);
             if (out.size() > limit) return new ArrayList<>(out.subList(0, limit));
             markHealthy();
@@ -903,7 +909,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             try {
                 StringBuilder sql = new StringBuilder(2048);
                 sql.append(selectFromSplitTable(kind, q, reverse))
-                        .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                        .append(queryOrder(q, reverse))
                         .append(" LIMIT ").append(Math.max(1, q.limit))
                         .append(" FORMAT JSONEachRow");
                 out.addAll(parseSplitJsonEachRow(execute(sql.toString(), queryTimeoutSec(q))));
@@ -912,7 +918,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                     try {
                         StringBuilder retrySql = new StringBuilder(2048);
                         retrySql.append(selectFromSplitTable(kind, q, reverse))
-                                .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                                .append(queryOrder(q, reverse))
                                 .append(" LIMIT ").append(Math.max(1, q.limit))
                                 .append(" FORMAT JSONEachRow");
                         out.addAll(parseSplitJsonEachRow(execute(retrySql.toString(), queryTimeoutSec(q))));
@@ -924,7 +930,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 try {
                     StringBuilder minimalSql = new StringBuilder(2048);
                     minimalSql.append(selectFromSplitTableMinimal(kind, q, reverse))
-                            .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                            .append(queryOrder(q, reverse))
                             .append(" LIMIT ").append(Math.max(1, q.limit))
                             .append(" FORMAT JSONEachRow");
                     out.addAll(parseSplitJsonEachRow(execute(minimalSql.toString(), queryTimeoutSec(q))));
@@ -939,7 +945,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             out.addAll(selectLegacy(q, reverse));
             out = dedupeById(out);
         }
-        out.sort((a, b) -> reverse ? Long.compare(b.id, a.id) : Long.compare(a.id, b.id));
+        out.sort(queryComparator(q, reverse));
         int limit = Math.max(1, q.limit);
         if (out.size() > limit) return new ArrayList<>(out.subList(0, limit));
         if (!out.isEmpty()) markHealthy();
@@ -952,7 +958,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         sql.append("SELECT id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, target_kind, target_id, item_count, source, short_text, extra, has_details ")
                 .append("FROM ").append(qualifiedFeedTable());
         appendFeedWhere(sql, q, reverse);
-        sql.append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+        sql.append(queryOrder(q, reverse))
                 .append(" LIMIT ").append(Math.max(1, q.limit))
                 .append(" FORMAT JSONEachRow");
         try {
@@ -972,13 +978,14 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     }
 
     private List<LogEntry> selectFeedMinimal(LogQuery q, boolean reverse, Throwable original) {
+        if (requiresSearchColumns(q)) return null;
         try {
             StringBuilder sql = new StringBuilder(1536);
             sql.append("SELECT id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, ")
                     .append("'' AS target_kind, '' AS target_id, 0 AS item_count, '' AS source, '' AS short_text, '' AS extra, 0 AS has_details ")
                     .append("FROM ").append(qualifiedFeedTable());
             appendFeedWhere(sql, q, reverse, false);
-            sql.append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+            sql.append(queryOrder(q, reverse))
                     .append(" LIMIT ").append(Math.max(1, q.limit))
                     .append(" FORMAT JSONEachRow");
             List<LogEntry> rows = parseFeedJsonEachRow(execute(sql.toString(), queryTimeoutSec(q)));
@@ -1024,11 +1031,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             if (i > 0) sql.append(" UNION ALL ");
             sql.append("(")
                     .append(selectFromSplitTable(kinds.get(i), q, reverse))
-                    .append(" ORDER BY id ").append(reverse ? "DESC" : "ASC")
+                    .append(queryOrder(q, reverse))
                     .append(" LIMIT ").append(Math.max(1, q.limit))
                     .append(")");
         }
-        sql.append(") ORDER BY id ").append(reverse ? "DESC" : "ASC")
+        sql.append(")").append(queryOrder(q, reverse))
                 .append(" LIMIT ").append(Math.max(1, q.limit))
                 .append(" FORMAT JSONEachRow");
         return sql.toString();
@@ -1058,6 +1065,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     }
 
     private String selectFromSplitTableMinimal(TableKind kind, LogQuery q, boolean reverse) {
+        if (requiresSearchColumns(q)) throw new IllegalStateException("Схема БД не поддерживает выбранные фильтры; неполная страница запрещена");
         StringBuilder sql = new StringBuilder(768);
         sql.append("SELECT ")
                 .append("id, ts_ms, dim, x, y, z, action, actor_name, actor_uuid, '' AS source, ")
@@ -1082,7 +1090,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
 
     private String selectExpr(TableKind kind, String column) {
         boolean has = switch (column) {
-            case "block_before", "be_before", "block_after", "be_after" -> kind == TableKind.BLOCKS || kind == TableKind.CONTAINERS || kind == TableKind.COMPAT;
+            case "be_after" -> kind != TableKind.CHAT;
+            case "block_before", "be_before", "block_after" -> kind != TableKind.CHAT;
             case "entity_type" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.COMPAT;
             case "entity_uuid" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
             case "entity_nbt" -> kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
@@ -1123,14 +1132,14 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             appendActorWhere(sql, q.actorName);
         }
 
+        if (q.sourcePrefix != null) sql.append(" AND startsWith(source, ").append(sqlString(q.sourcePrefix)).append(')');
+        if (q.backpackId != null) sql.append(" AND startsWith(source, ").append(sqlString(BackpackIds.prefix(q.backpackId))).append(')');
+        if (q.cartId != null) sql.append(" AND startsWith(source, ").append(sqlString(CartAuditContext.prefix(q.cartId))).append(')');
+        appendConstructionWhere(sql,q,"source");
         appendPositionWhere(sql, q);
-        if (includeOptionalFilters) appendFeedOptionalFilters(sql, q);
+        appendFeedOptionalFilters(sql, q);
 
-        if (reverse) {
-            if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
-        } else {
-            if (q.afterId > 0) sql.append(" AND id > ").append(q.afterId);
-        }
+        appendRecordCursor(sql,q,reverse);
     }
 
     private void appendWhere(StringBuilder sql, LogQuery q, boolean reverse, TableKind kind) {
@@ -1160,14 +1169,14 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
             appendActorWhere(sql, q.actorName);
         }
 
+        if (q.sourcePrefix != null) sql.append(" AND startsWith(source, ").append(sqlString(q.sourcePrefix)).append(')');
+        if (q.backpackId != null) sql.append(" AND startsWith(source, ").append(sqlString(BackpackIds.prefix(q.backpackId))).append(')');
+        if (q.cartId != null) sql.append(" AND startsWith(source, ").append(sqlString(CartAuditContext.prefix(q.cartId))).append(')');
+        appendConstructionWhere(sql,q,"source");
         appendPositionWhere(sql, q);
-        if (includeOptionalFilters) appendSplitOptionalFilters(sql, q, kind);
+        appendSplitOptionalFilters(sql, q, kind);
 
-        if (reverse) {
-            if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
-        } else {
-            if (q.afterId > 0) sql.append(" AND id > ").append(q.afterId);
-        }
+        appendRecordCursor(sql,q,reverse);
     }
 
 
@@ -1175,7 +1184,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         if (q == null) return;
         String block = normalizeSqlNeedle(q.blockIdFilter);
         if (!block.isBlank()) {
-            appendInsensitiveContainsAny(sql, block, "target_id", "short_text", "extra");
+            appendSearchAlternatives(sql,block,q.blockAliases,"target_id","short_text","extra","source");
         }
         String planeName = normalizeSqlNeedle(q.planeNameFilter);
         if (!planeName.isBlank()) {
@@ -1185,6 +1194,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         if (!text.isBlank()) {
             appendInsensitiveContainsAny(sql, text, "target_id", "short_text", "extra", "source");
         }
+        appendSearchFilters(sql,q,"target_id","extra","short_text","source","target_id");
     }
 
     private void appendSplitOptionalFilters(StringBuilder sql, LogQuery q, TableKind kind) {
@@ -1192,15 +1202,15 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         String block = normalizeSqlNeedle(q.blockIdFilter);
         if (!block.isBlank()) {
             switch (kind) {
-                case BLOCKS, CONTAINERS, COMPAT -> appendInsensitiveContainsAny(sql, block, "block_before", "block_after", "extra", "source");
-                default -> appendInsensitiveContainsAny(sql, block, "extra", "source");
+                case BLOCKS, CONTAINERS, COMPAT -> appendSearchAlternatives(sql,block,q.blockAliases,"block_before","block_after","extra","source");
+                default -> appendSearchAlternatives(sql,block,q.blockAliases,"extra","source");
             }
         }
 
         String planeName = normalizeSqlNeedle(q.planeNameFilter);
         if (!planeName.isBlank()) {
             switch (kind) {
-                case ENTITIES, COMPAT -> appendInsensitiveContainsAny(sql, planeName, "entity_type", "entity_nbt", "extra", "source");
+                case ENTITIES, COMPAT -> appendInsensitiveContainsAny(sql, planeName, "entity_type", "entity_nbt", "item_stack", "extra", "source");
                 default -> appendInsensitiveContainsAny(sql, planeName, "extra", "source");
             }
         }
@@ -1209,6 +1219,43 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         if (!text.isBlank()) {
             appendInsensitiveContainsAny(sql, text, "extra", "source");
         }
+        appendSearchFilters(sql,q,selectExpr(kind,"entity_type"),extraSelectExpr(kind),selectExpr(kind,"entity_nbt"),"source",
+                selectExpr(kind,"block_before"),selectExpr(kind,"block_after"),selectExpr(kind,"item_stack"));
+    }
+
+    private static boolean requiresSearchColumns(LogQuery q) {
+        return q.constructionId!=null||q.sourcePrefix!=null||q.cartId!=null||q.backpackId!=null||q.planeOnly
+                ||java.util.stream.Stream.of(q.blockIdFilter,q.planeNameFilter,q.extraTextFilter,q.owner,q.textFilter,q.trainNameFilter,q.backpackNeedle).anyMatch(x->x!=null&&!x.isBlank());
+    }
+    private static void appendSearchFilters(StringBuilder sql,LogQuery q,String entity,String extra,String nbt,String source,String... targets) {
+        var ownerColumns=new ArrayList<String>(List.of(extra,nbt));ownerColumns.addAll(List.of(targets));
+        appendInsensitiveContainsAny(sql,q.owner,ownerColumns.toArray(String[]::new));
+        appendInsensitiveContainsAny(sql,q.trainNameFilter,extra);
+        appendInsensitiveContainsAny(sql,q.backpackNeedle,extra);
+        if(q.planeOnly){
+            sql.append(" AND (action IN (");int n=0;
+            for(ActionType type:ActionType.values())if(LogSearchPredicate.dedicatedPlane(type)){if(n++>0)sql.append(',');sql.append(type.ordinal());}
+            sql.append(") OR positionCaseInsensitiveUTF8(").append(entity).append(", 'aircraft') > 0 OR positionCaseInsensitiveUTF8(").append(entity).append(", 'plane') > 0 OR positionCaseInsensitiveUTF8(").append(extra).append(", 'aircraft') > 0 OR positionCaseInsensitiveUTF8(").append(extra).append(", 'plane') > 0)");
+        }
+        if(q.textFilter!=null&&!q.textFilter.isBlank()){
+            String needle=q.textFilter.trim().toLowerCase(Locale.ROOT);var columns=new java.util.ArrayList<String>(List.of("actor_name",source,extra,entity,nbt));columns.addAll(List.of(targets));
+            sql.append(" AND (");int n=0;
+            for(String column:columns){if(n++>0)sql.append(" OR ");sql.append("positionCaseInsensitiveUTF8(").append(column).append(", ").append(sqlString(needle)).append(") > 0");}
+            appendAliases(sql,q.textAliases,columns.toArray(String[]::new));
+            for(ActionType type:ActionType.values())if(LogText.actionLabel(type).toLowerCase(Locale.ROOT).contains(needle))sql.append(" OR action = ").append(type.ordinal());
+            sql.append(')');
+        }
+    }
+
+    private static void appendAliases(StringBuilder sql,List<String> aliases,String... columns){
+        if(aliases==null||aliases.isEmpty())return;
+        String values=aliases.stream().map(ClickHouseLogStorage::sqlString).collect(java.util.stream.Collectors.joining(",","[","]"));
+        for(String column:columns)sql.append(" OR multiSearchAnyCaseInsensitiveUTF8(").append(column).append(", ").append(values).append(") > 0");
+    }
+    private static void appendSearchAlternatives(StringBuilder sql,String needle,List<String> aliases,String... columns){
+        if(needle==null||needle.isBlank())return;
+        sql.append(" AND (");int n=0;for(String column:columns){if(n++>0)sql.append(" OR ");sql.append("positionCaseInsensitiveUTF8(").append(column).append(", ").append(sqlString(needle)).append(") > 0");}
+        appendAliases(sql,aliases,columns);sql.append(')');
     }
 
     private static void appendInsensitiveContainsAny(StringBuilder sql, String needle, String... columns) {
@@ -1280,13 +1327,26 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                         .append(" AND chunk_x BETWEEN ").append(floorDiv(minX, 16)).append(" AND ").append(floorDiv(maxX, 16))
                         .append(" AND chunk_z BETWEEN ").append(floorDiv(minZ, 16)).append(" AND ").append(floorDiv(maxZ, 16));
             }
-            sql.append(" AND x BETWEEN ").append(minX).append(" AND ").append(maxX)
-                    .append(" AND y BETWEEN ").append(minY).append(" AND ").append(maxY)
-                    .append(" AND z BETWEEN ").append(minZ).append(" AND ").append(maxZ);
+            ChunkLogSearch.appendBounds(sql,q,min,max);
         }
     }
 
     private List<LogEntry> selectLegacy(LogQuery q, boolean reverse) {
+        if (!requiresSearchColumns(q)) return selectLegacyBatch(q,reverse);
+        var out=new ArrayList<LogEntry>();var scan=q.copy();scan.limit=Math.min(1000,Math.max(128,q.limit*2));
+        int scanned=0;long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        while(out.size()<Math.max(1,q.limit)){
+            if(Thread.currentThread().isInterrupted()||System.nanoTime()>deadline||scanned>=32000)throw new IllegalStateException("Поиск в старом сжатом журнале превысил лимит; сузьте дату/радиус");
+            var raw=selectLegacyBatch(scan,reverse);scanned+=raw.size();
+            for(var row:raw)if(LogSearchPredicate.matches(row,q)){out.add(row);if(out.size()>=Math.max(1,q.limit))break;}
+            if(raw.size()<scan.limit)break;
+            long cursor=raw.getLast().id;if(cursor<=0||cursor==(reverse?scan.beforeId:scan.afterId))throw new IllegalStateException("Неверный курсор старого журнала");
+            if(reverse)scan.beforeId=cursor;else scan.afterId=cursor;
+            scan.cursorTs=raw.getLast().ts;
+        }
+        return out;
+    }
+    private List<LogEntry> selectLegacyBatch(LogQuery q, boolean reverse) {
         if (splitSchema && !shouldReadLegacyUnifiedTable()) return List.of();
         StringBuilder sql = new StringBuilder();
         boolean allDims = isAllDimensions(q.dim);
@@ -1319,18 +1379,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         } else if (q.minPos != null && q.maxPos != null) {
             BlockPos min = q.minPos;
             BlockPos max = q.maxPos;
-            sql.append(" AND x BETWEEN ").append(Math.min(min.getX(), max.getX())).append(" AND ").append(Math.max(min.getX(), max.getX()))
-                    .append(" AND y BETWEEN ").append(Math.min(min.getY(), max.getY())).append(" AND ").append(Math.max(min.getY(), max.getY()))
-                    .append(" AND z BETWEEN ").append(Math.min(min.getZ(), max.getZ())).append(" AND ").append(Math.max(min.getZ(), max.getZ()));
+            ChunkLogSearch.appendBounds(sql,q,min,max);
         }
 
-        if (reverse) {
-            if (q.beforeId > 0) sql.append(" AND id < ").append(q.beforeId);
-            sql.append(" ORDER BY id DESC");
-        } else {
-            if (q.afterId > 0) sql.append(" AND id > ").append(q.afterId);
-            sql.append(" ORDER BY id ASC");
-        }
+        appendRecordCursor(sql,q,reverse);
+        sql.append(queryOrder(q,reverse));
         sql.append(" LIMIT ").append(Math.max(1, q.limit));
         sql.append(" FORMAT TabSeparated");
 
@@ -1341,9 +1394,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 markHealthy();
                 return out;
             }
-            String[] lines = response.split("\\R");
-            for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-                String line = lines[lineNumber];
+            int lineNumber = 0;
+            for (var lines = response.lines().iterator(); lines.hasNext(); lineNumber++) {
+                String line = lines.next();
                 if (line == null || line.isBlank()) continue;
                 int tab = line.indexOf('\t');
                 if (tab <= 0) throw new IllegalStateException("Invalid unified ClickHouse row at response line " + (lineNumber + 1));
@@ -1433,9 +1486,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private List<LogEntry> parseFeedJsonEachRow(String response) {
         if (response == null || response.isBlank()) return List.of();
         ArrayList<LogEntry> out = new ArrayList<>();
-        String[] lines = response.split("\\R");
-        for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-            String line = lines[lineNumber];
+        int lineNumber = 0;
+        for (var lines = response.lines().iterator(); lines.hasNext(); lineNumber++) {
+            String line = lines.next();
             if (line == null || line.isBlank()) continue;
             try {
                 JsonObject o = JsonParser.parseString(line).getAsJsonObject();
@@ -1444,7 +1497,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 e.ts = getRequiredLong(o, "ts_ms");
                 e.dim = nullIfBlank(getString(o, "dim"));
                 int action = (int) getRequiredLong(o, "action");
-                ActionType[] values = ActionType.values();
+                ActionType[] values = ACTION_TYPES;
                 e.type = action >= 0 && action < values.length ? values[action] : null;
                 e.actorName = nullIfBlank(getString(o, "actor_name"));
                 e.actorUuid = parseUuid(getString(o, "actor_uuid"));
@@ -1458,6 +1511,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 e.count = (int) getLong(o, "item_count");
                 hydrateFeedTarget(e, targetKind, targetId, shortText);
                 e.extra = nullIfBlank(getString(o, "extra"));
+                e.lightweight=true;e.fullSnapshot=e.extra!=null&&e.extra.contains("; full_snapshot=1")?Boolean.TRUE:null;
+                EntityLogIdentity.restoreExtra(e);
                 if (e.type == ActionType.CHAT_MESSAGE && e.extra == null) e.extra = shortText;
                 out.add(e);
             } catch (Throwable parseError) {
@@ -1487,9 +1542,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     private List<LogEntry> parseSplitJsonEachRow(String response) {
         if (response == null || response.isBlank()) return List.of();
         ArrayList<LogEntry> out = new ArrayList<>();
-        String[] lines = response.split("\\R");
-        for (int lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-            String line = lines[lineNumber];
+        int lineNumber = 0;
+        for (var lines = response.lines().iterator(); lines.hasNext(); lineNumber++) {
+            String line = lines.next();
             if (line == null || line.isBlank()) continue;
             try {
                 JsonObject o = JsonParser.parseString(line).getAsJsonObject();
@@ -1507,7 +1562,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         e.ts = getRequiredLong(o, "ts_ms");
         e.dim = nullIfBlank(getString(o, "dim"));
         int action = (int) getRequiredLong(o, "action");
-        ActionType[] values = ActionType.values();
+        ActionType[] values = ACTION_TYPES;
         e.type = action >= 0 && action < values.length ? values[action] : null;
         e.actorName = nullIfBlank(getString(o, "actor_name"));
         e.actorUuid = parseUuid(getString(o, "actor_uuid"));
@@ -1529,17 +1584,16 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         e.containerSlotsBefore = nullIfBlank(getString(o, "container_slots_before"));
         e.containerSlotsAfter = nullIfBlank(getString(o, "container_slots_after"));
         e.extra = nullIfBlank(getString(o, "extra"));
+        EntityLogIdentity.restoreExtra(e);
         return e;
     }
 
     @Override
     public void shutdown() {
         running = false;
-        writer.interrupt();
         retentionWorker.interrupt();
-        try { writer.join(5_000L); } catch (InterruptedException ignored) {}
-        if (writer.isAlive()) AvilixLoggerMod.LOGGER.warn("[AvilixLogger] ClickHouse writer thread did not stop within timeout.");
-        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse HTTP storage shutdown. written={}, dropped={}", written, dropped.get());
+        WeightedQueue.join(retentionWorker);
+        AvilixLoggerMod.LOGGER.info("[AvilixLogger] ClickHouse storage stopped. written={}; undelivered batches remain in the journal", written);
     }
 
     private String execute(String sql, int timeoutSec) throws IOException {
@@ -1551,8 +1605,12 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
                 + "&password=" + urlEncode(password)
                 + "&max_execution_time=" + Math.max(1, timeoutSec)
                 + "&input_format_skip_unknown_fields=1";
-        if (async && insert) {
-            query += "&async_insert=1&wait_for_async_insert=" + (waitForAsync ? "1" : "0");
+        if (insert) {
+            // Already batched on a background sender. Synchronous acknowledgment works on older
+            // MergeTree versions too, and avoids acknowledging data still in an async RAM buffer.
+            String table = sql.substring(0, sql.indexOf(" FORMAT "));
+            query += "&async_insert=0&insert_deduplicate=1&insert_deduplication_token="
+                    + urlEncode(deliveryToken + ":" + table);
         }
         URL url = URI.create(endpoint + (endpoint.contains("?") ? "&" : "?") + query).toURL();
         byte[] body = sql.getBytes(StandardCharsets.UTF_8);
@@ -1724,6 +1782,14 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         return "`" + s + "`";
     }
 
+    private static void appendConstructionWhere(StringBuilder sql,LogQuery query,String column){
+        if(query.constructionId==null)return;
+        sql.append(" AND (");boolean first=true;
+        for(var kind:CreateContraptionKind.values())if(kind!=CreateContraptionKind.UNKNOWN){
+            if(!first)sql.append(" OR ");first=false;
+            sql.append("startsWith(").append(column).append(", ").append(sqlString(kind.prefix()+query.constructionId+":")).append(')');
+        }sql.append(')');
+    }
     private static String sqlString(String s) {
         if (s == null) return "''";
         StringBuilder out = new StringBuilder(s.length() + 8);
@@ -1757,12 +1823,26 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
         return switch (e.type) {
             case BLOCK_BREAK -> targetBlock(e.blockBefore, e.extra);
             case BLOCK_PLACE, BLOCK_INTERACT, BLOCK_USE, BLOCK_ENTITY_NBT_CHANGE, CONTAINER_OPEN -> targetBlock(e.blockAfter, e.extra);
-            case CONTAINER_PUT, CONTAINER_TAKE, ME_PUT, ME_TAKE, ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_CELL_CHANGE,
-                 ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_SMELT,
+            case ME_CRAFT_REQUEST, ME_CRAFT_CANCEL, ME_CRAFT_FINISH -> {
+                var job = Ae2CraftingDetails.summary(e);
+                yield job == null ? new TargetInfo("other", "", "заказ МЭ")
+                        : new TargetInfo(job.kind().equals("i") ? "item" : job.kind().equals("f") ? "fluid" : "resource", job.resource(), job.label());
+            }
+            case ME_PUT, ME_TAKE -> {
+                var transfer = Ae2TransferDetails.summary(e);
+                yield transfer == null ? targetItem(e.itemStackNbt, e.count, e.extra)
+                        : new TargetInfo(transfer.kind().equals("i") ? "item" : transfer.kind().equals("f") ? "fluid" : "resource", transfer.resource(), transfer.label());
+            }
+            case CONTAINER_PUT, CONTAINER_TAKE, ME_UPGRADE_CHANGE, ME_FILTER_CHANGE, ME_CELL_CHANGE,
+                 ITEM_PICKUP, ITEM_DROP, ITEM_CRAFT, ITEM_TRANSFORM, ITEM_GIFT, ITEM_TRADE, WEAPON_RELOAD, ITEM_SMELT,
                  ITEM_USE, ITEM_USE_START, ITEM_USE_STOP, ITEM_CONSUME, PLANE_PICKUP, TRAIN_SCHEDULE_TAKE, TRAIN_SCHEDULE_PUT -> targetItem(e.itemStackNbt, e.count, e.extra);
             case ENTITY_DEATH, ENTITY_SPAWN, ENTITY_MOUNT, ENTITY_DISMOUNT, ENTITY_CONTAINER_OPEN,
-                 ENTITY_INTERACT, ENTITY_ATTACK, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
+                 ENTITY_INTERACT, ENTITY_ATTACK, WEAPON_KILL, ENTITY_EQUIPMENT_CHANGE, CORPSE_CONTENT_CHANGE, PROJECTILE_SHOOT, PROJECTILE_HIT, ENTITY_OWNER_SET, PLANE_PLACE, PLANE_REMOVE, PLANE_MOUNT ->
                     new TargetInfo("entity", safeString(e.entityType), safeString(e.entityType));
+            case EXPERIENCE_CHANGE -> e.blockAfter!=null&&!e.blockAfter.isBlank()?targetBlock(e.blockAfter,e.extra):new TargetInfo("entity",safeString(e.entityType),safeString(e.entityType));
+            case MACHINE_STATE_CHANGE, MACHINE_CONTENT_CHANGE -> targetBlock(e.blockAfter, e.extra);
+            case PARTY_CHANGE -> new TargetInfo("party", "", safeString(e.extra));
+            case PROTECTION_CHANGE, CLAIM_ACTION -> new TargetInfo("protection", "", safeString(e.extra));
             case CHAT_MESSAGE -> new TargetInfo("chat", "", safeString(e.extra));
             case TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE, TRAIN_CONTROL_START, TRAIN_CONTROL_STOP ->
                     new TargetInfo("train", extractExtraName(e.extra, "trainName", "поезд"), safeString(e.extra));
@@ -1857,48 +1937,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage {
     }
 
     private static List<LogEntry> coalesceBatch(List<LogEntry> in) {
-        if (in == null || in.size() < 2) return in;
-        LinkedHashMap<String, LogEntry> merged = new LinkedHashMap<>(in.size());
-        ArrayList<LogEntry> out = new ArrayList<>(in.size());
-        for (LogEntry e : in) {
-            if (!isCoalescibleDelta(e)) {
-                out.add(e);
-                continue;
-            }
-            String key = coalesceKey(e);
-            LogEntry prev = merged.get(key);
-            if (prev == null) {
-                merged.put(key, e);
-                out.add(e);
-            } else {
-                prev.count += Math.max(0, e.count);
-                if (e.ts < prev.ts) prev.ts = e.ts;
-            }
-        }
-        return out;
+        // HTTP batching already amortizes I/O. Each captured action must keep its own id,
+        // timestamp, quantity and source; equal item deltas are not duplicate actions.
+        return in;
     }
-
-    private static boolean isCoalescibleDelta(LogEntry e) {
-        if (e == null) return false;
-        if (e.type != ActionType.CONTAINER_PUT && e.type != ActionType.CONTAINER_TAKE) return false;
-        if (e.itemStackNbt == null || e.itemStackNbt.isBlank()) return false;
-        if (e.count <= 0) return false;
-        return isBlank(e.beBefore) && isBlank(e.beAfter)
-                && isBlank(e.containerSlotsBefore) && isBlank(e.containerSlotsAfter)
-                && isBlank(e.playerInvBefore) && isBlank(e.playerInvAfter);
-    }
-
-    private static String coalesceKey(LogEntry e) {
-        UUID actorUuid = e.actorUuid;
-        return (e.type == null ? -1 : e.type.ordinal()) + "|" + e.dim + "|" + e.x + '|' + e.y + '|' + e.z
-                + "|" + Objects.toString(actorUuid, "")
-                + "|" + Objects.toString(e.actorName, "")
-                + "|" + Objects.toString(e.entityUuid, "")
-                + "|" + Objects.toString(e.entityType, "")
-                + "|" + Objects.toString(e.blockAfter, "")
-                + "|" + Objects.toString(e.itemStackNbt, "")
-                + "|" + Objects.toString(e.extra, "");
-    }
-
     private static boolean isBlank(String s) { return s == null || s.isBlank(); }
 }

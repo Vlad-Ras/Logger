@@ -14,7 +14,21 @@ public final class GenericMenuSnapshot {
     private GenericMenuSnapshot() {}
 
     public static String write(AbstractContainerMenu menu, HolderLookup.Provider provider) {
-        if (menu == null || provider == null || menu.slots == null || menu.slots.isEmpty()) return null;
+        return NbtSerde.toSnbt(snapshot(menu, provider));
+    }
+
+    /** Read only during the actual menu action, never by background polling. */
+    public static int[] properties(AbstractContainerMenu menu) {
+        if (!(menu instanceof MenuDataAccess access)) return null;
+        var slots=access.avilixlogger$dataSlots();
+        if (slots.size()>4096) { AdaptiveLogDiagnostics.adapterFailure("menu-properties-limit"); return null; }
+        var values=new int[slots.size()];
+        for(int i=0;i<values.length;i++)values[i]=slots.get(i).get();
+        return values;
+    }
+
+    public static CompoundTag snapshot(AbstractContainerMenu menu, HolderLookup.Provider provider) {
+        if (menu == null || provider == null || menu.slots == null || menu.slots.isEmpty() || menu.slots.size() > 4096) return null;
         try {
             CompoundTag root = new CompoundTag();
             root.putInt("Size", menu.slots.size());
@@ -26,16 +40,15 @@ public final class GenericMenuSnapshot {
                 externalSlots++;
                 ItemStack stack = slot.getItem();
                 if (stack == null || stack.isEmpty()) continue;
-                CompoundTag item = new CompoundTag();
+                CompoundTag item = NbtSerde.snapshotItemStack(stack, provider);
+                if (item == null) return null;
                 item.putInt("Slot", i);
-                Tag saved = stack.save(provider);
-                if (saved instanceof CompoundTag compound) item.merge(compound);
                 items.add(item);
             }
             if (externalSlots == 0) return null;
             root.putInt("ExternalSlots", externalSlots);
             root.put("Items", items);
-            return NbtSerde.toSnbt(root);
+            return root;
         } catch (Throwable ignored) {
             return null;
         }

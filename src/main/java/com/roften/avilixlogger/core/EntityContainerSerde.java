@@ -16,6 +16,10 @@ public final class EntityContainerSerde {
     private EntityContainerSerde() {}
 
     public static String write(Container c, HolderLookup.Provider provider) {
+        return NbtSerde.toSnbt(snapshot(c, provider));
+    }
+
+    public static CompoundTag snapshot(Container c, HolderLookup.Provider provider) {
         if (c == null) return null;
         try {
             CompoundTag root = new CompoundTag();
@@ -23,19 +27,14 @@ public final class EntityContainerSerde {
             for (int i = 0; i < c.getContainerSize(); i++) {
                 ItemStack st = c.getItem(i);
                 if (st == null || st.isEmpty()) continue;
-                CompoundTag it = new CompoundTag();
+                CompoundTag it = NbtSerde.snapshotItemStack(st, provider);
+                if (it == null) return null;
                 it.putInt("Slot", i);
-                // write full stack (includes Count)
-                CompoundTag stackTag = (CompoundTag) st.save(provider);
-                // merge
-                for (String k : stackTag.getAllKeys()) {
-                    it.put(k, stackTag.get(k));
-                }
                 items.add(it);
             }
             root.put("Items", items);
             root.putInt("Size", c.getContainerSize());
-            return NbtSerde.toSnbt(root);
+            return root;
         } catch (Throwable t) {
             return null;
         }

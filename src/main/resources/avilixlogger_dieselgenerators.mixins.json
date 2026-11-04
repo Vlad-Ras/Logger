@@ -1,0 +1,43 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.roften.avilixlogger.compat.dieselgenerators.mixin",
+  "plugin": "com.roften.avilixlogger.compat.dieselgenerators.mixin.DieselGeneratorsMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "AcceptedSprayerShotMixin",
+    "AcceptedTurretShotMixin",
+    "BarrelTickMixin",
+    "BurnerTickMixin",
+    "CanisterMixin",
+    "ChemicalTickMixin",
+    "DistillationTickMixin",
+    "DistillationWindowMixin",
+    "EngineTickMixin",
+    "EngineUpgradeMixin",
+    "FermenterFluidMixin",
+    "FermenterTickMixin",
+    "FermentingRecipeMixin",
+    "FilterMenuMixin",
+    "FilterPacketMixin",
+    "FueledItemMixin",
+    "HammerMixin",
+    "HugeTickMixin",
+    "LidTickMixin",
+    "LighterMixin",
+    "ModularTickMixin",
+    "MultiblockMixin",
+    "OilDataMixin",
+    "ProjectileImpactMixin",
+    "PumpBearingTickMixin",
+    "PumpCrankTickMixin",
+    "PumpHoleTickMixin",
+    "SprayerMixin",
+    "TrackBagMixin",
+    "TurretControlMixin",
+    "TurretTickMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -21,42 +21,117 @@ import net.neoforged.neoforge.network.PacketDistributor;
 public final class LogViewerClientHooks {
     private LogViewerClientHooks() {}
 
-    private static LogViewerScreen OPEN_SCREEN;
+    private static java.lang.ref.WeakReference<LogViewerScreen> OPEN_SCREEN = new java.lang.ref.WeakReference<>(null);
+    private static boolean serverCreateAvailable;
+    private static boolean capturePaused;
+    public static boolean capturePaused(){return capturePaused;}
+    public static void acceptCaptureHealth(com.roften.avilixlogger.net.S2CCaptureHealthPayload payload){capturePaused=payload.paused();var screen=OPEN_SCREEN.get();if(screen!=null)screen.updateCaptureHealth();}
+    public static boolean createAvailable() { return serverCreateAvailable && com.roften.avilixlogger.core.CreateSupport.available(); }
 
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
-        OPEN_SCREEN = null;
+        capturePaused=false;
+        OPEN_SCREEN.clear();
+        teleportOwner.clear();teleportRequest=0;
+        LoggerActionsScreen.clear();
+        LocalizedLogSearch.clear();
+        serverCreateAvailable = false;
         RollbackPreviewRenderer.clear();
         // Inform server that this player supports the GUI payloads.
-        PacketDistributor.sendToServer(new C2SHelloPayload());
+        var connection=Minecraft.getInstance().getConnection();
+        if(connection!=null&&connection.hasChannel(C2SHelloPayload.TYPE))PacketDistributor.sendToServer(new C2SHelloPayload());
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
-        OPEN_SCREEN = null;
+        capturePaused=false;
+        OPEN_SCREEN.clear();
+        teleportOwner.clear();teleportRequest=0;
+        LoggerActionsScreen.clear();
+        LocalizedLogSearch.clear();
+        serverCreateAvailable = false;
         RollbackPreviewRenderer.clear();
     }
 
-    public static void open() {
+    public static void open(boolean createAvailable) { open(createAvailable, java.time.ZoneId.systemDefault().getId()); }
+    public static void open(boolean createAvailable, String timeZone) {
+        serverCreateAvailable = createAvailable;
+        LogViewerScreen.setLogTimeZone(timeZone);
         Minecraft mc = Minecraft.getInstance();
         if (mc == null) return;
-        OPEN_SCREEN = new LogViewerScreen();
-        mc.setScreen(OPEN_SCREEN);
+        var screen = new LogViewerScreen();
+        OPEN_SCREEN = new java.lang.ref.WeakReference<>(screen);
+        mc.setScreen(screen);
         // Load using the filters/mode restored by the screen, not hard-coded defaults.
-        OPEN_SCREEN.requestInitialData();
+        screen.requestInitialData();
+    }
+
+    public static void acceptCart(com.roften.avilixlogger.net.S2CCartHistoryPayload payload) {
+        Minecraft mc=Minecraft.getInstance();
+        if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.OPEN){
+            var existing=CartHistoryScreen.owner(mc.screen);
+            if(existing!=null&&!payload.cartId().isBlank()){existing.showHistory(payload.cartId());return;}
+            var screen=new CartHistoryScreen(mc.screen,payload.cartId());mc.setScreen(screen);screen.load();
+        }else {
+            var screen=CartHistoryScreen.owner(mc.screen);if(screen==null)return;
+            if(payload.kind()==com.roften.avilixlogger.net.S2CCartHistoryPayload.CONFIRM)screen.confirmation(payload.message(),payload.command());
+            else screen.apply(payload);
+        }
+    }
+
+    private static long teleportSequence,teleportRequest;
+    private static java.lang.ref.WeakReference<LogViewerScreen> teleportOwner=new java.lang.ref.WeakReference<>(null);
+    static void teleport(LogViewerScreen owner,long entryId) {
+        var connection=Minecraft.getInstance().getConnection();
+        if(connection==null||!connection.hasChannel(com.roften.avilixlogger.net.C2SEntryTeleportPayload.TYPE)) {
+            owner.applyEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(0,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,"Для перехода из строки обновите сервер и админклиент до 2.1.29."));return;
+        }
+        var old=teleportOwner.get();if(old!=null)old.applyEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(teleportRequest,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,"Переход заменён новым запросом."));
+        teleportOwner=new java.lang.ref.WeakReference<>(owner);teleportRequest=++teleportSequence;
+        owner.applyEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(teleportRequest,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.PREPARING,"Подготавливаю переход к выбранной записи…"));
+        PacketDistributor.sendToServer(new com.roften.avilixlogger.net.C2SEntryTeleportPayload(teleportRequest,entryId));
+    }
+    public static void acceptEntryTeleport(com.roften.avilixlogger.net.S2CEntryTeleportPayload payload) {
+        var owner=teleportOwner.get();if(owner==null||payload.request()!=teleportRequest)return;
+        owner.applyEntryTeleport(payload);
+        if(payload.state()!=com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.PREPARING)teleportOwner.clear();
+        if(payload.state()==com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.SUCCESS&&Minecraft.getInstance().screen==owner)Minecraft.getInstance().setScreen(null);
+    }
+
+    public static void acceptActionResult(com.roften.avilixlogger.net.S2CLoggerActionResultPayload payload) {
+        LoggerActionsScreen.accept(payload);
+    }
+
+    static void openModule(net.minecraft.client.gui.screens.Screen parent,int preset) {
+        var screen=LogViewerScreen.forModule(parent,preset);
+        OPEN_SCREEN=new java.lang.ref.WeakReference<>(screen);
+        Minecraft.getInstance().setScreen(screen);screen.requestInitialData();
+    }
+    static void resume(net.minecraft.client.gui.screens.Screen screen) {
+        if(screen instanceof LogViewerScreen journal){OPEN_SCREEN=new java.lang.ref.WeakReference<>(journal);journal.requestInitialData();}
     }
 
     public static void acceptPage(S2CLogPagePayload payload) {
         if (payload == null) return;
-        if (OPEN_SCREEN != null) OPEN_SCREEN.apply(payload);
+        var screen=OPEN_SCREEN.get();
+        if (screen != null) screen.apply(payload);
     }
 
     public static void acceptDetails(S2CLogDetailsPayload payload) {
         if (payload == null) return;
-        if (OPEN_SCREEN != null) OPEN_SCREEN.applyDetails(payload);
+        var cartScreen=CartHistoryScreen.owner(Minecraft.getInstance().screen);
+        if (cartScreen!=null) cartScreen.acceptDetails(payload);
+        var screen=OPEN_SCREEN.get();
+        if (screen != null) screen.applyDetails(payload);
+    }
+
+    public static void acceptCaptureTypes(com.roften.avilixlogger.net.S2CCaptureTypesPayload payload) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null && mc.screen instanceof CaptureTypesScreen screen) screen.apply(payload);
     }
 
     public static void acceptInspectTool(S2CInspectToolPayload payload) {
         if (payload == null) return;
-        if (OPEN_SCREEN != null) OPEN_SCREEN.applyInspectTool(payload);
+        var screen=OPEN_SCREEN.get();
+        if (screen != null) screen.applyInspectTool(payload);
     }
 
     public static void acceptRollbackPreview(S2CRollbackPreviewPayload payload) {

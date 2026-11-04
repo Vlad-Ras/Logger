@@ -46,7 +46,7 @@ public final class RollbackCoordinator {
     public static void startRollback(MinecraftServer server, UUID playerId, RollbackPlanManager.Plan plan,
                                      Runnable onStarted, Consumer<RollbackReport> onComplete,
                                      Consumer<String> onError) {
-        if (active != null) {
+        if (active != null || CartAuditContext.rollbackActive) {
             onError.accept("Другой откат уже изменяет мир. Дождитесь его завершения.");
             return;
         }
@@ -96,7 +96,7 @@ public final class RollbackCoordinator {
                             onComplete.accept(preview);
                             return;
                         }
-                        if (active != null) {
+                        if (active != null || CartAuditContext.rollbackActive) {
                             onError.accept("Другой откат уже изменяет мир. Подготовленный план не применён.");
                             return;
                         }
@@ -144,11 +144,12 @@ public final class RollbackCoordinator {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
+        ActiveJob job = active;
+        if (job == null && PREPARATIONS.isEmpty()) return;
         if (!LoggerConfig.isEnabled()) {
             if (active != null || !PREPARATIONS.isEmpty()) shutdown();
             return;
         }
-        ActiveJob job = active;
         if (job == null) return;
         // NeoForge's own tick budget is the first guard: under load the rollback simply waits.
         if (!event.hasTime()) return;
@@ -162,6 +163,7 @@ public final class RollbackCoordinator {
     }
 
     public static void shutdown() {
+        RollbackPlanManager.clearAll();
         for (Preparation preparation : PREPARATIONS.values()) preparation.cancelled = true;
         PREPARATIONS.clear();
         active = null;
@@ -182,9 +184,9 @@ public final class RollbackCoordinator {
                 thread.setPriority(Math.max(Thread.MIN_PRIORITY, Thread.NORM_PRIORITY - 1));
                 return thread;
             };
-            current = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+            current = new ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
                     new ArrayBlockingQueue<>(4), factory, new ThreadPoolExecutor.AbortPolicy());
-            current.prestartAllCoreThreads();
+            current.allowCoreThreadTimeOut(true);
             executor = current;
             return current;
         }

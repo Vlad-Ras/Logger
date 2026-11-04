@@ -1,51 +1,213 @@
-name: Build
+name: Verify AvilixLogger development
 
 on: [push, pull_request]
 
 jobs:
-  build:
+  verify:
+    name: verify (${{ matrix.profile }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {profile: current-fd132, fd: '1.3.2', create: '6.0.11-313', ae2: '19.2.12', framework: '1.21.1-0.13.10'}
+          - {profile: current-fd134, fd: '1.3.4', create: '6.0.11-313', ae2: '19.2.12', framework: '1.21.1-0.13.10'}
+          - {profile: logged-pack, fd: '1.3.2', create: '6.0.10-281', ae2: '19.2.18', framework: '1.21.1-0.13.11'}
+          # Matches the main module versions inventoried on the live Windows s4 client (JARs may differ by SHA-256).
+          - {profile: client-s4-core, fd: '1.3.4', create: '6.0.10-281', ae2: '19.2.18', framework: '1.21.1-0.13.11'}
     runs-on: ubuntu-latest
+    env:
+      ORG_GRADLE_PROJECT_compatCreateVersion: ${{ matrix.create }}
+      ORG_GRADLE_PROJECT_compatAe2Version: ${{ matrix.ae2 }}
+      ORG_GRADLE_PROJECT_compatFrameworkVersion: ${{ matrix.framework }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build with Gradle
-        run: ./gradlew build
-
-      - name: Smoke test dedicated server with AE2
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      # check/build depend on release obfuscation. Preparation deliberately runs only these tasks.
+      - name: Prepare exact official Create release for client pack
+        if: matrix.profile == 'client-s4-core' || matrix.profile == 'logged-pack'
+        run: |
+          python3 tools/ci/prepare-create-release.py
+          echo 'ORG_GRADLE_PROJECT_compatCreateReleaseDirectory=build/compat-create-release' >> "$GITHUB_ENV"
+      - name: Compile and verify detached pipelines and Create preflight
+        id: compile
+        run: |
+          set -o pipefail
+          ./gradlew compileJava compileCreateSmokeJava testAsyncPipeline testCreatePreflight verifyMixinSafety --console=plain --no-daemon 2>&1 | tee compile.log
+      - name: Native storage address and protected server admission
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.profile == 'client-s4-core' }}
+        timeout-minutes: 6
+        run: |
+          mkdir -p run-storage
+          printf 'eula=true\n' > run-storage/eula.txt
+          printf 'max-tick-time=-1\n' > run-storage/server.properties
+          timeout --signal=INT --kill-after=15s 240s ./gradlew runServer -PstorageSmoke --console=plain --no-daemon > storage-admission-smoke.log 2>&1
+          tail -n 70 storage-admission-smoke.log
+          grep -q 'STORAGE_BLOCK_ADDRESS_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'GUI_COMMAND_OUTPUT_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'PLAYER_DEATH_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'PLAYER_DEATH_CORPSE_NATIVE_OK: ExplosionVictim' storage-admission-smoke.log
+          grep -q 'OPAC_STATE_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'OPAC_ACTOR_NATIVE_OK' storage-admission-smoke.log
+          grep -q 'SERVER_CAPTURE_GUARD_NATIVE_OK' storage-admission-smoke.log
+          if grep -qE 'STORAGE_BLOCK_ADDRESS_NATIVE_FAILED|MixinApplyError|MixinTransformerError' storage-admission-smoke.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && matrix.profile == 'client-s4-core' }}
+        with:
+          name: player-death-native-evidence
+          path: storage-admission-smoke.log
+          if-no-files-found: ignore
+      - name: Native Create regression
         timeout-minutes: 10
         run: |
           mkdir -p run
           printf 'eula=true\n' > run/eula.txt
-          # runServer is intentionally long-lived. A GameTestServer without registered
-          # tests exits before reaching server startup while Gradle still reports success.
-          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
-          tail -n 100 ae2-smoke.log
-          if ! grep -qE 'Done \([0-9]+([.][0-9]+)?s\)!' ae2-smoke.log; then
-            echo 'Dedicated server did not finish loading with AE2.' >&2
+          # Startup smoke cases run synchronously; the outer timeout bounds the stand.
+          printf 'max-tick-time=-1\n' > run/server.properties
+          timeout --signal=INT --kill-after=15s 360s ./gradlew runServer -PcreateSmoke -PacceptanceJfr -PfdSmokeVersion=${{ matrix.fd }} --console=plain --no-daemon > create-smoke.log 2>&1 || status=$?
+          tail -n 100 create-smoke.log
+          if ! grep -q 'AVILIX_CREATE_SMOKE_OK' create-smoke.log || grep -qE '(AVILIX_CREATE_SMOKE_FAILED|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-smoke.log; then
             exit 1
           fi
-          if grep -qE '(Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then
-            echo 'Dedicated server reported a fatal loading error.' >&2
+      - name: Profile attribution tools
+        run: |
+          mkdir -p build/profile-tools
+          javac -d build/profile-tools tools/acceptance/ProfileSummary.java tools/acceptance/ProfileSummaryTest.java
+          java -cp build/profile-tools ProfileSummaryTest
+          python3 tools/acceptance/test-inventory-modpack.py
+          python3 tools/acceptance/test-profile-comparison.py
+      - name: Native AE2 menu and packet regression
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && (matrix.profile == 'current-fd134' || matrix.profile == 'client-s4-core') }}
+        timeout-minutes: 10
+        run: |
+          mkdir -p run-ae2
+          printf 'eula=true\n' > run-ae2/eula.txt
+          printf 'max-tick-time=-1\n' > run-ae2/server.properties
+          timeout --signal=INT --kill-after=15s 460s ./gradlew runServer -Pae2Smoke --console=plain --no-daemon > ae2-smoke.log 2>&1 || status=$?
+          tail -n 80 ae2-smoke.log
+          grep -q 'AE2_GRID_NATIVE_OK' ae2-smoke.log
+          grep -q 'AE2_CRAFTING_NATIVE_OK' ae2-smoke.log
+          grep -q 'AE2_ASSEMBLY_NATIVE_OK' ae2-smoke.log
+          grep -q 'AE2_PROCESSING_NATIVE_OK:' ae2-smoke.log
+          grep -q 'AE2_REQUESTER_CANCEL_NATIVE_OK:' ae2-smoke.log
+          grep -q 'AE2_CPU_CANCEL_NATIVE_OK:' ae2-smoke.log
+          grep -q 'AE2_LINK_CANCEL_NATIVE_OK:' ae2-smoke.log
+          grep -q 'AE2_TERMINAL_COST_NATIVE_OK:' ae2-smoke.log
+          if ! grep -q 'AE2_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_TRANSFER_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_DEVICE_SETTINGS_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_STOCK_CONFIGURATION_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_PATTERN_NATIVE_OK' ae2-smoke.log || ! grep -q 'AE2_REMOTE_NATIVE_OK' ae2-smoke.log || grep -qE '(AE2_NATIVE_FAILED|AE2 audit integration disabled|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-smoke.log; then exit 1; fi
+      - name: Native AE2 mid-job cancel and three-process world persistence
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && (matrix.profile == 'current-fd134' || matrix.profile == 'client-s4-core') }}
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          mkdir -p run-ae2-lifecycle
+          printf 'eula=true\n' > run-ae2-lifecycle/eula.txt
+          printf 'max-tick-time=-1\n' > run-ae2-lifecycle/server.properties
+          for phase in seed resume verify; do
+            timeout --signal=INT --kill-after=15s 240s ./gradlew runServer -Pae2Smoke -Pae2Lifecycle="$phase" --console=plain --no-daemon > "ae2-lifecycle-$phase-smoke.log" 2>&1
+            tail -n 70 "ae2-lifecycle-$phase-smoke.log"
+            if grep -qE 'AE2_NATIVE_FAILED|AE2 audit integration disabled|Failed to start the minecraft server|MixinApplyError|MixinTransformerError' "ae2-lifecycle-$phase-smoke.log"; then exit 1; fi
+            grep -q 'All dimensions are saved' "ae2-lifecycle-$phase-smoke.log"
+          done
+          grep -q 'AE2_MID_CANCEL_NATIVE_OK:' ae2-lifecycle-seed-smoke.log
+          grep -q 'AE2_LIFECYCLE_SEEDED:' ae2-lifecycle-seed-smoke.log
+          grep -q 'AE2_LIFECYCLE_RESUMED:' ae2-lifecycle-resume-smoke.log
+          grep -q 'AE2_LIFECYCLE_NATIVE_OK:' ae2-lifecycle-verify-smoke.log
+          test -s run-ae2-lifecycle/world/level.dat
+      - name: Native regression without AE2
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.profile == 'current-fd134' }}
+        timeout-minutes: 10
+        run: |
+          timeout --signal=INT --kill-after=15s 180s ./gradlew runServer -Pae2Absent --console=plain --no-daemon > ae2-absent-smoke.log 2>&1 || status=$?
+          tail -n 60 ae2-absent-smoke.log
+          if ! grep -q 'AE2_ABSENT_NATIVE_OK' ae2-absent-smoke.log || grep -qE '(AE2_NATIVE_FAILED|Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' ae2-absent-smoke.log; then exit 1; fi
+      - name: Native regression without Create
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.fd == '1.3.4' }}
+        timeout-minutes: 10
+        run: |
+          mkdir -p run-create-absent
+          printf 'eula=true\n' > run-create-absent/eula.txt
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PcreateAbsent --console=plain --no-daemon > create-absent-smoke.log 2>&1 || status=$?
+          tail -n 80 create-absent-smoke.log
+          if ! grep -q 'CREATE_ABSENT_NATIVE_OK' create-absent-smoke.log || grep -qE '(Failed to start the minecraft server|MixinApplyError|MixinTransformerError)' create-absent-smoke.log; then
             exit 1
           fi
-          echo 'Dedicated server started with AE2 and AvilixLogger.'
-
-      - name: Upload AvilixLogger JAR
+      - name: Native Backpacked regression
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && (matrix.fd == '1.3.4' || matrix.profile == 'logged-pack') }}
+        timeout-minutes: 5
+        run: |
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PbackpackSmoke --console=plain --no-daemon > backpack-smoke.log 2>&1 || status=$?
+          tail -n 50 backpack-smoke.log
+          if ! grep -q 'BACKPACK_NATIVE_SMOKE_OK' backpack-smoke.log || grep -qE 'Backpack smoke failed|MixinApplyError|MixinTransformerError' backpack-smoke.log; then exit 1; fi
+      - name: Native actor and aircraft regression
+        if: ${{ !cancelled() && steps.compile.outcome == 'success' && matrix.fd == '1.3.4' }}
+        timeout-minutes: 5
+        run: |
+          timeout --signal=INT --kill-after=15s 150s ./gradlew runServer -PactorSmoke --console=plain --no-daemon > actor-smoke.log 2>&1 || status=$?
+          tail -n 50 actor-smoke.log
+          if ! grep -q 'ACTOR_ATTRIBUTION_NATIVE_OK' actor-smoke.log || grep -qE 'ACTOR_ATTRIBUTION_NATIVE_FAILED|MixinApplyError|MixinTransformerError' actor-smoke.log; then exit 1; fi
+      - name: Verification logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AvilixLogger-2.1.8
-          path: build/libs/avilixlogger-2.1.8.jar
-          if-no-files-found: error
+          name: verification-logs-${{ matrix.profile }}
+          path: |
+            compile.log
+            *smoke.log
+            run/crash-reports/*.txt
+            run/avilixlogger-*-ci.jfr
+            run/avilixlogger-2.1.29-automation-cost.json
+          if-no-files-found: ignore
+
+  weapon-storage:
+    name: Weapon evidence on real ClickHouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        env:
+          CLICKHOUSE_USER: avilix_ci
+          CLICKHOUSE_PASSWORD: local_ci_only
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+    env:
+      ORG_GRADLE_PROJECT_compatCreateReleaseDirectory: build/compat-create-release
+      AVILIX_CI_CLICKHOUSE_URL: http://127.0.0.1:8123
+      AVILIX_CI_CLICKHOUSE_USER: avilix_ci
+      AVILIX_CI_CLICKHOUSE_PASSWORD: local_ci_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare verified official Create release input
+        run: python3 tools/ci/prepare-create-release.py
+      - name: Require ready actual ClickHouse, not a mock
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --show-error -u "$AVILIX_CI_CLICKHOUSE_USER:$AVILIX_CI_CLICKHOUSE_PASSWORD" "$AVILIX_CI_CLICKHOUSE_URL/ping" >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: Real schema + insert + feed + details + new connection
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew testNativeClickHouse --no-daemon --console=plain 2>&1 | tee native-clickhouse.log
+          grep -q 'CLICKHOUSE_NATIVE_OK' native-clickhouse.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weapon-clickhouse-native-acceptance
+          path: native-clickhouse.log
+          if-no-files-found: ignore

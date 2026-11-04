@@ -11,9 +11,10 @@ import com.roften.avilixlogger.api.LogAdapterRegistry;
  */
 public final class LoggerRuntime {
     private static final NoopLogStorage UNAUTHORIZED = new NoopLogStorage();
-    private static final PendingLogStorage PENDING = new PendingLogStorage();
-    private static final DeduplicatingLogStorage FRONT = new DeduplicatingLogStorage(PENDING);
+    private static volatile PendingLogStorage PENDING;
+    private static volatile DeduplicatingLogStorage FRONT;
 
+    private static volatile AsyncLogStorage ASYNC;
     private static volatile LogStorage STORAGE;
     private static volatile boolean INIT_STARTED;
     private static volatile long INIT_GENERATION;
@@ -21,20 +22,88 @@ public final class LoggerRuntime {
 
     private LoggerRuntime() {}
 
+    /** Inspect existing queues only. Reading diagnostics must not start a logger or storage connection. */
+    public static String queueReport() {
+        var states=new java.util.ArrayList<WeightedQueue.Statistics>(3);
+        var cpu=AsyncLogProcessor.queueStatistics();if(cpu!=null)states.add(cpu);
+        var events=ASYNC;if(events!=null)states.add(events.queueStatistics());
+        var journal=PENDING;if(journal!=null)states.add(journal.queueStatistics());
+        if(states.isEmpty())return ServerCaptureGuard.report()+"\n"+PlayerDeathAudit.report()+"\nОчереди Logger ещё не запущены.";
+        var text=new StringBuilder(ServerCaptureGuard.report()+"\n"+(STORAGE==null?"ClickHouse ещё не подключён: записи ожидают в локальном журнале.\n":"")+"Буферы Logger:\n");
+        for(var state:states) {
+            String name=switch(state.name()){case "cpu"->"Обработка снимков";case "events"->"События";case "journal"->"Запись на диск";default->state.name();};
+            text.append(String.format(java.util.Locale.ROOT,"%s: занято %d из %d; буфер %.1f из %.1f МБ (пик %.1f МБ).\n",
+                name,state.outstanding(),state.countLimit(),state.bytes()/1048576.0,state.byteLimit()/1048576.0,state.peakBytes()/1048576.0));
+        }
+        var runtime=Runtime.getRuntime();
+        text.append(String.format(java.util.Locale.ROOT,"Память всей JVM: %.0f / %.0f МБ. Буферы выше относятся к Logger; отдельно память его объектов здесь не измеряется.",(runtime.totalMemory()-runtime.freeMemory())/1048576.0,runtime.maxMemory()/1048576.0));
+        return text.append("\n").append(PlayerDeathAudit.report()).toString();
+    }
+    public static void resetQueueStatistics() {
+        AsyncLogProcessor.resetQueueStatistics();
+        var events=ASYNC;if(events!=null)events.resetQueueStatistics();
+        var journal=PENDING;if(journal!=null)journal.resetQueueStatistics();
+    }
+
+    public static String resumeCapture(){
+        if(!com.roften.avilixlogger.auth.AuthCoreBridge.isAuthorized())return "AuthCore не разрешил работу Logger.";
+        if(!LoggerConfig.isEnabled())return "Logger отключён в основной конфигурации.";
+        if(!ServerCaptureGuard.paused())return "Аварийной остановки захвата нет.";
+        var cpu=AsyncLogProcessor.queueStatistics();var events=ASYNC;var journal=PENDING;
+        if(cpu!=null&&cpu.outstanding()!=0||events!=null&&events.queueStatistics().outstanding()!=0||journal!=null&&journal.queueStatistics().outstanding()!=0)
+            return "Принятые записи ещё обрабатываются. Сначала освободите очереди; состояние видно в отчёте.";
+        var gap=ServerCaptureGuard.prepareResume();if(gap==null)return "Аварийной остановки захвата нет.";
+        if(events==null||!events.appendDiagnostic(captureGapEntry(gap)))return "Запись интервала пропуска пока не принята. Захват остаётся остановленным; повторите после освобождения очередей.";
+        ServerCaptureGuard.resume(gap);
+        java.util.concurrent.CompletableFuture.runAsync(()->AvilixLoggerMod.LOGGER.warn("[AvilixLogger] {}",ServerCaptureGuard.report()));
+        return "Захват возобновлён. Интервал пропуска будет сохранён отдельной записью журнала.\n"+ServerCaptureGuard.report();
+    }
+    public static boolean enqueueDiagnostic(LogEntry entry){
+        if(entry==null||entry.type!=ActionType.LOGGER_DIAGNOSTIC||!"logger:diagnostic".equals(entry.source)||!LoggerConfig.isEnabled())return false;
+        var events=ASYNC;if(events==null)return false;LogIdGenerator.ensure(entry);return events.appendDiagnostic(entry);
+    }
+    public static void autoResumeCapture() {
+        var gap=ServerCaptureGuard.active();
+        if(gap!=null && System.currentTimeMillis()-gap.since()>=1000) resumeCapture();
+    }
+    static LogEntry captureGapEntry(ServerCaptureGuard.Gap gap){
+        var row=new LogEntry();row.ts=gap.until();row.type=ActionType.CAPTURE_GAP;row.dim="*";row.actorName="Система";row.source="logger:capture-gap";
+        row.extra="Пропуск захвата "+java.time.Instant.ofEpochMilli(gap.since())+" — "+java.time.Instant.ofEpochMilli(gap.until())+"; очередь "+gap.queue()+"; отклонено заданий "+gap.rejected()+"; пропущено проверок "+gap.suppressedChecks()+" (не число событий)";
+        var tag=new net.minecraft.nbt.CompoundTag();tag.putString("Kind","LoggerCaptureGap");tag.putBoolean("PositionKnown",false);tag.putLong("Since",gap.since());tag.putLong("Until",gap.until());
+        tag.putString("Queue",gap.queue());tag.putString("Reason",gap.reason());tag.putLong("RejectedSubmissions",gap.rejected());tag.putLong("SuppressedCaptureChecks",gap.suppressedChecks());row.beAfter=tag.toString();return row;
+    }
     public static LogStorage storage(Level level) {
         if (!LoggerConfig.isEnabled()) return UNAUTHORIZED;
+        LogStorage events = eventStorage();
         if (STORAGE == null) startAsyncInit();
-        return FRONT;
+        return events;
     }
 
     public static void warmupAsync() {
         if (!LoggerConfig.isEnabled()) return;
+        eventStorage();
+        AsyncLogProcessor.warmup();
         startAsyncInit();
     }
 
+    private static AsyncLogStorage eventStorage() {
+        AsyncLogStorage current = ASYNC;
+        if (current != null) return current;
+        synchronized (LoggerRuntime.class) {
+            if (ASYNC == null) {
+                PENDING = new PendingLogStorage();
+                FRONT = new DeduplicatingLogStorage(PENDING);
+                ASYNC = new AsyncLogStorage(FRONT,
+                    LoggerConfig.VALUES.asyncQueueCapacity.get(),
+                    LoggerConfig.captureQueueBytes());
+            }
+            return ASYNC;
+        }
+    }
+
     private static void startAsyncInit() {
-        if (!LoggerConfig.isEnabled()) return;
         if (INIT_STARTED) return;
+        if (!LoggerConfig.isEnabled()) return;
         synchronized (LoggerRuntime.class) {
             if (INIT_STARTED) return;
             INIT_STARTED = true;
@@ -46,7 +115,7 @@ public final class LoggerRuntime {
                     LogAdapterRegistry.discover();
                     while (INIT_STARTED && INIT_GENERATION == generation && LoggerConfig.isEnabled()) {
                         attempt++;
-                        LogStorage real;
+                        BatchLogStorage real;
                         try {
                             real = createConfiguredStorage();
                         } catch (Throwable failure) {
@@ -68,12 +137,14 @@ public final class LoggerRuntime {
                             continue;
                         }
 
-                        if (!INIT_STARTED || INIT_GENERATION != generation || !LoggerConfig.isEnabled()) {
-                            real.shutdown();
-                            return;
+                        synchronized (LoggerRuntime.class) {
+                            if (!INIT_STARTED || INIT_GENERATION != generation || !LoggerConfig.isEnabled()) {
+                                real.shutdown();
+                                return;
+                            }
+                            PENDING.setDelegate(real);
+                            STORAGE = real;
                         }
-                        PENDING.setDelegate(real);
-                        STORAGE = real;
                         if (attempt > 1) {
                             AvilixLoggerMod.LOGGER.info(
                                     "[AvilixLogger] ClickHouse connection recovered after {} attempts; queued logs are being flushed.",
@@ -127,28 +198,36 @@ public final class LoggerRuntime {
         return LoggerConfig.isEnabled() && INIT_STARTED && STORAGE == null;
     }
 
-    private static LogStorage createConfiguredStorage() {
+    private static BatchLogStorage createConfiguredStorage() {
         AvilixLoggerMod.LOGGER.info("[AvilixLogger] Starting ClickHouse storage (MySQL is not read or migrated)");
         return new ClickHouseLogStorage();
     }
 
     public static void shutdown() {
-        INIT_STARTED = false;
-        INIT_GENERATION++;
-        Thread initThread = INIT_THREAD;
+        Thread initThread;
+        synchronized (LoggerRuntime.class) {
+            INIT_STARTED = false;
+            INIT_GENERATION++;
+            initThread = INIT_THREAD;
+        }
         if (initThread != null) initThread.interrupt();
         AsyncLogProcessor.shutdown();
+        AsyncLogStorage events = ASYNC;
+        if (events != null) events.shutdown();
+        PendingLogStorage pending = PENDING;
+        if (pending != null) pending.shutdown();
         ChatAuditLogger.clearPending();
         AdaptiveLogDiagnostics.logSummary();
-        LogStorage s = STORAGE;
-        if (s != null) {
-            s.shutdown();
-        } else {
-            PENDING.shutdown();
+        LogStorage storage = STORAGE;
+        if (storage != null) storage.shutdown();
+        if (initThread != null) WeightedQueue.join(initThread);
+        synchronized (LoggerRuntime.class) {
+            ASYNC = null;
+            STORAGE = null;
+            PENDING = null;
+            if (FRONT != null) FRONT.clear();
+            FRONT = null;
+            INIT_THREAD = null;
         }
-        STORAGE = null;
-        INIT_THREAD = null;
-        PENDING.reset();
-        FRONT.clear();
     }
 }

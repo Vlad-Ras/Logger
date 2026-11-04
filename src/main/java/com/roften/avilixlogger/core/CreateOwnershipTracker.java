@@ -37,11 +37,11 @@ public final class CreateOwnershipTracker {
     private static final long INTERACT_TTL_MS = 2 * 60_000L; // 2 minutes
     private static final int INTERACT_RADIUS = 24;
 
-    private record PosKey(String dim, long posLong) {}
+    private record ChunkKey(String dim, int x, int z) {}
 
     public record ResolvedActor(UUID uuid, String name, String source) {}
 
-    private static final ConcurrentMap<PosKey, ActorTracker.ActorRef> LAST_INTERACT = new ConcurrentHashMap<>();
+    private static final ConcurrentMap<ChunkKey, ConcurrentHashMap<Long, ActorTracker.ActorRef>> LAST_INTERACT = new ConcurrentHashMap<>();
 
     private static final ConcurrentMap<UUID, PendingMinecart> PENDING_MINECART = new ConcurrentHashMap<>();
     private record PendingMinecart(String dim, BlockPos pos, long gameTime, String playerName) {}
@@ -66,8 +66,13 @@ public final class CreateOwnershipTracker {
 
         // Track interactions with Create devices.
         if (isCreateBlock(level, pos) || (level.getBlockEntity(pos) != null && level.getBlockEntity(pos).getClass().getName().toLowerCase().contains("create"))) {
-            LAST_INTERACT.put(new PosKey(level.dimension().location().toString(), pos.asLong()),
-                    new ActorTracker.ActorRef(System.currentTimeMillis(), p.getUUID(), p.getName().getString()));
+            ChunkKey key = new ChunkKey(level.dimension().location().toString(), pos.getX() >> 4, pos.getZ() >> 4);
+            ActorTracker.ActorRef actor = new ActorTracker.ActorRef(System.currentTimeMillis(), p.getUUID(), p.getName().getString());
+            LAST_INTERACT.compute(key, (ignored, entries) -> {
+                if (entries == null) entries = new ConcurrentHashMap<>();
+                entries.put(pos.asLong(), actor);
+                return entries;
+            });
         }
 
         // Track minecart placement intent (minecart drill uses minecart base).
@@ -121,72 +126,17 @@ public final class CreateOwnershipTracker {
     @Nullable
     public static ResolvedActor resolveForSystemChange(ServerLevel level, BlockPos changedPos, @Nullable Entity directCauser) {
 
-        // 1) If the direct causer is a Create entity and has owner tag, use it.
-        if (directCauser != null && isCreateEntity(directCauser)) {
-            UUID u = readOwnerUuid(directCauser);
-            if (u != null) {
-                String n = readOwnerName(directCauser);
-                return new ResolvedActor(u, n, "create:entity@" + directCauser.blockPosition().getX() + "," + directCauser.blockPosition().getY() + "," + directCauser.blockPosition().getZ());
-            }
-        }
-
-        // 2) Find nearby Create entities with owner tag.
-        var aabb = new net.minecraft.world.phys.AABB(
-                changedPos.getX() - 16, changedPos.getY() - 16, changedPos.getZ() - 16,
-                changedPos.getX() + 16, changedPos.getY() + 16, changedPos.getZ() + 16
-        );
-        for (Entity e : level.getEntities(null, aabb)) {
-            if (!isCreateEntity(e)) continue;
-            UUID u = readOwnerUuid(e);
-            if (u == null) continue;
-            String n = readOwnerName(e);
-            return new ResolvedActor(u, n, "create:entity@" + e.blockPosition().getX() + "," + e.blockPosition().getY() + "," + e.blockPosition().getZ());
-        }
-
-        // 3) Check for tagged minecarts (covers minecart drill).
-        for (Entity e : level.getEntities(null, aabb)) {
-            if (!(e instanceof AbstractMinecart)) continue;
-            UUID u = readOwnerUuid(e);
-            if (u == null) continue;
-            String n = readOwnerName(e);
-            return new ResolvedActor(u, n, "create:minecart@" + e.blockPosition().getX() + "," + e.blockPosition().getY() + "," + e.blockPosition().getZ());
-        }
-
-        // 4) Search around for a recent Create block interaction.
-        long now = System.currentTimeMillis();
-        String dim = level.dimension().location().toString();
-        BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
-
-        int bestD2 = Integer.MAX_VALUE;
-        ActorTracker.ActorRef best = null;
-        BlockPos bestPos = null;
-
-        for (int dx = -INTERACT_RADIUS; dx <= INTERACT_RADIUS; dx++) {
-            for (int dz = -INTERACT_RADIUS; dz <= INTERACT_RADIUS; dz++) {
-                // keep it cheap: ignore far corners early
-                int d2 = dx*dx + dz*dz;
-                if (d2 > INTERACT_RADIUS*INTERACT_RADIUS) continue;
-                mp.set(changedPos.getX() + dx, changedPos.getY(), changedPos.getZ() + dz);
-
-                ActorTracker.ActorRef ar = LAST_INTERACT.get(new PosKey(dim, mp.asLong()));
-                if (ar == null) continue;
-                if (now - ar.tsMs() > INTERACT_TTL_MS) continue;
-
-                if (d2 < bestD2) {
-                    bestD2 = d2;
-                    best = ar;
-                    bestPos = mp.immutable();
-                }
-            }
-        }
-
-        if (best != null && best.actorUuid() != null) {
-            String n = best.actorName();
-            String src = "create:block@" + bestPos.getX() + "," + bestPos.getY() + "," + bestPos.getZ();
-            return new ResolvedActor(best.actorUuid(), n, src);
-        }
-
+        // Ownership and nearby interactions describe history, not the actor of this mutation.
         return null;
+    }
+
+    public static void cleanupBackground(long now) {
+        for (ChunkKey key : LAST_INTERACT.keySet()) {
+            LAST_INTERACT.computeIfPresent(key, (ignored, entries) -> {
+                entries.entrySet().removeIf(entry -> now - entry.getValue().tsMs() > INTERACT_TTL_MS);
+                return entries.isEmpty() ? null : entries;
+            });
+        }
     }
 
     @Nullable
