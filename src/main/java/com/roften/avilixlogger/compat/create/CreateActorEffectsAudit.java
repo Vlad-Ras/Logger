@@ -13,6 +13,7 @@ public final class CreateActorEffectsAudit {
         return entity==null||!CreateCapturePolicy.actor(context)||!CreateCargoAudit.active(entity)?null:new Scope(context,reason,internal,structure);
     }
     public static void spawning(ItemEntity drop){
+        if(CaptureTypePolicy.suppressed())return;
         var scope=CURRENT.get();if(scope==null)return;
         var cart=CreateCartAudit.state(scope.entity);
         if(cart!=null)drop.getPersistentData().putUUID("AvilixCartDrop",cart.id);
@@ -20,6 +21,7 @@ public final class CreateActorEffectsAudit {
                 CreateContraptionSources.kind(scope.entity).source(CreateContraptionSources.id(scope.entity),"actor_drop")));
     }
     public static void spawned(ItemEntity drop){
+        if(CaptureTypePolicy.suppressed())return;
         var scope=CURRENT.get();if(scope==null)return;
         // The existing cart join handler publishes this same drop under its active cart context.
         if(CreateCartAudit.enabled())return;

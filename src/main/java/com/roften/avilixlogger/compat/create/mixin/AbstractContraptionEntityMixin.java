@@ -29,8 +29,8 @@ public class AbstractContraptionEntityMixin {
             com.simibubi.create.content.contraptions.behaviour.MovementContext context, BlockPos pos,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
         var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
-        var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
-        try { original.call(actor, context, pos); }
+        var previous = com.roften.avilixlogger.core.CreateMechanismContext.current();
+        try { com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context); original.call(actor, context, pos); }
         finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
             com.roften.avilixlogger.core.CaptureTypePolicy.restoreSuppression(previousCapture); }
     }
@@ -40,8 +40,8 @@ public class AbstractContraptionEntityMixin {
             com.simibubi.create.content.contraptions.behaviour.MovementContext context,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
         var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
-        var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
-        try { original.call(actor, context); }
+        var previous = com.roften.avilixlogger.core.CreateMechanismContext.current();
+        try { com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context); original.call(actor, context); }
         finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
             com.roften.avilixlogger.core.CaptureTypePolicy.restoreSuppression(previousCapture); }
     }
@@ -52,8 +52,8 @@ public class AbstractContraptionEntityMixin {
             net.minecraft.world.phys.Vec3 oldMotion, net.minecraft.world.phys.Vec3 motion,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
         var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
-        var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
-        try { original.call(actor, context, oldMotion, motion); }
+        var previous = com.roften.avilixlogger.core.CreateMechanismContext.current();
+        try { com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context); original.call(actor, context, oldMotion, motion); }
         finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
             com.roften.avilixlogger.core.CaptureTypePolicy.restoreSuppression(previousCapture); }
     }

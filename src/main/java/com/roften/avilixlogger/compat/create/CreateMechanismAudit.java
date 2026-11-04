@@ -31,5 +31,5 @@ public final class CreateMechanismAudit {
         }
         return CreateMechanismContext.enter(cached.stamp());
     }
-    public static void clear() { CreateCaptureGaps.clear(); ACTORS.clear(); CreateMechanismContext.restore(null); }
+    public static void clear() { CaptureTypePolicy.clearSuppression(); CreateCaptureGaps.clear(); ACTORS.clear(); CreateMechanismContext.restore(null); }
 }

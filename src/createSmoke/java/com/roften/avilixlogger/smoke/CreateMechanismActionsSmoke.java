@@ -132,6 +132,19 @@ public final class CreateMechanismActionsSmoke {
                     check(row.actorUuid == null && !metadata(row).hasUUID("Owner"), "unknown mechanism owner was guessed");
                 }
                 scenarios++;
+                if (kind == CreateContraptionKind.MINECART) {
+                    var cartState = CreateCartAudit.state(entity);
+                    cartState.owner = OWNER; cartState.ownerName = "OfflineCartOwner";
+                    world.setBlock(target, Blocks.LEVER.defaultBlockState().setValue(FaceAttachedHorizontalDirectionalBlock.FACE, AttachFace.FLOOR), 3);
+                    try (var capture = CreateDeployerAudit.capture(context, target, anonymous, "USE")) {
+                        check(OWNER.equals(CauseContext.actorUuid(anonymous)), "active technical player lost cart owner");
+                        var unrelatedFake = new DeployerFakePlayer(world, UUID.randomUUID());
+                        check(CauseContext.actorUuid(unrelatedFake) == null, "unrelated fake inherited cart owner");
+                        actor.visitNewPosition(context, target); var row = capture.finish(true);
+                        check(row != null && OWNER.equals(row.actorUuid) && "OfflineCartOwner".equals(row.actorName), "offline cart owner name lost");
+                    }
+                    cartState.owner = null; cartState.ownerName = ""; scenarios++;
+                }
             }
             check(CreateActorContext.current() == null && CreateMechanismContext.current() == null && CauseContext.peek() == null, "actor/cause scope leaked");
             System.out.println("CREATE_MECHANISM_ACTIONS_NATIVE_OK: " + scenarios + " scenarios; real deployer place+lever+milk+attack+cancel+harvest+tool-wear and drill cargo+spill, cart/train/bearing, detached hand states+owner+mechanism");

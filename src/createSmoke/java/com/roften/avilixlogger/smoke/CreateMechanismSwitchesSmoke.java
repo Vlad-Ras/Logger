@@ -41,6 +41,9 @@ public final class CreateMechanismSwitchesSmoke {
             body.getBlocks().put(BlockPos.ZERO, new StructureBlockInfo(BlockPos.ZERO, AllBlocks.DEPLOYER.getDefaultState(), new CompoundTag()));
             var inventory = new ItemStackHandler(1); inventory.setStackInSlot(0, new ItemStack(Items.DIAMOND, 17));
             ((CartStorageAccessor)body.getStorage()).avilixlogger$addItem(new FallbackMountedStorage(inventory), BlockPos.ZERO);
+            var fluid = (CompoundTag)new net.neoforged.neoforge.fluids.FluidStack(net.minecraft.world.level.material.Fluids.WATER, 1250).save(world.registryAccess());
+            fluid.putInt("Capacity", 4000);
+            ((CartStorageAccessor)body.getStorage()).avilixlogger$addFluid(com.simibubi.create.content.fluids.tank.storage.FluidTankMountedStorage.fromLegacy(world.registryAccess(), fluid), BlockPos.ZERO);
             var entity = OrientedContraptionEntity.create(world, body, Direction.NORTH);
             entity.startRiding(new net.minecraft.world.entity.vehicle.Minecart(world, 0, 128, 0), true);
             CartStorageAudit.bind(entity);
@@ -64,6 +67,7 @@ public final class CreateMechanismSwitchesSmoke {
                 while (!restored.step(world)) check(++steps < 100, "muted snapshot restore did not finish");
                 check(restored.entity.getContraption().getBlocks().get(BlockPos.ZERO).state().is(AllBlocks.DEPLOYER.get()), "restore lost disabled deployer");
                 check(restored.entity.getContraption().getStorage().getAllItemStorages().get(BlockPos.ZERO).getStackInSlot(0).getCount() == 17, "restore lost cargo");
+                check(restored.entity.getContraption().getStorage().getFluids().storages.get(BlockPos.ZERO).getFluidInTank(0).getAmount() == 1250, "restore lost fluid");
                 check(recovery.blocks() == 1, "snapshot recovery rejected muted mechanism");
                 // A new checkpoint may start another period under the same disabled policy.
                 CreateCartAudit.state(entity).sequence++;
@@ -73,9 +77,12 @@ public final class CreateMechanismSwitchesSmoke {
                 CaptureTypePolicy.install(CaptureTypePolicy.changed(0, 14, false));
                 var target = world.getSharedSpawnPos().offset(700, 96, 700);
                 world.getChunkAt(target); world.setBlock(target, Blocks.STONE.defaultBlockState(), 3);
-                inventory.setStackInSlot(0, ItemStack.EMPTY);
+                var liveCargo = (net.neoforged.neoforge.items.IItemHandlerModifiable)body.getStorage().getAllItemStorages().get(BlockPos.ZERO);
+                liveCargo.setStackInSlot(0, ItemStack.EMPTY);
+                int beforeDrill = rows.rows().size();
                 var drillInfo = new StructureBlockInfo(new BlockPos(2, 0, 1), AllBlocks.MECHANICAL_DRILL.getDefaultState()
                         .setValue(com.simibubi.create.content.kinetics.drill.DrillBlock.FACING, Direction.EAST), null);
+                body.getBlocks().put(drillInfo.pos(), drillInfo);
                 var drill = new MovementContext(world, drillInfo, body);
                 drill.motion = new net.minecraft.world.phys.Vec3(1, 0, 0); drill.relativeMotion = drill.motion;
                 drill.stall = true; drill.data.put("BreakingPos", net.minecraft.nbt.NbtUtils.writeBlockPos(target)); drill.data.putInt("Progress", 9);
@@ -84,8 +91,8 @@ public final class CreateMechanismSwitchesSmoke {
                 HotPathMetrics.start();
                 entity.tickActors();
                 check(HotPathMetrics.stop().contains("NBT snapshot calls: 0,"), "muted native drill serialized NBT");
-                check(world.getBlockState(target).isAir() && inventory.getStackInSlot(0).is(Items.COBBLESTONE), "capture switch stopped native drill");
-                check(rows.rows().size() == 3, "muted native drill emitted detailed cargo/world rows");
+                check(world.getBlockState(target).isAir() && liveCargo.getStackInSlot(0).is(Items.COBBLESTONE), "capture switch stopped native drill");
+                check(rows.rows().size() == beforeDrill + 1, "muted native drill emitted detailed cargo/world rows");
                 CaptureTypePolicy.install(0);
                 check(CreateCapturePolicy.actor(context), "live re-enable failed");
                 check(!CaptureTypePolicy.suppressed(), "muted callback scope leaked");

@@ -64,6 +64,7 @@ public abstract class ServerLevelSetBlockMixin {
                                                     int recursionLeft, Operation<Boolean> original) {
         if (!((Object)this instanceof ServerLevel level) || !level.getServer().isSameThread() || CartAuditContext.restoring()) return original.call(pos,drops,entity,recursionLeft);
         if(CartRestoreLocks.blockLocked((Level)(Object)this,pos))return false;
+        if (com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()) return original.call(pos,drops,entity,recursionLeft);
         try(var removal=CreateStructuralHooks.removal((Level)(Object)this,pos,net.minecraft.world.level.block.Blocks.AIR.defaultBlockState())){
             boolean changed=original.call(pos,drops,entity,recursionLeft);
             if(removal!=null&&changed)removal.success();return changed;
@@ -80,6 +81,7 @@ public abstract class ServerLevelSetBlockMixin {
                                          Operation<Boolean> original) {
         if (!((Object)this instanceof ServerLevel level) || !level.getServer().isSameThread() || CartAuditContext.restoring()) return original.call(pos,newState,flags,recursionLeft);
         if (CartRestoreLocks.blockLocked((Level)(Object)this,pos)) return false;
+        if (com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()) return original.call(pos,newState,flags,recursionLeft);
         try(var removal=CreateStructuralHooks.removal((Level)(Object)this,pos,newState)){
             boolean structural=CreateStructuralHooks.before((Level)(Object)this,pos);
             boolean deployer=CreateDeployerHooks.before((Level)(Object)this,pos);

@@ -19,7 +19,7 @@ public final class CaptureTypePolicy {
     public static final int ALL_DISABLED = (1 << GROUPS) - 1;
     private static volatile int disabledMask;
     private static volatile long generation;
-    private static final ThreadLocal<Boolean> SUPPRESSED = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> SUPPRESSED = ThreadLocal.withInitial(() -> Boolean.FALSE);
     private CaptureTypePolicy() {}
 
     public static int mask() { return disabledMask; }
@@ -36,8 +36,9 @@ public final class CaptureTypePolicy {
         return previous;
     }
     public static void restoreSuppression(boolean previous) {
-        if (!previous) SUPPRESSED.remove();
+        if (suppressed() != previous) SUPPRESSED.set(previous);
     }
+    public static void clearSuppression() { SUPPRESSED.remove(); }
     public static boolean enabled(int preset) {
         return preset >= 1 && preset <= GROUPS && (disabledMask & (1 << (preset - 1))) == 0;
     }
