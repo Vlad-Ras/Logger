@@ -63,7 +63,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         return CreateCartAudit.enabled()?authorizedTick(source):null;
     }
     @Override public CartAutomationHooks.Capture authorizedTick(BlockEntity source){
-        if(!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
+        if(CaptureTypePolicy.suppressed() || !com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
                 ||current!=null||publishing||CartAuditContext.restoring()
                 ||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
         var blockType = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType());
@@ -80,7 +80,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     static boolean capturingChanges(){return current!=null&&serverThread();}
     public static Scope mounted(com.simibubi.create.content.contraptions.behaviour.MovementContext context,BlockPos pos){
         var entity=context.contraption.entity;
-        if(current!=null||entity==null||!CreateCargoAudit.active(entity))return null;
+        if(current!=null||entity==null||!CreateCapturePolicy.actor(context)||!CreateCargoAudit.active(entity))return null;
         activeServer=((ServerLevel)entity.level()).getServer();var scope=new Scope();
         scope.reset(null);scope.mounted=true;scope.entity=entity;
         scope.machine=BuiltInRegistries.BLOCK.getKey(context.state.getBlock()).toString();

@@ -34,6 +34,11 @@ public record CartRecoveryPlan(UUID id,long entry,long timestamp,String side,Com
                     var result=fromSnapshot(id,target,time,side,wrapped);
                     return new CartRecoveryPlan(id,target,time,side,result.item(),result.blocks(),row.id,replay.applied());
                 }
+                if (row.type == ActionType.CART_TRANSFER) {
+                    var gap = NbtSerde.fromSnbt(row.beAfter);
+                    if (gap != null && gap.getBoolean("CaptureDisabled"))
+                        throw new IllegalStateException("В этом периоде логирование механизмов было выключено. Выберите полный снимок упаковки, удаления или разборки после него");
+                }
                 if(CartRollbackPlan.checkpoint(row.type))throw new IllegalStateException("Переход entry="+row.id+" не содержит полного снимка; восстановление устаревшего состояния остановлено");
                 if(row.type==ActionType.CART_CONTENT_CHANGE||row.type==ActionType.CART_STRUCTURE_CHANGE||row.type==ActionType.CART_STATUS)changes.add(row);
             }

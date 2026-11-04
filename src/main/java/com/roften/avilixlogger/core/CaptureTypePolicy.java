@@ -10,13 +10,34 @@ package com.roften.avilixlogger.core;
  * planes from ordinary entities, avoiding accidental global suppression.
  */
 public final class CaptureTypePolicy {
-    public static final int GROUPS = 12;
+    // IDs 1..12 are persisted by older worlds. Append new controls; never renumber.
+    public static final int GROUPS = 22;
+    public static final int CREATE_DEPLOYER = 13, CREATE_DRILL = 14, CREATE_SAW = 15,
+            CREATE_HARVESTER = 16, CREATE_PLOUGH = 17, CREATE_ROLLER = 18,
+            CREATE_CHUTE = 19, CREATE_FUNNEL = 20, CREATE_PORTABLE_STORAGE = 21,
+            CREATE_DISPENSER = 22;
     public static final int ALL_DISABLED = (1 << GROUPS) - 1;
     private static volatile int disabledMask;
+    private static volatile long generation;
+    private static final ThreadLocal<Boolean> SUPPRESSED = new ThreadLocal<>();
     private CaptureTypePolicy() {}
 
     public static int mask() { return disabledMask; }
-    public static void install(int mask) { disabledMask = mask & ALL_DISABLED; }
+    public static void install(int mask) {
+        int next = mask & ALL_DISABLED;
+        if (disabledMask != next) { disabledMask = next; generation++; }
+    }
+    public static long generation() { return generation; }
+    public static boolean suppressed() { return Boolean.TRUE.equals(SUPPRESSED.get()); }
+    /** Nested callbacks may suppress capture, but cannot re-enable an outer muted operation. */
+    public static boolean suppress(boolean value) {
+        boolean previous = suppressed();
+        if (value && !previous) SUPPRESSED.set(Boolean.TRUE);
+        return previous;
+    }
+    public static void restoreSuppression(boolean previous) {
+        if (!previous) SUPPRESSED.remove();
+    }
     public static boolean enabled(int preset) {
         return preset >= 1 && preset <= GROUPS && (disabledMask & (1 << (preset - 1))) == 0;
     }
@@ -27,6 +48,7 @@ public final class CaptureTypePolicy {
     }
 
     public static boolean allows(ActionType type, String source, String extra) {
+        if (suppressed()) return false;
         if (type == null || disabledMask == 0 || type == ActionType.CART_ROLLBACK) return true;
         // Filter specific source families before generic action categories.
         if (source != null) {

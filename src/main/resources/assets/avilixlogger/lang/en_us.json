@@ -74,5 +74,15 @@
   "gui.avilixlogger.hint.audit_id": "ID / owner",
   "gui.avilixlogger.filter.audit_id.v": "ID / owner: %s",
   "gui.avilixlogger.type.bearing": "Create: bearing contraptions",
-  "gui.avilixlogger.type.contraption": "Create: other contraptions"
+  "gui.avilixlogger.type.contraption": "Create: other contraptions",
+  "gui.avilixlogger.type.create_deployer": "Create: deployers",
+  "gui.avilixlogger.type.create_drill": "Create: drills",
+  "gui.avilixlogger.type.create_saw": "Create: saws",
+  "gui.avilixlogger.type.create_harvester": "Create: harvesters",
+  "gui.avilixlogger.type.create_plough": "Create: ploughs",
+  "gui.avilixlogger.type.create_roller": "Create: rollers",
+  "gui.avilixlogger.type.create_chute": "Create: chutes and smart chutes",
+  "gui.avilixlogger.type.create_funnel": "Create: funnels",
+  "gui.avilixlogger.type.create_portable_storage": "Create: portable storage interfaces",
+  "gui.avilixlogger.type.create_dispenser": "Create: contraption dispensers and droppers"
 }

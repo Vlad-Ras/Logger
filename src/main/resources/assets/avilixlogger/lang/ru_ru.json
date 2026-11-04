@@ -74,5 +74,15 @@
   "gui.avilixlogger.hint.audit_id": "ID / владелец",
   "gui.avilixlogger.filter.audit_id.v": "ID / владелец: %s",
   "gui.avilixlogger.type.bearing": "Create: на подшипнике",
-  "gui.avilixlogger.type.contraption": "Create: другие конструкции"
+  "gui.avilixlogger.type.contraption": "Create: другие конструкции",
+  "gui.avilixlogger.type.create_deployer": "Create: активаторы",
+  "gui.avilixlogger.type.create_drill": "Create: буры",
+  "gui.avilixlogger.type.create_saw": "Create: пилы",
+  "gui.avilixlogger.type.create_harvester": "Create: комбайны",
+  "gui.avilixlogger.type.create_plough": "Create: плуги",
+  "gui.avilixlogger.type.create_roller": "Create: катки",
+  "gui.avilixlogger.type.create_chute": "Create: желоба и умные желоба",
+  "gui.avilixlogger.type.create_funnel": "Create: воронки",
+  "gui.avilixlogger.type.create_portable_storage": "Create: переносные интерфейсы",
+  "gui.avilixlogger.type.create_dispenser": "Create: раздатчики на штуковинах"
 }

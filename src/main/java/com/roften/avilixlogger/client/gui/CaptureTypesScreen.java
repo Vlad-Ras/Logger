@@ -16,7 +16,9 @@ import java.util.List;
 public final class CaptureTypesScreen extends Screen {
     private static final String[] KEYS = {
             "all","block","container","entity","item","train","cannon",
-            "chat","plane","cart","backpack","bearing","contraption"
+            "chat","plane","cart","backpack","bearing","contraption",
+            "create_deployer","create_drill","create_saw","create_harvester","create_plough",
+            "create_roller","create_chute","create_funnel","create_portable_storage","create_dispenser"
     };
     private final Screen parent;
     private final List<Button> switches = new ArrayList<>();
@@ -122,7 +124,7 @@ public final class CaptureTypesScreen extends Screen {
             g.drawString(font,"▼ Остальные типы ниже",x,Math.min(height-70,57+count*21),0xFF999999);
         g.drawCenteredString(font,font.plainSubstrByWidth(status,Math.max(30,width-24)),
                 width/2,height-62,lastSuccess?0xFFAAAAAA:0xFFFF6666);
-        g.drawCenteredString(font,"Выключенные события не сохраняются и не могут быть откатаны",
+        g.drawCenteredString(font,"Механизмы Create: снимки целой штуковины сохраняются",
                 width/2,height-48,0xFFFFAA55);
         for(var widget:renderables)widget.render(g,mx,my,partial);
     }

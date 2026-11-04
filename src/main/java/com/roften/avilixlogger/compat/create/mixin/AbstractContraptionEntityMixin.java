@@ -28,18 +28,22 @@ public class AbstractContraptionEntityMixin {
     private void avilixlogger$actorVisit(com.simibubi.create.api.behaviour.movement.MovementBehaviour actor,
             com.simibubi.create.content.contraptions.behaviour.MovementContext context, BlockPos pos,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
         var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
         try { original.call(actor, context, pos); }
-        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous); }
+        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
+            com.roften.avilixlogger.core.CaptureTypePolicy.restoreSuppression(previousCapture); }
     }
 
     @com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation(method = "tickActors", at = @At(value = "INVOKE", target = "Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;tick(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;)V"), require = 1, remap = false)
     private void avilixlogger$actorTick(com.simibubi.create.api.behaviour.movement.MovementBehaviour actor,
             com.simibubi.create.content.contraptions.behaviour.MovementContext context,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
         var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
         try { original.call(actor, context); }
-        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous); }
+        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
+            com.roften.avilixlogger.core.CaptureTypePolicy.restoreSuppression(previousCapture); }
     }
 
     @com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation(method = "tickActors", at = @At(value = "INVOKE", target = "Lcom/simibubi/create/api/behaviour/movement/MovementBehaviour;onSpeedChanged(Lcom/simibubi/create/content/contraptions/behaviour/MovementContext;Lnet/minecraft/world/phys/Vec3;Lnet/minecraft/world/phys/Vec3;)V"), require = 1, remap = false)
@@ -47,9 +51,11 @@ public class AbstractContraptionEntityMixin {
             com.simibubi.create.content.contraptions.behaviour.MovementContext context,
             net.minecraft.world.phys.Vec3 oldMotion, net.minecraft.world.phys.Vec3 motion,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
+        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
         var previous = com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context);
         try { original.call(actor, context, oldMotion, motion); }
-        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous); }
+        finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
+            com.roften.avilixlogger.core.CaptureTypePolicy.restoreSuppression(previousCapture); }
     }
 
     @com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod(method = "tick")

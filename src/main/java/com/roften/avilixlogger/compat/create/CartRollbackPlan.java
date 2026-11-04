@@ -54,6 +54,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                 if (e.type == ActionType.CREATE_DEPLOYER_ACTION) throw new IllegalStateException("В периоде работал активатор: нужен совместный откат механизма, предметов и его целей");
                 if(e.type==ActionType.CART_TRANSFER && CartAuditContext.phase(e.source).equals("actor_result")){
                     var result=NbtSerde.fromSnbt(e.beAfter);
+                    if (result != null && result.getBoolean("CaptureDisabled")) throw new IllegalStateException("В периоде отключалось логирование механизмов: отмена незаписанных действий невозможна. Используйте восстановление из полного снимка");
                     if(result!=null&&Set.of("world_item_merge","mixed_world_item_pickup").contains(result.getString("Operation"))){
                         var old=NbtSerde.fromSnbt(e.beBefore);String dimension=e.dim;long position=new BlockPos(e.x,e.y,e.z).asLong();
                         if(old==null)throw new IllegalStateException("Нет исходного снимка смешанного дропа");

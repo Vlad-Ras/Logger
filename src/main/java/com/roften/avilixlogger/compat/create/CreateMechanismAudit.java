@@ -16,7 +16,7 @@ public final class CreateMechanismAudit {
         var previous = CreateMechanismContext.current();
         // Check policy before actor cache, block registry, or position tracking.
         if (!com.roften.avilixlogger.LoggerConfig.VALUES.logCreateActorWork.get()
-                || context.contraption == null || !CreateCapturePolicy.actors(context.contraption.entity)
+                || context.contraption == null || !CreateCapturePolicy.actor(context)
                 || context.world.isClientSide || context.state == null || context.localPos == null
                 || CartAuditContext.current() == null
                 && CreateContraptionKind.fromSource(MutationSourceResolver.resolveExternalSource()) == CreateContraptionKind.UNKNOWN)
@@ -31,5 +31,5 @@ public final class CreateMechanismAudit {
         }
         return CreateMechanismContext.enter(cached.stamp());
     }
-    public static void clear() { ACTORS.clear(); CreateMechanismContext.restore(null); }
+    public static void clear() { CreateCaptureGaps.clear(); ACTORS.clear(); CreateMechanismContext.restore(null); }
 }

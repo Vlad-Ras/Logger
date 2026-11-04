@@ -23,6 +23,7 @@ public final class CreateCargoAudit {
     private CreateCargoAudit() {}
     private static Capture captureFor(AbstractContraptionEntity entity){for(var capture=CAPTURE.get();capture!=null;capture=capture.previous)if(capture.entity==entity)return capture;return null;}
     public static boolean active(AbstractContraptionEntity entity) {
+        if (CaptureTypePolicy.suppressed()) { CreateCaptureGaps.remember(entity); return false; }
         var capture = captureFor(entity);
         return CreateCapturePolicy.cargo(entity)
                 && entity.level() instanceof ServerLevel level && level.getServer().isSameThread()
@@ -98,6 +99,11 @@ public final class CreateCargoAudit {
         if (!CreateCapturePolicy.action(entity,type) || !CreateCartAudit.enabled() || !(entity.level() instanceof ServerLevel level)) return;
         LoggerRuntime.storage(level).append(row(entity, type, phase, before, after, detail));
     }
+    static void safetyBarrier(AbstractContraptionEntity entity, LogEntry row) {
+        var capture = captureFor(entity);
+        if (capture != null) { if (capture.rows.size() < 512) capture.rows.add(row); else capture.complete = false; }
+        else if (CreateCartAudit.enabled()) LoggerRuntime.storage((ServerLevel)entity.level()).append(row);
+    }
     static void deliver(AbstractContraptionEntity entity,LogEntry row){
         if (!CreateCapturePolicy.action(entity,row.type)) return;
         var capture=captureFor(entity);
@@ -107,7 +113,7 @@ public final class CreateCargoAudit {
     /** Only native, verified block-breaking collection passes internal=true. */
     public static OperationScope operation(MovementContext context, String reason, boolean internal) {
         var entity = context.contraption.entity;
-        if (entity == null || !active(entity) || !CreateCapturePolicy.actors(entity)) return null;
+        if (entity == null || !active(entity) || !CreateCapturePolicy.actor(context)) return null;
         return new OperationScope(context, reason, internal);
     }
     public static final class Capture implements AutoCloseable {
@@ -150,7 +156,8 @@ public final class CreateCargoAudit {
                 var technical = context.temporaryData instanceof Player p ? p : null;
                 CreateActorContext.enter(new CreateActorContext.Stamp(owner, ownerName, technical));
                 OPERATION.set(this);
-                installedCause = CauseContext.unattributed();
+                installedCause = technical == null ? CauseContext.unattributed()
+                        : CauseContext.push(technical, CauseContext.Kind.OTHER, entity.blockPosition(), ItemStack.EMPTY);
             } catch (Throwable failure) {
                 if (installedCause != null) installedCause.close();
                 restore(); throw failure;
