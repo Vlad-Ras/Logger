@@ -90,7 +90,7 @@ public final class CreateMechanismSwitchesSmoke {
                 entity.setPos(target.getX() - 3, target.getY(), target.getZ() - 1);
                 HotPathMetrics.start();
                 entity.tickActors();
-                check(HotPathMetrics.stop().contains("NBT snapshot calls: 0,"), "muted native drill serialized NBT");
+                check(HotPathMetrics.snapshotCount()==0, "muted native drill serialized NBT");HotPathMetrics.stop();
                 check(world.getBlockState(target).isAir() && liveCargo.getStackInSlot(0).is(Items.COBBLESTONE), "capture switch stopped native drill");
                 check(rows.rows().size() == beforeDrill + 1, "muted native drill emitted detailed cargo/world rows");
                 CaptureTypePolicy.install(0);

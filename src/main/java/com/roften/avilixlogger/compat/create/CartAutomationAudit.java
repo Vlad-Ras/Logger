@@ -415,6 +415,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
                         "machine="+machine+"; changes="+changes.size()+"; external="+beforeSlots.size()+"; constructions="+participants.size());
                 // An ambient player cause does not establish who started this machine's transfer.
                 manifest.actorUuid=null;manifest.actorName="SYSTEM";
+                CreateActorContext.attribute(manifest);
                 rows.add(manifest);
             }
             if(changes.isEmpty()&&!unverifiedCreative.isEmpty()){

@@ -169,6 +169,13 @@ public final class PendingLogStorage implements LogStorage {
 
     @Override public boolean awaitVisible(long deadline) throws InterruptedException {
         if (!queue.awaitThrough(queue.fence(),deadline)) return false;
+        // An empty new queue can still have durable files from the previous process.
+        // Capture the prefix only after initialize has counted those files.
+        while (!initialized && System.nanoTime() < deadline) {
+            if (journalFailure != null) throw new IllegalStateException("Журнал недоступен",journalFailure);
+            Thread.sleep(5);
+        }
+        if (!initialized) return false;
         // Single journal writer + monotonically ordered file names make this a
         // finite prefix, including startup backlog. Later batches do not extend it.
         long target = publishedBatches;

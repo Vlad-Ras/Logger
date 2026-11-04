@@ -29,6 +29,7 @@ public final class CreateCartSmoke {
             CreateCompletionSmoke.run(world);
             CreateMechanismActionsSmoke.run(world);
             CreateMechanismSwitchesSmoke.run(world);
+            CreateAutomationCostSmoke.run(world);
             CreateCargoSmoke.run(world);
             MountedContraption c=new MountedContraption();c.anchor=BlockPos.ZERO;c.bounds=new net.minecraft.world.phys.AABB(BlockPos.ZERO);
             c.getBlocks().put(BlockPos.ZERO,new StructureBlockInfo(BlockPos.ZERO,Blocks.STONE.defaultBlockState(),null));

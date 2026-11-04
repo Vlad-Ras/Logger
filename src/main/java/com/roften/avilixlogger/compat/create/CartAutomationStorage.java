@@ -52,6 +52,7 @@ public final class CartAutomationStorage {
         return handler instanceof FluidTank&&handler.getTanks()==1&&FLUIDS.get(handler.getClass());
     }
     public static CompoundTag describe(ServerLevel level,BlockPos pos,String side,String kind,int slot,Object handler){
+        com.roften.avilixlogger.core.HotPathMetrics.automationDescriptor();
         if(!level.hasChunkAt(pos))return null;
         if(kind.equals("item") && handler.getClass()==net.neoforged.neoforge.items.wrapper.SidedInvWrapper.class
                 && handler instanceof com.roften.avilixlogger.compat.create.mixin.SidedContainerAccessor access){

@@ -48,6 +48,10 @@ public final class CaptureTypePolicyTest {
                 finally { CaptureTypePolicy.restoreSuppression(inner); }
             } finally { CaptureTypePolicy.restoreSuppression(outer); }
             check(!CaptureTypePolicy.suppressed(), "capture suppression leaked");
+            for(int group=31;group<=40;group++) {
+                long bit=CaptureTypePolicy.changed(0,group,false);CaptureTypePolicy.install(bit);
+                check(!CaptureTypePolicy.enabled(group)&&CaptureTypePolicy.enabled(13)&&CaptureTypePolicy.enabled(30),"extended mechanism bit collided with saved module/overflow switches");
+            }
             CaptureTypePolicy.install(CaptureTypePolicy.ALL_DISABLED);
             for(int i=1;i<=CaptureTypePolicy.GROUPS;i++)check(!CaptureTypePolicy.enabled(i),"disable all did not take");
             check(CaptureTypePolicy.changed(CaptureTypePolicy.ALL_DISABLED,7,true)

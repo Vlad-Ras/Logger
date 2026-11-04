@@ -11,6 +11,22 @@ import java.util.UUID;
 /** Runs against an isolated, real ClickHouse instance; no AuthCore bypass or Minecraft world. */
 public final class ClickHouseNativeSmoke {
     private ClickHouseNativeSmoke() {}
+    private static void verifyChronologicalSearch(ClickHouseLogStorage db) throws Exception {
+        String source="logger:chronological-native:"+UUID.randomUUID();long now=System.currentTimeMillis();
+        var later=AsyncPipelineTest.row("later");later.type=ActionType.BLOCK_PLACE;later.dim="minecraft:overworld";later.source=source;later.ts=now;LogIdGenerator.ensure(later);
+        var first=AsyncPipelineTest.row("first");first.type=ActionType.BLOCK_PLACE;first.dim=later.dim;first.source=source;first.ts=now-60_000;LogIdGenerator.ensure(first);
+        var tie=AsyncPipelineTest.row("tie");tie.type=ActionType.BLOCK_PLACE;tie.dim=later.dim;tie.source=source;tie.ts=first.ts;LogIdGenerator.ensure(tie);
+        db.appendBatch("native-time-"+UUID.randomUUID(),List.of(later,first,tie));
+        for(boolean details:List.of(false,true)){
+            var q=new LogQuery();q.dim="*";q.sourcePrefix=source;q.chronological=true;q.sinceTs=first.ts;q.untilTs=now;q.limit=2;q.requireDetails=details;
+            var page=db.query(q);check(page.size()==2&&page.get(0).id==first.id&&page.get(1).id==tie.id,"SQL From time did not start at boundary/tie");
+            q.afterId=tie.id;q.cursorTs=tie.ts;page=db.query(q);
+            check(page.size()==1&&page.getFirst().id==later.id,"SQL time cursor used ID order or lost a clock-adjusted row");
+            q.afterId=0;q.exactIds=new long[]{first.id,tie.id};page=db.query(q);
+            check(page.size()==2&&page.stream().noneMatch(e->e.id==later.id),"exact selected-ID read broadened");
+        }
+        System.out.println("CHRONOLOGICAL_SEARCH_NATIVE_OK: real feed/details, From boundary, equal timestamps, clock-adjusted IDs and exact selection");
+    }
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
     }
@@ -104,7 +120,7 @@ public final class ClickHouseNativeSmoke {
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
             db.appendBatch("release-storage-"+UUID.randomUUID(),releaseStorage);ReleaseStorageEvidence.verify(db,releaseStorage);
             verifyReceipts(db,receipts);verifyConversion(db,conversion);verifyTextEdit(db,textEdit);verifyDisplay(db,display);
-            verifyChunkSearch(db);
+            verifyChunkSearch(db);verifyChronologicalSearch(db);
             verifyWeapons(db,weapons); verifyMeTransfers(db,meTransfers); verifyMeConfigurations(db,meConfigurations); verifyMeJobs(db,meJobs);
             pressureRows=journalPressure(db);verifyJournalPressure(db,pressureRows);
             check(block.id > 0 && item.id > 0 && block.id != item.id, "IDs missing after insertion");
@@ -127,7 +143,7 @@ public final class ClickHouseNativeSmoke {
             db = new ClickHouseLogStorage();
             verifyDetails(db.queryReverse(detail), block, item);
             ReleaseStorageEvidence.verify(db,releaseStorage);
-            verifyChunkSearch(db);
+            verifyChunkSearch(db);verifyChronologicalSearch(db);
             verifyWeapons(db,weapons);
             verifySetting(db,setting);
             verifyInteraction(db,interaction);
