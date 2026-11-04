@@ -74,9 +74,21 @@ public final class CreateDeployerAudit {
         var row = new LogEntry(); row.ts = System.currentTimeMillis(); row.type = ActionType.CREATE_DEPLOYER_ACTION;
         row.dim = level.dimension().location().toString(); row.x = pos.getX(); row.y = pos.getY(); row.z = pos.getZ();
         row.source = kind.source(CreateContraptionSources.id(context.contraption.entity), "deployer"); row.actorName = "SYSTEM";
+        var cart=CreateCartAudit.state(context.contraption.entity);
+        row.actorUuid=context.blockEntityData!=null&&context.blockEntityData.hasUUID("Owner")
+                ?context.blockEntityData.getUUID("Owner"):cart==null?null:cart.owner;
+        row.actorName=ownerName(level,row.actorUuid,cart);
         row.extra = "create_deployer; capture_failed; complete=false";
         row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE, tag); row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER, tag.copy());
         LogIdGenerator.ensure(row); LoggerRuntime.storage(level).append(row);
+    }
+    private static String ownerName(ServerLevel level,UUID owner,CartAuditState cart) {
+        if(owner==null)return "SYSTEM";
+        var online=level.getServer().getPlayerList().getPlayer(owner);
+        if(online!=null)return online.getGameProfile().getName();
+        if(cart!=null&&owner.equals(cart.owner)&&cart.ownerName!=null&&!cart.ownerName.isBlank())return cart.ownerName;
+        var cached=net.neoforged.neoforge.common.UsernameCache.getLastKnownUsername(owner);
+        return cached!=null&&!cached.isBlank()?cached:owner.toString();
     }
     public static final class Session implements AutoCloseable {
         private final ServerLevel level;
@@ -105,11 +117,7 @@ public final class CreateDeployerAudit {
             if (context.blockEntityData != null && context.blockEntityData.hasUUID("Owner")) {
                 owner = context.blockEntityData.getUUID("Owner"); ownerSource = "deployer";
             } else { owner = cart == null ? null : cart.owner; ownerSource = owner == null ? "unknown" : "cart"; }
-            var online = owner == null ? null : level.getServer().getPlayerList().getPlayer(owner);
-            var cachedName = owner == null ? null : net.neoforged.neoforge.common.UsernameCache.getLastKnownUsername(owner);
-            ownerName = online != null ? online.getGameProfile().getName()
-                    : cart != null && owner != null && owner.equals(cart.owner) && cart.ownerName != null && !cart.ownerName.isBlank()
-                    ? cart.ownerName : cachedName != null && !cachedName.isBlank() ? cachedName : owner == null ? null : owner.toString();
+            ownerName = CreateDeployerAudit.ownerName(level,owner,cart);
             var rawSource = CreateContraptionSources.kind(context.contraption.entity)
                     .source(CreateContraptionSources.id(context.contraption.entity), "deployer");
             previousSource = MutationSourceResolver.enter(rawSource);
