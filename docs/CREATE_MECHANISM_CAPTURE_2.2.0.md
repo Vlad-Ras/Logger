@@ -41,4 +41,10 @@
 
 Добавлен `CreateMechanismSwitchesSmoke`: реальные registry ID, 1000 отключённых callbacks с одним маркером, работа native бура без NBT-захвата, восстановление отключённого активатора с предметами/жидкостью, повторное включение и SavedData roundtrip. В существующие проверки добавлены отказ при пересечении пропуска и успешное восстановление из более позднего полного снимка, известный offline-владелец вагонетки и изоляция постороннего FakePlayer. Ожидания native deployer regression изменены под явную атрибуцию владельца.
 
-Локальная полная Gradle/Java 21 проверка недоступна: wrapper не смог скачать Gradle. Результаты CI фиксируются после выполнения; положительная цепочка production AuthCore и нагрузка пользовательской фермы этим стендом не заменяются.
+Проверенный код: `ac4c02d463b933519b18de4d2a97ce9f99857f8e`, tree `ceef039515dfe8d56c3de74a96c2888db0970aeb`.
+
+[Серверные проверки](https://github.com/Vlad-Ras/Logger/actions/runs/41860296342): все тестовые шаги четырёх профилей (current-fd132, current-fd134, logged-pack, client-s4-core) прошли. Create 6.0.10-281 / 6.0.11-313, AE2 19.2.12 / 19.2.18. Успешны compileJava/compileCreateSmokeJava, testAsyncPipeline, testCreatePreflight, verifyMixinSafety, native Create, три процесса сохранения/возобновления мира AE2, отсутствие AE2/Create, Backpacked и actor/aircraft regression, настоящая ClickHouse. [Клиентский GUI](https://github.com/Vlad-Ras/Logger/actions/runs/41860296533) прошёл; снимок окна записи событий осмотрен, границы проверены на 320×240, 640×360 и 960×540. Локально прошли git diff --check и Python inventory/profile comparison.
+
+В native стенде сохранены 34 сценария основных действий механизмов, новый набор отключений и AVILIX_CREATE_SMOKE_OK. Для 1000 отключённых callbacks — один маркер пропуска; native бур сохраняет добычу без NBT snapshot calls. Восстановлены отключённый активатор, 17 алмазов и 1250 mB воды. История через пропуск отклонена; более поздний полный снимок принят. Это проверка функциональных контрактов с detached capture, а не положительная production AuthCore → hook → БД → GUI цепочка.
+
+Локальная полная Gradle/Java 21 проверка недоступна: wrapper не смог скачать Gradle. Производственная приёмка и нагрузка пользовательской фермы остаются на этапе оптимизации; прирост TPS/MSPT не заявляется. Выпускной JAR этим изменением не создавался.
