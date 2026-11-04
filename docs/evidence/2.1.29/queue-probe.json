@@ -1,0 +1,5 @@
+{"schema":1,"scope":"synthetic-queue-only","rows_per_round":100000,"rounds":3,"payload_bytes":256,"results":[
+{"put_p50_us":0.067,"put_p95_us":1.483,"put_p99_us":6.830,"put_max_ms":3.804,"rows_per_second":1113265.8,"peak_estimated_bytes":1310720,"peak_rows":4096,"waits":49,"longest_wait_ms":3.194,"producer_allocated_bytes_per_row":332.24}
+,{"put_p50_us":0.046,"put_p95_us":1.034,"put_p99_us":8.859,"put_max_ms":0.528,"rows_per_second":1537819.6,"peak_estimated_bytes":920640,"peak_rows":2877,"waits":0,"longest_wait_ms":0.000,"producer_allocated_bytes_per_row":330.96}
+,{"put_p50_us":0.186,"put_p95_us":0.402,"put_p99_us":1.025,"put_max_ms":2.038,"rows_per_second":2326140.0,"peak_estimated_bytes":878080,"peak_rows":2744,"waits":0,"longest_wait_ms":0.000,"producer_allocated_bytes_per_row":346.11}
+],"controlled_stall_ms":112.842361,"rows_lost":0,"minecraft_mspt":null,"client_fps":null}
