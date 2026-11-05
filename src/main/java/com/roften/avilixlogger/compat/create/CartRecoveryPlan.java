@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.compat.create;
 
+import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.core.*;
 import net.minecraft.nbt.*;
 import java.util.*;
@@ -11,6 +12,8 @@ public record CartRecoveryPlan(UUID id,long entry,long timestamp,String side,Com
     /** Replay only the construction's own state, bounded by the requested row/capture ID. */
     public static CartRecoveryPlan prepare(LogStorage storage,UUID id,long entry,net.minecraft.core.HolderLookup.Provider registries){
         if(entry<0)throw new IllegalArgumentException("Неверный entry");
+        int limitMiB = LoggerConfig.createCartHistoryLimitMiB();
+        long maxBytes = limitMiB * 1024L * 1024L;
         var q=new LogQuery();q.dim="*";q.cartId=id;q.requireDetails=true;q.untilTs=Long.MAX_VALUE;q.limit=1;
         if(entry>0)q.exactId=entry;
         if(entry>0&&entry<Long.MAX_VALUE)q.beforeId=entry+1;
@@ -21,7 +24,8 @@ public record CartRecoveryPlan(UUID id,long entry,long timestamp,String side,Com
                 if(examined++==0){if(entry>0&&row.id!=entry)throw new IllegalStateException("Выбранная запись не найдена");target=row.id;time=row.ts;}
                 next=row.id;if(examined>100000)throw new IllegalStateException("Больше 100000 записей; выберите более ранний момент");
                 bytes+=(row.beBefore==null?0:row.beBefore.length()*2L)+(row.beAfter==null?0:row.beAfter.length()*2L);
-                if(bytes>128L*1024*1024)throw new IllegalStateException("История состояния превышает 128 MiB");
+                if (bytes > maxBytes) throw new IllegalStateException("История состояния превышает " + limitMiB
+                        + " MiB. Выберите полный снимок или увеличьте rollbackPerformance.createCartHistoryLimitMiB");
                 for(String side:List.of("after","before")){
                     var envelope=NbtSerde.fromSnbt(side.equals("after")?row.beAfter:row.beBefore);
                     if(!full(envelope))continue;

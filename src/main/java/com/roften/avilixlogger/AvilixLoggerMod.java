@@ -16,6 +16,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
@@ -43,6 +44,8 @@ public final class AvilixLoggerMod {
         modContainer.registerConfig(ModConfig.Type.COMMON, LoggerConfig.SPEC);
 
         // Mod bus listeners
+        modEventBus.addListener(ModConfigEvent.Loading.class, LoggerConfig::refreshCreateCartHistoryLimit);
+        modEventBus.addListener(ModConfigEvent.Reloading.class, LoggerConfig::refreshCreateCartHistoryLimit);
         modEventBus.addListener(LoggerNetwork::registerPayloads);
 
         // Optional client bootstrap (GUI hooks, keybinds, etc.)

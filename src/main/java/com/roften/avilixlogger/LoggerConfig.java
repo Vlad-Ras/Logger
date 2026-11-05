@@ -1,5 +1,6 @@
 package com.roften.avilixlogger;
 
+import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -9,6 +10,8 @@ import org.apache.commons.lang3.tuple.Pair;
 public final class LoggerConfig {
     public static final ModConfigSpec SPEC;
     public static final Values VALUES;
+    private static final int DEFAULT_CREATE_CART_HISTORY_LIMIT_MIB = 128;
+    private static volatile int createCartHistoryLimitMiB = DEFAULT_CREATE_CART_HISTORY_LIMIT_MIB;
 
     static {
         final Pair<Values, ModConfigSpec> specPair = new ModConfigSpec.Builder().configure(Values::new);
@@ -59,6 +62,7 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue rollbackChunkLoadsPerTick;
         public final ModConfigSpec.IntValue rollbackMaxMillisPerTick;
         public final ModConfigSpec.IntValue rollbackMaxPreparedPayloadMiB;
+        public final ModConfigSpec.IntValue rollbackCreateCartHistoryLimitMiB;
 
         // Create capture controls. Defaults preserve existing audit behaviour.
         public final ModConfigSpec.BooleanValue logCreateMinecarts;
@@ -187,6 +191,8 @@ public final class LoggerConfig {
                     .defineInRange("maxMillisPerTick", 2, 1, 25);
             rollbackMaxPreparedPayloadMiB = b.comment("Maximum estimated in-memory size of one fully prepared rollback plan. Exceeding it fails explicitly instead of risking JVM OOM; narrow the scope/time or raise this value deliberately.")
                     .defineInRange("maxPreparedPayloadMiB", 512, 64, 8192);
+            rollbackCreateCartHistoryLimitMiB = b.comment("History budget in MiB for one Create minecart rollback or item recovery. The next plan uses the new value after a config reload. Higher values allow more memory use during preparation.")
+                    .defineInRange("createCartHistoryLimitMiB", DEFAULT_CREATE_CART_HISTORY_LIMIT_MIB, 1, 8192);
             b.pop();
 
             b.push("createCapture");
@@ -297,5 +303,14 @@ public final class LoggerConfig {
     }
 
     public static boolean isCaptureEnabled(){return com.roften.avilixlogger.core.ServerCaptureGuard.captureAllowed()&&isEnabled();}
+
+    static void refreshCreateCartHistoryLimit(ModConfigEvent event) {
+        if (event.getConfig().getSpec() == SPEC) {
+            createCartHistoryLimitMiB = VALUES.rollbackCreateCartHistoryLimitMiB.get();
+        }
+    }
+
+    public static int createCartHistoryLimitMiB() { return createCartHistoryLimitMiB; }
+
     private LoggerConfig() {}
 }

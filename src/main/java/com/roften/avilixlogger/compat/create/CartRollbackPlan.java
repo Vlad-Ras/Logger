@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.compat.create;
 
+import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.core.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -17,11 +18,19 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
     public record ItemLocation(String dimension,BlockPos pos) {}
     private record Key(String dim, BlockPos pos) {}
     private static final int PAGE = 256, MAX_ROWS = 100_000;
-    private static final long MAX_BYTES = 128L * 1024 * 1024;
+
+    private static void checkHistoryLimit(long bytes, int limitMiB) {
+        if (bytes > limitMiB * 1024L * 1024L) {
+            throw new IllegalStateException("План превышает " + limitMiB
+                    + " MiB. Выберите более позднюю контрольную точку или увеличьте rollbackPerformance.createCartHistoryLimitMiB");
+        }
+    }
+
     public static boolean checkpoint(ActionType t) {
         return t == ActionType.CART_ASSEMBLE || t == ActionType.CART_PLACE || t == ActionType.CART_PACK || t == ActionType.CART_DISASSEMBLE || t == ActionType.CART_REMOVE || t == ActionType.CART_ROLLBACK;
     }
     public static CartRollbackPlan prepare(LogStorage storage, UUID id, long checkpointId) {
+        int limitMiB = LoggerConfig.createCartHistoryLimitMiB();
         LogQuery q = new LogQuery(); q.dim = "*"; q.cartId = id; q.requireDetails = true; q.exactId=checkpointId;q.types=java.util.EnumSet.of(ActionType.CART_ASSEMBLE,ActionType.CART_PLACE,ActionType.CART_PACK,ActionType.CART_DISASSEMBLE,ActionType.CART_REMOVE,ActionType.CART_ROLLBACK); q.afterId = checkpointId - 1; q.untilTs=Long.MAX_VALUE; q.limit = 1;
         List<LogEntry> found = storage.query(q);
         if (found.isEmpty() || found.getFirst().id != checkpointId || !id.equals(CartAuditContext.id(found.getFirst().source))) throw new IllegalArgumentException("Контрольная точка не найдена");
@@ -29,6 +38,8 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
         if (!checkpoint(checkpoint.type)) throw new IllegalArgumentException("Нужна запись сборки, установки, упаковки, разборки или удаления");
         CompoundTag target = NbtSerde.fromSnbt(checkpoint.beAfter);
         if (target == null || target.getInt("Format") != 1) throw new IllegalArgumentException("Нет полного снимка контрольной точки");
+        long bytes = target.sizeInBytes();
+        checkHistoryLimit(bytes, limitMiB);
         CompoundTag latest = target;
         LinkedHashMap<Key, BlockUndo> blocks = new LinkedHashMap<>();
         LinkedHashMap<UUID,SpawnUndo> spawned=new LinkedHashMap<>();
@@ -40,7 +51,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
         List<Runnable> worldHistory=new ArrayList<>();
         // Cursor IDs follow capture order even when the system clock moves backward.
         q.exactId=0;q.types=null;q.afterId = 0; q.sinceTs = 0; q.untilTs = Long.MAX_VALUE; q.beforeId = Long.MAX_VALUE; q.limit = PAGE;
-        long bytes = target.sizeInBytes(), cutoff = checkpointId; int rows = 0; boolean latestFound = false;
+        long cutoff = checkpointId; int rows = 0; boolean latestFound = false;
         scan: while (true) {
             List<LogEntry> page = storage.queryReverse(q);
             if (page.isEmpty()) break;
@@ -115,7 +126,7 @@ public record CartRollbackPlan(UUID cartId, long checkpointId, long cutoffId, lo
                     blocks.put(key, undo); bytes += before.sizeInBytes() + after.sizeInBytes() + (be == null ? 0 : be.sizeInBytes()) + (slots == null ? 0 : slots.sizeInBytes()) + (afterBe == null ? 0 : afterBe.sizeInBytes()) + (afterSlots == null ? 0 : afterSlots.sizeInBytes());
                 }
                 if ((e.type == ActionType.CONTAINER_PUT || e.type == ActionType.CONTAINER_TAKE) && locations.size() < 64) locations.add(new ItemLocation(e.dim,new BlockPos(e.x,e.y,e.z)));
-                if (bytes > MAX_BYTES) throw new IllegalStateException("План превышает 128 MiB; выберите более позднюю контрольную точку");
+                checkHistoryLimit(bytes, limitMiB);
             }
             if (next >= q.beforeId) throw new IllegalStateException("Курсор истории не продвигается");
             q.beforeId = next;
