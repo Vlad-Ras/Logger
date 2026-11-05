@@ -113,11 +113,9 @@ public final class LoggerNetwork {
     /** Only peers which actually requested the new 2.1.24 channel receive broadcasts. */
     private static final java.util.Set<UUID> CAPTURE_SETTINGS_PEERS = ConcurrentHashMap.newKeySet();
 
-    /** Per-player GUI filter state (button-driven). */
-    private static final Map<UUID, GuiFilters> GUI_FILTERS = new ConcurrentHashMap<>();
-
-    /** Per-player GUI page size. It is supplied by the client and clamped server-side. */
-    private static final Map<UUID, Integer> GUI_PAGE_SIZES = new ConcurrentHashMap<>();
+    // Chat lookup has its own cursor and must never replace an active GUI time window.
+    private record GuiSession(GuiFilters filters, int pageSize, LastQueryManager.State page) {}
+    private static final Map<UUID, GuiSession> GUI_SESSIONS = new ConcurrentHashMap<>();
 
     public static boolean isClientPresent(ServerPlayer player) {
         return player != null && com.roften.avilixlogger.core.PermissionUtil.isAdministrator(player)
@@ -129,9 +127,8 @@ public final class LoggerNetwork {
             UUID uuid = player.getUUID();
             CLIENT_PRESENT.remove(uuid);
             CartHistoryNetwork.logout(uuid);
-            GUI_FILTERS.remove(uuid);
+            GUI_SESSIONS.remove(uuid);
             CAPTURE_SETTINGS_PEERS.remove(uuid);
-            GUI_PAGE_SIZES.remove(uuid);
             LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
             LAST_GUI_PAGE_REQUEST_SIG.remove(uuid);
             LAST_GUI_DETAILS_REQUEST_AT.remove(uuid);
@@ -163,9 +160,8 @@ public final class LoggerNetwork {
         LAST_GUI_DETAILS_REQUEST_SIG.clear();
         CLIENT_PRESENT.clear();
         CartHistoryNetwork.stop();
-        GUI_FILTERS.clear();
+        GUI_SESSIONS.clear();
         CAPTURE_SETTINGS_PEERS.clear();
-        GUI_PAGE_SIZES.clear();
         LATEST_GUI_PAGE_SEQ.clear();
         LATEST_GUI_DETAILS_SEQ.clear();
         PENDING_GUI_PAGE_SEQ.clear();
@@ -398,7 +394,8 @@ public final class LoggerNetwork {
                     ServerPlayer livePlayer = playerRef.get();
                     if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
 
-                    LastQueryManager.State current = LastQueryManager.get(livePlayer);
+                    var session = GUI_SESSIONS.get(playerId);
+                    var current = session == null ? null : session.page();
                     if (current != null) {
                         current.nextCursorCandidate = snapshotState.nextCursorCandidate();
                         current.nextCursorTsCandidate = snapshotState.nextCursorTsCandidate;
@@ -670,43 +667,30 @@ public final class LoggerNetwork {
 
             GuiFilters gf = payload.filters() == null ? GuiFilters.DEFAULT : payload.filters();
             long seq = nextGuiPageSeq(sp.getUUID());
-            GuiFilters prevGf = GUI_FILTERS.get(sp.getUUID());
-            Integer prevPageSize = GUI_PAGE_SIZES.get(sp.getUUID());
-
-            // Build (or reuse) a base query. If filters changed, restart pagination.
-            LastQueryManager.State st = LastQueryManager.get(sp);
-            if (st == null || prevGf == null || !prevGf.equals(gf)
-                    || prevPageSize == null || prevPageSize.intValue() != pageSize
-                    || payload.nav() == C2SRequestPagePayload.Nav.FIRST) {
-                LogQuery q = buildBaseGuiQuery(sp, gf, pageSize);
-                st = LastQueryManager.set(sp, q, "Логи (GUI)");
-                GUI_FILTERS.put(sp.getUUID(), gf);
-                GUI_PAGE_SIZES.put(sp.getUUID(), pageSize);
+            UUID playerId = sp.getUUID();
+            GuiSession session = GUI_SESSIONS.get(playerId);
+            boolean restart = session == null || !session.filters().equals(gf) || session.pageSize() != pageSize
+                    || payload.nav() == C2SRequestPagePayload.Nav.FIRST;
+            if (restart) {
+                var cursors = new ArrayDeque<Long>();
+                cursors.addLast(0L);
+                var query = buildBaseGuiQuery(sp, gf, pageSize);
+                session = new GuiSession(gf, pageSize, new LastQueryManager.State(query, cursors, guiTimeTitle(query, gf)));
+                GUI_SESSIONS.put(playerId, session);
+            }
+            LastQueryManager.State liveState = session.page();
+            if (!restart && payload.nav() == C2SRequestPagePayload.Nav.NEXT
+                    && liveState.hasNext() && liveState.nextCursorCandidate() > 0) {
+                long cursor = liveState.nextCursorCandidate();
+                liveState.cursors.addLast(cursor);
+                liveState.cursorTimes.put(cursor, liveState.nextCursorTsCandidate);
+            } else if (!restart && payload.nav() == C2SRequestPagePayload.Nav.PREV && liveState.hasPrev()) {
+                liveState.cursorTimes.remove(liveState.cursors.removeLast());
             }
 
-            // Apply navigation.
-            switch (payload.nav()) {
-                case NEXT -> {
-                    if (st.hasNext() && st.nextCursorCandidate() > 0) {
-                        LastQueryManager.next(sp, st.nextCursorCandidate());
-                    }
-                }
-                case PREV -> {
-                    if (st.hasPrev()) LastQueryManager.prev(sp);
-                }
-                case FIRST -> LastQueryManager.first(sp);
-            }
-            st = LastQueryManager.get(sp);
-            if (st == null) return;
-
-            ServerLevel lvl = safeLevel(sp, st.baseQuery.dim);
+            ServerLevel lvl = safeLevel(sp, liveState.baseQuery.dim);
             if (lvl == null) lvl = sp.serverLevel();
 
-            // Use latest filter state (may have been updated above).
-            gf = GUI_FILTERS.getOrDefault(sp.getUUID(), gf);
-
-            GuiFilters finalGf = gf;
-            LastQueryManager.State liveState = st;
             LastQueryManager.State snapshotState = new LastQueryManager.State(
                     liveState.baseQuery.copy(),
                     new ArrayDeque<>(liveState.cursors),
@@ -727,7 +711,7 @@ public final class LoggerNetwork {
 
             try {
                 PAGE_EXECUTOR.execute(new GuiPageTask(
-                        sp, seq, finalLvl, snapshotState, payload.aggregated(), finalGf, pageSize));
+                        sp, seq, finalLvl, snapshotState, payload.aggregated(), gf, pageSize));
                 scheduleLongPageWarning(sp, seq, finalLvl, snapshotState);
             } catch (java.util.concurrent.RejectedExecutionException rejected) {
                 completeGuiPageSeq(sp.getUUID(), seq);
@@ -756,8 +740,8 @@ public final class LoggerNetwork {
             // Resolve level
             ServerLevel lvl = safeLevel(sp, payload.dimHint());
             if (lvl == null) {
-                LastQueryManager.State st = LastQueryManager.get(sp);
-                lvl = st != null ? safeLevel(sp, st.baseQuery.dim) : null;
+                var session = GUI_SESSIONS.get(sp.getUUID());
+                lvl = session != null ? safeLevel(sp, session.page().baseQuery.dim) : null;
             }
             if (lvl == null) lvl = sp.serverLevel();
 
@@ -788,6 +772,17 @@ public final class LoggerNetwork {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private static String guiTimeTitle(LogQuery query, GuiFilters filters) {
+        if (filters.absoluteSinceTs() < 0) return "Логи (GUI)";
+        var format = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss")
+                .withZone(java.time.ZoneId.systemDefault());
+        String from = query.sinceTs == 0 ? "" : format.format(java.time.Instant.ofEpochMilli(query.sinceTs));
+        String until = format.format(java.time.Instant.ofEpochMilli(query.untilTs));
+        if (from.isEmpty()) return "Логи · до " + until;
+        if (filters.absoluteUntilTs() < 0) return "Логи · с " + from;
+        return "Логи · " + from + " — " + until;
     }
 
     private static LogQuery buildBaseGuiQuery(ServerPlayer sp, GuiFilters gf, int pageSize) {
@@ -1036,6 +1031,7 @@ public final class LoggerNetwork {
         int size = C2SRequestPagePayload.clampPageSize(requestedPageSize);
 
         LogQuery q = state.baseQuery.copy();
+        if (q.sinceTs > q.untilTs) return errorPage(level, state, "Нет записей: начало периода ещё не наступило.");
         if(q.chronological)q.afterId=state.currentBeforeId();else q.beforeId=state.currentBeforeId();
         q.cursorTs=state.currentCursorTs();
 

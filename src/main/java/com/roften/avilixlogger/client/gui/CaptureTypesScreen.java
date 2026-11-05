@@ -3,6 +3,7 @@ package com.roften.avilixlogger.client.gui;
 import com.roften.avilixlogger.core.CaptureTypePolicy;
 import com.roften.avilixlogger.core.CaptureHandlers;
 import net.minecraft.client.gui.components.EditBox;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Set;
 import com.roften.avilixlogger.net.C2SCaptureTypesPayload;
@@ -26,7 +27,11 @@ public final class CaptureTypesScreen extends Screen {
     private final List<Button> switches = new ArrayList<>();
     private long disabledMask;
     private Set<String> disabledHandlers = Set.of();
+    private record HandlerGroup(String name, List<Integer> presets) {}
+    private static final List<HandlerGroup> GROUPS = handlerGroups();
     private final List<Integer> filtered = new ArrayList<>();
+    private final List<HandlerGroup> matchingGroups = new ArrayList<>();
+    private HandlerGroup selectedGroup;
     private boolean handlers;
     private EditBox search;
     private Button tab;
@@ -44,13 +49,37 @@ public final class CaptureTypesScreen extends Screen {
         this.parent = parent;
     }
 
+    private static List<HandlerGroup> handlerGroups() {
+        var groups = new LinkedHashMap<String, List<Integer>>();
+        for (int i = 0; i < CaptureHandlers.count(); i++) {
+            var handler = CaptureHandlers.at(i);
+            String name = handler.title().split(" · ", 2)[0];
+            if (name.equals("AE2")) name = "Applied Energistics 2";
+            if (name.equals("OPAC")) name = "Open Parties and Claims";
+            if (name.equals("ScorchedGuns")) name = "Scorched Guns";
+            if (handler.key().startsWith("core.") || handler.key().startsWith("mixin.")) {
+                if (!name.equals("Scorched Guns") && !name.equals("BlockPack")) name = "Minecraft / общие события";
+            }
+            groups.computeIfAbsent(name, ignored -> new ArrayList<>()).add(CaptureHandlers.PRESET_BASE + i);
+        }
+        return groups.entrySet().stream()
+                .map(entry -> new HandlerGroup(entry.getKey(), List.copyOf(entry.getValue())))
+                .sorted(java.util.Comparator.comparing(HandlerGroup::name, String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
+    private boolean showGroups() { return handlers && selectedGroup == null; }
+
+    private int rowCount() { return showGroups() ? matchingGroups.size() : filtered.size(); }
+
     @Override protected void init() {
         switches.clear();
         int x = Math.max(8,(width - Math.min(width-20,450))/2);
         int w = Math.min(width-16,450);
         tab = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,28,w,18,
                 Component.empty(), b -> {
-                    handlers = !handlers;
+                    if (handlers && selectedGroup != null) selectedGroup = null;
+                    else handlers = !handlers;
                     scroll = 0;
                     search.setValue("");
                     relayout();
@@ -68,7 +97,13 @@ public final class CaptureTypesScreen extends Screen {
             final int index = row;
             var button = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,98,w,18,
                     Component.empty(), b -> {
-                        if (scroll + index < filtered.size()) toggle(filtered.get(scroll + index));
+                        int item = scroll + index;
+                        if (item >= rowCount()) return;
+                        if (showGroups()) {
+                            selectedGroup = matchingGroups.get(item);
+                            scroll = 0;
+                            relayout();
+                        } else toggle(filtered.get(item));
                     }, () -> 1));
             switches.add(button);
         }
@@ -95,33 +130,60 @@ public final class CaptureTypesScreen extends Screen {
         return title != null ? title : Component.translatable("gui.avilixlogger.type." + KEYS[id]).getString();
     }
 
+    private boolean matches(int preset, String query) {
+        return label(preset).toLowerCase(Locale.ROOT).contains(query)
+                || CaptureHandlers.fromPreset(preset).key().toLowerCase(Locale.ROOT).contains(query);
+    }
+
     private void relayout() {
-        tab.setMessage(Component.literal(handlers ? "Обработчики · показать категории" : "Категории · показать обработчики"));
+        tab.setMessage(Component.literal(!handlers ? "Категории · открыть обработчики по модам"
+                : showGroups() ? "Обработчики по модам · открыть категории" : "← Моды · " + selectedGroup.name()));
+        search.setHint(Component.literal(showGroups() ? "Найти мод или обработчик" : "Поиск по названию"));
         filtered.clear();
+        matchingGroups.clear();
         String query = search.getValue().strip().toLowerCase(Locale.ROOT);
-        int size = handlers ? CaptureHandlers.count() : CaptureTypePolicy.GROUPS;
-        for (int i = 0; i < size; i++) {
-            int id = handlers ? CaptureHandlers.PRESET_BASE + i : i + 1;
-            var handler = CaptureHandlers.fromPreset(id);
-            if (label(id).toLowerCase(Locale.ROOT).contains(query)
-                    || handler != null && handler.key().toLowerCase(Locale.ROOT).contains(query)) filtered.add(id);
+        if (showGroups()) {
+            for (var group : GROUPS) {
+                if (group.name().toLowerCase(Locale.ROOT).contains(query)
+                        || group.presets().stream().anyMatch(preset -> matches(preset, query))) matchingGroups.add(group);
+            }
+        } else if (handlers) {
+            boolean wholeGroup = selectedGroup.name().toLowerCase(Locale.ROOT).contains(query);
+            for (int preset : selectedGroup.presets()) if (wholeGroup || matches(preset, query)) filtered.add(preset);
+        } else {
+            for (int id = 1; id <= CaptureTypePolicy.GROUPS; id++) {
+                if (label(id).toLowerCase(Locale.ROOT).contains(query)) filtered.add(id);
+            }
         }
-        scroll = Math.max(0, Math.min(scroll, filtered.size() - visibleCount()));
+        scroll = Math.max(0, Math.min(scroll, rowCount() - visibleCount()));
         for (int i = 0; i < switches.size(); i++) {
             var button = switches.get(i);
             int index = scroll + i;
-            button.visible = index < filtered.size();
+            button.visible = index < rowCount();
             if (!button.visible) continue;
-            int id = filtered.get(index);
-            boolean active = loaded && enabled(id);
             button.setY(98 + i * 21);
-            button.setMessage(Component.literal((active ? "●  " : "○  ") + label(id)
-                    + (active ? "  —  ВКЛ" : "  —  ВЫКЛ")));
-            button.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(label(id))));
-            button.active = loaded && canEdit && !pending;
+            String title;
+            if (showGroups()) {
+                var group = matchingGroups.get(index);
+                long enabledCount = group.presets().stream().filter(this::enabled).count();
+                title = group.name() + "  ·  " + (loaded ? enabledCount + " / " : "") + group.presets().size();
+                button.setMessage(Component.literal(title));
+                button.active = true;
+            } else {
+                int id = filtered.get(index);
+                boolean active = loaded && enabled(id);
+                title = label(id);
+                button.setMessage(Component.literal((active ? "●  " : "○  ") + title
+                        + (active ? "  —  ВКЛ" : "  —  ВЫКЛ")));
+                button.active = loaded && canEdit && !pending;
+            }
+            button.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(title)));
         }
-        enableAll.active = loaded && canEdit && !pending;
-        disableAll.active = loaded && canEdit && !pending;
+        boolean bulk = !handlers || showGroups();
+        enableAll.setMessage(Component.literal(handlers ? "Включить все обработчики" : "Включить все категории"));
+        disableAll.setMessage(Component.literal(handlers ? "Выключить все обработчики" : "Выключить все категории"));
+        enableAll.visible = disableAll.visible = bulk;
+        enableAll.active = disableAll.active = bulk && loaded && canEdit && !pending;
     }
 
     private void toggle(int preset) {
@@ -154,7 +216,7 @@ public final class CaptureTypesScreen extends Screen {
         relayout();
     }
     @Override public boolean mouseScrolled(double x,double y,double dx,double dy) {
-        scroll=Math.max(0,Math.min(filtered.size()-visibleCount(),scroll-(int)Math.signum(dy)*2));
+        scroll=Math.max(0,Math.min(rowCount()-visibleCount(),scroll-(int)Math.signum(dy)*2));
         relayout();return true;
     }
     @Override public void render(GuiGraphics g,int mx,int my,float partial) {
@@ -165,8 +227,8 @@ public final class CaptureTypesScreen extends Screen {
         g.drawCenteredString(font,Component.literal("Управление сбором, не фильтр существующих записей"),
                 width/2,18,0xFFAAAAAA);
         int count=visibleCount();
-        if(scroll+count<filtered.size())
-            g.drawString(font,"▼ Остальные типы ниже",x,Math.min(height-70,101+count*21),0xFF999999);
+        if(scroll+count<rowCount())
+            g.drawString(font,"▼ Остальные позиции ниже",x,Math.min(height-70,101+count*21),0xFF999999);
         g.drawCenteredString(font,font.plainSubstrByWidth(status,Math.max(30,width-24)),
                 width/2,height-62,lastSuccess?0xFFAAAAAA:0xFFFF6666);
         String overflow=!loaded?"Получение режима переполнения…":(disabledMask&(1L<<29))==0

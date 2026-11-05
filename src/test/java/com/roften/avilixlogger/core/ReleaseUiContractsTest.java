@@ -12,6 +12,14 @@ public final class ReleaseUiContractsTest {
         var range=GuiTimeFilter.parse(GuiTimeFilter.rangeInput("01.11.2026","09:30","02.11.2026","10:15",now),now);
         check(range.since()==Instant.parse("2026-11-01T06:30:00Z").toEpochMilli(),"lower time or timezone changed");
         check(range.until()==Instant.parse("2026-11-02T07:16:00Z").toEpochMilli()-1,"typed upper minute was cut off");
+        check(range.mode()==GuiTimeFilter.Mode.RANGE,"range labelled as since");
+        var narrow=GuiTimeFilter.parse("01.11.2026 14:00..01.11.2026 15:00",now);
+        check(narrow.until()==Instant.parse("2026-11-01T12:01:00Z").toEpochMilli()-1,"direct range lost the last minute");
+        check(Instant.parse("2026-11-01T20:25:42Z").toEpochMilli()>narrow.until(),"23:25 entered a 14:00–15:00 search");
+        check(GuiTimeFilter.parse("01.11.2026 14:00..02.11.2026 15:00:59.999",now).mode()==GuiTimeFilter.Mode.RANGE,
+                "saved absolute range is incompatible");
+        reject(()->GuiTimeFilter.form(GuiTimeFilter.Mode.RANGE,"01.11.2026","14:00","","",now));
+        reject(()->GuiTimeFilter.form(GuiTimeFilter.Mode.RANGE,"","","01.11.2026","15:00",now));
         var day=GuiTimeFilter.parse(GuiTimeFilter.rangeInput("01.11.2026","","01.11.2026","",now),now);
         check(day.until()-day.since()==86_400_000-1,"whole day inclusive bounds");
         var until=GuiTimeFilter.parse(GuiTimeFilter.rangeInput("02.11.2026","09:30:15","02.11.2026","09:30:15",now),now);

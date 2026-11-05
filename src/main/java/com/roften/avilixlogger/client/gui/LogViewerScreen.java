@@ -110,6 +110,7 @@ public final class LogViewerScreen extends Screen {
     private String blockIdFilter = GuiFilters.DEFAULT.blockId();
 
     private boolean showRawTab = false;
+    private boolean invalidTimeInput;
     private long selectedEntryId = -1L;
 
     private List<Component> detailLines = List.of();
@@ -155,7 +156,6 @@ public final class LogViewerScreen extends Screen {
     private Button btnClear;
     private Button btnTabDetails;
     private Button btnTabRaw;
-    private Button btnShowRaw;
     private Button btnSettings;
     private Button btnCaptureTypes;
 
@@ -395,7 +395,7 @@ public final class LogViewerScreen extends Screen {
         this.btnNext = addButton(Component.literal(">"), b -> sendPage(C2SRequestPagePayload.Nav.NEXT),
                 cx + Math.round(40 * controlScale()), top, controlH(), controlH());
 
-        this.btnRefresh = addButton(Component.literal("⟳"), b -> sendPage(C2SRequestPagePayload.Nav.SAME),
+        this.btnRefresh = addButton(Component.literal("⟳"), b -> sendPage(C2SRequestPagePayload.Nav.FIRST),
                 cx - Math.round(20 * controlScale()), top, Math.max(controlH() * 2, Math.round(40 * controlScale())), controlH());
 
         // Mode toggles moved to the right sidebar (people confuse them with Details/Raw).
@@ -529,14 +529,10 @@ public final class LogViewerScreen extends Screen {
                 rightX + half + gap, y2, rightW - half - gap, btnH);
 
         y2 += btnH + gap;
-        this.btnTabDetails = addButton(sideLabel("gui.avilixlogger.tab.details", "D"), b -> { showRawTab = false; saveGuiStateFromInstance(); },
+        this.btnTabDetails = addButton(sideLabel("gui.avilixlogger.tab.details", "D"), b -> { showRawTab = false; saveGuiStateFromInstance(); requestDetailsIfNeeded(); },
                 rightX, y2, half, btnH);
         this.btnTabRaw = addButton(sideLabel("gui.avilixlogger.tab.raw", "Raw"), b -> { showRawTab = true; saveGuiStateFromInstance(); requestRawIfNeeded(); },
                 rightX + half + gap, y2, rightW - half - gap, btnH);
-
-        y2 += btnH + gap;
-        this.btnShowRaw = addButton(sideLabel("gui.avilixlogger.show_raw", "RAW"), b -> requestRawIfNeeded(),
-                rightX, y2, rightW, btnH);
 
         y2 += btnH + gap;
         addButton(Component.literal("Вагонеточные штуковины"), b -> {
@@ -623,10 +619,15 @@ public final class LogViewerScreen extends Screen {
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
         saveGuiStateFromInstance();
-        try { PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, currentFilters(), savedPageSize)); }
-        catch (IllegalArgumentException failure) {
-            detailLines=List.of(Component.literal(failure.getMessage()).withStyle(ChatFormatting.RED));
-            showRawTab=false;
+        try {
+            var filters = currentFilters();
+            invalidTimeInput = false;
+            PacketDistributor.sendToServer(new C2SRequestPagePayload(nav, aggregatedMode, filters, savedPageSize));
+        } catch (IllegalArgumentException failure) {
+            invalidTimeInput = true;
+            applyPage(new S2CLogPagePayload("Неверный фильтр времени", 1, false, false,
+                    List.of(new LogRow(0L, "", 0, 0, 0, Component.literal(failure.getMessage())
+                            .withStyle(ChatFormatting.RED), false, new long[0]))));
         }
     }
 
@@ -663,7 +664,13 @@ public final class LogViewerScreen extends Screen {
     private Component headerTitle(){return LogViewerClientHooks.capturePaused()?Component.literal("Захват остановлен · Откройте «Действия»").withStyle(ChatFormatting.RED):(title.isEmpty()?Component.translatable("gui.avilixlogger.title"):Component.literal(title)).withStyle(ChatFormatting.GOLD);}
     public void updateCaptureHealth(){if(titleWidget!=null)titleWidget.setMessage(headerTitle());}
     public void apply(S2CLogPagePayload payload) {
-        this.title = module != null ? module.title() : payload.title() == null ? "" : payload.title();
+        if (!invalidTimeInput) applyPage(payload);
+    }
+
+    private void applyPage(S2CLogPagePayload payload) {
+        String pageTitle = payload.title() == null ? "" : payload.title();
+        this.title = module == null ? pageTitle
+                : pageTitle.startsWith("Логи · ") ? module.title() + pageTitle.substring(4) : module.title();
         this.pageIndex = payload.pageIndex();
         this.hasPrev = payload.hasPrev();
         this.hasNext = payload.hasNext();
@@ -716,10 +723,6 @@ public final class LogViewerScreen extends Screen {
 
         if (btnAgg != null) btnAgg.active = !aggregatedMode;
         if (btnRaw != null) btnRaw.active = aggregatedMode;
-        if (btnShowRaw != null) {
-            boolean can = selected >= 0 && selected < rows.size() && rows.get(selected).rawIds() != null && rows.get(selected).rawIds().length > 0;
-            btnShowRaw.active = can;
-        }
     }
 
     private void setAggregatedMode(boolean aggregated) {
@@ -820,11 +823,11 @@ public final class LogViewerScreen extends Screen {
 
                 this.selected = idx;
                 this.selectedEntryId = clickedRow.id();
-                this.detailLines = List.of(Component.literal("Loading…").withStyle(ChatFormatting.DARK_GRAY));
+                this.detailLines = List.of();
                 this.rawLines = List.of();
                 this.detailsScroll = 0;
-                PacketDistributor.sendToServer(new C2SRequestDetailsPayload(
-                        clickedRow.id(), C2SRequestDetailsPayload.Mode.DETAILS, clickedRow.rawIds(), clickedRow.dim()));
+                if (showRawTab) requestRawIfNeeded();
+                else requestDetailsIfNeeded();
                 updateButtons();
                 return true;
             }
@@ -1106,12 +1109,18 @@ public final class LogViewerScreen extends Screen {
                 && mouseY >= box.getY() && mouseY <= box.getY() + box.getHeight();
     }
 
+    private void requestDetailsIfNeeded() {
+        if (selectedEntryId <= 0 || selected < 0 || selected >= rows.size() || !detailLines.isEmpty()) return;
+        LogRow row = rows.get(selected);
+        PacketDistributor.sendToServer(new C2SRequestDetailsPayload(
+                row.id(), C2SRequestDetailsPayload.Mode.DETAILS, row.rawIds(), row.dim()));
+    }
+
     private void requestRawIfNeeded() {
         if (selected < 0 || selected >= rows.size()) return;
         LogRow r = rows.get(selected);
         if (r.rawIds() == null || r.rawIds().length == 0) return;
         if (rawLines != null && !rawLines.isEmpty()) return;
-        this.rawLines = List.of(Component.literal("Loading raw…").withStyle(ChatFormatting.DARK_GRAY));
         PacketDistributor.sendToServer(new C2SRequestDetailsPayload(r.id(), C2SRequestDetailsPayload.Mode.RAW, r.rawIds(), r.dim()));
     }
 
@@ -1477,7 +1486,18 @@ public final class LogViewerScreen extends Screen {
     private String timeLabel() {
         String entered = timeBox == null ? "" : timeBox.getValue().trim();
         if(entered.equals("0")||entered.equalsIgnoreCase("0m"))return "всё время";
-        if (!entered.isEmpty() && !entered.matches("[0-9]+[mMhHdD]?")) return "от даты";
+        if (!entered.isEmpty() && !entered.matches("[0-9]+[mMhHdD]?")) {
+            try {
+                return switch (com.roften.avilixlogger.net.GuiTimeFilter.parse(entered, java.time.ZonedDateTime.now(logTimeZone)).mode()) {
+                    case SINCE -> "начиная с";
+                    case UNTIL -> "до";
+                    case MINUTE -> "минута";
+                    case RANGE -> "период";
+                };
+            } catch (IllegalArgumentException ignored) {
+                return "ошибка";
+            }
+        }
         int custom = parseTimeMinutes(timeBox != null ? timeBox.getValue() : "");
         if (custom >= 0) {
             if (custom % 1440 == 0 && custom >= 1440) return (custom / 1440) + "d";

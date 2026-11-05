@@ -9,7 +9,11 @@ public final class GuiTimeFilter {
     public enum Mode { SINCE, UNTIL, MINUTE, RANGE }
     public static String form(Mode mode,String fromDate,String fromTime,String toDate,String toTime,ZonedDateTime now) {
         return switch(mode) {
-            case RANGE -> rangeInput(fromDate,fromTime,toDate,toTime,now);
+            case RANGE -> {
+                if ((fromDate.isBlank() && fromTime.isBlank()) || (toDate.isBlank() && toTime.isBlank()))
+                    throw new IllegalArgumentException("Укажите начало и конец периода.");
+                yield rangeInput(fromDate,fromTime,toDate,toTime,now);
+            }
             case SINCE -> {
                 if(fromDate.isBlank()&&fromTime.isBlank())throw new IllegalArgumentException("Укажите дату или время.");
                 yield rangeInput(fromDate,fromTime,"","",now);
@@ -25,7 +29,14 @@ public final class GuiTimeFilter {
             }
         };
     }
-    public record Selection(int minutes, long since, long until) {}
+    public record Selection(int minutes, long since, long until) {
+        public Mode mode() {
+            if (since < 0) return null;
+            if (until < 0) return Mode.SINCE;
+            if (since == 0) return Mode.UNTIL;
+            return until - since == 59_999 && since % 60_000 == 0 ? Mode.MINUTE : Mode.RANGE;
+        }
+    }
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd.MM.uuuu", Locale.ROOT).withResolverStyle(ResolverStyle.STRICT);
     private GuiTimeFilter() {}
     /** Validates the friendly form without requiring users to type the range separator. */
@@ -36,7 +47,7 @@ public final class GuiTimeFilter {
         if(fromDate.isEmpty()&&toDate.isEmpty())return "0m";
         // A blank upper time includes that entire date. A typed minute includes its whole minute.
         String start=fromDate+(fromTime.isEmpty()?"":" "+fromTime);
-        String end=toDate+(toTime.isEmpty()?"":" "+(toTime.length()==5?toTime+":59.999":toTime.length()==8?toTime+".999":toTime));
+        String end=toDate+(toTime.isEmpty()?"":" "+toTime);
         String result=start+(toDate.isEmpty()?"":".."+end);
         parse(result,now);return result;
     }
@@ -65,18 +76,25 @@ public final class GuiTimeFilter {
         if (parts.length > 2) throw new IllegalArgumentException();
         LocalDate date;
         LocalTime time;
+        String clock = "";
         boolean dateOnly = false;
         if (parts.length == 1 && parts[0].contains(":")) {
-            date = now.toLocalDate(); time = LocalTime.parse(parts[0]);
+            date = now.toLocalDate(); clock = parts[0]; time = LocalTime.parse(clock);
         } else {
             String day = parts[0];
             date = day.contains("-") ? LocalDate.parse(day) : LocalDate.parse(day.matches("[0-9]{2}\\.[0-9]{2}") ? day + "." + now.getYear() : day, DATE);
             dateOnly = parts.length == 1;
-            time = dateOnly ? LocalTime.MIDNIGHT : LocalTime.parse(parts[1]);
+            if (!dateOnly) clock = parts[1];
+            time = dateOnly ? LocalTime.MIDNIGHT : LocalTime.parse(clock);
         }
         var local = date.atTime(time);
         var zoned = local.atZone(now.getZone());
         if (!zoned.toLocalDateTime().equals(local)) throw new IllegalArgumentException("Время отсутствует при смене часового пояса");
-        return upper && dateOnly ? date.plusDays(1).atStartOfDay(now.getZone()).toInstant().toEpochMilli() - 1 : zoned.toInstant().toEpochMilli();
+        if (!upper) return zoned.toInstant().toEpochMilli();
+        if (dateOnly) return date.plusDays(1).atStartOfDay(now.getZone()).toInstant().toEpochMilli() - 1;
+        long millis = zoned.toInstant().toEpochMilli();
+        if (clock.length() == 5) return millis + 59_999;
+        if (clock.length() == 8) return millis + 999;
+        return millis;
     }
 }

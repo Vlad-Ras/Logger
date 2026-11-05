@@ -70,7 +70,18 @@ public final class CartGuiClientSmoke {
                     var screen=(com.roften.avilixlogger.client.gui.LoggerActionsScreen)mc.screen;
                     check(screen.mouseClicked(15,65,0),"result link did not open a GUI form");
                     var values=screen.getClass().getDeclaredField("values");values.setAccessible(true);check(values.get(screen).equals(List.of(ID,"100")),"confirmation link lost ID/entry");
-                    var guide=Class.forName("com.roften.avilixlogger.client.gui.LoggerGuideScreen").getDeclaredConstructor(Screen.class);guide.setAccessible(true);mc.setScreen((Screen)guide.newInstance(root));
+                    var guide=Class.forName("com.roften.avilixlogger.client.gui.LoggerGuideScreen").getDeclaredConstructor(Screen.class);
+                    guide.setAccessible(true);
+                    var help=(Screen)guide.newInstance(root);
+                    mc.setScreen(help);
+                    var rollback=help.children().stream()
+                            .filter(w -> w instanceof net.minecraft.client.gui.components.Button button
+                                    && button.getMessage().getString().equals("Откат мира: время и область"))
+                            .map(w -> (net.minecraft.client.gui.components.Button)w).findFirst().orElseThrow();
+                    check(help.mouseClicked(rollback.getX()+2,rollback.getY()+2,0),"help topic button did not open");
+                    check(help.children().stream().anyMatch(w -> w instanceof net.minecraft.client.gui.components.Button button
+                            && button.getMessage().getString().equals("К разделам справки")),"help article did not expose its menu");
+                    help.onClose();
                 }
                 else if(stage==7){
                     var viewer=new com.roften.avilixlogger.client.gui.LogViewerScreen();mc.setScreen(viewer);teleportReplies(mc,viewer);
@@ -116,7 +127,15 @@ public final class CartGuiClientSmoke {
                             "Индивидуальные обработчики",List.of(handler.key())));
                     var search=screen.getClass().getDeclaredField("search");
                     search.setAccessible(true);
-                    ((net.minecraft.client.gui.components.EditBox)search.get(screen)).setValue("industrial");
+                    ((net.minecraft.client.gui.components.EditBox)search.get(screen)).setValue("industry.");
+                    var group=screen.children().stream()
+                            .filter(w -> w instanceof net.minecraft.client.gui.components.Button button
+                                    && button.visible && button.getMessage().getString().startsWith("Промышленные машины  ·"))
+                            .map(w -> (net.minecraft.client.gui.components.Button)w).findFirst().orElseThrow();
+                    check(screen.mouseClicked(group.getX()+2,group.getY()+2,0),"handler group did not open");
+                    check(screen.children().stream().anyMatch(w -> w instanceof net.minecraft.client.gui.components.Button button
+                            && button.visible && button.getMessage().getString().contains("Промышленные машины ·")),
+                            "group did not show its individual switches");
                 }
                 if(stage==8){
                     var capture=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;

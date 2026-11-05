@@ -26,15 +26,19 @@ final class TimeRangeScreen extends Screen {
         try {
             var selection = GuiTimeFilter.parse(current, ZonedDateTime.now(zone));
             if (selection.since() > 0) set(0, Instant.ofEpochMilli(selection.since()).atZone(zone));
-            if (selection.until() >= 0) {
-                set(2, Instant.ofEpochMilli(selection.until()).atZone(zone));
-                mode=selection.since()==0?GuiTimeFilter.Mode.UNTIL:selection.until()-selection.since()==59_999&&selection.since()%60_000==0?GuiTimeFilter.Mode.MINUTE:GuiTimeFilter.Mode.RANGE;
-            }
+            if (selection.until() >= 0) set(2, Instant.ofEpochMilli(selection.until()).atZone(zone));
+            if (selection.mode() != null) mode = selection.mode();
         } catch (IllegalArgumentException ignored) { error = "Введите начало и конец периода."; }
         if (values[0].isEmpty()) values[0] = LocalDate.now(zone).format(DATE);
     }
     private void set(int index, ZonedDateTime time) {
-        values[index] = time.format(DATE); values[index + 1] = time.toLocalTime().withNano(0).toString();
+        values[index] = time.format(DATE);
+        LocalTime clock = time.toLocalTime();
+        if (index == 2 && clock.getNano() == 999_000_000) {
+            values[index + 1] = clock.format(DateTimeFormatter.ofPattern(clock.getSecond() == 59 ? "HH:mm" : "HH:mm:ss"));
+        } else {
+            values[index + 1] = clock.toString();
+        }
     }
     private double scale() { return LogViewerScreen.sharedControlScale(width, height); }
     private void button(String label, int x, int y, int w, Runnable action) {
@@ -56,7 +60,7 @@ final class TimeRangeScreen extends Screen {
             final int index=i; int y=top+40+(i/2)*36;
             var box=new LoggerGuiWidgets.ScaledEditBox(font,left+34+(i%2==0?0:dateWidth+6),y,i%2==0?dateWidth:timeWidth,20,
                     Component.literal(i%2==0?"Дата":"Время"),this::scale);
-            box.setMaxLength(i%2==0?10:8);box.setHint(Component.literal(i%2==0?"ДД.ММ.ГГГГ":"ЧЧ:ММ"));
+            box.setMaxLength(i%2==0?10:12);box.setHint(Component.literal(i%2==0?"ДД.ММ.ГГГГ":"ЧЧ:ММ"));
             box.active=mode==GuiTimeFilter.Mode.RANGE || (mode==GuiTimeFilter.Mode.UNTIL?i>=2:i<2);
             box.setValue(values[i]); box.setResponder(value->values[index]=value); boxes[i]=box;addRenderableWidget(box);
         }
@@ -65,16 +69,16 @@ final class TimeRangeScreen extends Screen {
             final int preset=i;button(labels[i],left+i*(w+3),top+116,w,()->quick(preset));
         }
         button("С начала журнала",left,top+140,panelWidth,()->finish("0m"));
-        button("Отмена",left,top+174,(panelWidth-6)/2,this::onClose);
-        button("Применить",left+(panelWidth+6)/2,top+174,(panelWidth-6)/2,this::submit);
+        button("Отмена",left,top+186,(panelWidth-6)/2,this::onClose);
+        button("Применить",left+(panelWidth+6)/2,top+186,(panelWidth-6)/2,this::submit);
     }
     private void quick(int preset) {
         var today=LocalDate.now(zone);
-        finish(switch(preset){case 0->"30m";case 1->"2h";case 2->today.format(DATE);default->today.minusDays(1).format(DATE)+".."+today.minusDays(1).format(DATE);});
+        finish(switch(preset){case 0->"30m";case 1->"2h";case 2->today.format(DATE)+".."+today.format(DATE);default->today.minusDays(1).format(DATE)+".."+today.minusDays(1).format(DATE);});
     }
     private void submit() {
         try { finish(GuiTimeFilter.form(mode,values[0],values[1],values[2],values[3],ZonedDateTime.now(zone))); }
-        catch(IllegalArgumentException failure){error=mode==GuiTimeFilter.Mode.MINUTE?"Для минуты укажите верные дату и ЧЧ:ММ.":"Проверьте дату, время и порядок границ.";}
+        catch(IllegalArgumentException failure){error=failure.getMessage();}
     }
     private void finish(String input) { minecraft.setScreen(parent);apply.accept(input); }
     public boolean keyPressed(int key,int scan,int modifiers) {
@@ -87,7 +91,7 @@ final class TimeRangeScreen extends Screen {
         g.drawString(font,"Время",left+34+(panelWidth-44)*2/3+6,top+27,0xAAAAAA,false);
         g.drawString(font,"С",left,top+46,0xFFFFFF,false);g.drawString(font,"По",left,top+82,0xFFFFFF,false);
         g.drawString(font,"Часовой пояс: "+zone.getId(),left,top-13,0xAAAAAA,false);
-        String hint=error.isBlank()?switch(mode){case SINCE->"Позже указанного времени, новые сверху";case UNTIL->"Не позднее указанного времени";case MINUTE->"Только указанная минута (00–59 секунд)";case RANGE->"Обе границы включены в период";}:error;
+        String hint=error.isBlank()?switch(mode){case SINCE->"От указанного времени, ранние сверху";case UNTIL->"Не позднее указанного времени";case MINUTE->"Только выбранная минута, включая все секунды";case RANGE->"Укажите обе границы. Начало и конец включены";}:error;
         int y=top+162;for(var line:font.split(Component.literal(hint),panelWidth)){g.drawString(font,line,left,y,error.isBlank()?0xAAAAAA:0xFF7777,false);y+=10;}
         for(var widget:renderables)widget.render(g,mx,my,dt);
     }
