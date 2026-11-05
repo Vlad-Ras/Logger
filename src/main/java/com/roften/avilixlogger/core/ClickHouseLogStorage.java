@@ -1138,6 +1138,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         appendConstructionWhere(sql,q,"source");
         appendPositionWhere(sql, q);
         appendFeedOptionalFilters(sql, q);
+        q.guiVisibility.appendWhere(sql, ClickHouseLogStorage::sqlString, "extra");
 
         appendRecordCursor(sql,q,reverse);
     }
@@ -1175,6 +1176,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         appendConstructionWhere(sql,q,"source");
         appendPositionWhere(sql, q);
         appendSplitOptionalFilters(sql, q, kind);
+        q.guiVisibility.appendWhere(sql, ClickHouseLogStorage::sqlString, extraSelectExpr(kind));
 
         appendRecordCursor(sql,q,reverse);
     }
@@ -1224,7 +1226,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     }
 
     private static boolean requiresSearchColumns(LogQuery q) {
-        return q.constructionId!=null||q.sourcePrefix!=null||q.cartId!=null||q.backpackId!=null||q.planeOnly
+        return q.guiVisibility.active()||q.constructionId!=null||q.sourcePrefix!=null||q.cartId!=null||q.backpackId!=null||q.planeOnly
                 ||java.util.stream.Stream.of(q.blockIdFilter,q.planeNameFilter,q.extraTextFilter,q.owner,q.textFilter,q.trainNameFilter,q.backpackNeedle).anyMatch(x->x!=null&&!x.isBlank());
     }
     private static void appendSearchFilters(StringBuilder sql,LogQuery q,String entity,String extra,String nbt,String source,String... targets) {

@@ -76,7 +76,8 @@ public final class CaptureTypesScreen extends Screen {
         switches.clear();
         int x = Math.max(8,(width - Math.min(width-20,450))/2);
         int w = Math.min(width-16,450);
-        tab = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,28,w,18,
+        int tabWidth = parent instanceof LogViewerScreen ? (w - 6) * 3 / 5 : w;
+        tab = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,28,tabWidth,18,
                 Component.empty(), b -> {
                     if (handlers && selectedGroup != null) selectedGroup = null;
                     else handlers = !handlers;
@@ -84,6 +85,10 @@ public final class CaptureTypesScreen extends Screen {
                     search.setValue("");
                     relayout();
                 }, () -> 1));
+        if (parent instanceof LogViewerScreen viewer) {
+            addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x + tabWidth + 6, 28, w - tabWidth - 6, 18,
+                    Component.literal("Видимость в GUI"), b -> minecraft.setScreen(new GuiVisibilityScreen(this, viewer)), () -> 1));
+        }
         search = addRenderableWidget(new EditBox(font,x,49,w,18,Component.literal("Поиск обработчика")));
         search.setHint(Component.literal("Поиск по моду или названию"));
         search.setResponder(value -> { scroll = 0; relayout(); });
@@ -126,6 +131,10 @@ public final class CaptureTypesScreen extends Screen {
     private String label(int id) {
         var handler = CaptureHandlers.fromPreset(id);
         if (handler != null) return handler.title();
+        return categoryLabel(id);
+    }
+
+    static String categoryLabel(int id) {
         String title = CaptureTypePolicy.title(id);
         return title != null ? title : Component.translatable("gui.avilixlogger.type." + KEYS[id]).getString();
     }

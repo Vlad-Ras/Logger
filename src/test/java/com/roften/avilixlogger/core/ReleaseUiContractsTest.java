@@ -53,6 +53,12 @@ public final class ReleaseUiContractsTest {
         chunks.includeIntersectingClaims=true;check(chunks.copy().includeIntersectingClaims,"spatial scope lost in fallback copy");
         check(ModLogFilters.find(14).sourcePrefix().equals("mod:openpartiesandclaims:"),"OPAC scope mismatch");
         check(ModLogFilters.find(20).sourcePrefix().equals("mod:create_vibrant_vaults:"),"Vibrant Vaults scope mismatch");
+        var hidden=GuiEventVisibility.ALL_VISIBLE.toggle(14).toggle(32).toggle(ActionType.CHAT_MESSAGE);
+        check(hidden.hidden(ActionType.BLOCK_PLACE,"mod:openpartiesandclaims",null),"legacy mod prefix visible");
+        check(hidden.hidden(ActionType.BLOCK_BREAK,"create:cart:test:mechanism=create:mechanical_drill@1,2,3",null),"recorded drill visible");
+        check(hidden.hidden(ActionType.CHAT_MESSAGE,null,null),"exact hidden type visible");
+        check(!hidden.hidden(ActionType.BLOCK_PLACE,"mod:create",null),"unrelated source hidden");
+        check(!GuiEventVisibility.ALL_VISIBLE.toggle(30).active(),"queue policy became a visibility filter");
     }
     private static void check(boolean condition,String message){if(!condition)throw new AssertionError(message);}
     private static void reject(Runnable action){try{action.run();throw new AssertionError("Invalid time accepted");}catch(IllegalArgumentException expected){}}

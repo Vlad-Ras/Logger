@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.net;
 
+import com.roften.avilixlogger.core.ActionType;
+import com.roften.avilixlogger.core.GuiEventVisibility;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 
@@ -18,12 +20,18 @@ public record GuiFilters(
         long absoluteUntilTs,
         String search,
         java.util.List<String> searchIds,
-        java.util.List<String> blockIds
+        java.util.List<String> blockIds,
+        GuiEventVisibility visibility
 ) {
 
     public GuiFilters {
         searchIds=com.roften.avilixlogger.core.LocalizedSearchTerms.checked(searchIds);
         blockIds=com.roften.avilixlogger.core.LocalizedSearchTerms.checked(blockIds);
+        visibility = GuiEventVisibility.of(visibility.categories(), visibility.actions());
+    }
+    public GuiFilters(int t,int r,int y,int minutes,int radius,String actor,String train,String plane,String block,
+                      long since,long until,String search,java.util.List<String> searchIds,java.util.List<String> blockIds){
+        this(t,r,y,minutes,radius,actor,train,plane,block,since,until,search,searchIds,blockIds,GuiEventVisibility.ALL_VISIBLE);
     }
     public GuiFilters(int t,int r,int y,int minutes,int radius,String actor,String train,String plane,String block,long since,long until,String search){
         this(t,r,y,minutes,radius,actor,train,plane,block,since,until,search,java.util.List.of(),java.util.List.of());
@@ -42,6 +50,20 @@ public record GuiFilters(
     }
     public static final GuiFilters DEFAULT = new GuiFilters(1, 1, 0, -1, -1, "", "", "", "");
 
+    private static GuiEventVisibility readVisibility(RegistryFriendlyByteBuf buf) {
+        long categories = buf.readLong();
+        var types = ActionType.values();
+        int size = buf.readVarInt();
+        if (size < 0 || size > types.length) throw new IllegalArgumentException("Неверный список скрытых событий");
+        var actions = java.util.EnumSet.noneOf(ActionType.class);
+        for (int i = 0; i < size; i++) {
+            int ordinal = buf.readVarInt();
+            if (ordinal < 0 || ordinal >= types.length) throw new IllegalArgumentException("Неизвестный тип события");
+            actions.add(types[ordinal]);
+        }
+        return GuiEventVisibility.of(categories, actions);
+    }
+
     public static final StreamCodec<RegistryFriendlyByteBuf, GuiFilters> STREAM_CODEC = StreamCodec.of(
             (buf, f) -> {
                 buf.writeVarInt(f.timePresetIdx);
@@ -56,6 +78,9 @@ public record GuiFilters(
                 buf.writeLong(f.absoluteSinceTs); buf.writeLong(f.absoluteUntilTs);
                 buf.writeUtf(f.search == null ? "" : f.search, 128);
                 writeIds(buf,f.searchIds);writeIds(buf,f.blockIds);
+                buf.writeLong(f.visibility.categories());
+                buf.writeVarInt(f.visibility.actions().size());
+                for (var action : f.visibility.actions()) buf.writeVarInt(action.ordinal());
             },
             buf -> {
                 int t = buf.readVarInt();
@@ -67,7 +92,7 @@ public record GuiFilters(
                 String train = buf.readUtf(64);
                 String planeName = buf.readUtf(64);
                 String blockId = buf.readUtf(128);
-                return new GuiFilters(t, r, y, ctm, crb, actor, train, planeName, blockId, buf.readLong(), buf.readLong(), buf.readUtf(128),readIds(buf),readIds(buf));
+                return new GuiFilters(t, r, y, ctm, crb, actor, train, planeName, blockId, buf.readLong(), buf.readLong(), buf.readUtf(128),readIds(buf),readIds(buf),readVisibility(buf));
             }
     );
 }

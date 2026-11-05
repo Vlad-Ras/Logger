@@ -6,7 +6,7 @@ import java.util.Locale;
 public final class LogSearchPredicate {
     private LogSearchPredicate() {}
     public static boolean matches(LogEntry e, LogQuery q) {
-        if(e == null) return false;
+        if(e == null || q.guiVisibility.hidden(e.type, e.source, e.extra)) return false;
         if(q.exactId>0 && e.id!=q.exactId)return false;
         if(q.exactIds!=null&&q.exactIds.length>0&&java.util.Arrays.stream(q.exactIds).noneMatch(id->id==e.id))return false;
         if(q.constructionId != null && !q.constructionId.equals(CreateContraptionKind.id(e.source))) return false;
