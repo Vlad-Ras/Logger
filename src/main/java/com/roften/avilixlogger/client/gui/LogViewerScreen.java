@@ -50,6 +50,7 @@ public final class LogViewerScreen extends Screen {
     private static final int PAGE_SIZE_MAX = C2SRequestPagePayload.MAX_PAGE_SIZE;
 
     private static boolean guiStateLoaded = false;
+    private static com.roften.avilixlogger.core.GuiEventVisibility savedVisibility = com.roften.avilixlogger.core.GuiEventVisibility.ALL_VISIBLE;
     private static int savedTimePresetIdx = GuiFilters.DEFAULT.timePresetIdx();
     private static int savedRadiusPresetIdx = GuiFilters.DEFAULT.radiusPresetIdx();
     private static int savedTypePresetIdx = GuiFilters.DEFAULT.typePresetIdx();
@@ -614,7 +615,7 @@ public final class LogViewerScreen extends Screen {
         String planeName = (planeNameBox != null && !planeNameBox.getValue().isBlank()) ? planeNameBox.getValue().trim() : (planeNameFilter == null ? "" : planeNameFilter);
         String blockId = (blockIdBox != null && !blockIdBox.getValue().isBlank()) ? blockIdBox.getValue().trim() : (blockIdFilter == null ? "" : blockIdFilter);
         String search=searchBox==null?"":searchBox.getValue().trim();
-        return new GuiFilters(timePresetIdx,radiusPresetIdx,typePresetIdx,customTime,customRadius,actor,train,planeName,blockId,time.since(),time.until(),search,LocalizedLogSearch.search(search),LocalizedLogSearch.blocks(blockId));
+        return new GuiFilters(timePresetIdx,radiusPresetIdx,typePresetIdx,customTime,customRadius,actor,train,planeName,blockId,time.since(),time.until(),search,LocalizedLogSearch.search(search),LocalizedLogSearch.blocks(blockId),savedVisibility);
     }
 
     private void sendPage(C2SRequestPagePayload.Nav nav) {
@@ -1167,6 +1168,14 @@ public final class LogViewerScreen extends Screen {
 
     // -------- filter buttons (button-driven args) --------
 
+    com.roften.avilixlogger.core.GuiEventVisibility visibility() { return savedVisibility; }
+
+    void applyVisibility(com.roften.avilixlogger.core.GuiEventVisibility visibility) {
+        if (savedVisibility.equals(visibility)) return;
+        savedVisibility = visibility;
+        sendPage(C2SRequestPagePayload.Nav.FIRST);
+    }
+
     private void openTimeRange() {
         saveGuiStateFromInstance();
         minecraft.setScreen(new TimeRangeScreen(this,logTimeZone,timeBox.getValue(),value->{
@@ -1637,6 +1646,15 @@ public final class LogViewerScreen extends Screen {
         Properties p = new Properties();
         try (java.io.Reader reader = Files.newBufferedReader(path)) {
             p.load(reader);
+            var hiddenActions = java.util.EnumSet.noneOf(com.roften.avilixlogger.core.ActionType.class);
+            for (String name : p.getProperty("hiddenActions", "").split(",")) {
+                try { hiddenActions.add(com.roften.avilixlogger.core.ActionType.valueOf(name)); }
+                catch (IllegalArgumentException ignored) {}
+            }
+            long hiddenCategories;
+            try { hiddenCategories = Long.parseLong(p.getProperty("hiddenCategories", "0")); }
+            catch (NumberFormatException ignored) { hiddenCategories = 0; }
+            savedVisibility = com.roften.avilixlogger.core.GuiEventVisibility.of(hiddenCategories, hiddenActions);
             savedTimePresetIdx = parseInt(p.getProperty("timePreset"), savedTimePresetIdx);
             savedRadiusPresetIdx = parseInt(p.getProperty("radiusPreset"), savedRadiusPresetIdx);
             savedTypePresetIdx = parseInt(p.getProperty("typePreset"), savedTypePresetIdx);
@@ -1702,6 +1720,9 @@ public final class LogViewerScreen extends Screen {
 
     private static void saveGuiStateToDisk() {
         Properties p = new Properties();
+        p.setProperty("hiddenCategories", Long.toString(savedVisibility.categories()));
+        p.setProperty("hiddenActions", savedVisibility.actions().stream().map(Enum::name).sorted()
+                .collect(java.util.stream.Collectors.joining(",")));
         p.setProperty("timePreset", String.valueOf(savedTimePresetIdx));
         p.setProperty("radiusPreset", String.valueOf(savedRadiusPresetIdx));
         p.setProperty("typePreset", String.valueOf(savedTypePresetIdx));

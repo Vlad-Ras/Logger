@@ -18,14 +18,16 @@ public final class GuiSearchSmoke {
         int tested=0;
         var actor=new net.minecraft.server.level.ServerPlayer(world.getServer(),world,new com.mojang.authlib.GameProfile(UUID.randomUUID(),"gui_fixture"),net.minecraft.server.level.ClientInformation.createDefault());
         var build=LoggerNetwork.class.getDeclaredMethod("buildBaseGuiQuery",net.minecraft.server.level.ServerPlayer.class,GuiFilters.class,int.class);build.setAccessible(true);
+        var hidden = GuiEventVisibility.ALL_VISIBLE.toggle(29).toggle(ActionType.CHAT_MESSAGE);
         for(int size:List.of(10,60,400))for(var nav:C2SRequestPagePayload.Nav.values()){
-            var filters=new GuiFilters(1,3,5,-1,0,"Alice","Express","","minecraft:stone",1760000000000L,1790000000000L,"needle");
+            var filters=new GuiFilters(1,3,5,-1,0,"Alice","Express","","minecraft:stone",1760000000000L,1790000000000L,"needle",List.of(),List.of(),hidden);
             var buffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),world.registryAccess());
             try{
                 var payload=new C2SRequestPagePayload(nav,false,filters,size);C2SRequestPagePayload.STREAM_CODEC.encode(buffer,payload);
                 check(payload.equals(C2SRequestPagePayload.STREAM_CODEC.decode(buffer))&&buffer.readableBytes()==0,"page wire consumed wrong fields");
                 var query=(LogQuery)build.invoke(null,actor,filters,size);
                 check(query.sinceTs==filters.absoluteSinceTs()&&query.untilTs<=filters.absoluteUntilTs()&&"*".equals(query.dim),"absolute bounds/world query lost");
+                check(query.guiVisibility.equals(hidden) && query.copy().guiVisibility.equals(hidden),"visibility dropped by query builder or copy");
                 check(query.limit==size&&"needle".equals(query.textFilter)&&"Express".equals(query.trainNameFilter)&&"create:train".equals(query.sourcePrefix)&&"Alice".equals(query.actorName)&&"minecraft:stone".equals(query.blockIdFilter),"production builder omitted GUI predicate");
             }finally{buffer.release();}tested++;
         }

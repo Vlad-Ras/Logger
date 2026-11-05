@@ -276,7 +276,7 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
-        PayloadRegistrar r = event.registrar("12").optional();
+        PayloadRegistrar r = event.registrar("13").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
         r.playToServer(C2SEntryTeleportPayload.TYPE,C2SEntryTeleportPayload.STREAM_CODEC,LoggerNetwork::handleEntryTeleport);
@@ -787,6 +787,7 @@ public final class LoggerNetwork {
 
     private static LogQuery buildBaseGuiQuery(ServerPlayer sp, GuiFilters gf, int pageSize) {
         LogQuery q = new LogQuery();
+        if (gf != null) q.guiVisibility = gf.visibility();
         ServerLevel level = sp.serverLevel();
 
         long now = System.currentTimeMillis();

@@ -67,6 +67,7 @@ public final class LogQuery {
     /** Optional exact persisted record; kept through every query fallback. */
     public long exactId;
     public long[] exactIds;
+    public GuiEventVisibility guiVisibility = GuiEventVisibility.ALL_VISIBLE;
     /** Explicit From/Range GUI searches use chronological keyset pagination. */
     public boolean chronological;
     public long cursorTs;
@@ -83,6 +84,7 @@ public final class LogQuery {
         LogQuery q = new LogQuery();
         q.dim = this.dim;
         q.sinceTs = this.sinceTs;
+        q.guiVisibility = this.guiVisibility;
         q.untilTs = this.untilTs;
         q.limit = this.limit;
         q.exactPos = this.exactPos;

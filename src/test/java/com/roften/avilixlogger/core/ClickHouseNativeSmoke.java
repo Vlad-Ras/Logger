@@ -181,6 +181,21 @@ public final class ClickHouseNativeSmoke {
         q.actorName="DeathVictim";check(db.queryReverse(q).size()==1,"player death lookup lost actor");q.actorName=null;
         q.requireDetails=true;check(db.queryReverse(q).size()==2,"minimal policy erased death receipts");q.requireDetails=false;
         q.untilTs=now.toInstant().toEpochMilli();check(db.queryReverse(q).size()==3,"since search wrongly excluded later records");
+        var visible = q.copy();
+        visible.guiVisibility = GuiEventVisibility.ALL_VISIBLE.toggle(29);
+        visible.chronological = true;
+        visible.limit = 1;
+        for (boolean details : List.of(false, true)) {
+            visible.requireDetails = details;
+            var visibleRows = db.query(visible);
+            check(visibleRows.size()==1 && visibleRows.getFirst().id==later.id,
+                    "GUI exclusions must run before LIMIT; feed="+useFeed+", details="+details);
+        }
+        visible.guiVisibility = GuiEventVisibility.ALL_VISIBLE.toggle(ActionType.BLOCK_PLACE);
+        check(db.queryReverse(visible).stream().allMatch(row -> row.type != ActionType.BLOCK_PLACE),
+                "individual event remained visible");
+        check(db.queryReverse(q).size()==3,"GUI visibility affected a normal journal query");
+
         if(useFeed) {
             var observation=AsyncPipelineTest.row("native-feed-only-position");observation.type=ActionType.BLOCK_INTERACT;observation.source="native:feed-only-position:"+UUID.randomUUID();
             observation.dim="minecraft:the_nether";observation.x=-1020;observation.y=15;observation.z=-820;observation.blockAfter="minecraft:chest";
