@@ -11,6 +11,7 @@ public final class AsyncPipelineTest {
         LoggerActionLinksTest.run();
         CreateContraptionKindTest.run();
         CaptureTypePolicyTest.run();
+        CaptureHandlersTest.run();
         OperatorAccessTest.run();
         WeaponCombatTraceTest.run();
         BlockPackGiftAuditTest.run();

@@ -1,0 +1,84 @@
+name: Build installable 2.1.30 binary
+on:
+  push:
+    branches: [release/2.1.30]
+    paths: ['src/**', 'build.gradle', 'gradle.properties', 'proguard-rules.pro', '.github/workflows/release-2.1.30.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  binary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      ORG_GRADLE_PROJECT_compatCreateReleaseDirectory: build/compat-create-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare verified official Create release input
+        run: python3 tools/ci/prepare-create-release.py
+      - name: Validate pipelines, mixins and production obfuscation
+        run: |
+          set -euo pipefail
+          ./gradlew testAsyncPipeline testCreatePreflight verifyMixinSafety verifyObfuscatedJar --no-daemon --console=plain 2>&1 | tee release-build.log
+          test -s build/libs/avilixlogger-2.1.30.jar
+          mkdir -p build/release-evidence
+          sha256sum build/libs/avilixlogger-2.1.30.jar > build/release-evidence/SHA256SUMS
+          printf 'source_commit=%s\nbranch=%s\nfull_pack_profile=operator_environment_required\nauthcore_positive=operator_environment_required\n' "$GITHUB_SHA" "$GITHUB_REF_NAME" > build/release-evidence/BUILD.txt
+      - name: Install clean NeoForge server for packaged JAR boot
+        run: |
+          set -euo pipefail
+          neo_version=$(sed -n 's/^neo_version=//p' gradle.properties)
+          curl --fail --location --retry 3 "https://maven.neoforged.net/releases/net/neoforged/neoforge/$neo_version/neoforge-$neo_version-installer.jar" -o build/neoforge-installer.jar
+          mkdir -p build/release-server
+          java -jar build/neoforge-installer.jar --installServer build/release-server > installer.log 2>&1
+          mkdir -p build/release-server/mods
+          cp build/libs/avilixlogger-2.1.30.jar build/release-server/mods/
+          printf 'eula=true\n' > build/release-server/eula.txt
+          printf 'server-ip=127.0.0.1\nserver-port=25579\nmax-tick-time=-1\nview-distance=2\nsimulation-distance=2\n' > build/release-server/server.properties
+          printf '%s\n' '-Xms512m' '-Xmx1G' > build/release-server/user_jvm_args.txt
+      - name: Boot actual obfuscated mod, verify fail-closed AuthCore and clean stop
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import subprocess,time,pathlib
+          root=pathlib.Path('build/release-server').resolve()
+          log=pathlib.Path('release-jar-boot.log').resolve()
+          with log.open('w') as out:
+              process=subprocess.Popen(['bash','run.sh','nogui'],cwd=root,stdin=subprocess.PIPE,stdout=out,stderr=subprocess.STDOUT,text=True)
+              try:
+                  deadline=time.monotonic()+210
+                  while time.monotonic()<deadline:
+                      text=log.read_text(errors='replace')
+                      if 'Done (' in text and 'Authorization denied' in text:
+                          assert not any(token in text for token in ['MixinApplyError','MixinTransformerError','NoClassDefFoundError']),'packaged runtime error'
+                          process.stdin.write('stop\n');process.stdin.flush()
+                          assert process.wait(timeout=60)==0,'server did not stop cleanly'
+                          print('OBFUSCATED_JAR_BOOT_OK: actual production JAR, clean dedicated server, missing AuthCore denied, normal shutdown')
+                          break
+                      if process.poll() is not None:raise RuntimeError('server stopped before ready\n'+text[-10000:])
+                      time.sleep(.5)
+                  else:raise TimeoutError('packaged server startup timed out')
+              finally:
+                  if process.poll() is None:process.kill();process.wait()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: AvilixLogger-2.1.30
+          path: |
+            build/libs/avilixlogger-2.1.30.jar
+            build/release-evidence/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-2.1.30-validation
+          path: |
+            release-build.log
+            installer.log
+            release-jar-boot.log

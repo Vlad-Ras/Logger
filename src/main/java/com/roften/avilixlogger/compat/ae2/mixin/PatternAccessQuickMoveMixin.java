@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.api.inventories.InternalInventory;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.*;
@@ -15,6 +17,7 @@ import java.util.List;
 public abstract class PatternAccessQuickMoveMixin {
     @WrapMethod(method="quickMovePattern")
     private void avilixlogger$remoteMove(ServerPlayer player, int slot, List<Long> allowed, Operation<Void> original) {
+        if (!CaptureHandlers.AE2_PATTERNACCESSQUICKMOVEMIXIN_REMOTEMOVE.enabled()) { original.call(player, slot, allowed); return; }
         var capture = (Ae2RemoteMenuCapture)this;
         boolean owner = capture.avilixlogger$remoteBefore(false);
         try { original.call(player, slot, allowed); } finally { capture.avilixlogger$remoteAfter(owner); }

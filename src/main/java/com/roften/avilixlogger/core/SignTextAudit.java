@@ -8,7 +8,9 @@ import net.minecraft.world.level.block.entity.SignBlockEntity;
 /** Captures edits when they happen, including direct mod calls to the native sign setter. */
 public final class SignTextAudit {
     private SignTextAudit(){}
-    public static boolean enabled(){return CaptureTypePolicy.enabled(1)&&CaptureTypePolicy.enabled(2)&&LoggerConfig.isEnabled()&&LoggerConfig.VALUES.logBlocks.get()&&!CartAuditContext.restoring();}
+    public static boolean enabled(){
+        if (!CaptureHandlers.CORE_SIGNTEXTAUDIT_ENABLED.enabled()) return false;
+        return CaptureTypePolicy.enabled(1)&&CaptureTypePolicy.enabled(2)&&LoggerConfig.isEnabled()&&LoggerConfig.VALUES.logBlocks.get()&&!CartAuditContext.restoring();}
     public static CompoundTag before(SignBlockEntity sign){
         if(!(sign.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread()||CartAuditContext.restoring())return null;
         boolean structural=CreateStructuralHooks.before(level,sign.getBlockPos());

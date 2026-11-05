@@ -17,6 +17,7 @@ public abstract class DisplayBookMixin {
     private static final String METHOD="acceptText(ILjava/util/List;Lcom/simibubi/create/content/redstone/displayLink/DisplayLinkContext;)V";
     @WrapMethod(method=METHOD)
     private void avilixlogger$display(int first,List<MutableComponent> input,DisplayLinkContext context,Operation<Void> original){
+        if (!CaptureHandlers.SUPPLEMENTARIES_DISPLAYBOOKMIXIN_DISPLAY.enabled()) { original.call(first,input,context); return; }
         var frame=SupplementariesAutomationAudit.enter(first,input);
         if(frame==null){original.call(first,input,context);return;}
         boolean completed=false;try{original.call(first,input,context);completed=true;}finally{frame.finish(completed);}

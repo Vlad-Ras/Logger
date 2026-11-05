@@ -280,7 +280,7 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
-        PayloadRegistrar r = event.registrar("11").optional();
+        PayloadRegistrar r = event.registrar("12").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
         r.playToServer(C2SEntryTeleportPayload.TYPE,C2SEntryTeleportPayload.STREAM_CODEC,LoggerNetwork::handleEntryTeleport);
@@ -522,6 +522,8 @@ public final class LoggerNetwork {
             boolean success = true;
             String message = "";
             long current = data.captureMask();
+            var currentHandlers = data.disabledHandlers();
+            int currentRevision = data.captureRevision();
             com.roften.avilixlogger.core.CaptureTypePolicy.install(current);
             if (payload.action() != C2SCaptureTypesPayload.Action.QUERY) {
                 if (!editor) {
@@ -532,9 +534,14 @@ public final class LoggerNetwork {
                     message = "Настройки изменены другим администратором: обновите состояние";
                 } else {
                     long next = current;
+                    var nextHandlers = new java.util.HashSet<>(currentHandlers);
                     switch (payload.action()) {
                         case SET -> {
-                            if (payload.preset() < 1 || payload.preset() > com.roften.avilixlogger.core.CaptureTypePolicy.GROUPS) {
+                            var handler = com.roften.avilixlogger.core.CaptureHandlers.fromPreset(payload.preset());
+                            if (handler != null) {
+                                if (payload.enabled()) nextHandlers.remove(handler.key());
+                                else nextHandlers.add(handler.key());
+                            } else if (payload.preset() < 1 || payload.preset() > com.roften.avilixlogger.core.CaptureTypePolicy.GROUPS) {
                                 success = false;
                                 message = "Неизвестный тип событий";
                             } else {
@@ -542,27 +549,36 @@ public final class LoggerNetwork {
                             }
                         }
                         case ENABLE_ALL -> next = 0;
+                        case ENABLE_HANDLERS -> nextHandlers.clear();
+                        case DISABLE_HANDLERS -> {
+                            for (var handler : com.roften.avilixlogger.core.CaptureHandlers.values()) nextHandlers.add(handler.key());
+                        }
                         case DISABLE_ALL -> next = com.roften.avilixlogger.core.CaptureTypePolicy.ALL_DISABLED;
                         default -> {}
                     }
-                    if (success && next != current) {
-                        data.setCaptureMask(next);
+                    if (nextHandlers.size() > 2048) {
+                        success = false;
+                        message = "Слишком много отключённых обработчиков";
+                    }
+                    if (success && (next != current || !nextHandlers.equals(currentHandlers))) {
+                        data.setCaptureSettings(next, nextHandlers);
                         com.roften.avilixlogger.AvilixLoggerMod.LOGGER.info(
-                                "[AvilixLogger] {} changed live GUI capture mask {:04x} -> {:04x} (type {}, enabled {})",
-                                sp.getGameProfile().getName(),current,next,payload.preset(),payload.enabled());
+                                "[AvilixLogger] {} updated capture settings (action {}, control {}, enabled {})",
+                                sp.getGameProfile().getName(),payload.action(),payload.preset(),payload.enabled());
                         message = "Применено без перезапуска; настройка сохранена в мире";
                     } else if (success) message = "Настройки без изменений";
                 }
             }
-            var state = new S2CCaptureTypesPayload(data.captureMask(),data.captureRevision(),editor,success,message);
+            var handlers = java.util.List.copyOf(data.disabledHandlers());
+            var state = new S2CCaptureTypesPayload(data.captureMask(),data.captureRevision(),editor,success,message,handlers);
             PacketDistributor.sendToPlayer(sp,state);
-            if (success && data.captureMask() != current) {
+            if (success && data.captureRevision() != currentRevision) {
                 // Keep other connected administrators' GUIs in sync.
                 for (var other : sp.getServer().getPlayerList().getPlayers()) {
                     if (other == sp || !CAPTURE_SETTINGS_PEERS.contains(other.getUUID()) || !hasGuiPermission(other)) continue;
                     PacketDistributor.sendToPlayer(other,new S2CCaptureTypesPayload(
                             data.captureMask(),data.captureRevision(),hasAdminPermission(other),true,
-                            "Другой администратор изменил настройки логирования"));
+                            "Другой администратор изменил настройки логирования", handlers));
                 }
             }
         });

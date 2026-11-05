@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.api.inventories.InternalInventory;
 import appeng.helpers.InventoryAction;
 import appeng.menu.AEBaseMenu;
@@ -17,6 +19,7 @@ public abstract class PatternAccessTermMenuMixin implements Ae2RemoteMenuCapture
     @Unique private Ae2RemoteAudit.Capture avilixlogger$remote;
     @WrapMethod(method="doAction")
     private void avilixlogger$remoteAction(ServerPlayer player, InventoryAction action, int slot, long id, Operation<Void> original) {
+        if (!CaptureHandlers.AE2_PATTERNACCESSTERMMENUMIXIN_REMOTEACTION.enabled()) { original.call(player, action, slot, id); return; }
         boolean owner = avilixlogger$remoteBefore(action == InventoryAction.MOVE_REGION);
         try { original.call(player, action, slot, id); } finally { avilixlogger$remoteAfter(owner); }
     }

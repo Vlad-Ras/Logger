@@ -10,7 +10,7 @@ public final class WeightedQueueBatchTest {
     public static void main(String[] args)throws Exception{run();}
     static void run()throws Exception{
         for(boolean producerFirst:new boolean[]{false,true})wakeBatch(producerFirst);
-        drainBeforeFlush();closeAndInterrupt();normalPoll();statistics();
+        concurrentConsumers();drainBeforeFlush();closeAndInterrupt();normalPoll();statistics();
         System.out.println("WEIGHTED_QUEUE_BATCH_OK: pressure before/during batch wait, queued drain, no early reservation release, normal poll, interrupted producer and close");
     }
     private static void await(java.util.function.BooleanSupplier ready)throws Exception{long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);while(!ready.getAsBoolean()&&System.nanoTime()<deadline)Thread.sleep(2);check(ready.getAsBoolean(),"fixture timed out");}
@@ -41,6 +41,43 @@ public final class WeightedQueueBatchTest {
         var result=new FutureTask<WeightedQueue.Work<Integer>>((Callable<WeightedQueue.Work<Integer>>)()->queue.poll(60_000));var consumer=new Thread(result,"normal-poll-consumer");consumer.setDaemon(true);consumer.start();
         try{try{result.get(30,TimeUnit.MILLISECONDS);throw new AssertionError("normal consumer became a batch flush poll");}catch(TimeoutException expected){}}finally{queue.close();queue.complete(held);producer.join(3000);consumer.join(3000);}
     }
+    private static void concurrentConsumers() throws Exception {
+        var queue = new WeightedQueue<Integer>(4096, 1_000_000);
+        var seen = new ConcurrentHashMap<Integer, Boolean>();
+        var errors = new AtomicReference<Throwable>();
+        var threads = new ArrayList<Thread>();
+        for (int i = 0; i < 4; i++) {
+            var worker = new Thread(() -> {
+                try {
+                    while (!queue.exhausted()) {
+                        var work = queue.poll(60_000);
+                        if (work == null) continue;
+                        try { check(seen.putIfAbsent(work.value(), true) == null, "duplicate work"); }
+                        finally { queue.complete(work); }
+                    }
+                } catch (Throwable failure) { errors.set(failure); }
+            }, "burst-consumer");
+            worker.setDaemon(true);
+            threads.add(worker);
+            worker.start();
+        }
+        try {
+            for (int round = 0; round < 20; round++) {
+                for (int i = 0; i < 1000; i++) queue.put(round * 1000 + i, 32);
+                check(queue.awaitThrough(queue.fence(), System.nanoTime() + TimeUnit.SECONDS.toNanos(3)),
+                        "burst lost a consumer wakeup");
+            }
+            check(seen.size() == 20000 && errors.get() == null, "lost or duplicated burst work: " + errors.get());
+            check(queue.statistics().bytes() == 0 && queue.statistics().outstanding() == 0, "burst retained completed payloads");
+        } finally {
+            queue.close();
+            for (var worker : threads) {
+                worker.join(3000);
+                check(!worker.isAlive(), "shutdown did not wake consumer");
+            }
+        }
+    }
+
     private static void statistics()throws Exception {
         var queue=new WeightedQueue<Integer>("fixture",3,100);queue.put(1,30);queue.put(2,40);
         var held=queue.poll(10);var initial=queue.statistics();

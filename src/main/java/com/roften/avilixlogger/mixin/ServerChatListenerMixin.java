@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.roften.avilixlogger.core.ChatAuditLogger;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
@@ -21,6 +23,7 @@ public abstract class ServerChatListenerMixin {
 
     @Inject(method = "handleChat", at = @At("HEAD"), require = 0)
     private void avilixlogger$logChat(net.minecraft.network.protocol.game.ServerboundChatPacket packet, CallbackInfo ci) {
+        if (!CaptureHandlers.MIXIN_SERVERCHATLISTENERMIXIN_AVILIXLOGGER_LOGCHAT.enabled()) return;
         try {
             if (packet == null || player == null) return;
             ChatAuditLogger.packetMessage(player, packet.message());

@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.dieselgenerators.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,12 +19,14 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class OilDataMixin {
     @WrapMethod(method = "setChunkAmount(Lnet/minecraft/world/level/ChunkPos;I)V", remap = false)
     private void avilixlogger$set(net.minecraft.world.level.ChunkPos pos, int amount, Operation<Void> original){
+        if (!CaptureHandlers.DIESELGENERATORS_OILDATAMIXIN_SET.enabled()) { original.call(pos, amount); return; }
         var action=DieselAudit.oil(this,pos); boolean success=false;
         try{original.call(pos, amount);success=true;}
         finally{if(action!=null)action.finish(!success);}
     }
     @WrapMethod(method = "removeChunk(Lnet/minecraft/world/level/ChunkPos;)V", remap = false)
     private void avilixlogger$remove(net.minecraft.world.level.ChunkPos pos, Operation<Void> original){
+        if (!CaptureHandlers.DIESELGENERATORS_OILDATAMIXIN_REMOVE.enabled()) { original.call(pos); return; }
         var action=DieselAudit.oil(this,pos); boolean success=false;
         try{original.call(pos);success=true;}
         finally{if(action!=null)action.finish(!success);}

@@ -59,18 +59,23 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
             finally{try{if(external!=null)external.finish(success);}finally{if(owns)transfer.finish(success);}}
         };
     }
-    public CartAutomationHooks.Capture tick(BlockEntity source){
-        return CreateCartAudit.enabled()?authorizedTick(source):null;
+    public CartAutomationHooks.Capture tick(BlockEntity source) {
+        if (!(source.getLevel() instanceof ServerLevel level) || !CreateCartAudit.enabled()
+                || !"create".equals(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType()).getNamespace())
+                || CreateCapturePolicy.mutedController(source)) return null;
+        return authorizedCreateTick(source, level);
     }
-    @Override public CartAutomationHooks.Capture authorizedTick(BlockEntity source){
-        if(CaptureTypePolicy.suppressed() || !com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
-                ||current!=null||publishing||CartAuditContext.restoring()
-                ||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return null;
-        var blockType = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType());
-        if(!"create".equals(blockType.getNamespace()))return null;
-        // Avoid an automation scope on bearing controller ticks when bearings are muted.
-        if(CreateCapturePolicy.mutedController(source))return null;
-        activeServer=level.getServer();REUSABLE.reset(source);REUSABLE.publish=true;return current=REUSABLE;
+
+    @Override
+    public CartAutomationHooks.Capture authorizedCreateTick(BlockEntity source, ServerLevel level) {
+        if (!CaptureHandlers.COMPAT_CREATE_CARTAUTOMATIONAUDIT_AUTHORIZEDTICK.enabled()
+                || current != null || publishing || CaptureTypePolicy.suppressed()
+                || CartAuditContext.restoring() || !com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
+                || !level.getServer().isSameThread()) return null;
+        activeServer = level.getServer();
+        REUSABLE.reset(source);
+        REUSABLE.publish = true;
+        return current = REUSABLE;
     }
     /** Detached native-operation capture; this scope never publishes to the journal. */
     public static Scope captureChanges(BlockEntity source){
@@ -106,23 +111,33 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
             }catch(RuntimeException error){scope.complete=false;CreateCartAudit.failed("direct container snapshot",error);}
         };
     }
-    public void exposed(Level level,BlockPos pos,Object side,Object handler){
-        if(!(level instanceof ServerLevel server)||!server.getServer().isSameThread()||current==null&&!CartAuditContext.rollbackActive||!(handler instanceof IItemHandler||handler instanceof IFluidHandler))return;
-        activeServer=server.getServer();
-        if(handler instanceof IFluidHandler&&server.getBlockEntity(pos) instanceof com.simibubi.create.content.fluids.tank.FluidTankBlockEntity tank&&tank.getControllerBE()!=null)pos=tank.getControllerBE().getBlockPos();
-        String direction=side instanceof Direction d?d.getName():"none";
-        if(current!=null){
-            // Native creative handlers report their actual IO through dedicated wrappers.
-            // An unknown adapter around a creative block has no verified IO contract.
-            if(worldCreativeBlock(server,pos)&&!worldCreativeHandler(handler))current.complete=false;
-            var old=current.addresses.get(handler);
-            if(old!=null&&(old.level.get()!=server||!old.pos.equals(pos)))current.complete=false;
-            if(current.addresses.size()<1024||old!=null)current.addresses.put(handler,new Endpoint(new WeakReference<>(server),pos.immutable(),direction));else current.complete=false;
+    public void exposed(Level level, BlockPos pos, Object side, Object handler) {
+        if (current == null && !CartAuditContext.rollbackActive) return;
+        if (!(level instanceof ServerLevel server) || !server.getServer().isSameThread()
+                || !(handler instanceof IItemHandler || handler instanceof IFluidHandler)) return;
+        activeServer = server.getServer();
+        if (handler instanceof IFluidHandler
+                && server.getBlockEntity(pos) instanceof com.simibubi.create.content.fluids.tank.FluidTankBlockEntity tank) {
+            var controller = tank.getControllerBE();
+            if (controller != null) pos = controller.getBlockPos();
         }
-        var previous=ADDRESSES.get(handler);
-        if(previous!=null&&(previous.level.get()!=server||!previous.pos.equals(pos))&&current!=null)current.complete=false;
-        if(previous!=null&&previous.level.get()==server&&previous.pos.equals(pos)&&previous.side.equals(direction))return;
-        ADDRESSES.put(handler,new Endpoint(new WeakReference<>(server),pos.immutable(),direction));
+
+        String direction = side instanceof Direction d ? d.getName() : "none";
+        var previous = ADDRESSES.get(handler);
+        boolean sameLocation = previous != null && previous.level.get() == server && previous.pos.equals(pos);
+        var endpoint = sameLocation && previous.side.equals(direction)
+                ? previous : new Endpoint(new WeakReference<>(server), pos.immutable(), direction);
+        if (current != null) {
+            // An unknown adapter around a creative block has no verified IO contract.
+            if (!worldCreativeHandler(handler) && worldCreativeBlock(server, pos)) current.complete = false;
+            var old = current.addresses.get(handler);
+            if ((old != null && (old.level.get() != server || !old.pos.equals(pos)))
+                    || (previous != null && !sameLocation)) current.complete = false;
+            if (current.addresses.size() < 1024 || old != null) {
+                if (old != endpoint) current.addresses.put(handler, endpoint);
+            } else current.complete = false;
+        }
+        if (endpoint != previous) ADDRESSES.put(handler, endpoint);
     }
     public boolean locked(Object handler){
         if(!serverThread())return false;
@@ -131,30 +146,69 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         var endpoint=ADDRESSES.get(handler);var level=endpoint==null?null:endpoint.level.get();return level!=null&&CartRestoreLocks.blockLocked(level,endpoint.pos);
     }
     public CartAutomationHooks.Capture item(Object object,int slot){
-        if(!serverThread())return null;
-        Scope scope=current;if(scope==null||!(object instanceof IItemHandler handler))return null;
-        if(worldCreativeAddress(scope,object)&&!worldCreativeHandler(object))scope.complete=false;
+        if (!CaptureHandlers.COMPAT_CREATE_CARTAUTOMATIONAUDIT_ITEM.enabled()) {
+            if (serverThread() && current != null) current.complete = false;
+            return null;
+        }
+        Scope scope=current;
+        if(scope==null||!serverThread()||scope.itemHandler==object||!(object instanceof IItemHandler handler))return null;
+        if(!worldCreativeHandler(object)&&worldCreativeAddress(scope,object))scope.complete=false;
         if(scope.mountedDepth>0||scope.handlerDepth>0)return null;
         if(CartStorageAudit.owner(object)!=null)return null;
-        scope.handlerDepth++;ItemStack before;
-        try{before=handler.getStackInSlot(slot).copy();}catch(RuntimeException e){scope.handlerDepth--;scope.complete=false;return null;}
+        scope.handlerDepth++;
+        scope.itemHandler=handler;
+        ItemStack before;
+        try{before=handler.getStackInSlot(slot).copy();}
+        catch(RuntimeException | LinkageError e){scope.itemHandler=null;scope.handlerDepth--;scope.complete=false;return null;}
         return success->{try{
             if(!success)scope.complete=false;ItemStack after=handler.getStackInSlot(slot);
             if(!ItemStack.matches(before,after))scope.external(object,"item",slot,before,after);
-        }catch(RuntimeException e){scope.complete=false;CreateCartAudit.failed("automation item snapshot",e);}finally{scope.handlerDepth--;}};
+        }catch(RuntimeException e){scope.complete=false;CreateCartAudit.failed("automation item snapshot",e);}finally{scope.itemHandler=null;scope.handlerDepth--;}};
     }
     public CartAutomationHooks.Capture fluid(Object object){
-        if(!serverThread())return null;
-        Scope scope=current;if(scope==null||!(object instanceof IFluidHandler handler))return null;
-        if(worldCreativeAddress(scope,object)&&!worldCreativeHandler(object))scope.complete=false;
-        if(scope.mountedDepth>0||scope.handlerDepth>0)return null;
-        if(CartStorageAudit.owner(object)!=null)return null;
-        if(handler.getTanks()>64){scope.complete=false;return null;}
-        scope.handlerDepth++;var before=CartStorageAudit.fluids(handler);
-        return success->{try{
-            if(!success||before.length!=handler.getTanks())scope.complete=false;
-            for(int i=0;i<Math.min(before.length,handler.getTanks());i++)if(!FluidStack.matches(before[i],handler.getFluidInTank(i)))scope.external(object,"fluid",i,before[i],handler.getFluidInTank(i));
-        }catch(RuntimeException e){scope.complete=false;CreateCartAudit.failed("automation fluid snapshot",e);}finally{scope.handlerDepth--;}};
+        if (!CaptureHandlers.COMPAT_CREATE_CARTAUTOMATIONAUDIT_FLUID.enabled()) {
+            if (serverThread() && current != null) current.complete = false;
+            return null;
+        }
+        Scope scope = current;
+        if (scope == null || !serverThread() || scope.fluidHandler == object
+                || !(object instanceof IFluidHandler handler)) return null;
+        if (!worldCreativeHandler(object) && worldCreativeAddress(scope, object)) scope.complete = false;
+        if (scope.mountedDepth > 0 || scope.handlerDepth > 0 || CartStorageAudit.owner(object) != null) return null;
+        scope.handlerDepth++;
+        scope.fluidHandler = handler;
+        FluidStack[] before;
+        try {
+            int tanks = handler.getTanks();
+            if (tanks < 0 || tanks > 64) {
+                scope.complete = false;
+                scope.fluidHandler = null;
+                scope.handlerDepth--;
+                return null;
+            }
+            before = CartStorageAudit.fluids(handler, tanks);
+        } catch (RuntimeException | LinkageError failure) {
+            scope.complete = false;
+            scope.fluidHandler = null;
+            scope.handlerDepth--;
+            return null;
+        }
+        return success -> {
+            try {
+                int tanks = handler.getTanks();
+                if (!success || before.length != tanks) scope.complete = false;
+                for (int i = 0; i < Math.min(before.length, tanks); i++) {
+                    var after = handler.getFluidInTank(i);
+                    if (!FluidStack.matches(before[i], after)) scope.external(object, "fluid", i, before[i], after);
+                }
+            } catch (RuntimeException failure) {
+                scope.complete = false;
+                CreateCartAudit.failed("automation fluid snapshot", failure);
+            } finally {
+                scope.fluidHandler = null;
+                scope.handlerDepth--;
+            }
+        };
     }
     /** Actual native result: an unchanged infinite template cannot express this transfer. */
     public static void worldCreativeItem(Object handler,ItemStack template,ItemStack payload,boolean inbound){
@@ -234,7 +288,6 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         return tag;
     }
     private static boolean worldCreativeAddress(Scope scope,Object handler){
-        if(worldCreativeHandler(handler))return true;
         Endpoint endpoint=scope.addresses.get(handler);
         if(endpoint==null)endpoint=ADDRESSES.get(handler);
         var level=endpoint==null?null:endpoint.level.get();
@@ -294,7 +347,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     private record RawExternal(Object handler,String kind,int slot,Object before,Object after,Endpoint endpoint,boolean direct) {}
     public static final class Scope implements CartAutomationHooks.Capture {
         private BlockEntity source;private AbstractContraptionEntity entity;private UUID id;
-        private String machine,machineDim;private BlockPos machinePos;private boolean mounted,direct,cargoDelivery;
+        private String machine,machineDim;private net.minecraft.resources.ResourceLocation sourceDimension;private BlockPos machinePos;private boolean mounted,direct,cargoDelivery;
         private List<Change> changes=new ArrayList<>();
         private final LinkedHashMap<Cell,Pair> external=new LinkedHashMap<>();
         private final ArrayList<RawExternal> rawExternal=new ArrayList<>();
@@ -305,12 +358,22 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         private final ListTag unverifiedCreative=new ListTag();
         private boolean complete,publish;private int mountedDepth,handlerDepth;
         private Map<Object,Integer> mountedCreative;
+        private Object fluidHandler, itemHandler;
         private Scope(){}
         private void reset(BlockEntity source){
             if(CreateDeployerAudit.capturing())CreateDeployerTransaction.unsupported("Вложенная автоматика активатора требует общего снимка всех внешних участников");
             this.source=source;entity=null;id=null;complete=true;publish=false;mountedDepth=handlerDepth=0;mounted=direct=false;
-            cargoDelivery=false;machine=source==null?null:BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType()).toString();
-            machineDim=source==null?null:source.getLevel().dimension().location().toString();machinePos=source==null?null:source.getBlockPos();}
+            cargoDelivery=false;
+            sourceDimension=source==null?null:source.getLevel().dimension().location();
+            machinePos=source==null?null:source.getBlockPos();
+        }
+
+        private void describeMachine() {
+            if (machine == null && source != null) {
+                machine = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType()).toString();
+                machineDim = sourceDimension.toString();
+            }
+        }
         private boolean cargo(CartStorageAudit.Ref ref,CompoundTag before,CompoundTag after,String detail){
             var e=ref.entity().get();if(e==null)return false;
             if(entity!=null&&entity.level()!=e.level()){complete=false;return false;}
@@ -328,7 +391,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
                 // values until a mounted endpoint or creative IO proves relevance.
                 // No world metadata, reflection or NBT is read for discarded scopes.
                 if(rawExternal.size()>=512){complete=false;return;}
-                Object b=before instanceof ItemStack i?i.copy():before instanceof FluidStack f?f.copy():before;
+                Object b = before; // The capture already owns the detached before value.
                 Object a=after instanceof ItemStack i?i.copy():after instanceof FluidStack f?f.copy():after;
                 rawExternal.add(new RawExternal(handler,kind,slot,b,a,endpoint,direct));return;
             }
@@ -367,8 +430,9 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         /** Returns detached rows; production publishes them, native fixtures exercise the same protocol. */
         private List<LogEntry> rows(boolean success){
             if(entity!=null || !worldCreative.isEmpty() || !unverifiedCreative.isEmpty())flushExternal();
-            if(entity==null)return worldCreative.isEmpty()&&unverifiedCreative.isEmpty()?List.of():worldCreativeRows();
             if(changes.isEmpty()&&external.isEmpty()&&worldBefore.isEmpty()&&worldCreative.isEmpty()&&unverifiedCreative.isEmpty())return List.of();
+            describeMachine();
+            if(entity==null)return worldCreative.isEmpty()&&unverifiedCreative.isEmpty()?List.of():worldCreativeRows();
             if(changes.isEmpty())complete=false;
             ListTag beforeEntities=new ListTag(),afterEntities=new ListTag();
             for(var entry:worldBefore.entrySet()){
@@ -485,7 +549,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         }
         private void clear(){
             rawExternal.clear();
-            source=null;entity=null;id=null;machine=null;machineDim=null;machinePos=null;
+            source=null;entity=null;id=null;machine=null;machineDim=null;sourceDimension=null;machinePos=null;
             if(changes.size()>64)changes=new ArrayList<>();else if(!changes.isEmpty())changes.clear();
             if(!external.isEmpty())external.clear();
             if(addresses.size()>64)addresses=new IdentityHashMap<>();else if(!addresses.isEmpty())addresses.clear();

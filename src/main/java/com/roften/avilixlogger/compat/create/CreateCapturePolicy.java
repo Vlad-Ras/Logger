@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.create;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.core.ActionType;
 import com.roften.avilixlogger.core.CreateContraptionKind;
@@ -38,7 +40,11 @@ public final class CreateCapturePolicy {
     }
     /** Called around native callbacks; Create itself always continues executing. */
     public static boolean enterActor(com.simibubi.create.content.contraptions.behaviour.MovementContext context) {
-        boolean muted = context != null && !context.world.isClientSide && !actor(context);
+        return enterActor(context, true);
+    }
+
+    public static boolean enterActor(com.simibubi.create.content.contraptions.behaviour.MovementContext context, boolean handlerEnabled) {
+        boolean muted = context != null && !context.world.isClientSide && (!handlerEnabled || !actor(context));
         if (muted && context.contraption != null && context.contraption.entity != null
                 && lifecycle(context.contraption.entity)) CreateCaptureGaps.remember(context.contraption.entity);
         return com.roften.avilixlogger.core.CaptureTypePolicy.suppress(muted);
@@ -82,11 +88,18 @@ public final class CreateCapturePolicy {
     }
 
     public static boolean actors(AbstractContraptionEntity entity) {
+        if (!CaptureHandlers.COMPAT_CREATE_CREATECAPTUREPOLICY_ACTORS.enabled()) return false;
         return !com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()
                 && LoggerConfig.VALUES.logCreateActorWork.get() && allows(entity);
     }
 
     public static boolean cargo(AbstractContraptionEntity entity) {
+        if (!CaptureHandlers.COMPAT_CREATE_CREATECAPTUREPOLICY_CARGO.enabled()
+                || !CaptureHandlers.COMPAT_CREATE_CARTAUTOMATIONAUDIT_AUTHORIZEDTICK.enabled()) {
+            if (entity != null && entity.level() instanceof net.minecraft.server.level.ServerLevel level
+                    && level.getServer().isSameThread()) CreateCaptureGaps.remember(entity);
+            return false;
+        }
         return !com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()
                 && LoggerConfig.VALUES.logCreateCargoTransfers.get() && allows(entity);
     }
@@ -96,6 +109,7 @@ public final class CreateCapturePolicy {
     }
 
     public static boolean movement(AbstractContraptionEntity entity) {
+        if (!CaptureHandlers.COMPAT_CREATE_CREATECAPTUREPOLICY_MOVEMENT.enabled()) return false;
         return LoggerConfig.VALUES.logCreateMovement.get() && allows(entity);
     }
 
@@ -103,14 +117,13 @@ public final class CreateCapturePolicy {
         if (com.roften.avilixlogger.core.CaptureTypePolicy.suppressed()) return false;
         if (!allows(entity)) return false;
         return switch (action) {
-            case CART_MOVE, CART_STATUS -> LoggerConfig.VALUES.logCreateMovement.get();
+            case CART_MOVE, CART_STATUS -> movement(entity);
             case CART_ASSEMBLE, CART_DISASSEMBLE, CART_LOAD, CART_UNLOAD, CART_REMOVE,
                     CART_PACK, CART_PLACE, TRAIN_ASSEMBLE, TRAIN_DISASSEMBLE ->
                     LoggerConfig.VALUES.logCreateLifecycle.get();
-            case CREATE_DEPLOYER_ACTION, CART_STRUCTURE_CHANGE ->
-                    LoggerConfig.VALUES.logCreateActorWork.get();
+            case CREATE_DEPLOYER_ACTION, CART_STRUCTURE_CHANGE -> actors(entity);
             case CART_ROLLBACK -> true; // Audit of committed rollback must never be silenced.
-            default -> LoggerConfig.VALUES.logCreateCargoTransfers.get();
+            default -> cargo(entity);
         };
     }
 }

@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.accessories.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.accessories.AccessoriesAudit;
@@ -22,12 +24,14 @@ import com.roften.avilixlogger.core.CauseContext;
 public abstract class EventsMixin {
     @WrapMethod(method = "revalidatePlayer(Lnet/minecraft/server/level/ServerPlayer;)V", remap = false)
     private static void avilixlogger$revalidate(ServerPlayer player, Operation<Void> original) {
+        if (!CaptureHandlers.ACCESSORIES_EVENTSMIXIN_REVALIDATE.enabled()) { original.call(player); return; }
         var action = AccessoriesAudit.entity(player, "reload-revalidate"); boolean success = false;
         try { original.call(player); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "onDeath(Lnet/minecraft/world/entity/LivingEntity;Lnet/minecraft/world/damagesource/DamageSource;)Ljava/util/Collection;", remap = false)
     private static Collection<ItemStack> avilixlogger$death(LivingEntity entity, DamageSource source, Operation<Collection<ItemStack>> original) {
+        if (!CaptureHandlers.ACCESSORIES_EVENTSMIXIN_DEATH.enabled()) { return original.call(entity, source); }
         var action = AccessoriesAudit.entity(entity, "death"); boolean success = false;
         try {
             var result = original.call(entity, source); success = true;
@@ -37,6 +41,7 @@ public abstract class EventsMixin {
     }
     @WrapMethod(method = "attemptEquipFromUse(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;)Lnet/minecraft/world/InteractionResultHolder;", remap = false)
     private static InteractionResultHolder<ItemStack> avilixlogger$use(Player player, InteractionHand hand, Operation<InteractionResultHolder<ItemStack>> original) {
+        if (!CaptureHandlers.ACCESSORIES_EVENTSMIXIN_USE.enabled()) { return original.call(player, hand); }
         if (!(player instanceof ServerPlayer serverPlayer) || !serverPlayer.server.isSameThread()) return original.call(player, hand);
         try (var cause = CauseContext.push(player, CauseContext.Kind.USE_ITEM, player.blockPosition(), player.getItemInHand(hand))) {
             var action = AccessoriesAudit.entity(player, "equip-from-use"); boolean success = false;
@@ -46,6 +51,7 @@ public abstract class EventsMixin {
     }
     @WrapMethod(method = "attemptEquipOnEntity(Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/entity/Entity;)Lnet/minecraft/world/InteractionResult;", remap = false)
     private static InteractionResult avilixlogger$equipEntity(Player player, InteractionHand hand, Entity target, Operation<InteractionResult> original) {
+        if (!CaptureHandlers.ACCESSORIES_EVENTSMIXIN_EQUIPENTITY.enabled()) { return original.call(player, hand, target); }
         if (!(player instanceof ServerPlayer serverPlayer) || !serverPlayer.server.isSameThread()) return original.call(player, hand, target);
         try (var cause = CauseContext.push(player, CauseContext.Kind.INTERACT_ENTITY, target.blockPosition(), player.getItemInHand(hand))) {
             var action = target instanceof LivingEntity living ? AccessoriesAudit.entity(living, "equip-on-entity") : null;

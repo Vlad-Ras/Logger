@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.accessories.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.accessories.AccessoriesAudit;
@@ -16,6 +18,7 @@ import net.minecraft.server.level.ServerPlayer;
 public abstract class NukeMixin {
     @WrapMethod(method = "handlePacket(Lio/wispforest/accessories/networking/server/NukeAccessories;Lnet/minecraft/world/entity/player/Player;)V", remap = false)
     private static void avilixlogger$handle(@Coerce Object packet, Player player, Operation<Void> original) {
+        if (!CaptureHandlers.ACCESSORIES_NUKEMIXIN_HANDLE.enabled()) { original.call(packet, player); return; }
         if (!(player instanceof ServerPlayer serverPlayer) || !serverPlayer.server.isSameThread()) { original.call(packet, player); return; }
         try (var cause = CauseContext.push(player, CauseContext.Kind.OTHER, player.blockPosition(), ItemStack.EMPTY)) {
             var action = AccessoriesAudit.entity(player, "packet-NukeAccessories"); boolean success = false;

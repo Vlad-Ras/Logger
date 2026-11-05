@@ -25,9 +25,10 @@ public final class AuthCoreBridge {
     private static volatile String failureDescription = "AvilixAuthCore has not been checked";
     private static final java.util.concurrent.atomic.AtomicLong INVALIDATION = new java.util.concurrent.atomic.AtomicLong();
     private static final long TICK_LEASE_NS = 50_000_000L;
+    private static final int TICK_LEASE_CLOCK_INTERVAL = 64;
     // Read/written only by the current server thread. Other threads invalidate via the epoch.
     private static MinecraftServer tickServer;
-    private static int checkedTick;
+    private static int checkedTick, admissionsUntilClockCheck;
     private static long checkedAt, checkedEpoch;
     private static boolean tickAllowed;
 
@@ -53,11 +54,14 @@ public final class AuthCoreBridge {
     public static boolean isAuthorizedForTick() {
         MinecraftServer server = activeServer;
         if (server == null || !server.isSameThread()) return isAuthorized(server);
-        long now = System.nanoTime();
         long epoch = INVALIDATION.get();
         int tick = server.getTickCount();
-        if (tickServer != server || checkedTick != tick || checkedEpoch != epoch
-                || now - checkedAt >= TICK_LEASE_NS) {
+        boolean newLease = tickServer != server || checkedTick != tick || checkedEpoch != epoch;
+        // Bound the extra admission work in slow ticks, while avoiding a clock read per ticker.
+        if (!newLease && --admissionsUntilClockCheck > 0) return tickAllowed;
+        long now = System.nanoTime();
+        admissionsUntilClockCheck = TICK_LEASE_CLOCK_INTERVAL;
+        if (newLease || now - checkedAt >= TICK_LEASE_NS) {
             boolean allowed = isAuthorized(server);
             tickServer = server;
             checkedTick = tick;

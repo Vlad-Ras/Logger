@@ -1,6 +1,10 @@
 package com.roften.avilixlogger.client.gui;
 
 import com.roften.avilixlogger.core.CaptureTypePolicy;
+import com.roften.avilixlogger.core.CaptureHandlers;
+import net.minecraft.client.gui.components.EditBox;
+import java.util.Locale;
+import java.util.Set;
 import com.roften.avilixlogger.net.C2SCaptureTypesPayload;
 import com.roften.avilixlogger.net.S2CCaptureTypesPayload;
 import net.minecraft.client.Minecraft;
@@ -21,6 +25,11 @@ public final class CaptureTypesScreen extends Screen {
     private final Screen parent;
     private final List<Button> switches = new ArrayList<>();
     private long disabledMask;
+    private Set<String> disabledHandlers = Set.of();
+    private final List<Integer> filtered = new ArrayList<>();
+    private boolean handlers;
+    private EditBox search;
+    private Button tab;
     private int revision;
     private boolean loaded;
     private boolean canEdit;
@@ -39,50 +48,86 @@ public final class CaptureTypesScreen extends Screen {
         switches.clear();
         int x = Math.max(8,(width - Math.min(width-20,450))/2);
         int w = Math.min(width-16,450);
-        int headerY = 28;
+        tab = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,28,w,18,
+                Component.empty(), b -> {
+                    handlers = !handlers;
+                    scroll = 0;
+                    search.setValue("");
+                    relayout();
+                }, () -> 1));
+        search = addRenderableWidget(new EditBox(font,x,49,w,18,Component.literal("Поиск обработчика")));
+        search.setHint(Component.literal("Поиск по моду или названию"));
+        search.setResponder(value -> { scroll = 0; relayout(); });
+        int headerY = 72;
         int half = Math.max(45,(w - 6)/2);
         enableAll = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,headerY,half,18,
                 Component.literal("Включить все"),b->setAll(true),()->1));
         disableAll = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x+half+6,headerY,w-half-6,18,
                 Component.literal("Выключить все"),b->setAll(false),()->1));
-        for (int preset=1;preset<=CaptureTypePolicy.GROUPS;preset++) {
-            final int id = preset;
-            var button = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,54,w,18,
-                    Component.empty(),b->toggle(id),()->1));
+        for (int row = 0; row < visibleCount(); row++) {
+            final int index = row;
+            var button = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,98,w,18,
+                    Component.empty(), b -> {
+                        if (scroll + index < filtered.size()) toggle(filtered.get(scroll + index));
+                    }, () -> 1));
             switches.add(button);
         }
         addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,height-28,w,19,
                 Component.literal("Назад"),b->onClose(),()->1));
-        relayout();
         // A fresh server response prevents accidentally using a previous world's state.
         loaded=false;pending=false;
+        relayout();
         if (Minecraft.getInstance().getConnection() != null)
             PacketDistributor.sendToServer(new C2SCaptureTypesPayload(C2SCaptureTypesPayload.Action.QUERY,0,false,0));
     }
 
-    private int visibleCount() { return Math.max(1,Math.min(CaptureTypePolicy.GROUPS,(height - 134)/21)); }
+    private int visibleCount() { return Math.max(1, (height - 180) / 21); }
+
+    private boolean enabled(int id) {
+        var handler = CaptureHandlers.fromPreset(id);
+        return handler == null ? (disabledMask & (1L << (id - 1))) == 0 : !disabledHandlers.contains(handler.key());
+    }
+
+    private String label(int id) {
+        var handler = CaptureHandlers.fromPreset(id);
+        if (handler != null) return handler.title();
+        String title = CaptureTypePolicy.title(id);
+        return title != null ? title : Component.translatable("gui.avilixlogger.type." + KEYS[id]).getString();
+    }
+
     private void relayout() {
-        int visible = visibleCount();
-        scroll=Math.max(0,Math.min(scroll,CaptureTypePolicy.GROUPS-visible));
-        for(int i=0;i<switches.size();i++){
-            var button=switches.get(i);
-            boolean shown=i>=scroll&&i<scroll+visible;
-            button.visible=shown;
-            button.setY(54+(i-scroll)*21);
-            boolean enabled=loaded&&(disabledMask&(1L<<i))==0;
-            button.setMessage(Component.literal((enabled?"●  ":"○  ")+
-                    (CaptureTypePolicy.title(i+1) != null ? CaptureTypePolicy.title(i+1) : Component.translatable("gui.avilixlogger.type."+KEYS[i+1]).getString())
-                    +(enabled?"  —  ВКЛ":"  —  ВЫКЛ")));
-            button.active=loaded&&canEdit&&!pending;
+        tab.setMessage(Component.literal(handlers ? "Обработчики · показать категории" : "Категории · показать обработчики"));
+        filtered.clear();
+        String query = search.getValue().strip().toLowerCase(Locale.ROOT);
+        int size = handlers ? CaptureHandlers.count() : CaptureTypePolicy.GROUPS;
+        for (int i = 0; i < size; i++) {
+            int id = handlers ? CaptureHandlers.PRESET_BASE + i : i + 1;
+            var handler = CaptureHandlers.fromPreset(id);
+            if (label(id).toLowerCase(Locale.ROOT).contains(query)
+                    || handler != null && handler.key().toLowerCase(Locale.ROOT).contains(query)) filtered.add(id);
         }
-        enableAll.active=loaded&&canEdit&&!pending;
-        disableAll.active=loaded&&canEdit&&!pending;
+        scroll = Math.max(0, Math.min(scroll, filtered.size() - visibleCount()));
+        for (int i = 0; i < switches.size(); i++) {
+            var button = switches.get(i);
+            int index = scroll + i;
+            button.visible = index < filtered.size();
+            if (!button.visible) continue;
+            int id = filtered.get(index);
+            boolean active = loaded && enabled(id);
+            button.setY(98 + i * 21);
+            button.setMessage(Component.literal((active ? "●  " : "○  ") + label(id)
+                    + (active ? "  —  ВКЛ" : "  —  ВЫКЛ")));
+            button.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(label(id))));
+            button.active = loaded && canEdit && !pending;
+        }
+        enableAll.active = loaded && canEdit && !pending;
+        disableAll.active = loaded && canEdit && !pending;
     }
 
     private void toggle(int preset) {
         if(!loaded||!canEdit||pending)return;
         pending=true;relayout();
-        boolean enabled=(disabledMask & (1L<<(preset-1)))!=0;
+        boolean enabled = !enabled(preset);
         PacketDistributor.sendToServer(new C2SCaptureTypesPayload(
                 C2SCaptureTypesPayload.Action.SET,preset,enabled,revision));
     }
@@ -90,12 +135,15 @@ public final class CaptureTypesScreen extends Screen {
         if(!loaded||!canEdit||pending)return;
         pending=true;relayout();
         PacketDistributor.sendToServer(new C2SCaptureTypesPayload(
-                enable?C2SCaptureTypesPayload.Action.ENABLE_ALL:C2SCaptureTypesPayload.Action.DISABLE_ALL,
+                handlers
+                        ? (enable ? C2SCaptureTypesPayload.Action.ENABLE_HANDLERS : C2SCaptureTypesPayload.Action.DISABLE_HANDLERS)
+                        : (enable ? C2SCaptureTypesPayload.Action.ENABLE_ALL : C2SCaptureTypesPayload.Action.DISABLE_ALL),
                 0,enable,revision));
     }
     public void apply(S2CCaptureTypesPayload state) {
         if(state==null)return;
         disabledMask=state.disabledMask()&CaptureTypePolicy.ALL_DISABLED;
+        disabledHandlers = Set.copyOf(state.disabledHandlers());
         revision=state.revision();
         canEdit=state.canEdit();lastSuccess=state.success();
         status=state.message().isBlank()
@@ -106,7 +154,7 @@ public final class CaptureTypesScreen extends Screen {
         relayout();
     }
     @Override public boolean mouseScrolled(double x,double y,double dx,double dy) {
-        scroll=Math.max(0,Math.min(CaptureTypePolicy.GROUPS-visibleCount(),scroll-(int)Math.signum(dy)*2));
+        scroll=Math.max(0,Math.min(filtered.size()-visibleCount(),scroll-(int)Math.signum(dy)*2));
         relayout();return true;
     }
     @Override public void render(GuiGraphics g,int mx,int my,float partial) {
@@ -117,9 +165,8 @@ public final class CaptureTypesScreen extends Screen {
         g.drawCenteredString(font,Component.literal("Управление сбором, не фильтр существующих записей"),
                 width/2,18,0xFFAAAAAA);
         int count=visibleCount();
-        if(scroll>0)g.drawString(font,"▲ Прокрутите список",x,49,0xFF999999);
-        if(scroll+count<CaptureTypePolicy.GROUPS)
-            g.drawString(font,"▼ Остальные типы ниже",x,Math.min(height-70,57+count*21),0xFF999999);
+        if(scroll+count<filtered.size())
+            g.drawString(font,"▼ Остальные типы ниже",x,Math.min(height-70,101+count*21),0xFF999999);
         g.drawCenteredString(font,font.plainSubstrByWidth(status,Math.max(30,width-24)),
                 width/2,height-62,lastSuccess?0xFFAAAAAA:0xFFFF6666);
         String overflow=!loaded?"Получение режима переполнения…":(disabledMask&(1L<<29))==0

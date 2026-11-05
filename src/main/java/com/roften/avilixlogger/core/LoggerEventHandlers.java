@@ -330,6 +330,7 @@ public final class LoggerEventHandlers {
         try (var scope = CauseContext.push(sp, CauseContext.Kind.USE_ITEM, sp.blockPosition(), used0)) {
             // Some items spawn entities without going through RightClickBlock.
             try { RecentPlayerActionTracker.note(level, sp, sp.blockPosition(), RecentPlayerActionTracker.ActionKind.RIGHT_CLICK_ITEM, used0); } catch (Throwable ignored) {}
+            if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONRIGHTCLICKITEM.enabled()) return;
             logItemUseIfNeeded(level, sp, used0, sp.blockPosition(), "right_click_item");
         }
     }
@@ -376,6 +377,7 @@ public final class LoggerEventHandlers {
             return;
         }
 
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONRIGHTCLICKBLOCK.enabled()) return;
         logBlockUseIfNeeded(level, p, pos, state, used0, event.getFace());
 
         BlockEntity interactionBe = null;
@@ -550,6 +552,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onAttackEntity(AttackEntityEvent event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONATTACKENTITY.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(3)) return;
         if (CreateActorContext.isTechnicalPlayer(event.getEntity())) return;
@@ -584,6 +587,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onRightClickEntity(PlayerInteractEvent.EntityInteract event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONRIGHTCLICKENTITY.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         // Container interaction can remain enabled while entity interaction is muted.
         if (!CaptureTypePolicy.enabled(3) && !CaptureTypePolicy.enabled(2)) return;
@@ -643,6 +647,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onContainerOpen(PlayerContainerEvent.Open event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONCONTAINEROPEN.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(2)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
@@ -747,6 +752,7 @@ public final class LoggerEventHandlers {
     }
 
     private static void logEntityContainerOpen(ServerLevel level, ServerPlayer sp, Entity target, String dim, String entityType, CompoundTag beforeInv) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_LOGENTITYCONTAINEROPEN.enabled()) return;
         LogEntry e = new LogEntry();
         e.ts = System.currentTimeMillis();
         e.dim = dim;
@@ -769,6 +775,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onEntityMount(EntityMountEvent event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONENTITYMOUNT.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
@@ -831,6 +838,14 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onContainerClose(PlayerContainerEvent.Close event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONCONTAINERCLOSE.enabled()) {
+            if (event.getEntity() instanceof ServerPlayer p) {
+                OPEN_CONTAINER.remove(p.getUUID());
+                OPEN_ENTITY_CONTAINER.remove(p.getUUID());
+                OPEN_GENERIC_MENU.remove(p.getUUID());
+            }
+            return;
+        }
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(2)) return;
         if (!LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logContainers.get()) return;
@@ -961,8 +976,11 @@ public final class LoggerEventHandlers {
      * are unchanged. The fallback is what makes pure rearrangements in arbitrary mod menus visible.
      */
     /** Captures only changes inside this actual click, never the entire time a GUI was open. */
-    public static MenuAction beginMenuAction(ServerPlayer player) { return beginMenuAction(player,"player:container_click"); }
+    public static MenuAction beginMenuAction(ServerPlayer player) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_BEGINMENUACTION.enabled()) return null;
+         return beginMenuAction(player,"player:container_click"); }
     public static MenuAction beginMenuAction(ServerPlayer player,String actionSource) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_BEGINMENUACTION.enabled()) return null;
         if (!CaptureTypePolicy.enabled(2) || player==null || !player.server.isSameThread() || !LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logContainers.get()
                 || isAe2Menu(player.containerMenu) || com.roften.avilixlogger.compat.corpse.CorpseAudit.handles(player.containerMenu) || com.roften.avilixlogger.compat.accessories.AccessoriesAudit.handles(player.containerMenu)
                 || player.containerMenu.slots.size() > 4096) return null;
@@ -1132,14 +1150,14 @@ public final class LoggerEventHandlers {
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
         // Projectile hit via damage source (entity hits). This also covers player victims.
-        logProjectileDamageHitIfNeeded(level, event);
+        if (CaptureHandlers.PROJECTILE_DAMAGE.enabled()) logProjectileDamageHitIfNeeded(level, event);
 
-        if (event.getEntity() instanceof Player) return; // игроков отдельно
+        if (!CaptureHandlers.ENTITY_DEATH.enabled() || event.getEntity() instanceof Player) return;
 
         // Сохраняем снимок ДО применения смертельного урона, чтобы откат возвращал сущность "живой".
         try {
             float hp = event.getEntity().getHealth();
-            float dmg = getDamageAmountCompat(event);
+            float dmg = event.getNewDamage();
             if (hp > 0.0f && (hp - dmg) <= 0.0f) {
                 String dim = level.dimension().location().toString();
                 CompoundTag nbt = NbtSerde.snapshotEntity(level, event.getEntity());
@@ -1159,47 +1177,12 @@ public final class LoggerEventHandlers {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * NeoForge events have been renamed/shuffled across 21.1.x.
-     * We keep this method reflective so the project compiles on 21.1.215+ without hard dependency
-     * on a particular accessor name.
-     */
-    private static float getDamageAmountCompat(LivingDamageEvent event) {
-        // Try common accessor names.
-        String[] candidates = new String[]{"getAmount", "getNewDamage", "getDamage", "getDamageAmount", "getFinalDamage"};
-        for (String name : candidates) {
-            try {
-                Method m = event.getClass().getMethod(name);
-                Object v = m.invoke(event);
-                if (v instanceof Number n) {
-                    return n.floatValue();
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-
-        // Last resort: if the API exposes a damage container, try to extract from it.
-        try {
-            Method m = event.getClass().getMethod("getDamageContainer");
-            Object dc = m.invoke(event);
-            if (dc != null) {
-                for (String name : new String[]{"getNewDamage", "getDamage", "getAmount", "getFinalDamage"}) {
-                    try {
-                        Method m2 = dc.getClass().getMethod(name);
-                        Object v = m2.invoke(dc);
-                        if (v instanceof Number n) return n.floatValue();
-                    } catch (Throwable ignored) {}
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-
-        return 0.0f;
-    }
-
-
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onEntityDeath(LivingDeathEvent event) {
+        if (!CaptureHandlers.ENTITY_DEATH.enabled()) {
+            PRE_DEATH.remove(event.getEntity().getUUID());
+            return;
+        }
         if (CaptureTypePolicy.suppressed()) return;
         // Players are observed once in ServerPlayer.die, after all death cancellations.
         if (event.getEntity() instanceof ServerPlayer || !CaptureTypePolicy.enabled(3)) return;
@@ -1235,6 +1218,7 @@ public final class LoggerEventHandlers {
     }
 
     private static void recordPlayerDrop(ServerLevel level, ServerPlayer player, int x, int y, int z, ItemStack stack, long now) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_RECORDPLAYERDROP.enabled()) return;
         if (level == null || player == null || stack == null || stack.isEmpty()) return;
         CompoundTag tag = NbtSerde.snapshotItemStack(stack, level.registryAccess());
         if (tag == null) return;
@@ -1254,6 +1238,7 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onItemToss(ItemTossEvent event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMTOSS.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
@@ -1279,16 +1264,14 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onEntitySpawn(EntityJoinLevelEvent event) {
-        if (CaptureTypePolicy.suppressed()) return;
-        // Item drops remain independent when generic entity capture is switched off.
-        if (!CaptureTypePolicy.enabled(3) && !(event.getEntity() instanceof ItemEntity
-                && CaptureTypePolicy.enabled(4))) return;
-        if (!LoggerConfig.isCaptureEnabled() || (!LoggerConfig.VALUES.logEntities.get() && CartAuditContext.current()==null
-                && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource())==null)) return;
-        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        if (!(event.getLevel() instanceof ServerLevel level) || CaptureTypePolicy.suppressed()) return;
         Entity ent = event.getEntity();
+        // Item drops remain independent when generic entity capture is switched off.
+        if (!CaptureTypePolicy.enabled(3) && !(ent instanceof ItemEntity && CaptureTypePolicy.enabled(4))) return;
         if (ent instanceof Player) return;
         if (CartAuditContext.restoring()) return;
+        if (!LoggerConfig.isCaptureEnabled() || (!LoggerConfig.VALUES.logEntities.get() && CartAuditContext.current()==null
+                && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource())==null)) return;
         if (ent instanceof com.roften.avilixlogger.compat.create.CartEntityAccess a && a.avilixlogger$mountedState() != null) return;
         if (ent instanceof AbstractMinecart && ent.getPersistentData().contains("AvilixCartAudit")) return;
 
@@ -1302,6 +1285,10 @@ public final class LoggerEventHandlers {
         try { CreateOwnershipTracker.onEntityJoin(event); } catch (Throwable ignored) {}
 
         if(CreateSupport.available()&&com.roften.avilixlogger.compat.create.CreateLifecycleAudit.handles(ent))return;
+
+        if (!CaptureHandlers.ENTITY_SPAWN.enabled() && CreateEntityOrigin.context() == null
+                && CartAuditContext.current() == null
+                && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource()) == null) return;
 
         // 1) ItemEntity spawn: player drops and exact construction effects.
         if (ent instanceof ItemEntity itemEnt) {
@@ -1431,6 +1418,7 @@ public final class LoggerEventHandlers {
     
     @SubscribeEvent
     public void onItemPickup(ItemEntityPickupEvent.Pre event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMPICKUP.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
@@ -1530,6 +1518,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemUseStart(LivingEntityUseItemEvent.Start event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMUSESTART.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
@@ -1546,6 +1535,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemUseStop(LivingEntityUseItemEvent.Stop event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMUSESTOP.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logItemUsePhases)) return;
@@ -1562,6 +1552,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemUseFinish(LivingEntityUseItemEvent.Finish event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMUSEFINISH.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logItemConsume)) return;
@@ -1592,6 +1583,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemCrafted(PlayerEvent.ItemCraftedEvent event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMCRAFTED.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
@@ -1619,6 +1611,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onItemSmelted(PlayerEvent.ItemSmeltedEvent event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMSMELTED.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
@@ -1648,6 +1641,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!CaptureHandlers.PLAYER_JOIN.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
@@ -1678,6 +1672,8 @@ public final class LoggerEventHandlers {
         ChatAuditLogger.discardPlayer(playerId);
         RecentPlayerActionTracker.discard(playerId);
 
+        if (!CaptureHandlers.PLAYER_LEAVE.enabled()) return;
+
         if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level)) return;
 
@@ -1697,6 +1693,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
+        if (!CaptureHandlers.PLAYER_DIMENSION.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
@@ -1720,6 +1717,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onPlayerRespawn(PlayerEvent.PlayerRespawnEvent event) {
+        if (!CaptureHandlers.PLAYER_RESPAWN.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(3)) return;
         if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logPlayerLifecycle)) return;
@@ -1743,6 +1741,7 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onProjectileImpact(ProjectileImpactEvent event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONPROJECTILEIMPACT.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(3) || !CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled() || !isEnabled(LoggerConfig.VALUES.logProjectileHits)) return;
@@ -1771,6 +1770,7 @@ public final class LoggerEventHandlers {
 
 
     private static void logGuiOpenIfNeeded(ServerLevel level, ServerPlayer sp, PlayerContainerEvent.Open event) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_LOGGUIOPENIFNEEDED.enabled()) return;
         if (level == null || sp == null || event == null) return;
         if (!isEnabled(LoggerConfig.VALUES.logGuiOpen)) return;
 
@@ -1839,6 +1839,7 @@ public final class LoggerEventHandlers {
     }
 
     private static void logItemUsePhase(ServerLevel level, ServerPlayer sp, ItemStack used, ActionType type, String phase) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_LOGITEMUSEPHASE.enabled()) return;
         if (level == null || sp == null || used == null || used.isEmpty() || type == null) return;
         String itemId = itemIdOf(used);
         String anim = useAnimName(used);
@@ -1903,7 +1904,7 @@ public final class LoggerEventHandlers {
         try {
             Entity direct = event.getSource().getDirectEntity();
             if (direct instanceof Projectile projectile) {
-                logProjectileHitIfNeeded(level, projectile, event.getEntity(), "entity_damage", getDamageAmountCompat(event));
+                logProjectileHitIfNeeded(level, projectile, event.getEntity(), "entity_damage", event.getNewDamage());
             }
         } catch (Throwable ignored) {}
     }
@@ -2058,6 +2059,7 @@ public final class LoggerEventHandlers {
     }
 
     private static void logBlockUseIfNeeded(ServerLevel level, Player player, BlockPos pos, BlockState state, ItemStack used, Direction face) {
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_LOGBLOCKUSEIFNEEDED.enabled()) return;
         if (level == null || player == null || pos == null || state == null) return;
         if (!(player instanceof ServerPlayer sp)) return;
         if (!isEnabled(LoggerConfig.VALUES.logGenericBlockUse)) return;
@@ -2183,53 +2185,8 @@ public final class LoggerEventHandlers {
                 ? new ActorTracker.ActorRef(System.currentTimeMillis(), cause.actorUuid(), cause.actorName()) : null;
     }
 
-    private static int getPickupDelayCompat(ItemEntity ent) {
-        if (ent == null) return 0;
-        try {
-            // Common method names across mappings.
-            for (String name : new String[]{"getPickupDelay", "getPickUpDelay"}) {
-                try {
-                    Method m = ent.getClass().getMethod(name);
-                    Object r = m.invoke(ent);
-                    if (r instanceof Number n) return n.intValue();
-                } catch (Throwable ignored) {}
-            }
-        } catch (Throwable ignored) {
-        }
-        try {
-            // Fallback to field access.
-            var f = ent.getClass().getDeclaredField("pickupDelay");
-            f.setAccessible(true);
-            Object r = f.get(ent);
-            if (r instanceof Number n) return n.intValue();
-        } catch (Throwable ignored) {
-        }
-        return 0;
-    }
-
-    private static int getEntityAgeTicksCompat(Entity ent) {
-        if (ent == null) return -1;
-        try {
-            // Vanilla field name.
-            var f = ent.getClass().getDeclaredField("tickCount");
-            f.setAccessible(true);
-            Object r = f.get(ent);
-            if (r instanceof Number n) return n.intValue();
-        } catch (Throwable ignored) {
-        }
-        try {
-            // Some mappings expose getter.
-            for (String name : new String[]{"getTickCount", "tickCount", "getAge"}) {
-                try {
-                    Method m = ent.getClass().getMethod(name);
-                    Object r = m.invoke(ent);
-                    if (r instanceof Number n) return n.intValue();
-                } catch (Throwable ignored2) {}
-            }
-        } catch (Throwable ignored) {
-        }
-        return -1;
-    }
+    private static int getPickupDelayCompat(ItemEntity ent) { return ent != null && ent.hasPickUpDelay() ? 1 : 0; }
+    private static int getEntityAgeTicksCompat(Entity ent) { return ent == null ? -1 : ent.tickCount; }
 
     @SubscribeEvent
     public void onEntityLeave(EntityLeaveLevelEvent event) {
@@ -2242,6 +2199,9 @@ public final class LoggerEventHandlers {
         if (com.roften.avilixlogger.compat.corpse.CorpseLifecycleAudit.handles(ent)) return;
         if(CreateSupport.available()&&(com.roften.avilixlogger.compat.create.CartAutomationAudit.worldCovered(ent)||com.roften.avilixlogger.compat.create.CreateLifecycleAudit.handles(ent)))return;
         var origin=CreateEntityOrigin.read(ent);
+        if (!CaptureHandlers.ENTITY_LEAVE.enabled() && origin == null
+                && CartAuditContext.current() == null
+                && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource()) == null) return;
         if(!LoggerConfig.VALUES.logEntities.get() && origin==null
                 && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource())==null)return;
         if (ent instanceof Player) return;

@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.enchantmentindustry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class HatchExperienceMixin {
     @WrapMethod(method = "useWithoutItem(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/Level;Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/entity/player/Player;Lnet/minecraft/world/phys/BlockHitResult;)Lnet/minecraft/world/InteractionResult;", remap = false)
     private net.minecraft.world.InteractionResult avilixlogger$hatch(net.minecraft.world.level.block.state.BlockState state, Level level, BlockPos pos, Player player, net.minecraft.world.phys.BlockHitResult hit, Operation<net.minecraft.world.InteractionResult> original){
+        if (!CaptureHandlers.ENCHANTMENTINDUSTRY_HATCHEXPERIENCEMIXIN_HATCH.enabled()) { return original.call(state,level,pos,player,hit); }
         if(!(level instanceof ServerLevel serverLevel)||!serverLevel.getServer().isSameThread())return original.call(state,level,pos,player,hit);
         try(var cause=com.roften.avilixlogger.core.CauseContext.push(player,com.roften.avilixlogger.core.CauseContext.Kind.USE_BLOCK,pos,ItemStack.EMPTY)){
             var action=player instanceof ServerPlayer serverPlayer?HatchStorageAudit.begin(serverPlayer,pos):null;boolean success=false;

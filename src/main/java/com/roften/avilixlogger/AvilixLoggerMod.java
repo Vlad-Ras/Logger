@@ -119,8 +119,9 @@ public final class AvilixLoggerMod {
             if(event.getServer().isRunning())event.getServer().execute(()->LoggerNetwork.broadcastCaptureHealth(event.getServer()));
         });
         // Restore persisted switches before the first server/player tick.
-        com.roften.avilixlogger.core.CaptureTypePolicy.install(
-                com.roften.avilixlogger.core.LoggerServerData.get(event.getServer().overworld()).captureMask());
+        var captureSettings = com.roften.avilixlogger.core.LoggerServerData.get(event.getServer().overworld());
+        com.roften.avilixlogger.core.CaptureTypePolicy.install(captureSettings.captureMask());
+        com.roften.avilixlogger.core.CaptureHandlers.install(captureSettings.disabledHandlers());
         if (AuthCoreBridge.attach(event.getServer())) {
             if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available())
                 com.roften.avilixlogger.compat.backpacked.BackpackIndex.start(event.getServer());
@@ -165,6 +166,7 @@ public final class AvilixLoggerMod {
             com.roften.avilixlogger.compat.backpacked.BackpackIndex.stop();
         }
         com.roften.avilixlogger.core.CaptureTypePolicy.install(0);
+        com.roften.avilixlogger.core.CaptureHandlers.install(java.util.Set.of());
         AuthCoreBridge.clear(event.getServer());
         com.roften.avilixlogger.core.CauseContext.clearCurrentThread();
         com.roften.avilixlogger.core.MutationSourceResolver.clearCurrentThread();

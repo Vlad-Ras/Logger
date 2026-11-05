@@ -19,6 +19,12 @@ import java.util.*;
 public final class IndustrialAudit {
     private static final Map<Object, WeakReference<BlockEntity>> ITEMS = new WeakHashMap<>();
     private static final ThreadLocal<Simulation> SIMULATION = new ThreadLocal<>();
+    private static final Set<String> SETTINGS_BEHAVIOURS = Set.of("EnchanterBehaviour", "ClassicEnchanterBehaviour",
+            "PrinterBehaviour", "ExperienceHatchBehaviour", "EntityFilteringBehaviour", "FilteringBehaviour",
+            "ScrollOptionBehaviour", "ScrollValueBehaviour");
+    private static final ClassValue<String[]> SETTINGS_FIELDS = new ClassValue<>() {
+        @Override protected String[] computeValue(Class<?> type) { return fields(type.getSimpleName()); }
+    };
     private IndustrialAudit() {}
     private static final class Versions {
         static final boolean CEI = exact("create_enchantment_industry", "2.4.2");
@@ -57,25 +63,45 @@ public final class IndustrialAudit {
     }
     public static void baseline(BlockEntity be) {
         if (!handles(be)) return;
-        if(!MachineAudit.policy(be,ActionType.MACHINE_STATE_CHANGE)){data(be).baseline=null;data(be).signature=null;return;}
+        if(!MachineAudit.policy(be,ActionType.MACHINE_STATE_CHANGE)){data(be).baseline=null;data(be).signature.clear();return;}
         try {
             var data = data(be);
-            data.signature = signature(be);
-            data.baseline = MachineAudit.policy(be, ActionType.MACHINE_STATE_CHANGE) ? settings(be) : null;
+            data.signature.clear();
+            signature(be, data.signature);
+            data.baseline = settings(be);
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { data(be).baseline = null; data(be).failed=true; fail("baseline"); }
     }
     public static void dirty(Object value) {
         if (!handles(value)) return;
-        var be = (BlockEntity)value; attached(be);
-        if(data(be).failed)return;
-        if (ModStateAudit.capturing(be, "industrial")) return;
-        if (!MachineAudit.policy(be, ActionType.MACHINE_STATE_CHANGE)) { data(be).baseline = null; return; }
+        var be = (BlockEntity)value;
+        var level = (ServerLevel)be.getLevel();
+        observeSettings(be, level, false);
+    }
+
+    private static void observeSettings(BlockEntity be, ServerLevel level, boolean simulation) {
+        var data = data(be);
+        if (!data.bound) attached(be);
+        if (data.failed || data.itemActive || ModStateAudit.capturing(be, "industrial")) return;
+        boolean enabled = simulation
+                ? ModStateAudit.simulationEnabled(level.getServer(), ActionType.MACHINE_STATE_CHANGE)
+                : ModStateAudit.enabled(level.getServer(), ActionType.MACHINE_STATE_CHANGE);
+        if (!enabled) { data.baseline = null; return; }
         try {
-            var data = data(be); var current = signature(be);
-            if (current.equals(data.signature)) return;
-            var previous = data.baseline; var next = settings(be); data.signature = current; data.baseline = next;
+            var current = data.observed;
+            current.clear();
+            signature(be, current);
+            if (current.equals(data.signature)) {
+                current.clear();
+                return;
+            }
+            var previous = data.baseline;
+            var next = settings(be);
+            data.observed = data.signature;
+            data.observed.clear();
+            data.signature = current;
+            data.baseline = next;
             if (previous != null && !previous.equals(next)) try (var cause = CauseContext.unattributed()) {
-                ModStateAudit.receipt(((ServerLevel)be.getLevel()).getServer(), provider(be), "native-settings-observation",
+                ModStateAudit.receipt(level.getServer(), provider(be), "native-settings-observation",
                         ActionType.MACHINE_STATE_CHANGE, previous, next);
             }
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { data(be).failed=true; fail("dirty"); }
@@ -85,7 +111,7 @@ public final class IndustrialAudit {
         var be = (BlockEntity)value; attached(be);
         if(data(be).failed)return null;
         ActionType type = contents ? ActionType.MACHINE_CONTENT_CHANGE : ActionType.MACHINE_STATE_CHANGE;
-        if (!MachineAudit.policy(be, type) || ModStateAudit.capturing(be, "industrial")) return null;
+        if (data(be).itemActive || !MachineAudit.policy(be, type) || ModStateAudit.capturing(be, "industrial")) return null;
         IndustrialFluids.flushOwner(be);
         var nativeAction = ModStateAudit.begin(((ServerLevel)be.getLevel()).getServer(), provider(be), operation, be, "industrial", type,
                 () -> {
@@ -104,16 +130,146 @@ public final class IndustrialAudit {
         try { return begin(StateAccess.field(value, "blockEntity"), operation, false); }
         catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { fail("behaviour"); return null; }
     }
-    public static Action item(Object handler, boolean simulate) {
+    /** Keep detached copies around the native call. Only a mutation goes through the codecs. */
+    public static ItemAction item(Object handler, boolean simulate) {
+        if (simulate) return null;
         var server = ServerLifecycleHooks.getCurrentServer();
-        if (simulate || server == null || !server.isSameThread()) return null;
-        var ref = ITEMS.get(handler); return ref == null ? null : begin(ref.get(), "physical-inventory", true);
+        if (server == null || !server.isSameThread()) return null;
+        var ref = ITEMS.get(handler);
+        var be = ref == null ? null : ref.get();
+        if (be == null || !handles(be) || data(be).itemActive || ModStateAudit.capturing(be, "industrial")) return null;
+        try {
+            var receipt = ModStateAudit.prepareReceipt(server, provider(be), "physical-inventory", ActionType.MACHINE_CONTENT_CHANGE);
+            if (receipt == null) return null;
+            var before = PhysicalContents.read(be);
+            data(be).itemActive = true;
+            return new ItemAction(be, before, receipt);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+            fail("item-before");
+            return null;
+        }
     }
+
+    public static final class ItemAction {
+        private final BlockEntity be;
+        private final PhysicalContents before;
+        private final ModStateAudit.Receipt receipt;
+        private boolean done;
+
+        private ItemAction(BlockEntity be, PhysicalContents before, ModStateAudit.Receipt receipt) {
+            this.be = be;
+            this.before = before;
+            this.receipt = receipt;
+        }
+
+        public void finish(boolean threw) {
+            if (done) return;
+            done = true;
+            try {
+                var after = PhysicalContents.read(be);
+                if (before.sameAs(after)) return;
+                IndustrialFluids.flushOwner(be);
+                receipt.finish(before.encode(be), after.encode(be), threw);
+                baseline(be);
+            } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+                fail("item-after");
+            } finally {
+                data(be).itemActive = false;
+            }
+        }
+    }
+
+    private record PhysicalContents(String dimension, BlockPos pos,
+                                    net.minecraft.world.level.block.state.BlockState state,
+                                    ItemStack[] slots, int exposed, ItemStack held, ItemStack processed,
+                                    CompoundTag hints, List<IndustrialFluids.PhysicalTank> fluids) {
+        static PhysicalContents read(BlockEntity be) throws ReflectiveOperationException {
+            var inventory = inventory(be);
+            ItemStack[] slots = null;
+            int exposed = 0;
+            if (inventory != null) {
+                var stored = (List<?>) StateAccess.field(inventory, "stacks");
+                if (stored.size() > 4096) throw new IllegalStateException("Stored item budget");
+                slots = new ItemStack[stored.size()];
+                for (int i = 0; i < slots.length; i++) slots[i] = ((ItemStack) stored.get(i)).copy();
+                exposed = inventory.getSlots();
+            }
+            String type = be.getClass().getSimpleName();
+            ItemStack held = null, processed = null;
+            if (type.equals("BlazeEnchanterBlockEntity") || type.equals("ClassicBlazeEnchanterBlockEntity"))
+                held = ((ItemStack) StateAccess.field(be, "heldItem")).copy();
+            if (type.equals("GrindstoneDrainBlockEntity"))
+                processed = ((ItemStack) StateAccess.field(be, "processedItem")).copy();
+            CompoundTag hints = null;
+            if (type.equals("BlazeForgerBlockEntity")) {
+                hints = new CompoundTag();
+                for (String key : new String[]{"cost", "mode", "conflicting", "overCap"})
+                    hints.put(key, StateAccess.encode(StateAccess.field(inventory, key)));
+            }
+            return new PhysicalContents(be.getLevel().dimension().location().toString(), be.getBlockPos().immutable(),
+                    be.getBlockState(), slots, exposed, held, processed, hints, IndustrialFluids.rawSnapshot(be));
+        }
+
+        boolean sameAs(PhysicalContents other) {
+            if (!dimension.equals(other.dimension) || !pos.equals(other.pos) || state != other.state
+                    || exposed != other.exposed || !sameStack(held, other.held) || !sameStack(processed, other.processed)
+                    || !Objects.equals(hints, other.hints) || fluids.size() != other.fluids.size()) return false;
+            if (slots != null || other.slots != null) {
+                if (slots == null || other.slots == null || slots.length != other.slots.length) return false;
+                for (int i = 0; i < slots.length; i++) if (!ItemStack.matches(slots[i], other.slots[i])) return false;
+            }
+            for (int i = 0; i < fluids.size(); i++) if (!fluids.get(i).sameAs(other.fluids.get(i))) return false;
+            return true;
+        }
+
+        private static boolean sameStack(ItemStack first, ItemStack last) {
+            return first == last || first != null && last != null && ItemStack.matches(first, last);
+        }
+
+        CompoundTag encode(BlockEntity be) {
+            long started = HotPathMetrics.beginSnapshot();
+            try {
+                var location = new CompoundTag();
+                location.putString("Dimension", dimension);
+                location.putInt("X", pos.getX());
+                location.putInt("Y", pos.getY());
+                location.putInt("Z", pos.getZ());
+                location.putString("Block", net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+                location.put("BlockState", NbtUtils.writeBlockState(state));
+                var tag = location.copy();
+                var access = be.getLevel().registryAccess();
+                if (slots != null) {
+                    var stored = new ListTag();
+                    for (int i = 0; i < slots.length; i++) {
+                        var slot = new CompoundTag();
+                        slot.putInt("Slot", i);
+                        slot.put("Stack", slots[i].saveOptional(access));
+                        stored.add(slot);
+                    }
+                    tag.put("StoredItems", stored);
+                    tag.putInt("ExposedSlots", exposed);
+                }
+                if (held != null) tag.put("HeldItem", held.saveOptional(access));
+                if (processed != null) tag.put("ProcessedItem", processed.saveOptional(access));
+                if (hints != null) tag.put("NativeForgerPreview", hints.copy());
+                var tanks = new ListTag();
+                for (var tank : fluids) tanks.add(tank.encode(be, location));
+                tag.put("PhysicalFluids", tanks);
+                return tag;
+            } finally {
+                HotPathMetrics.endSnapshot(started);
+            }
+        }
+    }
+
     public static Simulation simulate(Object value) {
-        if (!handles(value)) return null;
-        var be=(BlockEntity)value;
-        if(!MachineAudit.policy(be,ActionType.MACHINE_CONTENT_CHANGE)&&!MachineAudit.policy(be,ActionType.MACHINE_STATE_CHANGE))return null;
-        return new Simulation((BlockEntity)value, SIMULATION.get());
+        if (provider(value) == null || !(value instanceof BlockEntity be) || data(be).failed) return null;
+        var level = MachineAudit.level(be);
+        if (level == null) return null;
+        var server = level.getServer();
+        if (!ModStateAudit.simulationEnabled(server, ActionType.MACHINE_CONTENT_CHANGE)
+                && !ModStateAudit.simulationEnabled(server, ActionType.MACHINE_STATE_CHANGE)) return null;
+        return new Simulation(be, level, SIMULATION.get());
     }
     public static void removed(Object value) {
         if (value instanceof BlockEntity be && provider(be) != null && be.getLevel() instanceof ServerLevel level && level.getServer().isSameThread())
@@ -125,8 +281,8 @@ public final class IndustrialAudit {
             default -> null;
         };
     }
-    static String[] fields(BlockEntity be) {
-        return switch (be.getClass().getSimpleName()) {
+    private static String[] fields(String type) {
+        return switch (type) {
             case "BlazeEnchanterBlockEntity" -> new String[]{"isCreative", "special", "cursed", "seed"};
             case "ClassicBlazeEnchanterBlockEntity", "BlazeForgerBlockEntity" -> new String[]{"isCreative", "special", "cursed"};
             case "ExperienceLanternBlockEntity" -> new String[]{"rate"};
@@ -150,26 +306,27 @@ public final class IndustrialAudit {
         var selected = new ArrayList<>();
         for (Object behaviour : (Collection<?>)StateAccess.call(be, "getAllBehaviours")) {
             String type = behaviour.getClass().getSimpleName();
-            if (Set.of("EnchanterBehaviour", "ClassicEnchanterBehaviour", "PrinterBehaviour", "ExperienceHatchBehaviour",
-                    "EntityFilteringBehaviour", "FilteringBehaviour", "ScrollOptionBehaviour", "ScrollValueBehaviour").contains(type)) selected.add(behaviour);
+            if (SETTINGS_BEHAVIOURS.contains(type)) selected.add(behaviour);
         }
         if (selected.size() > 32) throw new IllegalStateException("Settings budget"); return selected;
     }
-    private static List<Object> signature(BlockEntity be) throws ReflectiveOperationException {
-        var values = new ArrayList<Object>(); values.add(be.getBlockState());
-        for (String field : fields(be)) values.add(StateAccess.field(be, field));
-        for (Object behaviour : behaviours(be)) {
+    private static void signature(BlockEntity be, List<Object> values) throws ReflectiveOperationException {
+        values.add(be.getBlockState());
+        for (String field : SETTINGS_FIELDS.get(be.getClass())) values.add(StateAccess.field(be, field));
+        int selected = 0;
+        for (Object behaviour : (Collection<?>)StateAccess.call(be, "getAllBehaviours")) {
             String type = behaviour.getClass().getSimpleName();
+            if (!SETTINGS_BEHAVIOURS.contains(type)) continue;
+            if (++selected > 32) throw new IllegalStateException("Settings budget");
             if (type.equals("EnchanterBehaviour")) {
                 values.add(StateAccess.field(behaviour, "value")); values.add(StateAccess.field(behaviour, "template"));
             } else if (type.equals("ScrollOptionBehaviour") || type.equals("ScrollValueBehaviour")) values.add(StateAccess.field(behaviour, "value"));
             else { values.add(StateAccess.field(behaviour, "filter")); values.add(StateAccess.field(behaviour, "count")); }
         }
-        return values;
     }
     private static CompoundTag settings(BlockEntity be) throws ReflectiveOperationException {
         var tag = MachineAudit.location(be);
-        for (String field : fields(be)) {
+        for (String field : SETTINGS_FIELDS.get(be.getClass())) {
             Object value = StateAccess.field(be, field);
             tag.put(field, raw(be, value));
         }
@@ -213,7 +370,9 @@ public final class IndustrialAudit {
     public static void clear() { ITEMS.clear(); SIMULATION.remove(); }
     public static void fail(String operation) { MachineAudit.failure("industrial-" + operation); }
     public static final class Data {
-        public boolean bound, established, failed; public Object signature; public CompoundTag baseline;
+        public boolean bound, established, failed, itemActive; public CompoundTag baseline;
+        private List<Object> signature = new ArrayList<>();
+        private List<Object> observed = new ArrayList<>();
         public final List<IndustrialFluids.Binding> fluids = new ArrayList<>();
     }
     public static final class Action {
@@ -222,8 +381,23 @@ public final class IndustrialAudit {
         public void finish(boolean threw) { try { delegate.finish(threw); } finally { baseline(be); } }
     }
     public static final class Simulation implements AutoCloseable {
-        private final BlockEntity be; private final Simulation parent;
-        private Simulation(BlockEntity be, Simulation parent) { this.be=be; this.parent=parent; SIMULATION.set(this); attached(be); }
-        public void close() { try { IndustrialFluids.due(be); dirty(be); } finally { if(parent==null)SIMULATION.remove(); else SIMULATION.set(parent); } }
+        private final BlockEntity be;
+        private final ServerLevel level;
+        private final Simulation parent;
+        private Simulation(BlockEntity be, ServerLevel level, Simulation parent) {
+            this.be = be;
+            this.level = level;
+            this.parent = parent;
+            SIMULATION.set(this);
+            if (!data(be).bound) attached(be);
+        }
+        public void close() {
+            try {
+                if (!be.isRemoved() && be.getLevel() == level) observeSettings(be, level, true);
+            } finally {
+                if (parent == null) SIMULATION.remove();
+                else SIMULATION.set(parent);
+            }
+        }
     }
 }

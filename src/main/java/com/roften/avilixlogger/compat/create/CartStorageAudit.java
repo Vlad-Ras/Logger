@@ -92,6 +92,13 @@ public final class CartStorageAudit {
         if(storage!=alias.manager.get()||alias.aggregate&&handler!=storage.getAllItems()&&handler!=storage.getFluids())return null;
         return entity;
     }
+    public static boolean capturing(Ref ref, com.roften.avilixlogger.core.CaptureHandlers handler) {
+        if (handler.enabled()) return capturing(ref);
+        var entity = ref == null ? null : ref.entity.get();
+        if (entity != null) CreateCaptureGaps.remember(entity);
+        return false;
+    }
+
     public static boolean capturing(Ref ref) {
         var entity=ref==null?null:ref.entity.get();return entity!=null&&CreateCargoAudit.active(entity);
     }
@@ -111,7 +118,10 @@ public final class CartStorageAudit {
         if (!stack.isEmpty()){var item=NbtSerde.snapshotItemStack(stack,e.registryAccess());if(item==null)n.putBoolean("Incomplete",true);else n.put("Item",item);}return n;
     }
     public static net.neoforged.neoforge.fluids.FluidStack[] fluids(net.neoforged.neoforge.fluids.capability.IFluidHandler handler) {
-        var result=new net.neoforged.neoforge.fluids.FluidStack[handler.getTanks()];
+        return fluids(handler, handler.getTanks());
+    }
+    static net.neoforged.neoforge.fluids.FluidStack[] fluids(net.neoforged.neoforge.fluids.capability.IFluidHandler handler, int tanks) {
+        var result=new net.neoforged.neoforge.fluids.FluidStack[tanks];
         for(int i=0;i<result.length;i++)result[i]=handler.getFluidInTank(i).copy();
         return result;
     }

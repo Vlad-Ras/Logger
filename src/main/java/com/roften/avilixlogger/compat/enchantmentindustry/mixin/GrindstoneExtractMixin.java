@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.enchantmentindustry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class GrindstoneExtractMixin {
     @WrapMethod(method = "extractItem(IIZ)Lnet/minecraft/world/item/ItemStack;", remap = false)
     private ItemStack avilixlogger$extract(int slot, int amount, boolean simulate, Operation<ItemStack> original){
+        if (!CaptureHandlers.ENCHANTMENTINDUSTRY_GRINDSTONEEXTRACTMIXIN_EXTRACT.enabled()) { return original.call(slot, amount, simulate); }
         var action=IndustrialAudit.item(this,simulate); boolean success=false;
         try{var result=original.call(slot, amount, simulate);success=true;return result;}
         finally{if(action!=null)action.finish(!success);}

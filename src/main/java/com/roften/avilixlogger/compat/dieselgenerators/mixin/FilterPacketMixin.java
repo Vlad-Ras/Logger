@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.dieselgenerators.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class FilterPacketMixin {
     @WrapMethod(method = "handle(Lnet/minecraft/server/level/ServerPlayer;)V", remap = false)
     private void avilixlogger$filter(ServerPlayer player, Operation<Void> original){
+        if (!CaptureHandlers.DIESELGENERATORS_FILTERPACKETMIXIN_FILTER.enabled()) { original.call(player); return; }
         if(player==null||!player.server.isSameThread()){original.call(player);return;}
         try(var cause=com.roften.avilixlogger.core.CauseContext.push(player,com.roften.avilixlogger.core.CauseContext.Kind.OTHER,player.blockPosition(),ItemStack.EMPTY)){
             var action=DieselAudit.filter(player);boolean success=false;

@@ -3,6 +3,7 @@ package com.roften.avilixlogger.compat.create.mixin;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.create.CartStorageAudit;
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.roften.avilixlogger.compat.create.CartAutomationAudit;
 import com.roften.avilixlogger.compat.create.CreateInfiniteStorageAudit;
 import com.simibubi.create.content.fluids.tank.storage.creative.CreativeFluidTankMountedStorage;
@@ -21,7 +22,7 @@ public abstract class MountedFluidStorageAuditMixin {
     private int avilixlogger$fill(FluidStack stack,IFluidHandler.FluidAction action,Operation<Integer> original){
         var ref=action.simulate()?null:CartStorageAudit.ref(this);
         if(CartStorageAudit.locked(ref))return 0;
-        if(ref==null || !CartStorageAudit.capturing(ref))return original.call(stack,action);
+        if(ref==null || !CartStorageAudit.capturing(ref, CaptureHandlers.CREATE_MOUNTED_FLUID_FILL))return original.call(stack,action);
         var handler=(IFluidHandler)this;var before=CartStorageAudit.fluids(handler);
         var creative=(Object)this instanceof CreativeFluidTankMountedStorage?wrapped:null;
         int result;var transfer=CartAutomationAudit.enterMounted(creative);try{result=original.call(stack,action);}finally{CartAutomationAudit.leaveMounted(transfer,creative);}
@@ -32,7 +33,7 @@ public abstract class MountedFluidStorageAuditMixin {
     private FluidStack avilixlogger$drainStack(FluidStack stack,IFluidHandler.FluidAction action,Operation<FluidStack> original){
         var ref=action.simulate()?null:CartStorageAudit.ref(this);
         if(CartStorageAudit.locked(ref))return FluidStack.EMPTY;
-        if(ref==null || !CartStorageAudit.capturing(ref))return original.call(stack,action);
+        if(ref==null || !CartStorageAudit.capturing(ref, CaptureHandlers.CREATE_MOUNTED_FLUID_DRAIN_STACK))return original.call(stack,action);
         var handler=(IFluidHandler)this;var before=CartStorageAudit.fluids(handler);
         var creative=(Object)this instanceof CreativeFluidTankMountedStorage?wrapped:null;
         FluidStack result;var transfer=CartAutomationAudit.enterMounted(creative);try{result=original.call(stack,action);}finally{CartAutomationAudit.leaveMounted(transfer,creative);}
@@ -43,7 +44,7 @@ public abstract class MountedFluidStorageAuditMixin {
     private FluidStack avilixlogger$drainAmount(int amount,IFluidHandler.FluidAction action,Operation<FluidStack> original){
         var ref=action.simulate()?null:CartStorageAudit.ref(this);
         if(CartStorageAudit.locked(ref))return FluidStack.EMPTY;
-        if(ref==null || !CartStorageAudit.capturing(ref))return original.call(amount,action);
+        if(ref==null || !CartStorageAudit.capturing(ref, CaptureHandlers.CREATE_MOUNTED_FLUID_DRAIN_AMOUNT))return original.call(amount,action);
         var handler=(IFluidHandler)this;var before=CartStorageAudit.fluids(handler);
         var creative=(Object)this instanceof CreativeFluidTankMountedStorage?wrapped:null;
         FluidStack result;var transfer=CartAutomationAudit.enterMounted(creative);try{result=original.call(amount,action);}finally{CartAutomationAudit.leaveMounted(transfer,creative);}

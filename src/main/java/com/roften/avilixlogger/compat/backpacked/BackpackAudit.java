@@ -31,7 +31,9 @@ public final class BackpackAudit {
     private static int depth;
     private static final Scope INACTIVE=new Scope(null,List.of(),null,false);
     public static boolean restoring;
-    public static boolean enabled(){return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(10)
+    public static boolean enabled(){
+        if (!CaptureHandlers.COMPAT_BACKPACKED_BACKPACKAUDIT_ENABLED.enabled()) return false;
+        return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(10)
             && !restoring&&!CartAuditContext.restoring()&&LoggerConfig.isEnabled();}
     /** Rebase the native cache/index after a joint restore, without gameplay events or new IDs. */
     public static void rebase(Container container){
@@ -69,6 +71,7 @@ public final class BackpackAudit {
         if(depth==0)flush(container);
     }
     public static Scope scope(Player player,String reason){
+        if (!CaptureHandlers.COMPAT_BACKPACKED_BACKPACKAUDIT_SCOPE.enabled()) return INACTIVE;
         if(!enabled()||!(player instanceof ServerPlayer p))return INACTIVE;
         var access=(BackpackedInventoryAccess)p;List<Container> containers=new ArrayList<>();
         // Backpacked already evaluates these inventories for augment operations.
@@ -167,6 +170,7 @@ public final class BackpackAudit {
         if(s.reason.startsWith("augment:"))event(complete,r,ActionType.BACKPACK_UPGRADE_USE,s,null,null);
     }
     public static void trackPlayer(ServerPlayer p,ActionType action){
+        if (!CaptureHandlers.COMPAT_BACKPACKED_BACKPACKAUDIT_TRACKPLAYER.enabled()) return;
         if(!enabled())return;
         for(int i=0;i<p.getInventory().getContainerSize();i++){ItemStack stack=p.getInventory().getItem(i);if(isBag(stack))track(new Ref(stack,p.serverLevel(),p.blockPosition(),p,"inventory",i,null),action);}
         ItemStack cursor=p.containerMenu.getCarried();if(isBag(cursor))track(new Ref(cursor,p.serverLevel(),p.blockPosition(),p,"cursor",-1,null),action);
@@ -177,6 +181,7 @@ public final class BackpackAudit {
         }}
     }
     public static void trackMenu(ServerPlayer player){
+        if (!CaptureHandlers.COMPAT_BACKPACKED_BACKPACKAUDIT_TRACKMENU.enabled()) return;
         if(!enabled())return;
         for(var slot:player.containerMenu.slots){ItemStack stack=slot.getItem();if(!isBag(stack))continue;
             if(slot.container instanceof ShelfBlockEntity.ShelfContainer shelf&&shelf.getShelf().getLevel() instanceof ServerLevel level)
@@ -194,6 +199,7 @@ public final class BackpackAudit {
     }
     public static Ref itemRef(ItemEntity e){return new Ref(e.getItem(),(ServerLevel)e.level(),e.blockPosition(),null,"item",-1,e.getUUID());}
     public static void metadataChanged(ItemStack stack,ServerPlayer p,ActionType type,String reason){
+        if (!CaptureHandlers.COMPAT_BACKPACKED_BACKPACKAUDIT_METADATACHANGED.enabled()) return;
         if(!enabled()||!isBag(stack))return;
         lifecycle(new Ref(stack,p.serverLevel(),p.blockPosition(),p,"equipped",-1,null),p,type,reason);
     }

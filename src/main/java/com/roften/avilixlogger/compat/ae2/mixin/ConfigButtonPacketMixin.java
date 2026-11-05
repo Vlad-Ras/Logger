@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.ae2.Ae2MenuCapture;
@@ -11,6 +13,7 @@ import org.spongepowered.asm.mixin.Mixin;
 public class ConfigButtonPacketMixin {
     @WrapMethod(method = "handleOnServer")
     private void avilixlogger$handle(ServerPlayer player, Operation<Void> original) {
+        if (!CaptureHandlers.AE2_CONFIGBUTTONPACKETMIXIN_HANDLE.enabled()) { original.call(player); return; }
         Ae2MenuCapture menu = player.containerMenu instanceof Ae2MenuCapture capture ? capture : null;
         if (menu == null) { original.call(player); return; }
         menu.avilixlogger$beforeAction();

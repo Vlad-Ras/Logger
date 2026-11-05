@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.industry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class ValueMixin {
     @WrapMethod(method = "setValue(I)V", remap = false)
     private void avilixlogger$value(int value, Operation<Void> original) {
+        if (!CaptureHandlers.INDUSTRY_VALUEMIXIN_VALUE.enabled()) { original.call(value); return; }
         var action = IndustrialAudit.behaviour(this,"value"); boolean success = false;
         try { original.call(value); success = true; }
         finally { if (action != null) action.finish(!success); }

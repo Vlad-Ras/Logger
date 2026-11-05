@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.api.networking.crafting.*;
 import appeng.api.networking.security.IActionSource;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
@@ -12,6 +14,7 @@ public abstract class CraftingServiceMixin {
     @WrapMethod(method="submitJob")
     private ICraftingSubmitResult avilixlogger$submitRefusal(ICraftingPlan plan, ICraftingRequester requester, ICraftingCPU cpu, boolean prioritizePower,
                                                           IActionSource source, Operation<ICraftingSubmitResult> original) {
+        if (!CaptureHandlers.AE2_CRAFTINGSERVICEMIXIN_SUBMITREFUSAL.enabled()) { return original.call(plan, requester, cpu, prioritizePower, source); }
         var capture = Ae2CraftingAudit.beginSubmission(plan, source, cpu);
         try {
             var result = original.call(plan, requester, cpu, prioritizePower, source);

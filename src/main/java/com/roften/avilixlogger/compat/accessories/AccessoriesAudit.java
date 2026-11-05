@@ -33,6 +33,7 @@ public final class AccessoriesAudit {
         }
     }
     private static boolean enabled(LivingEntity entity) {
+        if (!CaptureHandlers.COMPAT_ACCESSORIES_ACCESSORIESAUDIT_ENABLED.enabled()) return false;
         return api != null && entity != null && entity.level() instanceof ServerLevel level && level.getServer().isSameThread()
                 && CaptureTypePolicy.enabled(3) && LoggerConfig.isEnabled() && LoggerConfig.VALUES.logEntities.get()
                 && !CartAuditContext.restoring();

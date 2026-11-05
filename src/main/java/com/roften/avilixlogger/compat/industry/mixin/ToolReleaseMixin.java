@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.industry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class ToolReleaseMixin {
     @WrapMethod(method = "releaseUsing(Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/world/level/Level;Lnet/minecraft/world/entity/LivingEntity;I)V", remap = false)
     private void avilixlogger$release(ItemStack stack, Level level, LivingEntity entity, int ticks, Operation<Void> original){
+        if (!CaptureHandlers.INDUSTRY_TOOLRELEASEMIXIN_RELEASE.enabled()) { original.call(stack,level,entity,ticks); return; }
         try{original.call(stack,level,entity,ticks);}finally{IndustrialTools.release(stack);}
     }
 }

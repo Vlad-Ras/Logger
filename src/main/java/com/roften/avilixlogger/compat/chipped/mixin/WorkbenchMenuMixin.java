@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.chipped.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.chipped.ChippedCraftAudit;
@@ -14,6 +16,7 @@ public abstract class WorkbenchMenuMixin {
     @Shadow @Final protected Inventory inventory;
     @WrapMethod(method="craft(Lnet/minecraft/world/item/ItemStack;Z)V",remap=false)
     private void avilixlogger$craft(ItemStack requested,boolean all,Operation<Void> original) {
+        if (!CaptureHandlers.CHIPPED_WORKBENCHMENUMIXIN_CRAFT.enabled()) { original.call(requested,all); return; }
         var action=inventory.player instanceof ServerPlayer player?ChippedCraftAudit.begin(player,requested,all):null;
         try { original.call(requested,all); } finally { if(action!=null)action.finish(); }
     }

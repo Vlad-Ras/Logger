@@ -16,6 +16,7 @@ public final class PlayerDeathAudit {
     public static void reset(){observed.reset();disabled.reset();unauthorized.reset();queued.reset();rejected.reset();errors.reset();nextWarning.set(0);}
     public static long observedCount(){return observed.sum();}
     public static void accepted(ServerPlayer victim,DamageSource source) {
+        if (!CaptureHandlers.CORE_PLAYERDEATHAUDIT_ACCEPTED.enabled()) return;
         observed.increment();
         try {
             if(!CaptureTypePolicy.enabled(29)){disabled.increment();return;}

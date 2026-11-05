@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ftbteams.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.ftbteams.FtbTeamsAudit;
@@ -25,39 +27,46 @@ public abstract class TeamMixin implements FtbTeamState {
     public void avilixlogger$baseline(CompoundTag tag) { avilixlogger$lastState = tag; }
     @WrapMethod(method = "markDirty()V", remap = false)
     private void avilixlogger$dirty(Operation<Void> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_DIRTY.enabled()) { original.call(); return; }
         try { original.call(); } finally { FtbTeamsAudit.dirty(this); }
     }
     @WrapMethod(method = "onCreated(Lnet/minecraft/server/level/ServerPlayer;Ljava/util/UUID;)V", remap = false)
     private void avilixlogger$created(ServerPlayer player, UUID id, Operation<Void> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_CREATED.enabled()) { original.call(player, id); return; }
         boolean success = false;
         try { original.call(player, id); success = true; } finally { FtbTeamsAudit.created(this, !success); }
     }
     @WrapMethod(method = "settings(Lnet/minecraft/commands/CommandSourceStack;Ldev/ftb/mods/ftbteams/api/property/TeamProperty;Ljava/lang/String;)I", remap = false)
     private int avilixlogger$settings(CommandSourceStack source, @Coerce Object key, String value, Operation<Integer> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_SETTINGS.enabled()) { return original.call(source, key, value); }
         var action = FtbTeamsAudit.team(this, "settings"); boolean success = false;
         try { var result = original.call(source, key, value); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "updatePropertiesFrom(Ldev/ftb/mods/ftbteams/api/property/TeamPropertyCollection;)V", remap = false)
     private void avilixlogger$properties(@Coerce Object properties, Operation<Void> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_PROPERTIES.enabled()) { original.call(properties); return; }
         var action = FtbTeamsAudit.team(this, "properties"); boolean success = false;
         try { original.call(properties); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "copyExtraData(Ldev/ftb/mods/ftbteams/api/Team;)V", remap = false)
     private void avilixlogger$copyExtra(@Coerce Object team, Operation<Void> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_COPYEXTRA.enabled()) { original.call(team); return; }
         var action = FtbTeamsAudit.team(this, "copyExtra"); boolean success = false;
         try { original.call(team); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "declineInvitation(Lnet/minecraft/commands/CommandSourceStack;)I", remap = false)
     private int avilixlogger$decline(CommandSourceStack source, Operation<Integer> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_DECLINE.enabled()) { return original.call(source); }
         var action = FtbTeamsAudit.team(this, "decline"); boolean success = false;
         try { var result = original.call(source); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "deserializeNBT(Lnet/minecraft/nbt/CompoundTag;Lnet/minecraft/core/HolderLookup$Provider;)V", remap = false)
     private void avilixlogger$read(CompoundTag tag, HolderLookup.Provider provider, Operation<Void> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_READ.enabled()) { original.call(tag, provider); return; }
         var action = FtbTeamsAudit.team(this, "live-nbt-read");
         var history = FtbTeamsAudit.historyChange(this); boolean success = false;
         try { original.call(tag, provider); success = true; }
@@ -65,6 +74,7 @@ public abstract class TeamMixin implements FtbTeamState {
     }
     @WrapMethod(method = "sendMessage(Ljava/util/UUID;Lnet/minecraft/network/chat/Component;)V", remap = false)
     private void avilixlogger$chat(UUID from, Component text, Operation<Void> original) {
+        if (!CaptureHandlers.FTBTEAMS_TEAMMIXIN_CHAT.enabled()) { original.call(from, text); return; }
         var action = FtbTeamsAudit.chat(this, from, text); boolean success = false;
         try { original.call(from, text); success = true; } finally { if (action != null) action.finish(!success); }
     }

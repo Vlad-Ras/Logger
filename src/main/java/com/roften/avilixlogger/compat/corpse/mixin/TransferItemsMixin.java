@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.corpse.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.corpse.CorpseAudit;
@@ -13,6 +15,7 @@ import org.spongepowered.asm.mixin.Pseudo;
 public abstract class TransferItemsMixin {
     @WrapMethod(method = "executeServerSide(Lnet/neoforged/neoforge/network/handling/IPayloadContext;)V", remap = false)
     private void avilixlogger$transfer(IPayloadContext context, Operation<Void> original) {
+        if (!CaptureHandlers.CORPSE_TRANSFERITEMSMIXIN_TRANSFER.enabled()) { original.call(context); return; }
         var action = context.player() instanceof ServerPlayer player ? CorpseAudit.begin(player, "transfer-all") : null;
         boolean success = false;
         try { original.call(context); success = true; }

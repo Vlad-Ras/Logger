@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.api.config.Actionable;
 import appeng.api.networking.energy.IEnergySource;
 import appeng.api.networking.security.IActionSource;
@@ -16,6 +18,7 @@ public class StorageHelperMixin {
     @WrapMethod(method = "poweredInsert(Lappeng/api/networking/energy/IEnergySource;Lappeng/api/storage/MEStorage;Lappeng/api/stacks/AEKey;JLappeng/api/networking/security/IActionSource;Lappeng/api/config/Actionable;)J")
     private static long avilixlogger$insert(IEnergySource power, MEStorage storage, AEKey key, long amount,
             IActionSource source, Actionable mode, Operation<Long> original) {
+        if (!CaptureHandlers.AE2_STORAGEHELPERMIXIN_INSERT.enabled()) { return original.call(power, storage, key, amount, source, mode); }
         if (mode != Actionable.MODULATE || !Ae2Audit.enabled()) return original.call(power, storage, key, amount, source, mode);
         Ae2Audit.enterPowered();
         try {
@@ -28,6 +31,7 @@ public class StorageHelperMixin {
     @WrapMethod(method = "poweredExtraction(Lappeng/api/networking/energy/IEnergySource;Lappeng/api/storage/MEStorage;Lappeng/api/stacks/AEKey;JLappeng/api/networking/security/IActionSource;Lappeng/api/config/Actionable;)J")
     private static long avilixlogger$extract(IEnergySource power, MEStorage storage, AEKey key, long amount,
             IActionSource source, Actionable mode, Operation<Long> original) {
+        if (!CaptureHandlers.AE2_STORAGEHELPERMIXIN_EXTRACT.enabled()) { return original.call(power, storage, key, amount, source, mode); }
         if (mode != Actionable.MODULATE || !Ae2Audit.enabled()) return original.call(power, storage, key, amount, source, mode);
         Ae2Audit.enterPowered();
         try {

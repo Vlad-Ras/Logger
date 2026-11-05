@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.core.ChatAuditLogger;
 import net.minecraft.server.level.ServerPlayer;
@@ -21,6 +23,7 @@ public final class AvilixChatServerCompat {
 
     @SubscribeEvent(priority = EventPriority.LOWEST, receiveCanceled = true)
     public static void onServerChat(ServerChatEvent event) {
+        if (!CaptureHandlers.COMPAT_AVILIXCHATSERVERCOMPAT_ONSERVERCHAT.enabled()) return;
         try {
             if (event == null) return;
             final ServerPlayer player = event.getPlayer();

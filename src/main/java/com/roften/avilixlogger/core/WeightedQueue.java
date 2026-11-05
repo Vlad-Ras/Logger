@@ -27,6 +27,8 @@ final class WeightedQueue<T> {
     private long waits;
     private int waitingProducers;
     private int batchWaiters;
+    private int consumerWaiters;
+    private int completionWaiters;
     private boolean closed;
     private boolean pressureRequested;
 
@@ -62,7 +64,7 @@ final class WeightedQueue<T> {
             bytes += weight;
             outstanding++;
             peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);
-            ready.signal();
+            signalWork();
         } finally { lock.unlock(); }
     }
 
@@ -88,8 +90,12 @@ final class WeightedQueue<T> {
                     : outstanding >= (long)capacity+reserveCount || bytes > maxBytes+reserveBytes-weight;
             if(full){pressureRequested=true;ready.signalAll();return Offer.FULL;}
             entries.addLast(new Work<>(value,weight,++accepted));bytes+=weight;outstanding++;
-            peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);ready.signal();return Offer.ACCEPTED;
+            peakBytes=Math.max(peakBytes,bytes);peakOutstanding=Math.max(peakOutstanding,outstanding);signalWork();return Offer.ACCEPTED;
         }finally{lock.unlock();}
+    }
+    /** A queued burst needs at most one signal per sleeping consumer. */
+    private void signalWork() {
+        if (consumerWaiters > 0 && entries.size() <= consumerWaiters) ready.signal();
     }
     private boolean full(long weight) {
         return outstanding >= capacity || (outstanding > 0 && (weight > maxBytes || bytes > maxBytes - weight));
@@ -110,8 +116,9 @@ final class WeightedQueue<T> {
         try {
             while (entries.isEmpty() && !closed && remaining > 0 && (!flushOnPressure || waitingProducers == 0&&!pressureRequested)) {
                 if (flushOnPressure) batchWaiters++;
+                consumerWaiters++;
                 try { remaining = ready.awaitNanos(remaining); }
-                finally { if (flushOnPressure) batchWaiters--; }
+                finally { consumerWaiters--; if (flushOnPressure) batchWaiters--; }
             }
             var work = entries.pollFirst();
             if (work != null) inFlight.put(work, Boolean.TRUE);
@@ -126,7 +133,7 @@ final class WeightedQueue<T> {
             bytes -= work.bytes();
             outstanding--;
             pressureRequested=false;
-            space.signalAll();
+            if (waitingProducers > 0 || completionWaiters > 0) space.signalAll();
         } finally { lock.unlock(); }
     }
 
@@ -145,7 +152,7 @@ final class WeightedQueue<T> {
             while (pendingThrough(ticket)) {
                 long remaining = deadlineNanos - System.nanoTime();
                 if (remaining <= 0) return false;
-                space.awaitNanos(remaining);
+                awaitCompletion(remaining);
             }
             return true;
         } finally { lock.unlock(); }
@@ -153,9 +160,15 @@ final class WeightedQueue<T> {
     boolean awaitEmpty(long deadlineNanos) throws InterruptedException {
         lock.lockInterruptibly();
         try {
-            while (outstanding > 0) { long remaining = deadlineNanos - System.nanoTime(); if (remaining <= 0) return false; space.awaitNanos(remaining); }
+            while (outstanding > 0) { long remaining = deadlineNanos - System.nanoTime(); if (remaining <= 0) return false; awaitCompletion(remaining); }
             return true;
         } finally { lock.unlock(); }
+    }
+
+    private void awaitCompletion(long nanos) throws InterruptedException {
+        completionWaiters++;
+        try { space.awaitNanos(nanos); }
+        finally { completionWaiters--; }
     }
 
     void close() {

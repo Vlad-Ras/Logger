@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -101,7 +101,23 @@ public final class CartGuiClientSmoke {
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptCaptureHealth(new com.roften.avilixlogger.net.S2CCaptureHealthPayload(true,"Тест отображения остановки захвата"));
                     mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
                 }
+                else if(stage==14){
+                    var screen=new com.roften.avilixlogger.client.gui.CaptureTypesScreen(root);
+                    var mode=screen.getClass().getDeclaredField("handlers");
+                    mode.setAccessible(true);
+                    mode.setBoolean(screen,true);
+                    mc.setScreen(screen);
+                }
                 if(stage<FILES.size())layout(mc.screen,mc);
+                if(stage==14){
+                    var screen=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;
+                    var handler=com.roften.avilixlogger.core.CaptureHandlers.at(70);
+                    screen.apply(new com.roften.avilixlogger.net.S2CCaptureTypesPayload(0,9,true,true,
+                            "Индивидуальные обработчики",List.of(handler.key())));
+                    var search=screen.getClass().getDeclaredField("search");
+                    search.setAccessible(true);
+                    ((net.minecraft.client.gui.components.EditBox)search.get(screen)).setValue("industrial");
+                }
                 if(stage==8){
                     var capture=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;
                     capture.apply(new com.roften.avilixlogger.net.S2CCaptureTypesPayload(1<<10,7,true,true,"Подшипники отключены без перезагрузки"));

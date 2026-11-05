@@ -11,7 +11,16 @@ public final class ModStateAudit {
     private static final ThreadLocal<Action> ACTIVE = new ThreadLocal<>();
     private ModStateAudit() {}
     public static boolean enabled(MinecraftServer server, ActionType type) {
-        if (server == null || !server.isSameThread() || !LoggerConfig.isEnabled() || !CaptureTypePolicy.allows(type, null, null) || CartAuditContext.restoring()) return false;
+        return allowedContext(server, type) && LoggerConfig.isEnabled() && configured(type);
+    }
+    /** Admission for native simulation only. Any receipt still checks authorization directly. */
+    public static boolean simulationEnabled(MinecraftServer server, ActionType type) {
+        return allowedContext(server, type) && LoggerConfig.isTickCaptureEnabled() && configured(type);
+    }
+    private static boolean allowedContext(MinecraftServer server, ActionType type) {
+        return server != null && server.isSameThread() && CaptureTypePolicy.allows(type, null, null) && !CartAuditContext.restoring();
+    }
+    private static boolean configured(ActionType type) {
         return switch (type) {
             case CLAIM_ACTION, PROTECTION_CHANGE, MACHINE_STATE_CHANGE -> LoggerConfig.VALUES.logBlocks.get();
             case MACHINE_CONTENT_CHANGE, CONTAINER_OPEN, GUI_CHANGE, EXPERIENCE_CHANGE -> LoggerConfig.VALUES.logContainers.get();
@@ -34,6 +43,30 @@ public final class ModStateAudit {
             ACTIVE.set(action); return action;
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { failure(provider); return null; }
     }
+    /** Keep the original cause and time while deferring serialization until a confirmed change. */
+    public static Receipt prepareReceipt(MinecraftServer server, String provider, String operation, ActionType type) {
+        if (!enabled(server, type) || !CaptureTypePolicy.allows(type, "mod:" + provider + ":", null)) return null;
+        return new Receipt(server, row(server, provider, operation, type));
+    }
+
+    public static final class Receipt {
+        private final MinecraftServer server;
+        private final LogEntry row;
+        private boolean done;
+
+        private Receipt(MinecraftServer server, LogEntry row) {
+            this.server = server;
+            this.row = row;
+        }
+
+        public void finish(CompoundTag before, CompoundTag after, boolean threw) {
+            if (done) return;
+            done = true;
+            if (enabled(server, row.type) && CaptureTypePolicy.allows(row.type, row.source, null))
+                append(server, row, before, after, threw);
+        }
+    }
+
     public static void receipt(MinecraftServer server, String provider, String operation, ActionType type, CompoundTag before, CompoundTag after) {
         if (!enabled(server, type) || !CaptureTypePolicy.allows(type, "mod:" + provider + ":", null)) return;
         try { append(server, row(server, provider, operation, type), before, after, false); }

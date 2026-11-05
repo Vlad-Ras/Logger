@@ -51,38 +51,78 @@ public final class IndustrialFluids {
             for(Object tank:(Collection<?>)StateAccess.field(handler,"tanks")) OWNERS.put(tank,binding);
     }
     public static Action begin(Object handler,boolean simulate) {
+        if (simulate) return null;
         var server=ServerLifecycleHooks.getCurrentServer();
-        if(simulate||server==null||!server.isSameThread())return null;
+        if(server==null||!server.isSameThread())return null;
         var binding=OWNERS.get(handler); if(binding==null||binding.active)return null;
         var be=binding.owner.get();
-        if(be==null||!IndustrialAudit.handles(be)||!MachineAudit.policy(be,ActionType.MACHINE_CONTENT_CHANGE)
-                ||ModStateAudit.capturing(be,"industrial"))return null;
+        if (be == null || !IndustrialAudit.handles(be) || IndustrialAudit.data(be).itemActive
+                || ModStateAudit.capturing(be, "industrial")) return null;
+        boolean batch = IndustrialAudit.simulating();
+        if (batch ? !ModStateAudit.simulationEnabled(server, ActionType.MACHINE_CONTENT_CHANGE)
+                : !ModStateAudit.enabled(server, ActionType.MACHINE_CONTENT_CHANGE)) return null;
         try {
-            boolean batch=IndustrialAudit.simulating();
             if(!batch)flush(binding);
-            var before=read(binding);
+            var before=read(binding, binding.pending == null ? null : binding.pending.after);
             binding.active=true; return new Action(binding,before,batch,server.getTickCount());
         } catch(RuntimeException|LinkageError failure){IndustrialAudit.fail("fluid-before");return null;}
     }
     private static Raw read(Binding binding) {
-        var handler=binding.handler.get(); if(handler==null)throw new IllegalStateException("Detached physical handler");
-        int size=handler.getTanks(); if(size<0||size>64)throw new IllegalStateException("Physical tanks budget");
-        var fluids=new FluidStack[size];var capacities=new int[size];
-        for(int i=0;i<size;i++){fluids[i]=handler.getFluidInTank(i).copy();capacities[i]=handler.getTankCapacity(i);}
-        return new Raw(fluids,capacities);
+        return read(binding, null);
+    }
+
+    // Reuse detached tank states and arrays until a real mutation is observed.
+    private static Raw read(Binding binding, Raw previous) {
+        var handler = binding.handler.get();
+        if (handler == null) throw new IllegalStateException("Detached physical handler");
+        int size = handler.getTanks();
+        if (size < 0 || size > 64) throw new IllegalStateException("Physical tanks budget");
+        if (previous != null && previous.fluids.length != size) previous = null;
+        var fluids = previous == null ? new FluidStack[size] : previous.fluids;
+        var capacities = previous == null ? new int[size] : previous.capacities;
+        for (int i = 0; i < size; i++) {
+            var stack = handler.getFluidInTank(i);
+            if (previous == null || !FluidStack.matches(fluids[i], stack)) {
+                if (previous != null && fluids == previous.fluids) fluids = fluids.clone();
+                fluids[i] = stack.copy();
+            }
+            int capacity = handler.getTankCapacity(i);
+            if (previous == null || capacities[i] != capacity) {
+                if (previous != null && capacities == previous.capacities) capacities = capacities.clone();
+                capacities[i] = capacity;
+            }
+        }
+        return previous != null && fluids == previous.fluids && capacities == previous.capacities
+                ? previous : new Raw(fluids, capacities);
     }
     private static boolean same(Raw first,Raw last) {
+        if (first == last) return true;
         if(!Arrays.equals(first.capacities,last.capacities)||first.fluids.length!=last.fluids.length)return false;
         for(int i=0;i<first.fluids.length;i++)if(!FluidStack.matches(first.fluids[i],last.fluids[i]))return false;
         return true;
     }
     private static CompoundTag tag(BlockEntity be,Binding binding,Raw raw) {
-        var tag=MachineAudit.location(be);tag.putString("PhysicalTank",binding.name);var tanks=new ListTag();
+        return tag(be, binding, raw, MachineAudit.location(be));
+    }
+
+    private static CompoundTag tag(BlockEntity be,Binding binding,Raw raw,CompoundTag location) {
+        var tag=location.copy();tag.putString("PhysicalTank",binding.name);var tanks=new ListTag();
         for(int i=0;i<raw.fluids.length;i++){var tank=new CompoundTag();tank.putInt("Tank",i);tank.putInt("Capacity",raw.capacities[i]);
             tank.put("Fluid",save(be,raw.fluids[i]));tanks.add(tank);}
         tag.put("Tanks",tanks);return tag;
     }
     private static Tag save(BlockEntity be,FluidStack fluid){return fluid.isEmpty()?new CompoundTag():fluid.save(be.getLevel().registryAccess(),new CompoundTag());}
+    static List<PhysicalTank> rawSnapshot(BlockEntity be) {
+        var result = new ArrayList<PhysicalTank>();
+        for (var binding : IndustrialAudit.data(be).fluids) result.add(new PhysicalTank(binding, read(binding)));
+        return result;
+    }
+
+    record PhysicalTank(Binding binding, Raw raw) {
+        CompoundTag encode(BlockEntity be, CompoundTag location) { return tag(be, binding, raw, location); }
+        boolean sameAs(PhysicalTank other) { return binding == other.binding && same(raw, other.raw); }
+    }
+
     public static ListTag snapshot(BlockEntity be) {
         var result=new ListTag();
         for(var binding:IndustrialAudit.data(be).fluids)result.add(tag(be,binding,read(binding)));
@@ -91,22 +131,18 @@ public final class IndustrialFluids {
     public static void flushOwner(BlockEntity be) {
         for(var binding:IndustrialAudit.data(be).fluids)flush(binding);
     }
-    public static void due(Object value) {
-        if(PENDING.isEmpty())return;
-        if(!(value instanceof BlockEntity be)||IndustrialAudit.provider(be)==null||!(be.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())return;
-        int tick=level.getServer().getTickCount();
-        for(var binding:IndustrialAudit.data(be).fluids)if(binding.pending!=null&&tick-binding.pending.start>=20)flush(binding);
-    }
     private static void flush(Binding binding) {
         var pending=binding.pending; if(pending==null)return;binding.pending=null;PENDING.remove(binding);
         var be=binding.owner.get();if(be==null||!(be.getLevel() instanceof ServerLevel level))return;
-        if(!ModStateAudit.enabled(level.getServer(),ActionType.MACHINE_CONTENT_CHANGE))return;
         try(var cause=CauseContext.unattributed()){
+            var receipt = ModStateAudit.prepareReceipt(level.getServer(), IndustrialAudit.provider(be),
+                    "native-fluid-interval", ActionType.MACHINE_CONTENT_CHANGE);
+            if (receipt == null) return;
             var before=tag(be,binding,pending.before);var after=tag(be,binding,pending.after);
             after.putInt("FromServerTick",pending.start);after.putInt("ToServerTick",pending.end);after.putInt("NativeMutations",pending.operations);
             after.putBoolean("NativeThrew",pending.threw);after.put("ObservedFlows",flows(be,pending.flows));
             // A circulation may return to its original amount; its observed operation count remains evidence.
-            ModStateAudit.receipt(level.getServer(),IndustrialAudit.provider(be),"native-fluid-interval",ActionType.MACHINE_CONTENT_CHANGE,before,after);
+            receipt.finish(before, after, false);
         }catch(RuntimeException|LinkageError failure){IndustrialAudit.fail("fluid-flush");}
     }
     public static void stop(MinecraftServer server) {
@@ -149,7 +185,7 @@ public final class IndustrialFluids {
         private Action(Binding binding,Raw before,boolean batch,int tick){this.binding=binding;this.before=before;this.batch=batch;this.tick=tick;}
         public void finish(boolean threw) {
             try {
-                var after=read(binding);if(same(before,after))return;
+                var after=read(binding, before);if(before==after)return;
                 var be=binding.owner.get();if(be==null||!(be.getLevel() instanceof ServerLevel level))return;
                 if(batch){
                     var pending=binding.pending;
@@ -170,9 +206,12 @@ public final class IndustrialFluids {
             finally{binding.active=false;}
         }
         private void emit(BlockEntity be,Raw before,Raw after,boolean threw){
+            var receipt = ModStateAudit.prepareReceipt(((ServerLevel)be.getLevel()).getServer(), IndustrialAudit.provider(be),
+                    "physical-fluid-change", ActionType.MACHINE_CONTENT_CHANGE);
+            if (receipt == null) return;
             var first=tag(be,binding,before);var last=tag(be,binding,after);last.putBoolean("NativeThrew",threw);
             var flow=new ArrayList<Flow>();delta(flow,before,after);last.put("ObservedFlows",flows(be,flow));
-            ModStateAudit.receipt(((ServerLevel)be.getLevel()).getServer(),IndustrialAudit.provider(be),"physical-fluid-change",ActionType.MACHINE_CONTENT_CHANGE,first,last);
+            receipt.finish(first, last, false);
         }
     }
 }

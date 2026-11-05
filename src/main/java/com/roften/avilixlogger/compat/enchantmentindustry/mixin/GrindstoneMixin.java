@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.enchantmentindustry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,18 +19,21 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class GrindstoneMixin {
     @WrapMethod(method = "applyRecipe()V", remap = false)
     private void avilixlogger$recipe(Operation<Void> original){
+        if (!CaptureHandlers.ENCHANTMENTINDUSTRY_GRINDSTONEMIXIN_RECIPE.enabled()) { original.call(); return; }
         var action=IndustrialAudit.begin(this,"grinding-result",true); boolean success=false;
         try{original.call();success=true;}
         finally{if(action!=null)action.finish(!success);}
     }
     @WrapMethod(method = "clearContent()V", remap = false)
     private void avilixlogger$clear(Operation<Void> original){
+        if (!CaptureHandlers.ENCHANTMENTINDUSTRY_GRINDSTONEMIXIN_CLEAR.enabled()) { original.call(); return; }
         var action=IndustrialAudit.begin(this,"clear-grindstone",true); boolean success=false;
         try{original.call();success=true;}
         finally{if(action!=null)action.finish(!success);}
     }
     @WrapMethod(method = "destroy()V", remap = false)
     private void avilixlogger$destroy(Operation<Void> original){
+        if (!CaptureHandlers.ENCHANTMENTINDUSTRY_GRINDSTONEMIXIN_DESTROY.enabled()) { original.call(); return; }
         var action=IndustrialAudit.begin(this,"destroy-grindstone",true); boolean success=false;
         try{original.call();success=true;}
         finally{if(action!=null)action.finish(!success);}

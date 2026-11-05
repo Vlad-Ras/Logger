@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.api.networking.crafting.ICraftingLink;
 import appeng.crafting.CraftingLink;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
@@ -19,6 +21,7 @@ public abstract class CraftingLinkNexusMixin implements Ae2LinkedCancellationSta
     public boolean avilixlogger$done() { return done; }
     @WrapMethod(method="cancel")
     private void avilixlogger$linkedCancel(Operation<Void> original) {
+        if (!CaptureHandlers.AE2_CRAFTINGLINKNEXUSMIXIN_LINKEDCANCEL.enabled()) { original.call(); return; }
         var capture = Ae2CraftingAudit.beginLinkedCancellation(this);
         boolean returned = false;
         try { original.call(); returned = true; }

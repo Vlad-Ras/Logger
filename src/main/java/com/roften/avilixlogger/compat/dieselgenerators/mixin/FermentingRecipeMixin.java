@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.dieselgenerators.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class FermentingRecipeMixin {
     @WrapMethod(method = "apply(Lcom/jesz/createdieselgenerators/content/bulk_fermenter/BulkFermenterBlockEntity;Z)Z", remap = false)
     private boolean avilixlogger$apply(@Coerce Object be, boolean simulate, Operation<Boolean> original){
+        if (!CaptureHandlers.DIESELGENERATORS_FERMENTINGRECIPEMIXIN_APPLY.enabled()) { return original.call(be, simulate); }
         var action=simulate?null:IndustrialAudit.begin(be,"bulk-fermenting-recipe",true); boolean success=false;
         try{var result=original.call(be, simulate);success=true;return result;}
         finally{if(action!=null)action.finish(!success);}

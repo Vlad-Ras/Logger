@@ -61,7 +61,9 @@ public final class CreateEntityOrigin {
                 tag.getInt("AttributionFormat")==2 && tag.hasUUID("Actor") ? tag.getString("ActorName") : null);
     }
     public static CauseContext.Scope cause(Entity entity) {
-        var origin = read(entity);
+        return cause(entity, read(entity));
+    }
+    public static CauseContext.Scope cause(Entity entity, Stamp origin) {
         return origin == null || origin.actor() == null ? CauseContext.unattributed()
                 : CauseContext.push(new CauseContext.Cause(origin.actor(), origin.actorName(),
                 CauseContext.Kind.OTHER, entity.blockPosition(), null, System.currentTimeMillis()));

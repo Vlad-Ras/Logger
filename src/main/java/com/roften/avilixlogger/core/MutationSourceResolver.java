@@ -23,14 +23,18 @@ public final class MutationSourceResolver {
             var origin = CreateEntityOrigin.read(entity);
             if (origin != null) return origin.source();
         }
-        String source = CLASS_SOURCES.get(object.getClass());
+        return sourceForClass(object.getClass());
+    }
+
+    public static String sourceForClass(Class<?> type) {
+        String source = CLASS_SOURCES.get(type);
         return source.isEmpty() ? null : source;
     }
 
     /** Allocation-free enter/restore for callbacks executed on every tick. */
     public static String enter(String source) {
         String previous = CONTEXT.get();
-        CONTEXT.set(source);
+        if (previous != source) CONTEXT.set(source);
         return previous;
     }
 

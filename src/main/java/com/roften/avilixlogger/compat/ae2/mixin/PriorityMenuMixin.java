@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.ae2.Ae2MenuCapture;
@@ -9,6 +11,7 @@ import org.spongepowered.asm.mixin.Mixin;
 public abstract class PriorityMenuMixin {
     @WrapMethod(method="setPriority")
     private void avilixlogger$priority(int value, Operation<Void> original) {
+        if (!CaptureHandlers.AE2_PRIORITYMENUMIXIN_PRIORITY.enabled()) { original.call(value); return; }
         var capture = (Ae2MenuCapture) this;
         capture.avilixlogger$beforeAction();
         try { original.call(value); }

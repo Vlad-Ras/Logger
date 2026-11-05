@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.accessories.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.accessories.AccessoriesAudit;
@@ -23,30 +25,35 @@ public abstract class InventoryMixin implements AccessoriesInventoryState {
     }
     @WrapMethod(method = "setItem(ILnet/minecraft/world/item/ItemStack;)V", remap = false)
     private void avilixlogger$set(int slot, ItemStack stack, Operation<Void> original) {
+        if (!CaptureHandlers.ACCESSORIES_INVENTORYMIXIN_SET.enabled()) { original.call(slot, stack); return; }
         var action = AccessoriesAudit.inventory(this, "inventory-set"); boolean success = false;
         try { original.call(slot, stack); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "removeItem(II)Lnet/minecraft/world/item/ItemStack;", remap = false)
     private ItemStack avilixlogger$remove(int slot, int amount, Operation<ItemStack> original) {
+        if (!CaptureHandlers.ACCESSORIES_INVENTORYMIXIN_REMOVE.enabled()) { return original.call(slot, amount); }
         var action = AccessoriesAudit.inventory(this, "inventory-remove"); boolean success = false;
         try { var result = original.call(slot, amount); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "removeItemNoUpdate(I)Lnet/minecraft/world/item/ItemStack;", remap = false)
     private ItemStack avilixlogger$removeWithoutUpdate(int slot, Operation<ItemStack> original) {
+        if (!CaptureHandlers.ACCESSORIES_INVENTORYMIXIN_REMOVEWITHOUTUPDATE.enabled()) { return original.call(slot); }
         var action = AccessoriesAudit.inventory(this, "inventory-removeWithoutUpdate"); boolean success = false;
         try { var result = original.call(slot); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "fromTag(Lnet/minecraft/nbt/ListTag;Lnet/minecraft/core/HolderLookup$Provider;)V", remap = false)
     private void avilixlogger$read(ListTag tag, HolderLookup.Provider provider, Operation<Void> original) {
+        if (!CaptureHandlers.ACCESSORIES_INVENTORYMIXIN_READ.enabled()) { original.call(tag, provider); return; }
         var action = AccessoriesAudit.inventory(this, "inventory-read"); boolean success = false;
         try { original.call(tag, provider); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "setPreviousItem(ILnet/minecraft/world/item/ItemStack;)V", remap = false)
     private void avilixlogger$observe(int slot, ItemStack stack, Operation<Void> original) {
+        if (!CaptureHandlers.ACCESSORIES_INVENTORYMIXIN_OBSERVE.enabled()) { original.call(slot, stack); return; }
         var observation = AccessoriesAudit.observe(this, slot); boolean success = false;
         try { original.call(slot, stack); success = true; }
         finally { if (observation != null) observation.finish(!success); }

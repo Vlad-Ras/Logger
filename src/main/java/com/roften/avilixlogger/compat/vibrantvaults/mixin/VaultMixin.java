@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.vibrantvaults.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -13,36 +15,42 @@ import com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit;
 public abstract class VaultMixin {
     @WrapMethod(method = "setController(Lnet/minecraft/core/BlockPos;)V", remap = false)
     private void avilixlogger$controller(BlockPos pos, Operation<Void> original) {
+        if (!CaptureHandlers.VIBRANTVAULTS_VAULTMIXIN_CONTROLLER.enabled()) { original.call(pos); return; }
         var action = VibrantVaultAudit.begin(this, "controller", false); boolean success = false;
         try { original.call(pos); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "removeController(Z)V", remap = false)
     private void avilixlogger$split(boolean keepContents, Operation<Void> original) {
+        if (!CaptureHandlers.VIBRANTVAULTS_VAULTMIXIN_SPLIT.enabled()) { original.call(keepContents); return; }
         var action = VibrantVaultAudit.begin(this, "split", false); boolean success = false;
         try { original.call(keepContents); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "setHeight(I)V", remap = false)
     private void avilixlogger$height(int height, Operation<Void> original) {
+        if (!CaptureHandlers.VIBRANTVAULTS_VAULTMIXIN_HEIGHT.enabled()) { original.call(height); return; }
         var action = VibrantVaultAudit.begin(this, "height", false); boolean success = false;
         try { original.call(height); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "setWidth(I)V", remap = false)
     private void avilixlogger$width(int width, Operation<Void> original) {
+        if (!CaptureHandlers.VIBRANTVAULTS_VAULTMIXIN_WIDTH.enabled()) { original.call(width); return; }
         var action = VibrantVaultAudit.begin(this, "width", false); boolean success = false;
         try { original.call(width); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "clearContent()V", remap = false)
     private void avilixlogger$clear(Operation<Void> original) {
+        if (!CaptureHandlers.VIBRANTVAULTS_VAULTMIXIN_CLEAR.enabled()) { original.call(); return; }
         var action = VibrantVaultAudit.begin(this, "clear", true); boolean success = false;
         try { original.call(); success = true; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "applyInventoryToBlock(Lnet/neoforged/neoforge/items/ItemStackHandler;)V", remap = false)
     private void avilixlogger$copy(net.neoforged.neoforge.items.ItemStackHandler handler, Operation<Void> original) {
+        if (!CaptureHandlers.VIBRANTVAULTS_VAULTMIXIN_COPY.enabled()) { original.call(handler); return; }
         var action = VibrantVaultAudit.begin(this, "copy", true); boolean success = false;
         try { original.call(handler); success = true; }
         finally { if (action != null) action.finish(!success); }

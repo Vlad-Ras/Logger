@@ -21,8 +21,7 @@ public final class VibrantVaultAudit {
     private static String kind(BlockEntity be) {
         String type = be.getClass().getSimpleName();
         if (type.equals("FactoryPanelBlockEntity")) return "panel";
-        if (!BuiltInRegistries.BLOCK.getKey(be.getBlockState().getBlock()).getNamespace().equals("create_vibrant_vaults")) return "";
-        return switch (type) {
+        String candidate = switch (type) {
             case "ItemVaultBlockEntity" -> "vault";
             case "PackagerBlockEntity" -> "packager";
             case "FrogportBlockEntity" -> "port";
@@ -30,9 +29,11 @@ public final class VibrantVaultAudit {
             case "RedstoneRequesterBlockEntity" -> "requester";
             default -> "";
         };
+        return !candidate.isEmpty() && BuiltInRegistries.BLOCK.getKey(be.getBlockState().getBlock())
+                .getNamespace().equals("create_vibrant_vaults") ? candidate : "";
     }
     public static boolean handles(Object target) {
-        return target instanceof MachineState && target instanceof BlockEntity be && MachineAudit.level(be) != null && !kind(be).isEmpty();
+        return target instanceof MachineState && target instanceof BlockEntity be && !kind(be).isEmpty() && MachineAudit.level(be) != null;
     }
     private static IItemHandler inventory(BlockEntity be) throws ReflectiveOperationException {
         return switch (kind(be)) {
@@ -70,17 +71,21 @@ public final class VibrantVaultAudit {
     }
     public static void observed(Object target) { observed(target, false); }
     private static void observed(Object target, boolean threw) {
-        if (!handles(target) || !(target instanceof MachineState tracked)) return;
-        var be = (BlockEntity) target; bind(be);
+        if (!(target instanceof MachineState tracked) || !(target instanceof BlockEntity be)
+                || kind(be).isEmpty()) return;
+        var level = MachineAudit.level(be);
+        if (level == null) return;
+        bindPhysical(be);
         if (ModStateAudit.capturing(be, "machine")) return;
-        if (!MachineAudit.enabled(be, observationType(be))) { tracked.avilixlogger$machineBaseline(null); return; }
+        var type = observationType(be);
+        if (!ModStateAudit.enabled(level.getServer(), type)) { tracked.avilixlogger$machineBaseline(null); return; }
         try {
             var previous = tracked.avilixlogger$machineBaseline(); var now = state(be); tracked.avilixlogger$machineBaseline(now);
             if (previous != null && !previous.equals(now)) {
                 // A dirty notification does not establish the author of an earlier raw-field edit.
                 try (var cause = CauseContext.unattributed()) {
-                    ModStateAudit.receipt(((ServerLevel)be.getLevel()).getServer(), "create_vibrant_vaults",
-                            "native-state-observation", observationType(be), previous, evidence(now, threw));
+                    ModStateAudit.receipt(level.getServer(), "create_vibrant_vaults",
+                            "native-state-observation", type, previous, evidence(now, threw));
                 }
             }
         } catch (ReflectiveOperationException | RuntimeException | LinkageError failure) { MachineAudit.failure("vibrant-observed"); }

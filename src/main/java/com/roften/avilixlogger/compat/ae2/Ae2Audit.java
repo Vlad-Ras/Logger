@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -56,6 +58,7 @@ public final class Ae2Audit {
     }
 
     public static boolean enabled() {
+        if (!CaptureHandlers.COMPAT_AE2_AE2AUDIT_ENABLED.enabled()) return false;
         try {
             return com.roften.avilixlogger.core.CaptureTypePolicy.enabled(13) && com.roften.avilixlogger.core.CaptureTypePolicy.enabled(2)
                     && LoggerConfig.isCaptureEnabled() && LoggerConfig.VALUES.logAe2.get();

@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.api.networking.IGrid;
 import appeng.api.networking.crafting.*;
 import appeng.api.networking.security.IActionSource;
@@ -14,6 +16,7 @@ public abstract class CraftingCPUClusterMixin {
     @WrapMethod(method="submitJob")
     private ICraftingSubmitResult avilixlogger$submitAccepted(IGrid grid, ICraftingPlan plan, IActionSource source, ICraftingRequester requester,
                                                            Operation<ICraftingSubmitResult> original) {
+        if (!CaptureHandlers.AE2_CRAFTINGCPUCLUSTERMIXIN_SUBMITACCEPTED.enabled()) { return original.call(grid, plan, source, requester); }
         var capture = Ae2CraftingAudit.beginSubmission(plan, source, (CraftingCPUCluster)(Object)this);
         boolean returned = false;
         try {

@@ -23,6 +23,7 @@ public final class CreateCartSmoke {
         if(!Boolean.getBoolean("avilixlogger.createSmoke"))return;
         try {
             var world=event.getServer().overworld();
+            HandlerCaptureSmoke.run(world);
             AuditDetailsSmoke.run(world);
             ModpackBoundarySmoke.run(world);
             CreateContraptionKindsSmoke.run(world);

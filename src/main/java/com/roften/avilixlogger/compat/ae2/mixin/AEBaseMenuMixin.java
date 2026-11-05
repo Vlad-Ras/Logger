@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import appeng.helpers.InventoryAction;
@@ -47,6 +49,7 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
     @WrapMethod(method = "clicked")
     private void avilixlogger$click(int slot, int button, ClickType kind, Player player,
             Operation<Void> original) {
+        if (!CaptureHandlers.AE2_AEBASEMENUMIXIN_CLICK.enabled()) { original.call(slot, button, kind, player); return; }
         if (!(player instanceof ServerPlayer)) { original.call(slot, button, kind, player); return; }
         avilixlogger$beforeAction();
         try { original.call(slot, button, kind, player); }
@@ -56,6 +59,7 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
     @WrapMethod(method = "quickMoveStack")
     private ItemStack avilixlogger$move(Player player, int slot,
             Operation<ItemStack> original) {
+        if (!CaptureHandlers.AE2_AEBASEMENUMIXIN_MOVE.enabled()) { return original.call(player, slot); }
         if (!(player instanceof ServerPlayer)) return original.call(player, slot);
         avilixlogger$beforeAction();
         try { return original.call(player, slot); }
@@ -65,6 +69,7 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
     @WrapMethod(method = "doAction")
     private void avilixlogger$action(ServerPlayer player, InventoryAction action, int slot, long id,
             Operation<Void> original) {
+        if (!CaptureHandlers.AE2_AEBASEMENUMIXIN_ACTION.enabled()) { original.call(player, action, slot, id); return; }
         avilixlogger$beforeAction();
         try { original.call(player, action, slot, id); }
         finally { avilixlogger$afterAction(); }
@@ -73,6 +78,7 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
     @WrapMethod(method = "setFilter")
     private void avilixlogger$filter(int slot, ItemStack item,
             Operation<Void> original) {
+        if (!CaptureHandlers.AE2_AEBASEMENUMIXIN_FILTER.enabled()) { original.call(slot, item); return; }
         avilixlogger$beforeAction();
         try { original.call(slot, item); }
         finally { avilixlogger$afterAction(); }
@@ -81,6 +87,7 @@ public abstract class AEBaseMenuMixin implements Ae2MenuCapture {
     @WrapMethod(method = "receiveClientAction")
     private void avilixlogger$clientAction(String name, String json,
             Operation<Void> original) {
+        if (!CaptureHandlers.AE2_AEBASEMENUMIXIN_CLIENTACTION.enabled()) { original.call(name, json); return; }
         avilixlogger$beforeAction();
         try { original.call(name, json); }
         finally { avilixlogger$afterAction(); }

@@ -2,6 +2,7 @@ package com.roften.avilixlogger.compat.create.mixin;
 
 import com.roften.avilixlogger.compat.create.CreateTrainsCompatHooks;
 import com.roften.avilixlogger.core.CreateContraptionSnapshotStore;
+import com.roften.avilixlogger.core.CaptureHandlers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -28,7 +29,7 @@ public class AbstractContraptionEntityMixin {
     private void avilixlogger$actorVisit(com.simibubi.create.api.behaviour.movement.MovementBehaviour actor,
             com.simibubi.create.content.contraptions.behaviour.MovementContext context, BlockPos pos,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
-        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
+        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context, CaptureHandlers.CREATE_ACTOR_VISIT.enabled());
         var previous = com.roften.avilixlogger.core.CreateMechanismContext.current();
         try { com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context); original.call(actor, context, pos); }
         finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
@@ -39,7 +40,7 @@ public class AbstractContraptionEntityMixin {
     private void avilixlogger$actorTick(com.simibubi.create.api.behaviour.movement.MovementBehaviour actor,
             com.simibubi.create.content.contraptions.behaviour.MovementContext context,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
-        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
+        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context, CaptureHandlers.CREATE_ACTOR_TICK.enabled());
         var previous = com.roften.avilixlogger.core.CreateMechanismContext.current();
         try { com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context); original.call(actor, context); }
         finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);
@@ -51,7 +52,7 @@ public class AbstractContraptionEntityMixin {
             com.simibubi.create.content.contraptions.behaviour.MovementContext context,
             net.minecraft.world.phys.Vec3 oldMotion, net.minecraft.world.phys.Vec3 motion,
             com.llamalad7.mixinextras.injector.wrapoperation.Operation<Void> original) {
-        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context);
+        var previousCapture = com.roften.avilixlogger.compat.create.CreateCapturePolicy.enterActor(context, CaptureHandlers.CREATE_ACTOR_SPEED.enabled());
         var previous = com.roften.avilixlogger.core.CreateMechanismContext.current();
         try { com.roften.avilixlogger.compat.create.CreateMechanismAudit.enter(context); original.call(actor, context, oldMotion, motion); }
         finally { com.roften.avilixlogger.core.CreateMechanismContext.restore(previous);

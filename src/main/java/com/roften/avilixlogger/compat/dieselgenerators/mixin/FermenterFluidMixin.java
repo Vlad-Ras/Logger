@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.dieselgenerators.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,30 +19,35 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class FermenterFluidMixin {
     @WrapMethod(method = "fill(Lnet/neoforged/neoforge/fluids/FluidStack;Lnet/neoforged/neoforge/fluids/capability/IFluidHandler$FluidAction;)I", remap = false)
     private int avilixlogger$fill(net.neoforged.neoforge.fluids.FluidStack stack, net.neoforged.neoforge.fluids.capability.IFluidHandler.FluidAction mode, Operation<Integer> original) {
+        if (!CaptureHandlers.DIESELGENERATORS_FERMENTERFLUIDMIXIN_FILL.enabled()) { return original.call(stack, mode); }
         var action = IndustrialFluids.begin(this, mode.simulate()); boolean success = false;
         try { var result = original.call(stack, mode); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "drain(Lnet/neoforged/neoforge/fluids/FluidStack;Lnet/neoforged/neoforge/fluids/capability/IFluidHandler$FluidAction;)Lnet/neoforged/neoforge/fluids/FluidStack;", remap = false)
     private net.neoforged.neoforge.fluids.FluidStack avilixlogger$drainFluid(net.neoforged.neoforge.fluids.FluidStack stack, net.neoforged.neoforge.fluids.capability.IFluidHandler.FluidAction mode, Operation<net.neoforged.neoforge.fluids.FluidStack> original) {
+        if (!CaptureHandlers.DIESELGENERATORS_FERMENTERFLUIDMIXIN_DRAINFLUID.enabled()) { return original.call(stack, mode); }
         var action = IndustrialFluids.begin(this, mode.simulate()); boolean success = false;
         try { var result = original.call(stack, mode); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "drain(ILnet/neoforged/neoforge/fluids/capability/IFluidHandler$FluidAction;)Lnet/neoforged/neoforge/fluids/FluidStack;", remap = false)
     private net.neoforged.neoforge.fluids.FluidStack avilixlogger$drainAmount(int amount, net.neoforged.neoforge.fluids.capability.IFluidHandler.FluidAction mode, Operation<net.neoforged.neoforge.fluids.FluidStack> original) {
+        if (!CaptureHandlers.DIESELGENERATORS_FERMENTERFLUIDMIXIN_DRAINAMOUNT.enabled()) { return original.call(amount, mode); }
         var action = IndustrialFluids.begin(this, mode.simulate()); boolean success = false;
         try { var result = original.call(amount, mode); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "setCapacity(I)Lnet/neoforged/neoforge/fluids/capability/templates/FluidTank;", remap = false)
     private net.neoforged.neoforge.fluids.capability.templates.FluidTank avilixlogger$capacity(int capacity, Operation<net.neoforged.neoforge.fluids.capability.templates.FluidTank> original) {
+        if (!CaptureHandlers.DIESELGENERATORS_FERMENTERFLUIDMIXIN_CAPACITY.enabled()) { return original.call(capacity); }
         var action = IndustrialFluids.begin(this, false); boolean success = false;
         try { var result = original.call(capacity); success = true; return result; }
         finally { if (action != null) action.finish(!success); }
     }
     @WrapMethod(method = "readFromNBT(Lnet/minecraft/core/HolderLookup$Provider;Lnet/minecraft/nbt/CompoundTag;)Lnet/neoforged/neoforge/fluids/capability/templates/FluidTank;", remap = false)
     private net.neoforged.neoforge.fluids.capability.templates.FluidTank avilixlogger$read(HolderLookup.Provider provider, CompoundTag tag, Operation<net.neoforged.neoforge.fluids.capability.templates.FluidTank> original) {
+        if (!CaptureHandlers.DIESELGENERATORS_FERMENTERFLUIDMIXIN_READ.enabled()) { return original.call(provider, tag); }
         var action = IndustrialFluids.begin(this, false); boolean success = false;
         try { var result = original.call(provider, tag); success = true; return result; }
         finally { if (action != null) action.finish(!success); }

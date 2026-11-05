@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.enchantmentindustry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -18,6 +20,7 @@ public abstract class PrinterProcessingMixin {
     @WrapMethod(method = "onItemHeld(Lcom/simibubi/create/content/kinetics/belt/transport/TransportedItemStack;Lcom/simibubi/create/content/kinetics/belt/behaviour/TransportedItemStackHandlerBehaviour;)Lcom/simibubi/create/content/kinetics/belt/behaviour/BeltProcessingBehaviour$ProcessingResult;", remap = false)
     @Coerce
     private Object avilixlogger$print(@Coerce Object transported, @Coerce Object handler, Operation<Object> original){
+        if (!CaptureHandlers.ENCHANTMENTINDUSTRY_PRINTERPROCESSINGMIXIN_PRINT.enabled()) { return original.call(transported, handler); }
         var action=IndustrialProcessing.print(this,transported); boolean success=false;
         try{var result=original.call(transported, handler);success=true;return result;}
         finally{if(action!=null)action.finish(!success);}

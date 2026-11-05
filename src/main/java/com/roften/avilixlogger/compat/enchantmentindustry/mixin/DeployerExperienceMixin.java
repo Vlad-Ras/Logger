@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.enchantmentindustry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class DeployerExperienceMixin {
     @WrapMethod(method = "collectExperience(Lcom/simibubi/create/content/kinetics/deployer/DeployerFakePlayer;I)V", remap = false)
     private static void avilixlogger$collect(@Coerce Object deployer, int amount, Operation<Void> original){
+        if (!CaptureHandlers.ENCHANTMENTINDUSTRY_DEPLOYEREXPERIENCEMIXIN_COLLECT.enabled()) { original.call(deployer,amount); return; }
         try(var cause=com.roften.avilixlogger.core.CauseContext.unattributed()){
             var action=IndustrialPlayers.begin(deployer,"create_enchantment_industry","deployer-collected-experience",null,true);boolean success=false;
             try{original.call(deployer,amount);success=true;}finally{if(action!=null)action.finish(!success);}

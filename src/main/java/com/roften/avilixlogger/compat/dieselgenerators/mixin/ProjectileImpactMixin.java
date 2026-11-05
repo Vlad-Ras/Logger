@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.dieselgenerators.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class ProjectileImpactMixin implements IndustrialChemicalProjectile {
     @WrapMethod(method = "onHitEntity(Lnet/minecraft/world/phys/EntityHitResult;)V", remap = false)
     private void avilixlogger$impact(net.minecraft.world.phys.EntityHitResult hit,Operation<Void> original){
+        if (!CaptureHandlers.DIESELGENERATORS_PROJECTILEIMPACTMIXIN_IMPACT.enabled()) { original.call(hit); return; }
         try(var cause=IndustrialImpacts.cause(this)){
             var action=IndustrialImpacts.hit(this,hit.getEntity());boolean success=false;
             try{original.call(hit);success=true;}finally{if(action!=null)action.finish(!success);}

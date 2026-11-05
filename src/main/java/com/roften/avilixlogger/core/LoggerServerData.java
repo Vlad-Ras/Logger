@@ -21,6 +21,7 @@ public final class LoggerServerData extends SavedData {
     private String inspectToolItemId;
     private long guiCaptureDisabledMask;
     private int guiCaptureRevision;
+    private java.util.Set<String> disabledHandlers = java.util.Set.of();
 
     /** Stored command argument presets (name -> raw args string). */
     private final java.util.Map<String, String> presets = new java.util.LinkedHashMap<>();
@@ -39,6 +40,13 @@ public final class LoggerServerData extends SavedData {
             d.inspectToolItemId = tag.getString(KEY_INSPECT_TOOL);
         }
         d.guiCaptureDisabledMask = tag.getLong(KEY_CAPTURE_MASK) & CaptureTypePolicy.ALL_DISABLED;
+        var handlers = tag.getList("guiDisabledHandlers", net.minecraft.nbt.Tag.TAG_STRING);
+        var keys = new java.util.HashSet<String>();
+        for (int i = 0; i < Math.min(2048, handlers.size()); i++) {
+            String key = handlers.getString(i);
+            if (!key.isBlank() && key.length() <= 256) keys.add(key);
+        }
+        d.disabledHandlers = java.util.Set.copyOf(keys);
         d.guiCaptureRevision = Math.max(0, tag.getInt(KEY_CAPTURE_REVISION));
         if (tag.contains(KEY_PRESETS, net.minecraft.nbt.Tag.TAG_COMPOUND)) {
             CompoundTag p = tag.getCompound(KEY_PRESETS);
@@ -56,6 +64,9 @@ public final class LoggerServerData extends SavedData {
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
         if (inspectToolItemId != null) tag.putString(KEY_INSPECT_TOOL, inspectToolItemId);
         tag.putLong(KEY_CAPTURE_MASK, guiCaptureDisabledMask);
+        var handlers = new net.minecraft.nbt.ListTag();
+        disabledHandlers.stream().sorted().forEach(key -> handlers.add(net.minecraft.nbt.StringTag.valueOf(key)));
+        tag.put("guiDisabledHandlers", handlers);
         tag.putInt(KEY_CAPTURE_REVISION, guiCaptureRevision);
         CompoundTag p = new CompoundTag();
         for (var e : presets.entrySet()) {
@@ -71,12 +82,22 @@ public final class LoggerServerData extends SavedData {
     public int captureRevision() { return guiCaptureRevision; }
     /** Server thread only: durable level SavedData and immediate volatile hot-path update. */
     public void setCaptureMask(long mask) {
-        long sanitized = mask & CaptureTypePolicy.ALL_DISABLED;
-        if (guiCaptureDisabledMask == sanitized) { CaptureTypePolicy.install(sanitized); return; }
-        guiCaptureDisabledMask = sanitized;
-        guiCaptureRevision++;
-        CaptureTypePolicy.install(sanitized);
-        setDirty();
+        setCaptureSettings(mask, disabledHandlers);
+    }
+
+    public java.util.Set<String> disabledHandlers() { return disabledHandlers; }
+
+    public void setCaptureSettings(long mask, java.util.Set<String> handlers) {
+        long next = mask & CaptureTypePolicy.ALL_DISABLED;
+        boolean changed = guiCaptureDisabledMask != next || !disabledHandlers.equals(handlers);
+        guiCaptureDisabledMask = next;
+        disabledHandlers = java.util.Set.copyOf(handlers);
+        CaptureTypePolicy.install(next);
+        CaptureHandlers.install(disabledHandlers);
+        if (changed) {
+            guiCaptureRevision++;
+            setDirty();
+        }
     }
 
     public String getInspectToolItemId() {

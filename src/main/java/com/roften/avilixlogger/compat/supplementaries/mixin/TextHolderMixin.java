@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.supplementaries.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.supplementaries.SupplementariesTextAudit;
@@ -26,5 +28,6 @@ public abstract class TextHolderMixin implements TextHolderAuditAccess {
         return true;
     }
     @WrapMethod(method="acceptClientMessages(Lnet/minecraft/world/entity/player/Player;Ljava/util/List;)V")
-    private void avilixlogger$acceptedText(Player player,List<?> messages,Operation<Void> original){SupplementariesTextAudit.beforeNativeText();original.call(player,messages);}
+    private void avilixlogger$acceptedText(Player player,List<?> messages,Operation<Void> original){
+        if (!CaptureHandlers.SUPPLEMENTARIES_TEXTHOLDERMIXIN_ACCEPTEDTEXT.enabled()) { original.call(player,messages); return; }SupplementariesTextAudit.beforeNativeText();original.call(player,messages);}
 }

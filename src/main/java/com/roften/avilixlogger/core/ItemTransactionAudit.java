@@ -33,6 +33,7 @@ public final class ItemTransactionAudit {
         row.extra="торговля BlockPack; продавец="+merchant.name()+"; цена="+itemLabel(first)+(second==null?"":" + "+itemLabel(second))+"; результат="+itemLabel(result)+"; audit only";return row;
     }
     public static void onTrade(TradeWithVillagerEvent event){
+        if (!CaptureHandlers.CORE_ITEMTRANSACTIONAUDIT_ONTRADE.enabled()) return;
         if(!enabled()||event==null||!(event.getEntity() instanceof ServerPlayer player)||!player.server.isSameThread()||CauseContext.actorUuid(player)==null)return;
         var merchant=event.getAbstractVillager();
         if(merchant==null||!merchant.getClass().getName().equals("com.blockfactory.blockpack.entity.BfWanderingTrader"))return;

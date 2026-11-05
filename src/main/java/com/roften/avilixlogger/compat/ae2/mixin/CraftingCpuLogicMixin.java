@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.me.cluster.implementations.CraftingCPUCluster;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
@@ -23,6 +25,7 @@ public abstract class CraftingCpuLogicMixin implements Ae2CpuCancellationSource 
     }
     @WrapMethod(method="finishJob")
     private void avilixlogger$finishJob(boolean success, Operation<Void> original) {
+        if (!CaptureHandlers.AE2_CRAFTINGCPULOGICMIXIN_FINISHJOB.enabled()) { original.call(success); return; }
         var capture = success ? Ae2CraftingAudit.beginCompletion(cluster) : null;
         var cancellation = success ? null : Ae2CraftingAudit.beginCpuCancellation(cluster);
         boolean previousOwner = cancellation != null && avilixlogger$swapCancellationOwned(true);

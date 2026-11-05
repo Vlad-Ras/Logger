@@ -27,6 +27,7 @@ public final class CaptureTypePolicy {
         long next = mask & ALL_DISABLED;
         if (disabledMask != next) { disabledMask = next; generation++; }
     }
+    static void handlersChanged() { generation++; }
     public static long generation() { return generation; }
     public static boolean suppressed() { return Boolean.TRUE.equals(SUPPRESSED.get()); }
     /** Nested callbacks may suppress capture, but cannot re-enable an outer muted operation. */

@@ -16,7 +16,9 @@ public final class SupplementariesTextAudit {
     private static final Set<String> PROVIDERS=Set.of("net.mehvahdjukaar.supplementaries.common.block.tiles.DoormatBlockTile","net.mehvahdjukaar.supplementaries.common.block.tiles.NoticeBoardBlockTile","net.mehvahdjukaar.supplementaries.common.block.tiles.SignPostBlockTile");
     private SupplementariesTextAudit(){}
     public static boolean supported(BlockEntity entity){return entity!=null&&PROVIDERS.contains(entity.getClass().getName());}
-    public static boolean enabled(){return CaptureTypePolicy.enabled(1)&&CaptureTypePolicy.enabled(2)&&LoggerConfig.isEnabled()&&LoggerConfig.VALUES.logBlocks.get()&&!CartAuditContext.restoring();}
+    public static boolean enabled(){
+        if (!CaptureHandlers.COMPAT_SUPPLEMENTARIES_SUPPLEMENTARIESTEXTAUDIT_ENABLED.enabled()) return false;
+        return CaptureTypePolicy.enabled(1)&&CaptureTypePolicy.enabled(2)&&LoggerConfig.isEnabled()&&LoggerConfig.VALUES.logBlocks.get()&&!CartAuditContext.restoring();}
     public static Scope begin(ServerPlayer player,BlockPos pos){
         if(!CaptureTypePolicy.enabled(1)||!CaptureTypePolicy.enabled(2)||player==null||!player.server.isSameThread()||!enabled()||CauseContext.actorUuid(player)==null)return null;
         try{var scope=new Scope(player,pos.immutable(),CURRENT.get());CURRENT.set(scope);return scope;}

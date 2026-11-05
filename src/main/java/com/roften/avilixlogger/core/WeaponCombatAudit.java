@@ -35,6 +35,7 @@ public final class WeaponCombatAudit {
     }
 
     public static Fire beginFire(ServerPlayer player) {
+        if (!CaptureHandlers.CORE_WEAPONCOMBATAUDIT_BEGINFIRE.enabled()) return null;
         if(player==null || !player.server.isSameThread() || !traceEnabled())return null;
         try {var f=new Fire(player,WeaponCombatTrace.Pose.capture(player),FIRE.get());FIRE.set(f);return f;}
         catch(RuntimeException failure){failure();return null;}
@@ -78,6 +79,7 @@ public final class WeaponCombatAudit {
         return null;
     }
     public static void damage(LivingDamageEvent.Post event) {
+        if (!CaptureHandlers.CORE_WEAPONCOMBATAUDIT_DAMAGE.enabled()) return;
         if(!(event.getEntity().level() instanceof ServerLevel level) || !level.getServer().isSameThread() || !enabled()
                 || !CaptureTypePolicy.allows(ActionType.PROJECTILE_HIT,"mod:scguns",null) || !LoggerConfig.VALUES.logProjectileHits.get() || !(event.getNewDamage()>0))return;
         try {
@@ -88,6 +90,7 @@ public final class WeaponCombatAudit {
         }catch(RuntimeException failure){failure();}
     }
     public static void blockImpact(Entity projectile,BlockHitResult hit) {
+        if (!CaptureHandlers.CORE_WEAPONCOMBATAUDIT_BLOCKIMPACT.enabled()) return;
         if(!(projectile.level() instanceof ServerLevel level) || !level.getServer().isSameThread() || !enabled()
                 || !CaptureTypePolicy.allows(ActionType.PROJECTILE_HIT,"mod:scguns",null) || !LoggerConfig.VALUES.logProjectileHits.get() || !traced(projectile))return;
         try {
@@ -145,19 +148,23 @@ public final class WeaponCombatAudit {
         private ReloadSession(ItemStack stack,CompoundTag weapon,int ammo){this.stack=stack;this.weapon=weapon.copy();this.ammo=ammo;}
     }
     public static Reload beginReload(Player player,ItemStack stack,String phase) {
+        if (!CaptureHandlers.CORE_WEAPONCOMBATAUDIT_BEGINRELOAD.enabled()) return null;
         if(!(player instanceof ServerPlayer p) || !p.server.isSameThread() || !enabled() || !CaptureTypePolicy.enabled(4) || RELOAD.get()!=null)return null;
-        try {var before=NbtSerde.snapshotItemStack(stack,p.registryAccess());if(before==null)return null;
+        if (stack == null || stack.isEmpty()) return null;
+        try {var before=stack.copy();
             var session=p instanceof WeaponReloadAccess access?access.avilixlogger$reload():null;
             var r=new Reload(p,stack,phase,before,ammo(stack),WeaponCombatTrace.Pose.capture(p),session);RELOAD.set(r);return r;
         }catch(RuntimeException failure){failure();return null;}
     }
-    public record Reload(ServerPlayer player,ItemStack stack,String phase,CompoundTag before,int previousAmmo,WeaponCombatTrace.Pose pose,ReloadSession initialSession) implements AutoCloseable {
+    public record Reload(ServerPlayer player,ItemStack stack,String phase,ItemStack before,int previousAmmo,WeaponCombatTrace.Pose pose,ReloadSession initialSession) implements AutoCloseable {
         public void close(){try {
-            var after=NbtSerde.snapshotItemStack(stack,player.registryAccess());
-            if(after!=null && !before.equals(after)){
+            if (stack.isEmpty() || ItemStack.matches(before, stack)) return;
+            var beforeTag = NbtSerde.snapshotItemStack(before, player.registryAccess());
+            var after = NbtSerde.snapshotItemStack(stack, player.registryAccess());
+            if (beforeTag != null && after != null && !beforeTag.equals(after)) {
                 var session=initialSession!=null?initialSession:player instanceof WeaponReloadAccess access?access.avilixlogger$reload():null;
                 if(session!=null && session.stack==stack){session.weapon=after.copy();session.ammo=ammo(stack);}
-                var row=reloadEntry(player,pose,phase,before,after,previousAmmo,ammo(stack));
+                var row=reloadEntry(player,pose,phase,beforeTag,after,previousAmmo,ammo(stack));
                 if(session!=null && session.stack==stack){var t=(CompoundTag)row.copyDeferredSnapshot(LogEntry.SnapshotField.BE_AFTER);t.putUUID("ReloadId",session.id);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,t);}
                 append(player.serverLevel(),row);
             }
@@ -169,7 +176,8 @@ public final class WeaponCombatAudit {
         var access=p instanceof WeaponReloadAccess a?a:null;
         var session=access==null?null:access.avilixlogger$reload();
         if(!after && access!=null)access.avilixlogger$reload(null);
-        if(before==after || !enabled() || !CaptureTypePolicy.enabled(4))return;
+        if(before==after || !CaptureHandlers.CORE_WEAPONCOMBATAUDIT_RELOADSTATE.enabled()
+                || !enabled() || !CaptureTypePolicy.enabled(4))return;
         try {
             var gun=p.getMainHandItem();var item=NbtSerde.snapshotItemStack(gun,p.registryAccess());
             if(after && item!=null){session=new ReloadSession(gun,item,ammo(gun));if(access!=null)access.avilixlogger$reload(session);}

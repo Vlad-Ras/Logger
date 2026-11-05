@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.backpacked.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.mrcrayfish.backpacked.common.augment.AugmentHandler;
@@ -16,6 +18,7 @@ import org.spongepowered.asm.mixin.Mixin;
 public abstract class BackpackAugmentsMixin {
     @WrapMethod(method="recallBackpack")
     private static boolean avilixlogger$recall(ServerPlayer p,int index,net.minecraft.world.item.ItemStack stack,com.mrcrayfish.backpacked.common.augment.impl.RecallAugment augment,Operation<Boolean> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_RECALL.enabled()) { return original.call(p,index,stack,augment); }
         if(!BackpackAudit.enabled())return original.call(p,index,stack,augment);
         BackpackAudit.ensure(new BackpackAudit.Ref(stack,p.serverLevel(),p.blockPosition(),p,"equipped",index,null),p,com.roften.avilixlogger.core.ActionType.BACKPACK_DISCOVER);
         var copy=stack.copy();boolean result=original.call(p,index,stack,augment);
@@ -26,17 +29,24 @@ public abstract class BackpackAugmentsMixin {
         return result;
     }
     @WrapMethod(method="beforeItemPickup")
-    private static boolean avilixlogger$funnel(Player p,ItemEntity e,UUID target,Operation<Boolean> original){try(var s=BackpackAudit.scope(p,"augment:funnelling")){return original.call(p,e,target);}}
+    private static boolean avilixlogger$funnel(Player p,ItemEntity e,UUID target,Operation<Boolean> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_FUNNEL.enabled()) { return original.call(p,e,target); }try(var s=BackpackAudit.scope(p,"augment:funnelling")){return original.call(p,e,target);}}
     @WrapMethod(method="beforeArrowPickup")
-    private static boolean avilixlogger$arrows(Player p,AbstractArrow arrow,Operation<Boolean> original){try(var s=BackpackAudit.scope(p,"augment:funnelling_arrow")){return original.call(p,arrow);}}
+    private static boolean avilixlogger$arrows(Player p,AbstractArrow arrow,Operation<Boolean> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_ARROWS.enabled()) { return original.call(p,arrow); }try(var s=BackpackAudit.scope(p,"augment:funnelling_arrow")){return original.call(p,arrow);}}
     @WrapMethod(method={"onLootDroppedByEntity","onLootDroppedByBlock"})
-    private static void avilixlogger$loot(Collection<ItemEntity> drops,Player p,Operation<Void> original){try(var s=BackpackAudit.scope(p,"augment:lootbound")){original.call(drops,p);}}
+    private static void avilixlogger$loot(Collection<ItemEntity> drops,Player p,Operation<Void> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_LOOT.enabled()) { original.call(drops,p); return; }try(var s=BackpackAudit.scope(p,"augment:lootbound")){original.call(drops,p);}}
     @WrapMethod(method="onPlayerPickupExperienceOrb")
-    private static void avilixlogger$repair(Player p,ExperienceOrb orb,Operation<Void> original){try(var s=BackpackAudit.scope(p,"augment:reforge")){original.call(p,orb);}}
+    private static void avilixlogger$repair(Player p,ExperienceOrb orb,Operation<Void> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_REPAIR.enabled()) { original.call(p,orb); return; }try(var s=BackpackAudit.scope(p,"augment:reforge")){original.call(p,orb);}}
     @WrapMethod(method="onPlayerChangedBlockPos")
-    private static void avilixlogger$walk(ServerPlayer p,ServerLevel level,BlockPos pos,int brightness,Operation<Void> original){try(var s=BackpackAudit.scope(p,"augment:lightweaver")){original.call(p,level,pos,brightness);}}
+    private static void avilixlogger$walk(ServerPlayer p,ServerLevel level,BlockPos pos,int brightness,Operation<Void> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_WALK.enabled()) { original.call(p,level,pos,brightness); return; }try(var s=BackpackAudit.scope(p,"augment:lightweaver")){original.call(p,level,pos,brightness);}}
     @WrapMethod(method="onPlayerWalkOnCrops")
-    private static void avilixlogger$seedflow(ServerPlayer p,Operation<Void> original){try(var s=BackpackAudit.scope(p,"augment:seedflow")){original.call(p);}}
+    private static void avilixlogger$seedflow(ServerPlayer p,Operation<Void> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_SEEDFLOW.enabled()) { original.call(p); return; }try(var s=BackpackAudit.scope(p,"augment:seedflow")){original.call(p);}}
     @WrapMethod(method="replantCrop")
-    private static void avilixlogger$plant(BlockState state,ServerPlayer p,BlockPos pos,Operation<Void> original){try(var s=BackpackAudit.scope(p,"augment:farmhand")){original.call(state,p,pos);}}
+    private static void avilixlogger$plant(BlockState state,ServerPlayer p,BlockPos pos,Operation<Void> original){
+        if (!CaptureHandlers.BACKPACKED_BACKPACKAUGMENTSMIXIN_PLANT.enabled()) { original.call(state,p,pos); return; }try(var s=BackpackAudit.scope(p,"augment:farmhand")){original.call(state,p,pos);}}
 }

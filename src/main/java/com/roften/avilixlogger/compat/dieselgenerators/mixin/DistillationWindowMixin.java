@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.dieselgenerators.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,12 +19,14 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class DistillationWindowMixin {
     @WrapMethod(method = "toggleWindows()V", remap = false)
     private void avilixlogger$toggle(Operation<Void> original){
+        if (!CaptureHandlers.DIESELGENERATORS_DISTILLATIONWINDOWMIXIN_TOGGLE.enabled()) { original.call(); return; }
         var action=IndustrialAudit.begin(this,"toggle-windows",false); boolean success=false;
         try{original.call();success=true;}
         finally{if(action!=null)action.finish(!success);}
     }
     @WrapMethod(method = "setWindows(Z)V", remap = false)
     private void avilixlogger$windows(boolean windows, Operation<Void> original){
+        if (!CaptureHandlers.DIESELGENERATORS_DISTILLATIONWINDOWMIXIN_WINDOWS.enabled()) { original.call(windows); return; }
         var action=IndustrialAudit.begin(this,"set-windows",false); boolean success=false;
         try{original.call(windows);success=true;}
         finally{if(action!=null)action.finish(!success);}

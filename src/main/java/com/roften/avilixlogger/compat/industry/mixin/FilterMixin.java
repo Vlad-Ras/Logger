@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.industry.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class FilterMixin {
     @WrapMethod(method = "setFilter(Lnet/minecraft/world/item/ItemStack;)Z", remap = false)
     private boolean avilixlogger$filter(ItemStack stack, Operation<Boolean> original) {
+        if (!CaptureHandlers.INDUSTRY_FILTERMIXIN_FILTER.enabled()) { return original.call(stack); }
         var action = IndustrialAudit.behaviour(this,"filter"); boolean success = false;
         try { var result = original.call(stack); success = true; return result; }
         finally { if (action != null) action.finish(!success); }

@@ -7,23 +7,42 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Cached reads of finite, explicitly selected state. Never calls an arbitrary object's serializer/toString. */
 public final class StateAccess {
-    private static final Map<String, Field> FIELDS = new ConcurrentHashMap<>();
+    private static final ClassValue<Map<String, Field>> FIELDS = new ClassValue<>() {
+        @Override protected Map<String, Field> computeValue(Class<?> type) { return new ConcurrentHashMap<>(); }
+    };
+    private static final ClassValue<Map<String, Method>> NO_ARG_METHODS = new ClassValue<>() {
+        @Override protected Map<String, Method> computeValue(Class<?> type) { return new ConcurrentHashMap<>(); }
+    };
     private static final Map<String, Method> METHODS = new ConcurrentHashMap<>();
+    private static final Object[] NO_ARGUMENTS = {};
     private StateAccess() {}
     public static Object field(Object value, String name) throws ReflectiveOperationException {
-        Class<?> type = value.getClass(); String key = type.getName() + "#" + name;
-        Field field = FIELDS.get(key);
+        Class<?> type = value.getClass();
+        var fields = FIELDS.get(type);
+        Field field = fields.get(name);
         if (field == null) {
             Class<?> owner = type;
             while (owner != null) {
                 try { field = owner.getDeclaredField(name); break; } catch (NoSuchFieldException absent) { owner = owner.getSuperclass(); }
             }
-            if (field == null) throw new NoSuchFieldException(key);
-            field.setAccessible(true); FIELDS.put(key, field);
+            if (field == null) throw new NoSuchFieldException(type.getName() + "#" + name);
+            field.setAccessible(true);
+            fields.put(name, field);
         }
         return field.get(value);
     }
-    public static Object call(Object value, String name) throws ReflectiveOperationException { return call(value, name, new Class<?>[0]); }
+
+    public static Object call(Object value, String name) throws ReflectiveOperationException {
+        Class<?> type = value.getClass();
+        var methods = NO_ARG_METHODS.get(type);
+        Method method = methods.get(name);
+        if (method == null) {
+            method = type.getMethod(name);
+            method.setAccessible(true);
+            methods.put(name, method);
+        }
+        return method.invoke(value, NO_ARGUMENTS);
+    }
     public static Object call(Object value, String name, Class<?>[] types, Object... args) throws ReflectiveOperationException {
         String key = value.getClass().getName() + "#" + name + Arrays.toString(types);
         Method method = METHODS.get(key);

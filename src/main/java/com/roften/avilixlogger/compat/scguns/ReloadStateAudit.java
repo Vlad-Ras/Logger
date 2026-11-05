@@ -11,6 +11,7 @@ public final class ReloadStateAudit {
     private ReloadStateAudit() {}
     @SuppressWarnings("unchecked")
     public static Boolean before(SyncedDataKey key,Entity entity) {
+        if (!CaptureHandlers.COMPAT_SCGUNS_RELOADSTATEAUDIT_BEFORE.enabled()) return null;
         if(!(entity instanceof ServerPlayer p) || !p.server.isSameThread() || !WeaponCombatAudit.enabled() || !CaptureTypePolicy.enabled(4))return null;
         try {if(key.id().getNamespace().equals("scguns") && key.id().getPath().equals("reloading") && key.getValue(entity) instanceof Boolean value)return value;}
         catch(RuntimeException failure){WeaponCombatAudit.failure();}return null;

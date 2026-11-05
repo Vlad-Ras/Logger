@@ -14,6 +14,7 @@ public final class CuriosAudit {
     private CuriosAudit() {}
     public static void install() { NeoForge.EVENT_BUS.addListener(CuriosAudit::changed); }
     private static void changed(CurioChangeEvent event) {
+        if (!CaptureHandlers.COMPAT_CURIOS_CURIOSAUDIT_CHANGED.enabled()) return;
         if (!CaptureTypePolicy.enabled(3) || !LoggerConfig.VALUES.logEntities.get() || !LoggerConfig.isEnabled() || CartAuditContext.restoring()) return;
         if (!(event.getEntity().level() instanceof ServerLevel level) || !level.getServer().isSameThread()) return;
         try {

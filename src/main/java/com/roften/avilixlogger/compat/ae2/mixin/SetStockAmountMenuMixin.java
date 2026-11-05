@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.ae2.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import appeng.api.stacks.GenericStack;
 import appeng.helpers.InterfaceLogicHost;
 import appeng.menu.AEBaseMenu;
@@ -19,6 +21,7 @@ public abstract class SetStockAmountMenuMixin {
     @Shadow private int slot;
     @WrapMethod(method = "confirm")
     private void avilixlogger$confirm(int amount, Operation<Void> original) {
+        if (!CaptureHandlers.AE2_SETSTOCKAMOUNTMENUMIXIN_CONFIRM.enabled()) { original.call(amount); return; }
         AEBaseMenu menu = (AEBaseMenu) (Object) this;
         if (!Ae2Audit.enabled() || !Ae2Audit.onServerThread(menu)) { original.call(amount); return; }
         ItemStack before = avilixlogger$snapshot();

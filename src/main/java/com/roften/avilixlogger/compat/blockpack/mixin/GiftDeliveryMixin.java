@@ -1,5 +1,7 @@
 package com.roften.avilixlogger.compat.blockpack.mixin;
 
+import com.roften.avilixlogger.core.CaptureHandlers;
+
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.*;
 import com.roften.avilixlogger.compat.blockpack.BlockPackJoinGiftAudit;
@@ -14,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.At;
 public abstract class GiftDeliveryMixin {
     @WrapMethod(method="giveOrDrop(Lnet/minecraft/server/level/ServerPlayer;Lnet/minecraft/world/item/ItemStack;)V")
     private static void avilixlogger$gift(ServerPlayer player,ItemStack stack,Operation<Void> original){
+        if (!CaptureHandlers.BLOCKPACK_GIFTDELIVERYMIXIN_GIFT.enabled()) { original.call(player,stack); return; }
         var capture=BlockPackJoinGiftAudit.begin(player,stack);if(capture==null){original.call(player,stack);return;}
         boolean completed=false;try{original.call(player,stack);completed=true;}finally{capture.finish(completed);}
     }

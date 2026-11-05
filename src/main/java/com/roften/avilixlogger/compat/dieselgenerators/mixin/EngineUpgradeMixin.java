@@ -1,4 +1,6 @@
 package com.roften.avilixlogger.compat.dieselgenerators.mixin;
+
+import com.roften.avilixlogger.core.CaptureHandlers;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import org.spongepowered.asm.mixin.*;
@@ -17,6 +19,7 @@ import com.roften.avilixlogger.compat.industry.*;
 public abstract class EngineUpgradeMixin {
     @WrapMethod(method = "setUpgrade(Lcom/jesz/createdieselgenerators/content/diesel_engine/EngineUpgrades;)V", remap = false)
     private void avilixlogger$upgrade(@Coerce Object upgrade, Operation<Void> original){
+        if (!CaptureHandlers.DIESELGENERATORS_ENGINEUPGRADEMIXIN_UPGRADE.enabled()) { original.call(upgrade); return; }
         var action=IndustrialAudit.begin(this,"engine-upgrade",false); boolean success=false;
         try{original.call(upgrade);success=true;}
         finally{if(action!=null)action.finish(!success);}

@@ -8,7 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 
 /** Query all current settings, toggle one type, or enable/disable all. */
 public record C2SCaptureTypesPayload(Action action, int preset, boolean enabled, int expectedRevision) implements CustomPacketPayload {
-    public enum Action { QUERY, SET, ENABLE_ALL, DISABLE_ALL }
+    public enum Action { QUERY, SET, ENABLE_ALL, DISABLE_ALL, ENABLE_HANDLERS, DISABLE_HANDLERS }
     public static final Type<C2SCaptureTypesPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "capture_types_request"));
     public static final StreamCodec<RegistryFriendlyByteBuf,C2SCaptureTypesPayload> STREAM_CODEC = StreamCodec.of(

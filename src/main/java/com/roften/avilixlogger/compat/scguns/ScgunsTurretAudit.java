@@ -15,6 +15,7 @@ public final class ScgunsTurretAudit {
     private static final ThreadLocal<Fire> CURRENT=new ThreadLocal<>();
     private ScgunsTurretAudit(){}
     public static Fire begin(BlockEntity turret,UUID owner,String name){
+        if (!CaptureHandlers.COMPAT_SCGUNS_SCGUNSTURRETAUDIT_BEGIN.enabled()) return null;
         if(!(turret.getLevel() instanceof ServerLevel level) || !WeaponCombatAudit.wantsTrace(level))return null;
         var scope=new Fire(turret,owner,name,CURRENT.get());CURRENT.set(scope);return scope;
     }

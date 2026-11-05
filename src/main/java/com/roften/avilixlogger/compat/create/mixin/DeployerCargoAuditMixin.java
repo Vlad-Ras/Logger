@@ -3,6 +3,9 @@ package com.roften.avilixlogger.compat.create.mixin;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.roften.avilixlogger.compat.create.CreateCargoAudit;
+import com.roften.avilixlogger.compat.create.CreateCapturePolicy;
+import com.roften.avilixlogger.core.CaptureHandlers;
+import com.roften.avilixlogger.core.CaptureTypePolicy;
 import com.roften.avilixlogger.compat.create.CreateDeployerAudit;
 import com.simibubi.create.content.kinetics.deployer.DeployerFakePlayer;
 import org.spongepowered.asm.mixin.Shadow;
@@ -18,13 +21,19 @@ public abstract class DeployerCargoAuditMixin {
     @Shadow private DeployerFakePlayer getPlayer(MovementContext context) { throw new AssertionError(); }
     @WrapMethod(method = "tryGrabbingItem")
     private void avilixlogger$take(MovementContext context, Operation<Void> original) {
-        avilixlogger$exchange(context, "deployer_take", original);
+        avilixlogger$exchange(context, "deployer_take", CaptureHandlers.CREATE_DEPLOYER_TAKE, original);
     }
     @WrapMethod(method = "tryDisposeOfExcess")
     private void avilixlogger$return(MovementContext context, Operation<Void> original) {
-        avilixlogger$exchange(context, "deployer_return", original);
+        avilixlogger$exchange(context, "deployer_return", CaptureHandlers.CREATE_DEPLOYER_RETURN, original);
     }
-    @Unique private void avilixlogger$exchange(MovementContext context, String reason, Operation<Void> original) {
+    @Unique private void avilixlogger$exchange(MovementContext context, String reason, CaptureHandlers handler, Operation<Void> original) {
+        if (!handler.enabled()) {
+            boolean previous = CreateCapturePolicy.enterActor(context, false);
+            try { original.call(context); }
+            finally { CaptureTypePolicy.restoreSuppression(previous); }
+            return;
+        }
         var entity=context.contraption==null?null:context.contraption.entity;
         if (!com.roften.avilixlogger.compat.create.CreateCapturePolicy.actor(context)
                 || !com.roften.avilixlogger.compat.create.CreateCapturePolicy.cargo(entity)) {
