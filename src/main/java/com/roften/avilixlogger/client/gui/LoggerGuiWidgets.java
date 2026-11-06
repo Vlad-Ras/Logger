@@ -1,6 +1,5 @@
 package com.roften.avilixlogger.client.gui;
 
-import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -80,7 +79,7 @@ final class LoggerGuiWidgets {
         @Override
         public void setHint(Component hint) {
             super.setHint(hint);
-            this.localHint = hint == null ? Component.empty() : hint.copy().withStyle(ChatFormatting.DARK_GRAY);
+            this.localHint = hint == null ? Component.empty() : hint.copy().withStyle(style -> style.withColor(0xA8B3C2));
         }
 
         @Override
@@ -102,7 +101,6 @@ final class LoggerGuiWidgets {
             if (!java.util.Objects.equals(renderedValue, value)) { renderedValue = value; valueText = Component.literal(value); }
             Component text = hint ? this.localHint : valueText;
             int color = this.active ? 0xFFE0E0E0 : 0xFF808080;
-            if (hint) color = 0xFF808080;
 
             float s = Math.min((float) scale.getAsDouble(), Math.max(0.35f, (h - 4) / (float) this.boxFont.lineHeight));
             s = clampFloat(s, 0.45f, 1.10f);

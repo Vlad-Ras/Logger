@@ -110,7 +110,18 @@ public final class CartGuiClientSmoke {
                 }
                 else if(stage==13){
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptCaptureHealth(new com.roften.avilixlogger.net.S2CCaptureHealthPayload(com.roften.avilixlogger.net.S2CCaptureHealthPayload.State.PAUSED,"Тест отображения остановки захвата"));
-                    mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
+                    var viewer = new com.roften.avilixlogger.client.gui.LogViewerScreen();
+                    mc.setScreen(viewer);
+                    var line = net.minecraft.network.chat.Component.literal("[01.11 23:25:42] ")
+                            .withStyle(net.minecraft.ChatFormatting.DARK_GRAY)
+                            .append(net.minecraft.network.chat.Component.literal("Create поставил компостницу ")
+                                    .withStyle(net.minecraft.ChatFormatting.WHITE))
+                            .append(net.minecraft.network.chat.Component.literal("(3173 72 3485) · mod:create"));
+                    viewer.apply(new com.roften.avilixlogger.net.S2CLogPagePayload("Логи · 01.11.2026", 1, false, false,
+                            List.of(com.roften.avilixlogger.net.LogRow.single(42, "minecraft:overworld", 3173, 72, 3485, line))));
+                    check(viewer.children().stream().anyMatch(widget -> widget instanceof net.minecraft.client.gui.components.Button button
+                            && button.getMessage().getString().equals("Запись на паузе")),
+                            "pause status missing after applying a journal page");
                 }
                 else if(stage==14){
                     var screen=new com.roften.avilixlogger.client.gui.CaptureTypesScreen(root);
