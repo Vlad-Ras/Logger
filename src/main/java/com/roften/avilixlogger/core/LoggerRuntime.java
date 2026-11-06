@@ -30,9 +30,14 @@ public final class LoggerRuntime {
         var journal=PENDING;if(journal!=null)states.add(journal.queueStatistics());
         var storage = STORAGE;
         var text = new StringBuilder(ServerCaptureGuard.report()).append('\n');
-        text.append(storage == null ? "ClickHouse ещё не подключён."
-                : storage.isLikelyAvailable() ? storage.storageName() + " · доступен по последней проверке."
-                : storage.storageName() + " · временно недоступен.").append('\n');
+        if (storage instanceof HealthAwareLogStorage health) {
+            text.append(health.storageName()).append(health.isLikelyAvailable()
+                    ? " · готов принимать записи по данным драйвера."
+                    : " · временно недоступен.");
+        } else {
+            text.append(storage == null ? "ClickHouse ещё не подключён." : "Хранилище подключено.");
+        }
+        text.append('\n');
         if (states.isEmpty()) return text.append("Очереди Logger ещё не запущены.").toString();
         text.append("Буферы Logger:\n");
         for(var state:states) {
