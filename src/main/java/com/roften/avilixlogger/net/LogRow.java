@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.net;
 
+import com.roften.avilixlogger.core.ActionType;
 import net.minecraft.network.chat.Component;
 
 import java.util.List;
@@ -18,12 +19,20 @@ public record LogRow(long id,
                      Component line,
                      boolean aggregated,
                      long[] rawIds,
-                     List<Component> groupedLines) {
+                     List<Component> groupedLines,
+                     ActionType action,
+                     String originMod) {
 
     public LogRow {
+        originMod = originMod == null ? "" : originMod;
         line = line == null ? Component.empty() : line;
         rawIds = rawIds == null ? new long[0] : rawIds;
         groupedLines = groupedLines == null ? List.of() : List.copyOf(groupedLines);
+    }
+
+    public LogRow(long id, String dim, int x, int y, int z, Component line, boolean aggregated,
+                  long[] rawIds, List<Component> groupedLines) {
+        this(id, dim, x, y, z, line, aggregated, rawIds, groupedLines, null, "");
     }
 
     /** Compatibility constructor for ordinary rows and existing call sites. */

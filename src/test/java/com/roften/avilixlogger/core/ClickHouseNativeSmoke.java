@@ -196,6 +196,24 @@ public final class ClickHouseNativeSmoke {
                 "individual event remained visible");
         check(db.queryReverse(q).size()==3,"GUI visibility affected a normal journal query");
 
+        String fixture = "ux_visibility_" + UUID.randomUUID().toString().replace("-", "");
+        var modRow = AsyncPipelineTest.row("native-visibility-mod");
+        modRow.type = ActionType.BLOCK_PLACE;
+        modRow.dim = "minecraft:overworld";
+        modRow.source = "mod:" + fixture;
+        var addOn = modRow.copyForQueue();
+        addOn.id = 0;
+        addOn.source += "_addon:observe";
+        db.appendBatch(fixture, List.of(modRow, addOn));
+        var modQuery = new LogQuery();
+        modQuery.dim = "*";
+        modQuery.untilTs = Long.MAX_VALUE;
+        modQuery.sourcePrefix = modRow.source;
+        modQuery.limit = 5;
+        modQuery.guiVisibility = GuiEventVisibility.ALL_VISIBLE.toggleMod(fixture);
+        var modVisible = db.queryReverse(modQuery);
+        check(modVisible.size() == 1 && modVisible.getFirst().id == addOn.id, "SQL visibility hid an unrelated mod or leaked legacy source");
+
         if(useFeed) {
             var observation=AsyncPipelineTest.row("native-feed-only-position");observation.type=ActionType.BLOCK_INTERACT;observation.source="native:feed-only-position:"+UUID.randomUUID();
             observation.dim="minecraft:the_nether";observation.x=-1020;observation.y=15;observation.z=-820;observation.blockAfter="minecraft:chest";

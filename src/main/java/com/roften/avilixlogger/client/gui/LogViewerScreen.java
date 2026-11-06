@@ -1,5 +1,6 @@
 package com.roften.avilixlogger.client.gui;
 
+import com.roften.avilixlogger.core.GuiEventVisibility;
 import com.roften.avilixlogger.net.C2SInspectToolPayload;
 import com.roften.avilixlogger.net.C2SRequestPagePayload;
 import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
@@ -139,6 +140,10 @@ public final class LogViewerScreen extends Screen {
     private Button btnNext;
     private Button btnRefresh;
     private Button btnCopy;
+    private Button rowActions;
+    private Button undoVisibility;
+    private Button captureStatus;
+    private GuiEventVisibility visibilityBeforeHide;
     private Button btnTp;
     private boolean teleportPending;
 
@@ -549,6 +554,16 @@ public final class LogViewerScreen extends Screen {
             if(moduleParent!=null){minecraft.setScreen(moduleParent);LogViewerClientHooks.resume(this.moduleParent);}
             else minecraft.setScreen(new ModulePickerScreen(this));
         },rightX,y2,rightW,btnH);
+        y2 += btnH + gap;
+        rowActions = addButton(Component.literal("Строка"), b -> openRowActions(rows.get(selected)),
+                rightX, y2, half, btnH);
+        undoVisibility = addButton(Component.literal("Вернуть"), b -> undoQuickHide(),
+                rightX + half + gap, y2, rightW - half - gap, btnH);
+        undoVisibility.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Отменить последнее скрытие в журнале")));
+        captureStatus = addButton(Component.empty(), b -> LoggerActionsScreen.run(this, "capture_status", List.of()),
+                leftX, top, leftPanelW, leftRowH);
+        updateCaptureHealth();
+
         this.detailSearchBox=makeEditBox(rightX,y2+btnH+gap,rightW,btnH,Component.literal("Поиск в деталях / RAW"));
         this.detailSearchBox.setHint(Component.literal("Найти параметр…"));
         this.detailSearchBox.setMaxLength(128);this.detailSearchBox.setValue(detailNeedle);
@@ -662,8 +677,31 @@ public final class LogViewerScreen extends Screen {
         PacketDistributor.sendToServer(new C2SInspectToolPayload(C2SInspectToolPayload.Action.RESET, ""));
     }
 
-    private Component headerTitle(){return LogViewerClientHooks.capturePaused()?Component.literal("Захват остановлен · Откройте «Действия»").withStyle(ChatFormatting.RED):(title.isEmpty()?Component.translatable("gui.avilixlogger.title"):Component.literal(title)).withStyle(ChatFormatting.GOLD);}
-    public void updateCaptureHealth(){if(titleWidget!=null)titleWidget.setMessage(headerTitle());}
+    private Component headerTitle() {
+        return (title.isEmpty() ? Component.translatable("gui.avilixlogger.title") : Component.literal(title))
+                .withStyle(ChatFormatting.GOLD);
+    }
+
+    public void updateCaptureHealth() {
+        if (titleWidget != null) titleWidget.setMessage(headerTitle());
+        if (captureStatus == null) return;
+        var health = LogViewerClientHooks.captureHealth();
+        Component label = health == null ? Component.literal("Статус записи")
+                : Component.literal(switch (health.state()) {
+                    case PAUSED -> "Запись на паузе";
+                    case RESUMED -> "Запись возобновлена";
+                    case ACTIVE -> "Запись работает";
+                    case DISABLED -> "Запись отключена";
+                }).withStyle(switch (health.state()) {
+                    case PAUSED, DISABLED -> ChatFormatting.RED;
+                    case RESUMED -> ChatFormatting.YELLOW;
+                    case ACTIVE -> ChatFormatting.GREEN;
+                });
+        captureStatus.setMessage(label);
+        captureStatus.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
+                Component.literal(health == null ? "Открыть состояние захвата и очередей"
+                        : health.message() + "\nНажмите, чтобы обновить отчёт по очередям и хранилищу.")));
+    }
     public void apply(S2CLogPagePayload payload) {
         if (!invalidTimeInput) applyPage(payload);
     }
@@ -717,6 +755,8 @@ public final class LogViewerScreen extends Screen {
     private void updateButtons() {
         if (btnPrev != null) btnPrev.active = hasPrev;
         if (btnNext != null) btnNext.active = hasNext;
+        if (rowActions != null) rowActions.active = selectedEntryId > 0;
+        if (undoVisibility != null) undoVisibility.active = visibilityBeforeHide != null;
         if (btnCopy != null) btnCopy.active = selected >= 0 && selected < rows.size();
         if (btnTp != null) btnTp.active = !teleportPending && selected >= 0 && selected < rows.size() && rows.get(selected).id()>0;
         if (btnCopyFull != null) btnCopyFull.active = selectedEntryId > 0;
@@ -791,6 +831,11 @@ public final class LogViewerScreen extends Screen {
                 DisplayLine clicked = visibleLines.get(displayIndex);
                 int idx = clicked.rowIndex();
                 LogRow clickedRow = rows.get(idx);
+
+                if (button == 1 && clickedRow.id() > 0) {
+                    openRowActions(clickedRow);
+                    return true;
+                }
 
                 // The chevron is a real disclosure control: clicking it expands/collapses all
                 // underlying rows locally without issuing another database query.
@@ -900,8 +945,8 @@ public final class LogViewerScreen extends Screen {
         int listWidth = listWidth();
 
         // Small page indicator
-        g.drawString(this.font, Component.literal("page " + pageIndex).withStyle(ChatFormatting.DARK_GRAY),
-                this.width - 10 - 90, 6, 0xFFFFFF, false);
+        g.drawString(this.font, Component.literal("Стр. " + pageIndex),
+                this.width - 10 - 90, 6, 0xD9E0EA, true);
 
         // Render base rows plus locally expanded children. The list itself scrolls when disclosed
         // rows no longer fit, so every hidden instance remains reachable on low resolutions.
@@ -912,9 +957,8 @@ public final class LogViewerScreen extends Screen {
             DisplayLine displayLine = visibleLines.get(displayIndex);
             int drawn = displayIndex - this.listScroll;
             int y = listTop + drawn * rowH;
-            if (displayLine.rowIndex() == selected) {
-                g.fill(listLeft - 2, y - 1, listLeft + listWidth + 2, y + rowH, 0x55222222);
-            }
+            g.fill(listLeft - 2, y, listLeft + listWidth, y + rowH,
+                    displayLine.rowIndex() == selected ? 0xD322334A : 0xB0000000);
 
             int textX = listLeft + displayLine.indentPixels();
             if (displayLine.groupHeader()) {
@@ -953,7 +997,7 @@ public final class LogViewerScreen extends Screen {
             int count = Math.min(2, Math.max(1, previewLines.size()));
             int previewLineH = detailLineH();
             int y = this.height - 8 - count * previewLineH;
-            g.fill(8, y - 2, this.width - 8, this.height - 6, 0x66000000);
+            g.fill(8, y - 2, this.width - 8, this.height - 6, 0xB0000000);
             for (int i = 0; i < count; i++) {
                 net.minecraft.util.FormattedCharSequence preview = previewLines.isEmpty()
                         ? net.minecraft.util.FormattedCharSequence.EMPTY
@@ -1014,7 +1058,8 @@ public final class LogViewerScreen extends Screen {
         int panelTop = Math.max(detailsPanelTop, listTop());
         int panelBottom = this.height - 30;
 
-        g.fill(panelLeft, panelTop, panelRight, panelBottom, 0x44000000);
+        if (panelBottom <= panelTop) return;
+        g.fill(panelLeft, panelTop, panelRight, panelBottom, 0xB0000000);
 
         List<Component> base = shownDetails();
         if (base == null) base = List.of();
@@ -1027,10 +1072,10 @@ public final class LogViewerScreen extends Screen {
         // Fixed header inside the panel
         Component hdr = Component.translatable(showRawTab ? "gui.avilixlogger.hdr.raw" : "gui.avilixlogger.hdr.details")
                 .withStyle(ChatFormatting.GOLD);
-        g.drawString(this.font, hdr, panelLeft + 4, panelTop + 3, 0xFFFFFF, false);
+        g.drawString(this.font, hdr, panelLeft + 4, panelTop + 3, 0xFFFFFF, true);
         g.drawString(this.font,
-                Component.translatable("gui.avilixlogger.hdr.lines", lines.size()).withStyle(ChatFormatting.DARK_GRAY),
-                panelLeft + 54, panelTop + 3, 0xFFFFFF, false);
+                Component.translatable("gui.avilixlogger.hdr.lines", lines.size()),
+                panelLeft + 54, panelTop + 3, 0xBFC9D6, true);
 
         int headerH = 14;
         int y = panelTop + headerH;
@@ -1170,7 +1215,30 @@ public final class LogViewerScreen extends Screen {
 
     com.roften.avilixlogger.core.GuiEventVisibility visibility() { return savedVisibility; }
 
-    void applyVisibility(com.roften.avilixlogger.core.GuiEventVisibility visibility) {
+    void applyVisibility(GuiEventVisibility visibility) {
+        visibilityBeforeHide = null;
+        changeVisibility(visibility);
+    }
+
+    private void openRowActions(LogRow row) {
+        saveGuiStateFromInstance();
+        minecraft.setScreen(new LogRowActionsScreen(this, row));
+    }
+
+    void quickHide(GuiEventVisibility visibility) {
+        if (savedVisibility.equals(visibility)) return;
+        visibilityBeforeHide = savedVisibility;
+        changeVisibility(visibility);
+    }
+
+    private void undoQuickHide() {
+        var previous = visibilityBeforeHide;
+        visibilityBeforeHide = null;
+        if (previous != null) changeVisibility(previous);
+    }
+
+    private void changeVisibility(GuiEventVisibility visibility) {
+        updateButtons();
         if (savedVisibility.equals(visibility)) return;
         savedVisibility = visibility;
         sendPage(C2SRequestPagePayload.Nav.FIRST);
@@ -1612,11 +1680,34 @@ public final class LogViewerScreen extends Screen {
     }
 
     private void drawLogString(GuiGraphics g, Component text, int x, int y, int color) {
-        drawScaledLogString(g, () -> g.drawString(this.font, text, 0, 0, color, false), x, y);
+        drawLogString(g, text.getVisualOrderText(), x, y, color);
     }
 
     private void drawLogString(GuiGraphics g, net.minecraft.util.FormattedCharSequence text, int x, int y, int color) {
-        drawScaledLogString(g, () -> g.drawString(this.font, text, 0, 0, color, false), x, y);
+        net.minecraft.util.FormattedCharSequence readable = sink -> text.accept(new net.minecraft.util.FormattedCharSink() {
+            private Style previous;
+            private Style mapped;
+
+            @Override public boolean accept(int index, Style style, int codePoint) {
+                if (style != previous) {
+                    previous = style;
+                    mapped = readableStyle(style);
+                }
+                return sink.accept(index, mapped, codePoint);
+            }
+        });
+        drawScaledLogString(g, () -> g.drawString(this.font, readable, 0, 0, color, true), x, y);
+    }
+
+    private static Style readableStyle(Style style) {
+        var color = style.getColor();
+        if (color == null) return style;
+        int rgb = color.getValue();
+        return switch (rgb) {
+            case 0x000000, 0x555555 -> style.withColor(0xBFC9D6);
+            case 0xAAAAAA -> style.withColor(0xD9E0EA);
+            default -> style;
+        };
     }
 
     private void drawScaledLogString(GuiGraphics g, Runnable draw, int x, int y) {
@@ -1654,7 +1745,8 @@ public final class LogViewerScreen extends Screen {
             long hiddenCategories;
             try { hiddenCategories = Long.parseLong(p.getProperty("hiddenCategories", "0")); }
             catch (NumberFormatException ignored) { hiddenCategories = 0; }
-            savedVisibility = com.roften.avilixlogger.core.GuiEventVisibility.of(hiddenCategories, hiddenActions);
+            savedVisibility = com.roften.avilixlogger.core.GuiEventVisibility.of(hiddenCategories, hiddenActions,
+                    new HashSet<>(List.of(p.getProperty("hiddenMods", "").split(","))));
             savedTimePresetIdx = parseInt(p.getProperty("timePreset"), savedTimePresetIdx);
             savedRadiusPresetIdx = parseInt(p.getProperty("radiusPreset"), savedRadiusPresetIdx);
             savedTypePresetIdx = parseInt(p.getProperty("typePreset"), savedTypePresetIdx);
@@ -1721,6 +1813,7 @@ public final class LogViewerScreen extends Screen {
     private static void saveGuiStateToDisk() {
         Properties p = new Properties();
         p.setProperty("hiddenCategories", Long.toString(savedVisibility.categories()));
+        p.setProperty("hiddenMods", savedVisibility.mods().stream().sorted().collect(java.util.stream.Collectors.joining(",")));
         p.setProperty("hiddenActions", savedVisibility.actions().stream().map(Enum::name).sorted()
                 .collect(java.util.stream.Collectors.joining(",")));
         p.setProperty("timePreset", String.valueOf(savedTimePresetIdx));

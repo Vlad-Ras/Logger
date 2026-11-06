@@ -10,11 +10,12 @@ import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import com.roften.avilixlogger.core.ActionType;
 
 /** Server -> Client: a rendered page for the GUI (+ row metadata for actions). */
 public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, boolean hasNext, List<LogRow> rows) implements CustomPacketPayload {
+
+    private static final ActionType[] ACTIONS = ActionType.values();
 
     public static final Type<S2CLogPagePayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "gui_page_data"));
 
@@ -42,6 +43,8 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                     long[] ids = r.rawIds() == null ? new long[0] : r.rawIds();
                     buf.writeVarInt(ids.length);
                     for (long id : ids) buf.writeVarLong(id);
+                    buf.writeVarInt(r.action() == null ? 0 : r.action().ordinal() + 1);
+                    buf.writeUtf(r.originMod(), 128);
                     List<Component> groupedLines = r.groupedLines() == null ? List.of() : r.groupedLines();
                     buf.writeVarInt(groupedLines.size());
                     for (Component groupedLine : groupedLines) {
@@ -76,6 +79,8 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                     int m = buf.readVarInt();
                     long[] ids = new long[Math.max(0, m)];
                     for (int j = 0; j < ids.length; j++) ids[j] = buf.readVarLong();
+                    int action = buf.readVarInt() - 1;
+                    String originMod = buf.readUtf(128);
                     int groupedCount = buf.readVarInt();
                     List<Component> groupedLines = new ArrayList<>(Math.max(0, groupedCount));
                     for (int j = 0; j < groupedCount; j++) {
@@ -87,7 +92,8 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                             groupedLines.add(Component.literal(groupedJson));
                         }
                     }
-                    rows.add(new LogRow(id, dim, x, y, z, line, aggregated, ids, groupedLines));
+                    rows.add(new LogRow(id, dim, x, y, z, line, aggregated, ids, groupedLines,
+                            action >= 0 && action < ACTIONS.length ? ACTIONS[action] : null, originMod));
                 }
                 return new S2CLogPagePayload(title, pageIndex, hasPrev, hasNext, List.copyOf(rows));
             }

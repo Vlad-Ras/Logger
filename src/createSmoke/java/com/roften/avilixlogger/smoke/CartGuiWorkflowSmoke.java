@@ -13,8 +13,18 @@ import java.util.*;
 final class CartGuiWorkflowSmoke {
     static void run(){
         String id="51000000-0000-0000-0000-000000000001";
-        var health=new S2CCaptureHealthPayload(true,"Захват остановлен");var healthBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
+        var health=new S2CCaptureHealthPayload(S2CCaptureHealthPayload.State.PAUSED,"Захват остановлен");var healthBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
         try{S2CCaptureHealthPayload.STREAM_CODEC.encode(healthBuffer,health);check(S2CCaptureHealthPayload.STREAM_CODEC.decode(healthBuffer).equals(health),"health changed on wire");}finally{healthBuffer.release();}
+        var journalFilters = new GuiFilters(1, 3, 0, -1, 0, "", "", "", "", -1, -1, "", List.of(), List.of(),
+                GuiEventVisibility.ALL_VISIBLE.toggleMod("create").toggle(ActionType.BLOCK_BREAK));
+        var journalBuffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+        try {
+            GuiFilters.STREAM_CODEC.encode(journalBuffer, journalFilters);
+            check(GuiFilters.STREAM_CODEC.decode(journalBuffer).equals(journalFilters), "journal hide filters changed on wire");
+        } finally { journalBuffer.release(); }
+        var linked = LoggerActionCatalog.linkedForm(LoggerActionCatalog.ACTIONS, "/log rollback-entry confirm 1880834017623801859");
+        check(linked != null && linked.action().id().equals("entry_rollback_confirm")
+                && linked.values().equals(List.of("1880834017623801859")), "exact rollback confirmation lost the ID");
         var form=new C2SLoggerActionPayload(17,"cart_confirm",List.of(id,"42"));
         var formBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
         try{C2SLoggerActionPayload.STREAM_CODEC.encode(formBuffer,form);check(C2SLoggerActionPayload.STREAM_CODEC.decode(formBuffer).equals(form),"action form changed on wire");}finally{formBuffer.release();}

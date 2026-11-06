@@ -18,7 +18,10 @@ public final class ServerTickScheduler {
 
     public static void onServerTick(ServerTickEvent.Post event) {
         HotPathMetrics.tick();
-        if(event.getServer().getTickCount()%20==0 && ServerCaptureGuard.paused()) LoggerRuntime.autoResumeCapture();
+        if (event.getServer().getTickCount() % 20 == 0 && ServerCaptureGuard.paused()) {
+            LoggerRuntime.autoResumeCapture();
+            if (!ServerCaptureGuard.paused()) com.roften.avilixlogger.net.LoggerNetwork.broadcastCaptureHealth(event.getServer());
+        }
         Tasks tasks = SERVERS.get(event.getServer());
         if (tasks != null) tasks.runDue(event.getServer().getTickCount());
     }

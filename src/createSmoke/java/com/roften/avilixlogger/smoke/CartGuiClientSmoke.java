@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -109,7 +109,7 @@ public final class CartGuiClientSmoke {
                     var refresh=screen.getClass().getDeclaredMethod("refresh");refresh.setAccessible(true);refresh.invoke(screen);
                 }
                 else if(stage==13){
-                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptCaptureHealth(new com.roften.avilixlogger.net.S2CCaptureHealthPayload(true,"Тест отображения остановки захвата"));
+                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptCaptureHealth(new com.roften.avilixlogger.net.S2CCaptureHealthPayload(com.roften.avilixlogger.net.S2CCaptureHealthPayload.State.PAUSED,"Тест отображения остановки захвата"));
                     mc.setScreen(new com.roften.avilixlogger.client.gui.LogViewerScreen());
                 }
                 else if(stage==14){
@@ -118,6 +118,20 @@ public final class CartGuiClientSmoke {
                     mode.setAccessible(true);
                     mode.setBoolean(screen,true);
                     mc.setScreen(screen);
+                }
+                else if(stage==15) {
+                    var viewer = new com.roften.avilixlogger.client.gui.LogViewerScreen();
+                    var row = new com.roften.avilixlogger.net.LogRow(42, "minecraft:overworld", 1, 2, 3,
+                            net.minecraft.network.chat.Component.literal("Create поставил компостницу"),
+                            false, new long[]{42}, List.of(), com.roften.avilixlogger.core.ActionType.BLOCK_PLACE, "create");
+                    var screenClass = Class.forName("com.roften.avilixlogger.client.gui.LogRowActionsScreen");
+                    var constructor = screenClass.getDeclaredConstructor(viewer.getClass(), row.getClass());
+                    constructor.setAccessible(true);
+                    var menu = (Screen) constructor.newInstance(viewer, row);
+                    mc.setScreen(menu);
+                    check(menu.children().stream().anyMatch(widget -> widget instanceof net.minecraft.client.gui.components.Button button
+                            && button.active && button.getMessage().getString().equals("Скрыть мод · create")),
+                            "mod from the selected row was not exposed as a hide filter");
                 }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==14){

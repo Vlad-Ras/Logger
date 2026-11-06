@@ -58,6 +58,11 @@ public final class ReleaseUiContractsTest {
         check(hidden.hidden(ActionType.BLOCK_BREAK,"create:cart:test:mechanism=create:mechanical_drill@1,2,3",null),"recorded drill visible");
         check(hidden.hidden(ActionType.CHAT_MESSAGE,null,null),"exact hidden type visible");
         check(!hidden.hidden(ActionType.BLOCK_PLACE,"mod:create",null),"unrelated source hidden");
+        var byMod = hidden.toggleMod("create");
+        check(byMod.hidden(ActionType.BLOCK_PLACE, "mod:create", null), "legacy Create source visible");
+        check(byMod.hidden(ActionType.BLOCK_PLACE, "create:cart:test:place", null), "native Create source visible");
+        check(!byMod.hidden(ActionType.BLOCK_PLACE, "mod:create_cobblestone:place", null), "different mod accidentally hidden");
+        check(byMod.toggleMod("create").equals(hidden), "restoring a mod lost other rules");
         check(!GuiEventVisibility.ALL_VISIBLE.toggle(30).active(),"queue policy became a visibility filter");
     }
     private static void check(boolean condition,String message){if(!condition)throw new AssertionError(message);}

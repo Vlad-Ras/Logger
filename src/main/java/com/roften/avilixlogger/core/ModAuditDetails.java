@@ -68,6 +68,13 @@ public final class ModAuditDetails {
         if(!operation.isEmpty()) {
             lines.add(Component.literal(storageSummary(operation)));
             lines.add(Component.literal("Способ: люк опыта; позиция люка: "+operation.getInt("HatchX")+" "+operation.getInt("HatchY")+" "+operation.getInt("HatchZ")));
+            var key = fluidIdentity(operation.getCompound("FluidKey"));
+            var oldContents = before.getCompound("StorageContents");
+            var newContents = after.getCompound("StorageContents");
+            if (!key.isEmpty() && oldContents.contains("Tanks", Tag.TAG_LIST) && newContents.contains("Tanks", Tag.TAG_LIST)) {
+                lines.add(Component.literal("В хранилище · " + key.getString("id") + " · "
+                        + fluidAmount(oldContents, key) + " → " + fluidAmount(newContents, key) + " mB"));
+            }
             lines.add(Component.literal("Опыт игрока: "+before.getCompound("PlayerExperience").getLong("Points")+" → "+after.getCompound("PlayerExperience").getLong("Points")));
         }
         if(row.type==ActionType.CLAIM_ACTION) {
@@ -89,6 +96,22 @@ public final class ModAuditDetails {
         if(after.getBoolean("NativeThrew"))lines.add(Component.literal("Игровая операция завершилась исключением; показаны наблюдаемые изменения."));
         return List.copyOf(lines);
     }
+    private static CompoundTag fluidIdentity(CompoundTag stack) {
+        var key = stack.copy();
+        key.remove("amount");
+        return key;
+    }
+
+    private static long fluidAmount(CompoundTag contents, CompoundTag key) {
+        var tanks = contents.getList("Tanks", Tag.TAG_COMPOUND);
+        long amount = 0;
+        for (int i = 0; i < Math.min(64, tanks.size()); i++) {
+            var tank = tanks.getCompound(i);
+            if (key.equals(fluidIdentity(tank.getCompound("Fluid")))) amount += tank.getLong("AmountMB");
+        }
+        return amount;
+    }
+
     private static String owner(CompoundTag tag){return tag.contains("OwnerUUID")?tag.getString("OwnerUUID"):"нет";}
     private static String signed(long value){return(value>0?"+":"")+value;}
     private static String value(Tag tag) {

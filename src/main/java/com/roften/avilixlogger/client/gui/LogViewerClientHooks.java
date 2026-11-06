@@ -23,13 +23,17 @@ public final class LogViewerClientHooks {
 
     private static java.lang.ref.WeakReference<LogViewerScreen> OPEN_SCREEN = new java.lang.ref.WeakReference<>(null);
     private static boolean serverCreateAvailable;
-    private static boolean capturePaused;
-    public static boolean capturePaused(){return capturePaused;}
-    public static void acceptCaptureHealth(com.roften.avilixlogger.net.S2CCaptureHealthPayload payload){capturePaused=payload.paused();var screen=OPEN_SCREEN.get();if(screen!=null)screen.updateCaptureHealth();}
+    private static com.roften.avilixlogger.net.S2CCaptureHealthPayload captureHealth;
+    static com.roften.avilixlogger.net.S2CCaptureHealthPayload captureHealth() { return captureHealth; }
+    public static void acceptCaptureHealth(com.roften.avilixlogger.net.S2CCaptureHealthPayload payload) {
+        captureHealth = payload;
+        var screen = OPEN_SCREEN.get();
+        if (screen != null) screen.updateCaptureHealth();
+    }
     public static boolean createAvailable() { return serverCreateAvailable && com.roften.avilixlogger.core.CreateSupport.available(); }
 
     public static void onLogin(ClientPlayerNetworkEvent.LoggingIn e) {
-        capturePaused=false;
+        captureHealth = null;
         OPEN_SCREEN.clear();
         teleportOwner.clear();teleportRequest=0;
         LoggerActionsScreen.clear();
@@ -42,7 +46,7 @@ public final class LogViewerClientHooks {
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
-        capturePaused=false;
+        captureHealth = null;
         OPEN_SCREEN.clear();
         teleportOwner.clear();teleportRequest=0;
         LoggerActionsScreen.clear();

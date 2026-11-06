@@ -172,6 +172,15 @@ public final class RollbackCoordinator {
         if (ex != null) ex.shutdownNow();
     }
 
+    public static boolean submitEntryLookup(Runnable task) {
+        try {
+            executor().execute(task);
+            return true;
+        } catch (RejectedExecutionException rejected) {
+            return false;
+        }
+    }
+
     private static ThreadPoolExecutor executor() {
         ThreadPoolExecutor current = executor;
         if (current != null) return current;

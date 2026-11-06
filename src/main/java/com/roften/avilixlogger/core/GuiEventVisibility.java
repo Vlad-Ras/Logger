@@ -11,8 +11,10 @@ import java.util.stream.Collectors;
 import static com.roften.avilixlogger.core.ActionType.*;
 
 /** Personal journal exclusions. Rules use saved fields and are independent of capture policy. */
-public record GuiEventVisibility(long categories, Set<ActionType> actions) {
-    public static final GuiEventVisibility ALL_VISIBLE = new GuiEventVisibility(0, Set.of());
+public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<String> mods) {
+    public static final GuiEventVisibility ALL_VISIBLE = new GuiEventVisibility(0, Set.of(), Set.of());
+    public static final int MAX_MODS = 64;
+    private static final java.util.regex.Pattern MOD_ID = java.util.regex.Pattern.compile("[a-z0-9_][a-z0-9_.-]{0,127}");
     private static final List<Category> CATEGORIES = buildCategories();
     private static final long CATEGORY_MASK = CATEGORIES.stream().mapToLong(c -> bit(c.preset())).reduce(0, (a, b) -> a | b);
 
@@ -20,23 +22,59 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions) {
 
     public GuiEventVisibility {
         actions = Set.copyOf(actions);
+        mods = mods.stream().filter(id -> MOD_ID.matcher(id).matches()).sorted().limit(MAX_MODS).collect(Collectors.toUnmodifiableSet());
     }
 
     public static List<Category> supportedCategories() { return CATEGORIES; }
 
     public static GuiEventVisibility of(long categories, Set<ActionType> actions) {
-        return new GuiEventVisibility(categories & CATEGORY_MASK, actions);
+        return of(categories, actions, Set.of());
     }
 
-    public boolean active() { return categories != 0 || !actions.isEmpty(); }
+    public static GuiEventVisibility of(long categories, Set<ActionType> actions, Set<String> mods) {
+        return new GuiEventVisibility(categories & CATEGORY_MASK, actions, mods);
+    }
+
+    public boolean active() { return categories != 0 || !actions.isEmpty() || !mods.isEmpty(); }
     public boolean hides(int preset) { return (categories & bit(preset)) != 0; }
-    public GuiEventVisibility toggle(int preset) { return of(categories ^ bit(preset), actions); }
+    public GuiEventVisibility toggle(int preset) { return of(categories ^ bit(preset), actions, mods); }
 
     public GuiEventVisibility toggle(ActionType action) {
         var next = EnumSet.noneOf(ActionType.class);
         next.addAll(actions);
         if (!next.remove(action)) next.add(action);
-        return of(categories, next);
+        return of(categories, next, mods);
+    }
+
+    public GuiEventVisibility toggleMod(String mod) {
+        var next = new java.util.HashSet<>(mods);
+        if (!next.remove(mod) && next.size() < MAX_MODS) next.add(mod);
+        return of(categories, actions, next);
+    }
+
+    private static final Set<String> NATIVE_MODS = Set.of("create", "ae2", "backpacked");
+
+    public static String modOrigin(String source) {
+        if (source == null) return "";
+        if (source.startsWith("mod:")) {
+            int end = source.indexOf(':', 4);
+            String id = end < 0 ? source.substring(4) : source.substring(4, end);
+            return MOD_ID.matcher(id).matches() ? id : "";
+        }
+        int end = source.indexOf(':');
+        if (end < 0) return "";
+        String prefix = source.substring(0, end);
+        return switch (prefix) {
+            case "plane" -> "immersive_aircraft";
+            case "create", "ae2", "backpacked" -> prefix;
+            default -> "";
+        };
+    }
+
+    private static List<String> modPrefixes(String mod) {
+        if (mod.equals("immersive_aircraft")) return List.of("mod:" + mod + ":", "plane:");
+        if (NATIVE_MODS.contains(mod)) return List.of("mod:" + mod + ":", mod + ":");
+        return List.of("mod:" + mod + ":");
     }
 
     private static long bit(int preset) { return 1L << (preset - 1); }
@@ -105,6 +143,7 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions) {
         if (!active()) return false;
         if (action != null && actions.contains(action)) return true;
         String origin = source == null ? "" : source;
+        if (!mods.isEmpty() && mods.contains(modOrigin(origin))) return true;
         for (var category : CATEGORIES) {
             if (!hides(category.preset())) continue;
             if (action != null && category.actions().contains(action)) return true;
@@ -122,6 +161,12 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions) {
     public void appendWhere(StringBuilder sql, Function<String, String> quote, String extraColumn) {
         if (!active()) return;
         var clauses = new ArrayList<String>();
+        for (String mod : mods) {
+            for (String prefix : modPrefixes(mod)) {
+                clauses.add("startsWith(source, " + quote.apply(prefix) + ")");
+                if (prefix.startsWith("mod:")) clauses.add("source = " + quote.apply(prefix.substring(0, prefix.length() - 1)));
+            }
+        }
         var hiddenTypes = EnumSet.noneOf(ActionType.class);
         hiddenTypes.addAll(actions);
         for (var category : CATEGORIES) {

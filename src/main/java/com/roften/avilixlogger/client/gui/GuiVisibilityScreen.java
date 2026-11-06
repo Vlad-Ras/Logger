@@ -29,7 +29,7 @@ final class GuiVisibilityScreen extends Screen {
     private final List<Button> rows = new ArrayList<>();
     private List<Choice> matches = List.of();
     private GuiEventVisibility selection;
-    private boolean exactTypes;
+    private int tab;
     private int scroll;
     private String needle = "";
 
@@ -49,13 +49,12 @@ final class GuiVisibilityScreen extends Screen {
         rows.clear();
         int w = Math.min(450, width - 20);
         int x = (width - w) / 2;
-        int half = (w - 6) / 2;
-        var categories = button("Категории", x, 35, half, () -> show(false));
-        var actions = button("Типы событий", x + half + 6, 35, w - half - 6, () -> show(true));
-        categories.active = exactTypes;
-        actions.active = !exactTypes;
+        int tabWidth = (w - 12) / 3;
+        button("Категории", x, 35, tabWidth, () -> show(0)).active = tab != 0;
+        button("Типы событий", x + tabWidth + 6, 35, tabWidth, () -> show(1)).active = tab != 1;
+        button("Скрытые моды", x + 2 * (tabWidth + 6), 35, tabWidth, () -> show(2)).active = tab != 2;
         var search = addRenderableWidget(new EditBox(font, x, 57, w, 18, Component.literal("Поиск событий")));
-        search.setHint(Component.literal("Найти тип или категорию"));
+        search.setHint(Component.literal("Найти тип, категорию или мод"));
         search.setValue(needle);
         search.setResponder(value -> {
             needle = value;
@@ -82,8 +81,8 @@ final class GuiVisibilityScreen extends Screen {
         refreshRows();
     }
 
-    private void show(boolean exact) {
-        exactTypes = exact;
+    private void show(int selectedTab) {
+        tab = selectedTab;
         scroll = 0;
         needle = "";
         clearWidgets();
@@ -91,13 +90,22 @@ final class GuiVisibilityScreen extends Screen {
     }
 
     private void toggle(Choice choice) {
-        selection = choice.action() == null ? selection.toggle(choice.preset()) : selection.toggle(choice.action());
+        selection = switch (tab) {
+            case 2 -> selection.toggleMod(choice.key());
+            case 1 -> selection.toggle(choice.action());
+            default -> selection.toggle(choice.preset());
+        };
         refreshRows();
     }
 
     private void refreshRows() {
         String query = needle.strip().toLowerCase(Locale.ROOT);
-        matches = (exactTypes ? ACTIONS : categories).stream()
+        var choices = switch (tab) {
+            case 2 -> selection.mods().stream().sorted().map(mod -> new Choice(mod, mod, 0, null)).toList();
+            case 1 -> ACTIONS;
+            default -> categories;
+        };
+        matches = choices.stream()
                 .filter(choice -> choice.label().toLowerCase(Locale.ROOT).contains(query)
                         || choice.key().toLowerCase(Locale.ROOT).contains(query))
                 .toList();
@@ -109,7 +117,8 @@ final class GuiVisibilityScreen extends Screen {
             var choice = matches.get(scroll + i);
             boolean hidden = choice.action() == null ? selection.hides(choice.preset())
                     : selection.actions().contains(choice.action());
-            row.setMessage(Component.literal((hidden ? "Скрыто · " : "Показывать · ") + choice.label()));
+            String prefix = tab == 2 ? "Показать мод · " : hidden ? "Скрыто · " : "Показывать · ";
+            row.setMessage(Component.literal(prefix + choice.label()));
             row.setTooltip(Tooltip.create(Component.literal(choice.key().isEmpty() ? choice.label()
                     : choice.label() + " · " + choice.key())));
         }
