@@ -52,7 +52,10 @@ public final class CreateTransferRollbackCoordinator {
                 source.getServer().execute(()->{if(request!=generation||!LoggerConfig.isEnabled()||!Objects.equals(REQUESTS.get(player.getUUID()),token))return;
                     REQUESTS.remove(player.getUUID());
                     PREVIEWS.put(player.getUUID(),new Preview(plan,System.currentTimeMillis()+120000,entry));
-                    source.sendSystemMessage(Component.literal("Передача "+plan.transfer()+": конструкций "+plan.constructions().size()+", слотов груза "+plan.cargo().size()+", внешних слотов "+plan.external().size()+", предметов мира "+plan.world().size()+", creative источников/поглотителей "+(plan.creative().size()+plan.worldCreative().size())+", рук активатора "+plan.hands().size()+", блоков "+plan.blocks().size()+", целей-сущностей "+plan.targets().size()+". Подтвердить: /log cart confirm-transfer (2 минуты)."));});
+                    source.sendSystemMessage(Component.literal("Передача "+plan.transfer()+": конструкций "+plan.constructions().size()+", слотов груза "+plan.cargo().size()+", внешних слотов "+plan.external().size()+", предметов мира "+plan.world().size()+", creative источников/поглотителей "+(plan.creative().size()+plan.worldCreative().size())+", рук активатора "+plan.hands().size()+", блоков "+plan.blocks().size()+", целей-сущностей "+plan.targets().size()+". Подтверждение действует 2 минуты. ")
+                        .append(Component.literal("[Подтвердить]").withStyle(style -> style.withClickEvent(
+                                new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.SUGGEST_COMMAND,
+                                        "/log cart confirm-transfer " + entry)))));});
             }catch(Exception failure){source.getServer().execute(()->{if(!Objects.equals(REQUESTS.get(player.getUUID()),token))return;REQUESTS.remove(player.getUUID());source.sendFailure(Component.literal("Откат передачи: "+failure.getMessage()));});}
         });
     }
@@ -73,10 +76,18 @@ public final class CreateTransferRollbackCoordinator {
             if(examined>=512)throw new IllegalStateException("Слишком большая последующая история передачи");
         }
     }
-    public static void confirm(CommandSourceStack source){
+    public static void confirm(CommandSourceStack source) {
+        confirm(source, 0);
+    }
+    public static void confirm(CommandSourceStack source, long expectedEntry) {
         var player=source.getPlayer();if(player==null)return;
-        var preview=PREVIEWS.remove(player.getUUID());
+        var preview=PREVIEWS.get(player.getUUID());
         if(preview==null||preview.expires<System.currentTimeMillis()){source.sendFailure(Component.literal("Предпросмотр передачи отсутствует или истёк"));return;}
+        if (expectedEntry > 0 && preview.entry != expectedEntry) {
+            source.sendFailure(Component.literal("Предпросмотр относится к другой записи."));
+            return;
+        }
+        PREVIEWS.remove(player.getUUID());
         if(CartRollbackCoordinator.busy()||RollbackCoordinator.hasActiveRollback()||CartAuditContext.rollbackActive){source.sendFailure(Component.literal("Уже выполняется откат"));return;}
         if(!CreateCartAudit.enabled())return;
         active=new Job(source,preview.plan,preview.entry,LoggerRuntime.storage(source.getLevel()));CartAuditContext.rollbackActive=true;

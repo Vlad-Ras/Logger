@@ -42,16 +42,28 @@ public final class CartCommands {
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CreateTrainRecovery.confirm(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
             .then(literal("undo-transfer").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CreateTransferRollbackCoordinator.preview(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
-            .then(literal("confirm-transfer").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).executes(c->{CreateTransferRollbackCoordinator.confirm(c.getSource());return 1;}))
+            .then(literal("confirm-transfer").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
+                .executes(c->{CreateTransferRollbackCoordinator.confirm(c.getSource());return 1;})
+                .then(argument("entry",LongArgumentType.longArg(1)).executes(c->{
+                    CreateTransferRollbackCoordinator.confirm(c.getSource(),LongArgumentType.getLong(c,"entry"));return 1;
+                })))
             .then(literal("undo-disassembly").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CreateStructuralRollbackCoordinator.preview(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
             .then(literal("undo-coupling").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CreateCouplingRollbackCoordinator.preview(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
-            .then(literal("confirm-coupling").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).executes(c->{CreateCouplingRollbackCoordinator.confirm(c.getSource());return 1;}))
+            .then(literal("confirm-coupling").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
+                .executes(c->{CreateCouplingRollbackCoordinator.confirm(c.getSource());return 1;})
+                .then(argument("entry",LongArgumentType.longArg(1)).executes(c->{
+                    CreateCouplingRollbackCoordinator.confirm(c.getSource(),LongArgumentType.getLong(c,"entry"));return 1;
+                })))
             .then(literal("recover-representations").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CreateTrainRepresentationCoordinator.preview(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
             .then(literal("confirm-representations").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).executes(c->{CreateTrainRepresentationCoordinator.confirm(c.getSource());return 1;}))
-            .then(literal("confirm-structure").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).executes(c->{CreateStructuralRollbackCoordinator.confirm(c.getSource());return 1;}))
+            .then(literal("confirm-structure").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2))
+                .executes(c->{CreateStructuralRollbackCoordinator.confirm(c.getSource());return 1;})
+                .then(argument("entry",LongArgumentType.longArg(1)).executes(c->{
+                    CreateStructuralRollbackCoordinator.confirm(c.getSource(),LongArgumentType.getLong(c,"entry"));return 1;
+                })))
             .then(literal("confirm").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).executes(c->{CartRollbackCoordinator.confirm(c.getSource());return 1;})
                 .then(argument("id",StringArgumentType.word()).then(argument("entry",LongArgumentType.longArg(1)).executes(c->{UUID id=parse(c.getSource(),StringArgumentType.getString(c,"id"));if(id!=null)CartRollbackCoordinator.confirm(c.getSource(),id,LongArgumentType.getLong(c,"entry"));return 1;}))))
             .then(literal("cancel").requires(s->PermissionUtil.has(s,"avilixlogger.command.rollback",2)).executes(c->{CartRollbackCoordinator.cancel(c.getSource());CreateTransferRollbackCoordinator.cancel(c.getSource());CreateStructuralRollbackCoordinator.cancel(c.getSource());CreateCouplingRollbackCoordinator.cancel(c.getSource());CreateTrainRepresentationCoordinator.cancel(c.getSource());CreateTrainRecovery.cancel(c.getSource());return 1;}));
@@ -74,6 +86,39 @@ public final class CartCommands {
         chatHistory(source,text,before);
     }
     private static Component copyButton(String label,String value){return Component.literal(label).withStyle(s->s.withColor(ChatFormatting.AQUA).withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD,value)).withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,Component.literal("Скопировать: "+value))));}
+    static void previewEntry(CommandSourceStack source, LogEntry row) {
+        if (!CreateSupport.available() || !PermissionUtil.has(source, "avilixlogger.command.lookup", 2)
+                || !PermissionUtil.has(source, "avilixlogger.command.rollback", 2)) {
+            source.sendFailure(Component.literal("Для отката этой записи нужны Create и права на историю и откат конструкций."));
+            return;
+        }
+        var id = CreateContraptionKind.id(row.source);
+        if (id == null) {
+            source.sendFailure(Component.literal("В записи отсутствует ID конструкции."));
+            return;
+        }
+        var phase = CreateContraptionKind.phase(row.source);
+        if (row.type == ActionType.CREATE_DEPLOYER_ACTION
+                || row.type == ActionType.CART_TRANSFER && phase.equals("automation_transfer")) {
+            CreateTransferRollbackCoordinator.preview(source, id, row.id);
+        } else if (row.type == ActionType.CART_DISASSEMBLE && phase.equals("structural_disassemble")) {
+            CreateStructuralRollbackCoordinator.preview(source, id, row.id);
+        } else if (row.type == ActionType.CART_STATUS && phase.equals("coupling")) {
+            CreateCouplingRollbackCoordinator.preview(source, id, row.id);
+        } else if (isCheckpoint(row, id, phase)) {
+            CartRollbackCoordinator.preview(source, id, row.id);
+        } else {
+            source.sendFailure(Component.literal("Для этой записи Create отдельный откат недоступен. Откройте историю конструкции " + id + "."));
+        }
+    }
+
+    private static boolean isCheckpoint(LogEntry row, UUID id, String phase) {
+        var prefix = CartAuditContext.prefix(id) + phase + ":";
+        return CreateContraptionKind.fromSource(row.source) == CreateContraptionKind.MINECART
+                && CartRollbackPlan.checkpoint(row.type) && row.source.startsWith(prefix)
+                && row.source.length() > prefix.length() && Character.isDigit(row.source.charAt(prefix.length()));
+    }
+
     private static void chatHistory(CommandSourceStack source,String text,long before){UUID id=parse(source,text);if(id==null)return;
         LogQuery q=new LogQuery();q.dim="*";q.constructionId=id;q.limit=8;q.beforeId=before;
         var storage=LoggerRuntime.storage(source.getLevel());
@@ -82,9 +127,7 @@ public final class CartCommands {
             for(var row:rows){var phase=CreateContraptionKind.phase(row.source);
                 boolean transfer=row.type==ActionType.CART_TRANSFER&&phase.equals("automation_transfer")||row.type==ActionType.CREATE_DEPLOYER_ACTION;
                 boolean structure=row.type==ActionType.CART_DISASSEMBLE&&phase.equals("structural_disassemble");
-                var checkpointPrefix=CartAuditContext.prefix(id)+phase+":";
-                boolean checkpoint=CreateContraptionKind.fromSource(row.source)==CreateContraptionKind.MINECART&&CartRollbackPlan.checkpoint(row.type)
-                        &&row.source.startsWith(checkpointPrefix)&&row.source.length()>checkpointPrefix.length()&&Character.isDigit(row.source.charAt(checkpointPrefix.length()));
+                boolean checkpoint=isCheckpoint(row,id,phase);
                 String suffix=checkpoint?" [контрольная точка]":"";
                 var message=Component.literal("entry="+row.id+" · "+java.time.Instant.ofEpochMilli(row.ts)+" · "+LogText.actionLabel(row.type)+" · "+Objects.toString(row.actorName,"SYSTEM")+" · "+row.dim+" "+row.x+" "+row.y+" "+row.z+suffix+" · "+Objects.toString(row.extra,""));
                 if(transfer||structure||checkpoint)message.withStyle(st->st.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,(transfer?"/log cart undo-transfer ":structure?"/log cart undo-disassembly ":"/log cart rollback ")+id+" "+row.id)));

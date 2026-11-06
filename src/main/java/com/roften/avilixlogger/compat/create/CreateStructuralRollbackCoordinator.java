@@ -57,13 +57,24 @@ public final class CreateStructuralRollbackCoordinator {
             try{var plan=read(storage,id,entry);source.getServer().execute(()->{
                 if(request!=generation||!LoggerConfig.isEnabled()||!Objects.equals(REQUESTS.get(player.getUUID()),token))return;REQUESTS.remove(player.getUUID());
                 PREVIEWS.put(player.getUUID(),new Preview(id,entry,System.currentTimeMillis()+120000));
-                source.sendSystemMessage(Component.literal("Разборка "+plan.operation()+": конструкций "+plan.bodies().size()+", блоков мира "+plan.world().size()+", дропов/клея "+plan.effects().size()+". Подтвердить: /log cart confirm-structure (2 минуты)."));
+                source.sendSystemMessage(Component.literal("Разборка "+plan.operation()+": конструкций "+plan.bodies().size()+", блоков мира "+plan.world().size()+", дропов/клея "+plan.effects().size()+". Подтверждение действует 2 минуты. ")
+                        .append(Component.literal("[Подтвердить]").withStyle(style -> style.withClickEvent(
+                                new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.SUGGEST_COMMAND,
+                                        "/log cart confirm-structure " + entry)))));
             });}catch(Exception failure){source.getServer().execute(()->{if(!Objects.equals(REQUESTS.get(player.getUUID()),token))return;REQUESTS.remove(player.getUUID());error(source,failure);});}
         });
     }
-    public static void confirm(CommandSourceStack source){
-        var player=source.getPlayer();if(player==null)return;var preview=PREVIEWS.remove(player.getUUID());
+    public static void confirm(CommandSourceStack source) {
+        confirm(source, 0);
+    }
+    public static void confirm(CommandSourceStack source, long expectedEntry) {
+        var player=source.getPlayer();if(player==null)return;var preview=PREVIEWS.get(player.getUUID());
         if(preview==null||preview.expires<System.currentTimeMillis()){source.sendFailure(Component.literal("Предпросмотр разборки отсутствует или истёк"));return;}
+        if (expectedEntry > 0 && preview.entry != expectedEntry) {
+            source.sendFailure(Component.literal("Предпросмотр относится к другой записи."));
+            return;
+        }
+        PREVIEWS.remove(player.getUUID());
         if(CartRollbackCoordinator.busy()||RollbackCoordinator.hasActiveRollback()||CartAuditContext.rollbackActive){source.sendFailure(Component.literal("Уже выполняется откат"));return;}
         if(!CreateCartAudit.enabled())return;
         preparing=true;preparingActor=player.getUUID();CartAuditContext.rollbackActive=true;long request=++generation;var history=LoggerRuntime.storage(source.getLevel());

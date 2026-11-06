@@ -38,12 +38,12 @@ public final class LoggerActionsScreen extends Screen {
     private Button execute;
     public LoggerActionsScreen(Screen parent){
         super(Component.literal("Действия логгера"));this.parent=parent;
-        allActions=LoggerActionCatalog.ACTIONS.stream().filter(this::available).toList();actions=allActions;
+        allActions=LoggerActionCatalog.ACTIONS.stream().filter(LoggerActionsScreen::available).toList();actions=allActions;
         var categories=new ArrayList<String>();categories.add("Все");categories.addAll(allActions.stream().map(LoggerActionCatalog.Action::group).distinct().toList());groups=List.copyOf(categories);
         if(!actions.isEmpty())values=actions.getFirst().fields().stream().map(LoggerActionCatalog.Field::initial).toList();
         current=new java.lang.ref.WeakReference<>(this);
     }
-    private boolean available(LoggerActionCatalog.Action action){
+    private static boolean available(LoggerActionCatalog.Action action){
         var connection=Minecraft.getInstance().getConnection();if(connection==null)return false;
         var node=connection.getCommands().getRoot().getChild("log");if(node==null)return false;
         for(String word:action.template().substring(3).trim().split(" ")){
@@ -90,6 +90,11 @@ public final class LoggerActionsScreen extends Screen {
         try{action.command(values);lastRequest=++sequence;append("→ "+action.label());PacketDistributor.sendToServer(new C2SLoggerActionPayload(lastRequest,action.id(),values));results=true;textScroll=0;refresh();}
         catch(IllegalArgumentException e){append(e.getMessage());results=true;refresh();}
     }
+    static boolean canRun(String actionId) {
+        return LoggerActionCatalog.ACTIONS.stream().filter(action -> action.id().equals(actionId))
+                .anyMatch(LoggerActionsScreen::available);
+    }
+
     static void run(Screen parent,String actionId,List<String> values) {
         var screen=new LoggerActionsScreen(parent);
         var action=screen.allActions.stream().filter(a->a.id().equals(actionId)).findFirst().orElse(null);

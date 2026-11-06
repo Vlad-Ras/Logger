@@ -12,6 +12,8 @@ public final class ServerCaptureGuard {
         Fault(String queue,String reason){this.queue=queue;this.reason=reason;rejected.increment();}
         Gap snapshot(long until){return new Gap(since,until,queue,reason,rejected.sum(),suppressed.sum());}
     }
+    private static final java.time.format.DateTimeFormatter GAP_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss z").withZone(java.time.ZoneId.systemDefault());
     private static volatile Thread serverThread;
     private static volatile Fault fault;
     private static volatile Gap last;
@@ -38,15 +40,15 @@ public final class ServerCaptureGuard {
     /** Used only after the caller has accepted the gap receipt and checked drained queues. */
     static void resume(Gap gap){last=gap;generation++;fault=null;}
     public static String report(){
+        if (!com.roften.avilixlogger.LoggerConfig.isEnabled()) return "Запись отключена в конфигурации.";
         var gap=active();if(gap==null)gap=last;
         String mode=CaptureTypePolicy.enabled(30)?"Переполнение: временная пауза с автоматическим возобновлением.":"Переполнение: ожидание очереди, серверный тик может задерживаться.";
         if(gap==null)return "Запись событий работает. "+mode;
         String queue=switch(gap.queue()){case "cpu"->"обработка снимков";case "events"->"события";case "journal"->"запись на диск";default->gap.queue();};
         String reason=switch(gap.reason()){case "FULL"->"достигнут лимит очереди: обработка медленнее поступления";case "BUSY"->"очередь не освободила блокировку за 0,2 мс";case "OVERSIZED"->"крупный снимок не принят: буфер ещё занят";default->gap.reason();};
-        var format=java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm:ss z").withZone(java.time.ZoneId.systemDefault());
-        return (gap.until()==0?"ЗАПИСЬ ВРЕМЕННО ПРИОСТАНОВЛЕНА с ":"Запись работает. Последняя пауза: ")+format.format(java.time.Instant.ofEpochMilli(gap.since()))
+        return (gap.until()==0?"ЗАПИСЬ ВРЕМЕННО ПРИОСТАНОВЛЕНА с ":"Запись работает. Последняя пауза: ")+GAP_TIME.format(java.time.Instant.ofEpochMilli(gap.since()))
             +".\nПричина: "+queue+" — "+reason+".\nОтклонено заданий: "+gap.rejected()+"; пропущено проверок: "+gap.suppressedChecks()+" (это не число игровых действий)."
-            +(gap.until()==0?"\nПосле освобождения очередей запись возобновится автоматически. Пропущенные действия восстановить нельзя.":"\nПауза завершена в "+format.format(java.time.Instant.ofEpochMilli(gap.until()))+"; интервал сохранён в журнале.")
+            +(gap.until()==0?"\nПосле освобождения очередей запись возобновится автоматически. Пропущенные действия восстановить нельзя.":"\nПауза завершена в "+GAP_TIME.format(java.time.Instant.ofEpochMilli(gap.until()))+"; интервал передан на запись в журнал.")
             +"\nРежим можно изменить: Главный экран → Запись событий → Переполнение. "+mode;
     }
 }

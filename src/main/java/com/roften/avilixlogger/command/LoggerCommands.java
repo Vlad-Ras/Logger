@@ -81,6 +81,15 @@ public final class LoggerCommands {
             .then(CartCommands.node())
             .then(CombatPositionCommand.node())
             .then(EntryPositionCommand.node())
+            .then(EntryRollbackCommand.node())
+            .then(literal("capture-status")
+                .requires(s -> PermissionUtil.has(s, "avilixlogger.gui", 2))
+                .executes(c -> {
+                    c.getSource().sendSystemMessage(Component.literal(LoggerRuntime.captureQueueReport()));
+                    var player = c.getSource().getPlayer();
+                    if (player != null) LoggerNetwork.sendCaptureHealth(player);
+                    return 1;
+                }))
             .then(BackpackCommands.node())
             .then(literal("perf")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.command.admin", 2))

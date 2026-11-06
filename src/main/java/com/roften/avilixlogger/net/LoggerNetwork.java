@@ -1,6 +1,8 @@
 package com.roften.avilixlogger.net;
 
 import com.roften.avilixlogger.AvilixLoggerMod;
+import com.roften.avilixlogger.LoggerConfig;
+import com.roften.avilixlogger.command.EntryRollbackCommand;
 import com.roften.avilixlogger.core.ActionType;
 import com.roften.avilixlogger.auth.AuthCoreBridge;
 import com.roften.avilixlogger.core.ChatLogPager;
@@ -140,12 +142,14 @@ public final class LoggerNetwork {
             LastQueryManager.clear(player);
             ChatLogPager.clear(player);
             RollbackPlanManager.clear(uuid);
+            EntryRollbackCommand.clear(uuid);
             pruneQueuedPageTasks(uuid);
             pruneQueuedDetailsTasks(uuid);
         }
     }
 
     public static void shutdown() {
+        EntryRollbackCommand.clearAll();
         // Static registration survives an integrated-server restart. Invalidate requests
         // below, drop queued captures, and let idle workers time out instead of poisoning
         // the pools permanently for the next world.
@@ -276,7 +280,7 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
-        PayloadRegistrar r = event.registrar("13").optional();
+        PayloadRegistrar r = event.registrar("14").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
         r.playToServer(C2SEntryTeleportPayload.TYPE,C2SEntryTeleportPayload.STREAM_CODEC,LoggerNetwork::handleEntryTeleport);
@@ -504,8 +508,14 @@ public final class LoggerNetwork {
         });
     }
 
-    private static void sendCaptureHealth(ServerPlayer player){
-        if(player.connection.hasChannel(S2CCaptureHealthPayload.TYPE)&&hasGuiPermission(player))PacketDistributor.sendToPlayer(player,new S2CCaptureHealthPayload(com.roften.avilixlogger.core.ServerCaptureGuard.paused(),com.roften.avilixlogger.core.ServerCaptureGuard.report()));
+    public static void sendCaptureHealth(ServerPlayer player) {
+        if (!player.connection.hasChannel(S2CCaptureHealthPayload.TYPE) || !hasGuiPermission(player)) return;
+        var state = !LoggerConfig.isEnabled() ? S2CCaptureHealthPayload.State.DISABLED
+                : com.roften.avilixlogger.core.ServerCaptureGuard.paused() ? S2CCaptureHealthPayload.State.PAUSED
+                : com.roften.avilixlogger.core.ServerCaptureGuard.last() != null ? S2CCaptureHealthPayload.State.RESUMED
+                : S2CCaptureHealthPayload.State.ACTIVE;
+        PacketDistributor.sendToPlayer(player, new S2CCaptureHealthPayload(state,
+                com.roften.avilixlogger.core.ServerCaptureGuard.report()));
     }
     public static void broadcastCaptureHealth(net.minecraft.server.MinecraftServer server){
         for(var player:server.getPlayerList().getPlayers())if(Boolean.TRUE.equals(CLIENT_PRESENT.get(player.getUUID())))sendCaptureHealth(player);
@@ -1057,7 +1067,7 @@ public final class LoggerNetwork {
             List<LogRow> rr = new ArrayList<>(Math.min(size, filtered.size()));
             int n = 0;
             for (LogEntry e : filtered) {
-                rr.add(LogRow.single(e.id, e.dim, e.x, e.y, e.z, com.roften.avilixlogger.core.LogText.toChatLine(level, e)));
+                rr.add(singleRow(level, e));
                 n++;
                 if (n >= size) break;
             }
@@ -1156,6 +1166,13 @@ public final class LoggerNetwork {
         return List.copyOf(out);
     }
 
+    private static LogRow singleRow(ServerLevel level, LogEntry entry) {
+        return new LogRow(entry.id, entry.dim, entry.x, entry.y, entry.z,
+                com.roften.avilixlogger.core.LogText.toChatLine(level, entry), false,
+                new long[]{entry.id}, List.of(), entry.type,
+                com.roften.avilixlogger.core.GuiEventVisibility.modOrigin(entry.source));
+    }
+
     private static List<Component> buildDetailsLines(ServerLevel level, long entryId, long[] rawIds) {
         List<LogEntry> es = fetchByIdsBestEffort(level, entryId, rawIds);
         if (es.isEmpty()) return List.of(Component.literal("(нет данных)").withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
@@ -1185,7 +1202,9 @@ public final class LoggerNetwork {
         // If a single entry with BE snapshots, compute NBT diff.
         LogEntry first = es.get(0);
         List<Component> out = new ArrayList<>();
-        out.add(Component.literal("Подробности").withStyle(net.minecraft.ChatFormatting.GOLD));
+        out.add(Component.literal(chronological == null ? "Запись #" + first.id : "Событий в группе · " + es.size())
+                .withStyle(net.minecraft.ChatFormatting.GOLD));
+        if (chronological == null) out.add(com.roften.avilixlogger.core.LogText.toChatLine(level, first));
         out.addAll(com.roften.avilixlogger.core.DeathLogDetails.describe(first));
         out.addAll(com.roften.avilixlogger.core.WeaponCombatTrace.describe(first));
         out.addAll(com.roften.avilixlogger.core.SignLogDetails.describe(level,first));
@@ -1195,7 +1214,7 @@ public final class LoggerNetwork {
         out.addAll(com.roften.avilixlogger.compat.supplementaries.SupplementariesTextAudit.describe(level,first));
 
         if (chronological != null) {
-            out.add(Component.literal("Timeline:").withStyle(net.minecraft.ChatFormatting.YELLOW));
+            out.add(Component.literal("Хронология").withStyle(net.minecraft.ChatFormatting.YELLOW));
             long t0 = chronological.get(0).ts;
             int limit = Math.min(120, chronological.size());
             for (int i = 0; i < limit; i++) {
@@ -1206,7 +1225,7 @@ public final class LoggerNetwork {
                 out.add(Component.literal(stamp).withStyle(net.minecraft.ChatFormatting.DARK_GRAY).append(shortLine));
             }
             if (chronological.size() > limit) {
-                out.add(Component.literal("… +" + (chronological.size() - limit) + " events").withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
+                out.add(Component.literal("… +" + (chronological.size() - limit) + " событий").withStyle(net.minecraft.ChatFormatting.DARK_GRAY));
             }
             out.add(Component.literal(" "));
         }
@@ -1476,14 +1495,7 @@ public final class LoggerNetwork {
                     burst = null;
                     if (out.size() >= pageSize) break;
                 }
-                out.add(com.roften.avilixlogger.net.LogRow.single(
-                        e.id,
-                        e.dim,
-                        e.x,
-                        e.y,
-                        e.z,
-                        com.roften.avilixlogger.core.LogText.toChatLine(level, e)
-                ));
+                out.add(singleRow(level, e));
                 nextCursorCandidate = e.id;
                 if (out.size() >= pageSize) break;
                 continue;
@@ -1619,7 +1631,7 @@ public final class LoggerNetwork {
         com.roften.avilixlogger.net.LogRow toRow(ServerLevel level) {
             if (events.size() == 1) {
                 LogEntry e = events.get(0);
-                return com.roften.avilixlogger.net.LogRow.single(e.id, e.dim, e.x, e.y, e.z, com.roften.avilixlogger.core.LogText.toChatLine(level, e));
+                return singleRow(level, e);
             }
 
             LogEntry first = events.get(0);
@@ -1690,15 +1702,19 @@ public final class LoggerNetwork {
                 }
             }
 
+            ActionType commonAction = first.type;
+            String commonMod = com.roften.avilixlogger.core.GuiEventVisibility.modOrigin(first.source);
             long[] rawIds = new long[events.size()];
             List<Component> groupedLines = new ArrayList<>(events.size());
             for (int i = 0; i < events.size(); i++) {
                 LogEntry event = events.get(i);
+                if (commonAction != event.type) commonAction = null;
+                if (!commonMod.isEmpty() && !commonMod.equals(com.roften.avilixlogger.core.GuiEventVisibility.modOrigin(event.source))) commonMod = "";
                 rawIds[i] = event.id;
                 groupedLines.add(com.roften.avilixlogger.core.LogText.toChatLine(level, event));
             }
             return new com.roften.avilixlogger.net.LogRow(
-                    first.id, first.dim, first.x, first.y, first.z, line, true, rawIds, groupedLines);
+                    first.id, first.dim, first.x, first.y, first.z, line, true, rawIds, groupedLines, commonAction, commonMod);
         }
 
         private static String safeBlockName(ServerLevel level, String blockStateSnbtOrId) {
