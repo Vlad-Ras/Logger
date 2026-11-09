@@ -3,28 +3,29 @@ package com.roften.avilixlogger.compat.ae2.mixin;
 import appeng.api.config.Actionable;
 import appeng.api.networking.security.IActionSource;
 import appeng.api.stacks.AEKey;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.roften.avilixlogger.compat.ae2.Ae2Audit;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** One audit point for player and machine transfers through the actual grid. */
+/** Observe the primitive result without constructing a return callback for every storage probe. */
 @Mixin(targets = "appeng.me.storage.NetworkStorage", remap = false)
 public class NetworkStorageMixin {
-    @Inject(method = "insert", at = @At("RETURN"), require = 0, remap = false)
-    private void avilixlogger$insert(AEKey key, long requested, Actionable mode, IActionSource source,
-                                      CallbackInfoReturnable<Long> result) {
-        if (mode != Actionable.MODULATE || key == null || source == null) return;
-        long actual = result.getReturnValue();
-        if (actual > 0 && !Ae2Audit.insidePowered()) Ae2Audit.transfer(key, actual, mode, source, true);
+    @ModifyReturnValue(method = "insert(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;Lappeng/api/networking/security/IActionSource;)J",
+            at = @At("RETURN"), require = 0, remap = false)
+    private long avilixlogger$insert(long actual, AEKey key, long requested, Actionable mode, IActionSource source) {
+        if (mode == Actionable.MODULATE && actual > 0 && key != null && source != null && !Ae2Audit.insidePowered()) {
+            Ae2Audit.transfer(key, actual, mode, source, true);
+        }
+        return actual;
     }
 
-    @Inject(method = "extract", at = @At("RETURN"), require = 0, remap = false)
-    private void avilixlogger$extract(AEKey key, long requested, Actionable mode, IActionSource source,
-                                       CallbackInfoReturnable<Long> result) {
-        if (mode != Actionable.MODULATE || key == null || source == null) return;
-        long actual = result.getReturnValue();
-        if (actual > 0 && !Ae2Audit.insidePowered()) Ae2Audit.transfer(key, actual, mode, source, false);
+    @ModifyReturnValue(method = "extract(Lappeng/api/stacks/AEKey;JLappeng/api/config/Actionable;Lappeng/api/networking/security/IActionSource;)J",
+            at = @At("RETURN"), require = 0, remap = false)
+    private long avilixlogger$extract(long actual, AEKey key, long requested, Actionable mode, IActionSource source) {
+        if (mode == Actionable.MODULATE && actual > 0 && key != null && source != null && !Ae2Audit.insidePowered()) {
+            Ae2Audit.transfer(key, actual, mode, source, false);
+        }
+        return actual;
     }
 }
