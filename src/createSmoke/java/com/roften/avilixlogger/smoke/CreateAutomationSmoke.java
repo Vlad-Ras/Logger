@@ -105,14 +105,11 @@ public final class CreateAutomationSmoke {
         var fluidCache=!isItem?BlockCapabilityCache.create(Capabilities.FluidHandler.BLOCK,world,externalPos,null):null;
         // Warm the cache outside capture: a cache hit must still address the native handler.
         if(itemCache!=null)itemCache.getCapability();if(fluidCache!=null)fluidCache.getCapability();
-        var scopeCtor=CartAutomationAudit.Scope.class.getDeclaredConstructor();scopeCtor.setAccessible(true);var scope=scopeCtor.newInstance();
-        var reset=CartAutomationAudit.Scope.class.getDeclaredMethod("reset",net.minecraft.world.level.block.entity.BlockEntity.class);reset.setAccessible(true);reset.invoke(scope,machine);
-        var active=CartAutomationAudit.class.getDeclaredField("current");active.setAccessible(true);active.set(null,scope);
-        var rowsMethod=CartAutomationAudit.Scope.class.getDeclaredMethod("rows",boolean.class);rowsMethod.setAccessible(true);
+        var scope = base ? null : CartAutomationAudit.captureChanges(machine);
         List<LogEntry> captured;
         try{
             if(base){
-                active.set(null,null);var hopper=(net.minecraft.world.level.block.entity.HopperBlockEntity)world.getBlockEntity(externalPos);
+                var hopper=(net.minecraft.world.level.block.entity.HopperBlockEntity)world.getBlockEntity(externalPos);
                 try(var capture=CreateCargoAudit.captureChanges(current)){
                     check(CreateBaseHopperSmoke.move(world,hopper,(net.minecraft.world.Container)cart,load,vanilla),"native base transfer refused");
                     check(((net.minecraft.world.Container)cart).getItem(0).getCount()==(load?1:11)&&hopper.getItem(0).getCount()==(load?11:1),"native base transfer amount");
@@ -126,7 +123,7 @@ public final class CreateAutomationSmoke {
                 IItemHandler port=world.getCapability(Capabilities.ItemHandler.BLOCK,psiPos,null);check(CartStorageAudit.owner(port)==current,"portable item alias missing");
                 var mounted=current.getContraption().getStorage().getAllItemStorages().get(BlockPos.ZERO);ItemStack before=mounted.getStackInSlot(3).copy();
                 port.extractItem(3,4,true);items.insertItem(slot,new ItemStack(Items.DIAMOND,4),true);
-                @SuppressWarnings("unchecked")var empty=(List<LogEntry>)rowsMethod.invoke(scope,true);check(empty.isEmpty(),"simulation produced automation rows");
+                var empty = scope.snapshotRows(true);check(empty.isEmpty(),"simulation produced automation rows");
                 if(mode.equals("in")){ItemStack moved=items.extractItem(slot,4,false);check(moved.getCount()==4&&port.insertItem(3,moved,false).isEmpty(),"native inbound remainder");}
                 else{int amount=direct?1:mode.equals("partial")?4:12;ItemStack moved=port.extractItem(3,amount,false);check(moved.getCount()==amount,"native outbound amount");
                     if(direct){
@@ -140,20 +137,23 @@ public final class CreateAutomationSmoke {
                 var port=world.getCapability(Capabilities.FluidHandler.BLOCK,psiPos,null);check(CartStorageAudit.owner(port)==current,"portable fluid alias missing");
                 var mounted=current.getContraption().getStorage().getFluids().storages.get(BlockPos.ZERO);FluidStack before=mounted.getFluidInTank(0).copy();
                 port.drain(750,IFluidHandler.FluidAction.SIMULATE);fluids.fill(new FluidStack(Fluids.WATER,100),IFluidHandler.FluidAction.SIMULATE);
-                @SuppressWarnings("unchecked")var empty=(List<LogEntry>)rowsMethod.invoke(scope,true);check(empty.isEmpty(),"fluid simulation produced automation rows");
+                var empty = scope.snapshotRows(true);check(empty.isEmpty(),"fluid simulation produced automation rows");
                 int amount=mode.equals("partial")?100:750;
                 if(mode.equals("in"))check(port.fill(fluids.drain(amount,IFluidHandler.FluidAction.EXECUTE),IFluidHandler.FluidAction.EXECUTE)==amount,"native inbound fluid amount");
                 else check(fluids.fill(port.drain(amount,IFluidHandler.FluidAction.EXECUTE),IFluidHandler.FluidAction.EXECUTE)==amount,"native outbound fluid amount");
             }
-            @SuppressWarnings("unchecked")var result=(List<LogEntry>)rowsMethod.invoke(scope,true);captured=result;
+            captured = scope.snapshotRows(true);
             }
-        }finally{active.set(null,null);}
+        } finally { if (scope != null) scope.finish(true); }
         StagedCartRestore replacement=null;
         try{
             check(captured.size()==2,"native automation operation was duplicated/incomplete");
             var history=new ArrayList<LogEntry>();var point=row(id,1,ActionType.CART_PLACE);point.beAfter=target.toString();history.add(point);long seq=2;for(var r:captured){r.materializeSnapshots();r.id=seq++;history.add(r);}
             var manifest=NbtSerde.fromSnbt(captured.getLast().beAfter);
             if(sided)check(manifest.getList("Slots",10).getCompound(0).getInt("Slot")== (mode.equals("in")?2:0) && manifest.getList("Slots",10).getCompound(0).getBoolean("DirectContainer"),"sided logical slot was not canonicalized");check(manifest.getBoolean("Complete")&&manifest.getList("Slots",10).size()==1,"native recipient missing: "+kind+"/"+mode+" handler="+(items!=null?items.getClass().getName():fluids.getClass().getName())+" "+manifest);check(captured.getLast().actorUuid==null&&captured.getLast().actorName.equals("SYSTEM"),"machine blamed backpack/cart owner");
+            if (!base) check(manifest.getLong("MachinePos") == machinePos.asLong()
+                    && manifest.getString("MachineDim").equals(world.dimension().location().toString()),
+                    "deferred machine address changed");
             if(base)check(NbtSerde.fromSnbt(captured.getFirst().beAfter).getBoolean("BaseCart")&&manifest.getString("Machine").equals("minecraft:hopper"),"base cargo or hopper identity lost");
             check(CartLogDetails.describe(world,captured.getLast()).stream().anyMatch(c->c.getString().contains("Хранилище:")),"GUI omitted automatic endpoint address");
             check(CartLogDetails.describe(world,captured.getFirst()).stream().anyMatch(c->c.getString().contains("До:")),"GUI omitted cargo before/after");
