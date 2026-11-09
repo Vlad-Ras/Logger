@@ -69,7 +69,7 @@ public final class Ae2Audit {
 
     /** The returned amount, never the simulated/requested amount, is what entered the ME network. */
     public static void transfer(AEKey key, long amount, Actionable mode, IActionSource source, boolean insert) {
-        if (mode != Actionable.MODULATE || amount <= 0 || key == null || source == null || !enabled() || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(27)) return;
+        if (mode != Actionable.MODULATE || amount <= 0 || key == null || source == null || !com.roften.avilixlogger.core.CaptureTypePolicy.enabled(27) || !enabled()) return;
         try {
             Transfer captured = captureTransfer(key, amount, mode, source, insert);
             if (captured != null) LoggerRuntime.storage(captured.level()).append(captured.row());
