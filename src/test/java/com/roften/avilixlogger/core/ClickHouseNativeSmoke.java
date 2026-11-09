@@ -214,6 +214,37 @@ public final class ClickHouseNativeSmoke {
         var modVisible = db.queryReverse(modQuery);
         check(modVisible.size() == 1 && modVisible.getFirst().id == addOn.id, "SQL visibility hid an unrelated mod or leaked legacy source");
 
+        var state = AsyncPipelineTest.row("native-visibility-system");
+        state.type = ActionType.BLOCK_PLACE;
+        state.dim = "minecraft:overworld";
+        state.source = GuiEventVisibility.UNATTRIBUTED;
+        state.extra = BlockChangeDetails.STATE_ONLY_PREFIX + "minecraft:wheat";
+        state.blockBefore = "{Name:'minecraft:wheat',Properties:{age:'1'}}";
+        state.blockAfter = "{Name:'minecraft:wheat',Properties:{age:'2'}}";
+        var playerPlacement = state.copyForQueue();
+        playerPlacement.id = 0;
+        playerPlacement.extra = "setBlock minecraft:wheat";
+        playerPlacement.blockBefore = "{Name:'minecraft:air'}";
+        playerPlacement.source = "player:place_block";
+        db.appendBatch("system-visibility-" + UUID.randomUUID(), List.of(state, playerPlacement));
+        var systemQuery = new LogQuery();
+        systemQuery.dim = "*";
+        systemQuery.untilTs = Long.MAX_VALUE;
+        systemQuery.exactIds = new long[]{state.id, playerPlacement.id};
+        systemQuery.limit = 5;
+        for (boolean details : List.of(false, true)) {
+            systemQuery.requireDetails = details;
+            var unfiltered = db.queryReverse(systemQuery);
+            check(unfiltered.size() == 2 && unfiltered.stream().anyMatch(r -> r.id == state.id
+                            && BlockChangeDetails.isStateOnlyPlacement(r)),
+                    "state-only label marker was lost in feed/detail roundtrip");
+            var filtered = systemQuery.copy();
+            filtered.guiVisibility = GuiEventVisibility.ALL_VISIBLE.toggleSource(GuiEventVisibility.UNATTRIBUTED);
+            var rows = db.queryReverse(filtered);
+            check(rows.size() == 1 && rows.getFirst().id == playerPlacement.id && !BlockChangeDetails.isStateOnlyPlacement(rows.getFirst()),
+                    "system source filter hid an ordinary placement or leaked system rows");
+        }
+
         if(useFeed) {
             var observation=AsyncPipelineTest.row("native-feed-only-position");observation.type=ActionType.BLOCK_INTERACT;observation.source="native:feed-only-position:"+UUID.randomUUID();
             observation.dim="minecraft:the_nether";observation.x=-1020;observation.y=15;observation.z=-820;observation.blockAfter="minecraft:chest";

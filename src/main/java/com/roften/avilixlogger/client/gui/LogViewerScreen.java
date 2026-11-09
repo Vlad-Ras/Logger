@@ -1746,7 +1746,8 @@ public final class LogViewerScreen extends Screen {
             try { hiddenCategories = Long.parseLong(p.getProperty("hiddenCategories", "0")); }
             catch (NumberFormatException ignored) { hiddenCategories = 0; }
             savedVisibility = com.roften.avilixlogger.core.GuiEventVisibility.of(hiddenCategories, hiddenActions,
-                    new HashSet<>(List.of(p.getProperty("hiddenMods", "").split(","))));
+                    new HashSet<>(List.of(p.getProperty("hiddenMods", "").split(","))),
+                    new HashSet<>(List.of(p.getProperty("hiddenSources", "").split(","))));
             savedTimePresetIdx = parseInt(p.getProperty("timePreset"), savedTimePresetIdx);
             savedRadiusPresetIdx = parseInt(p.getProperty("radiusPreset"), savedRadiusPresetIdx);
             savedTypePresetIdx = parseInt(p.getProperty("typePreset"), savedTypePresetIdx);
@@ -1813,6 +1814,7 @@ public final class LogViewerScreen extends Screen {
     private static void saveGuiStateToDisk() {
         Properties p = new Properties();
         p.setProperty("hiddenCategories", Long.toString(savedVisibility.categories()));
+        p.setProperty("hiddenSources", String.join(",", savedVisibility.sources().stream().sorted().toList()));
         p.setProperty("hiddenMods", savedVisibility.mods().stream().sorted().collect(java.util.stream.Collectors.joining(",")));
         p.setProperty("hiddenActions", savedVisibility.actions().stream().map(Enum::name).sorted()
                 .collect(java.util.stream.Collectors.joining(",")));

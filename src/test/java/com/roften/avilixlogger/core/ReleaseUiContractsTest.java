@@ -63,6 +63,14 @@ public final class ReleaseUiContractsTest {
         check(byMod.hidden(ActionType.BLOCK_PLACE, "create:cart:test:place", null), "native Create source visible");
         check(!byMod.hidden(ActionType.BLOCK_PLACE, "mod:create_cobblestone:place", null), "different mod accidentally hidden");
         check(byMod.toggleMod("create").equals(hidden), "restoring a mod lost other rules");
+        String origin = GuiEventVisibility.UNATTRIBUTED;
+        var system = GuiEventVisibility.ALL_VISIBLE.toggleSource(origin);
+        check(system.hidden(ActionType.BLOCK_PLACE, origin, null), "system origin remained visible");
+        check(!system.hidden(ActionType.BLOCK_PLACE, "player:place_block", null)
+                && !system.hidden(ActionType.BLOCK_PLACE, "mod:create", null)
+                && !system.hidden(ActionType.BLOCK_PLACE, origin + "_other", null), "system filter broadened to other origins");
+        check(system.toggleSource(origin).equals(GuiEventVisibility.ALL_VISIBLE), "system origin could not be restored");
+        check(GuiEventVisibility.systemOrigin("player:place_block").isEmpty(), "player source offered as system filter");
         check(!GuiEventVisibility.ALL_VISIBLE.toggle(30).active(),"queue policy became a visibility filter");
     }
     private static void check(boolean condition,String message){if(!condition)throw new AssertionError(message);}

@@ -4,6 +4,8 @@ import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.command.EntryRollbackCommand;
 import com.roften.avilixlogger.core.ActionType;
+import com.roften.avilixlogger.core.GuiEventVisibility;
+import com.roften.avilixlogger.core.BlockChangeDetails;
 import com.roften.avilixlogger.auth.AuthCoreBridge;
 import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LastQueryManager;
@@ -280,7 +282,7 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
-        PayloadRegistrar r = event.registrar("14").optional();
+        PayloadRegistrar r = event.registrar("15").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
         r.playToServer(C2SEntryTeleportPayload.TYPE,C2SEntryTeleportPayload.STREAM_CODEC,LoggerNetwork::handleEntryTeleport);
@@ -1170,7 +1172,7 @@ public final class LoggerNetwork {
         return new LogRow(entry.id, entry.dim, entry.x, entry.y, entry.z,
                 com.roften.avilixlogger.core.LogText.toChatLine(level, entry), false,
                 new long[]{entry.id}, List.of(), entry.type,
-                com.roften.avilixlogger.core.GuiEventVisibility.modOrigin(entry.source));
+                GuiEventVisibility.modOrigin(entry.source), GuiEventVisibility.systemOrigin(entry.source));
     }
 
     private static List<Component> buildDetailsLines(ServerLevel level, long entryId, long[] rawIds) {
@@ -1568,6 +1570,8 @@ public final class LoggerNetwork {
                 return new BurstKey(BurstKind.ITEM, dim, e.actorUuid, cx, cz, e.type, key);
             }
 
+            // State-only rows have a distinct label and must not merge with placements.
+            if (BlockChangeDetails.isStateOnlyPlacement(e)) return null;
             // Blocks
             if (e.type == com.roften.avilixlogger.core.ActionType.BLOCK_BREAK || e.type == com.roften.avilixlogger.core.ActionType.BLOCK_PLACE) {
                 String key = (e.type == com.roften.avilixlogger.core.ActionType.BLOCK_PLACE) ? (e.blockAfter == null ? "" : e.blockAfter)
@@ -1703,18 +1707,20 @@ public final class LoggerNetwork {
             }
 
             ActionType commonAction = first.type;
-            String commonMod = com.roften.avilixlogger.core.GuiEventVisibility.modOrigin(first.source);
+            String commonMod = GuiEventVisibility.modOrigin(first.source);
+            String commonSource = GuiEventVisibility.systemOrigin(first.source);
             long[] rawIds = new long[events.size()];
             List<Component> groupedLines = new ArrayList<>(events.size());
             for (int i = 0; i < events.size(); i++) {
                 LogEntry event = events.get(i);
                 if (commonAction != event.type) commonAction = null;
-                if (!commonMod.isEmpty() && !commonMod.equals(com.roften.avilixlogger.core.GuiEventVisibility.modOrigin(event.source))) commonMod = "";
+                if (!commonMod.isEmpty() && !commonMod.equals(GuiEventVisibility.modOrigin(event.source))) commonMod = "";
+                if (!commonSource.isEmpty() && !commonSource.equals(event.source)) commonSource = "";
                 rawIds[i] = event.id;
                 groupedLines.add(com.roften.avilixlogger.core.LogText.toChatLine(level, event));
             }
             return new com.roften.avilixlogger.net.LogRow(
-                    first.id, first.dim, first.x, first.y, first.z, line, true, rawIds, groupedLines, commonAction, commonMod);
+                    first.id, first.dim, first.x, first.y, first.z, line, true, rawIds, groupedLines, commonAction, commonMod, commonSource);
         }
 
         private static String safeBlockName(ServerLevel level, String blockStateSnbtOrId) {

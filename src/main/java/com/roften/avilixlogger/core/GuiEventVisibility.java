@@ -11,9 +11,12 @@ import java.util.stream.Collectors;
 import static com.roften.avilixlogger.core.ActionType.*;
 
 /** Personal journal exclusions. Rules use saved fields and are independent of capture policy. */
-public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<String> mods) {
-    public static final GuiEventVisibility ALL_VISIBLE = new GuiEventVisibility(0, Set.of(), Set.of());
+public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<String> mods, Set<String> sources) {
+    public static final GuiEventVisibility ALL_VISIBLE = new GuiEventVisibility(0, Set.of(), Set.of(), Set.of());
     public static final int MAX_MODS = 64;
+    public static final int MAX_SOURCES = 64;
+    public static final String UNATTRIBUTED = "system:unattributed";
+    private static final java.util.regex.Pattern SYSTEM_SOURCE = java.util.regex.Pattern.compile("system:[a-z0-9_][a-z0-9_.-]{0,120}");
     private static final java.util.regex.Pattern MOD_ID = java.util.regex.Pattern.compile("[a-z0-9_][a-z0-9_.-]{0,127}");
     private static final List<Category> CATEGORIES = buildCategories();
     private static final long CATEGORY_MASK = CATEGORIES.stream().mapToLong(c -> bit(c.preset())).reduce(0, (a, b) -> a | b);
@@ -22,34 +25,50 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<S
 
     public GuiEventVisibility {
         actions = Set.copyOf(actions);
+        sources = sources.stream().filter(id -> SYSTEM_SOURCE.matcher(id).matches()).sorted()
+                .limit(MAX_SOURCES).collect(Collectors.toUnmodifiableSet());
         mods = mods.stream().filter(id -> MOD_ID.matcher(id).matches()).sorted().limit(MAX_MODS).collect(Collectors.toUnmodifiableSet());
     }
 
     public static List<Category> supportedCategories() { return CATEGORIES; }
 
     public static GuiEventVisibility of(long categories, Set<ActionType> actions) {
-        return of(categories, actions, Set.of());
+        return of(categories, actions, Set.of(), Set.of());
     }
 
-    public static GuiEventVisibility of(long categories, Set<ActionType> actions, Set<String> mods) {
-        return new GuiEventVisibility(categories & CATEGORY_MASK, actions, mods);
+    public static GuiEventVisibility of(long categories, Set<ActionType> actions, Set<String> mods, Set<String> sources) {
+        return new GuiEventVisibility(categories & CATEGORY_MASK, actions, mods, sources);
     }
 
-    public boolean active() { return categories != 0 || !actions.isEmpty() || !mods.isEmpty(); }
+    public boolean active() { return categories != 0 || !actions.isEmpty() || !mods.isEmpty() || !sources.isEmpty(); }
     public boolean hides(int preset) { return (categories & bit(preset)) != 0; }
-    public GuiEventVisibility toggle(int preset) { return of(categories ^ bit(preset), actions, mods); }
+    public GuiEventVisibility toggle(int preset) { return of(categories ^ bit(preset), actions, mods, sources); }
 
     public GuiEventVisibility toggle(ActionType action) {
         var next = EnumSet.noneOf(ActionType.class);
         next.addAll(actions);
         if (!next.remove(action)) next.add(action);
-        return of(categories, next, mods);
+        return of(categories, next, mods, sources);
     }
 
     public GuiEventVisibility toggleMod(String mod) {
         var next = new java.util.HashSet<>(mods);
         if (!next.remove(mod) && next.size() < MAX_MODS) next.add(mod);
-        return of(categories, actions, next);
+        return of(categories, actions, next, sources);
+    }
+
+    public GuiEventVisibility toggleSource(String source) {
+        var next = new java.util.HashSet<>(sources);
+        if (!next.remove(source) && next.size() < MAX_SOURCES) next.add(source);
+        return of(categories, actions, mods, next);
+    }
+
+    public static String systemOrigin(String source) {
+        return source != null && source.startsWith("system:") && SYSTEM_SOURCE.matcher(source).matches() ? source : "";
+    }
+
+    public static String systemOriginLabel(String source) {
+        return UNATTRIBUTED.equals(source) ? "Неустановленный источник" : source;
     }
 
     private static final Set<String> NATIVE_MODS = Set.of("create", "ae2", "backpacked");
@@ -143,7 +162,7 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<S
         if (!active()) return false;
         if (action != null && actions.contains(action)) return true;
         String origin = source == null ? "" : source;
-        if (!mods.isEmpty() && mods.contains(modOrigin(origin))) return true;
+        if (sources.contains(origin) || !mods.isEmpty() && mods.contains(modOrigin(origin))) return true;
         for (var category : CATEGORIES) {
             if (!hides(category.preset())) continue;
             if (action != null && category.actions().contains(action)) return true;
@@ -161,6 +180,7 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<S
     public void appendWhere(StringBuilder sql, Function<String, String> quote, String extraColumn) {
         if (!active()) return;
         var clauses = new ArrayList<String>();
+        for (String source : sources) clauses.add("source = " + quote.apply(source));
         for (String mod : mods) {
             for (String prefix : modPrefixes(mod)) {
                 clauses.add("startsWith(source, " + quote.apply(prefix) + ")");

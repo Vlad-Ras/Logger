@@ -45,6 +45,7 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                     for (long id : ids) buf.writeVarLong(id);
                     buf.writeVarInt(r.action() == null ? 0 : r.action().ordinal() + 1);
                     buf.writeUtf(r.originMod(), 128);
+                    buf.writeUtf(r.originSource(), 128);
                     List<Component> groupedLines = r.groupedLines() == null ? List.of() : r.groupedLines();
                     buf.writeVarInt(groupedLines.size());
                     for (Component groupedLine : groupedLines) {
@@ -81,6 +82,7 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                     for (int j = 0; j < ids.length; j++) ids[j] = buf.readVarLong();
                     int action = buf.readVarInt() - 1;
                     String originMod = buf.readUtf(128);
+                    String originSource = buf.readUtf(128);
                     int groupedCount = buf.readVarInt();
                     List<Component> groupedLines = new ArrayList<>(Math.max(0, groupedCount));
                     for (int j = 0; j < groupedCount; j++) {
@@ -93,7 +95,7 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                         }
                     }
                     rows.add(new LogRow(id, dim, x, y, z, line, aggregated, ids, groupedLines,
-                            action >= 0 && action < ACTIONS.length ? ACTIONS[action] : null, originMod));
+                            action >= 0 && action < ACTIONS.length ? ACTIONS[action] : null, originMod, originSource));
                 }
                 return new S2CLogPagePayload(title, pageIndex, hasPrev, hasNext, List.copyOf(rows));
             }

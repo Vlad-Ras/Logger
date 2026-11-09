@@ -16,12 +16,22 @@ final class CartGuiWorkflowSmoke {
         var health=new S2CCaptureHealthPayload(S2CCaptureHealthPayload.State.PAUSED,"Захват остановлен");var healthBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
         try{S2CCaptureHealthPayload.STREAM_CODEC.encode(healthBuffer,health);check(S2CCaptureHealthPayload.STREAM_CODEC.decode(healthBuffer).equals(health),"health changed on wire");}finally{healthBuffer.release();}
         var journalFilters = new GuiFilters(1, 3, 0, -1, 0, "", "", "", "", -1, -1, "", List.of(), List.of(),
-                GuiEventVisibility.ALL_VISIBLE.toggleMod("create").toggle(ActionType.BLOCK_BREAK));
+                GuiEventVisibility.ALL_VISIBLE.toggleMod("create").toggleSource(GuiEventVisibility.UNATTRIBUTED).toggle(ActionType.BLOCK_BREAK));
         var journalBuffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
         try {
             GuiFilters.STREAM_CODEC.encode(journalBuffer, journalFilters);
             check(GuiFilters.STREAM_CODEC.decode(journalBuffer).equals(journalFilters), "journal hide filters changed on wire");
         } finally { journalBuffer.release(); }
+        var systemRow = new LogRow(42, "minecraft:overworld", 1, 2, 3,
+                net.minecraft.network.chat.Component.literal("Система"), false, new long[]{42},
+                List.of(), ActionType.BLOCK_PLACE, "", GuiEventVisibility.UNATTRIBUTED);
+        var pageBuffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+        try {
+            S2CLogPagePayload.STREAM_CODEC.encode(pageBuffer, new S2CLogPagePayload("Журнал", 1, false, false, List.of(systemRow)));
+            var decoded = S2CLogPagePayload.STREAM_CODEC.decode(pageBuffer).rows().getFirst();
+            check(decoded.originSource().equals(systemRow.originSource()) && decoded.originMod().isEmpty(),
+                    "system origin was lost or converted into a mod");
+        } finally { pageBuffer.release(); }
         var linked = LoggerActionCatalog.linkedForm(LoggerActionCatalog.ACTIONS, "/log rollback-entry confirm 1880834017623801859");
         check(linked != null && linked.action().id().equals("entry_rollback_confirm")
                 && linked.values().equals(List.of("1880834017623801859")), "exact rollback confirmation lost the ID");

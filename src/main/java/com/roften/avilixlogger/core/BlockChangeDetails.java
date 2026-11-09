@@ -7,7 +7,25 @@ import java.util.*;
 /** Bounded, detached comparison of recorded states/settings; never reads the current world. */
 public final class BlockChangeDetails {
     private static final int MAX_LINES=32,MAX_NODES=4096,MAX_INPUT=1_048_576;
+    static final String STATE_ONLY_PREFIX = "setBlockState ";
     private BlockChangeDetails() {}
+
+    /** The lightweight feed stores the marker; historic detail rows can prove it with both snapshots. */
+    public static boolean isStateOnlyPlacement(LogEntry row) {
+        if (row.type != ActionType.BLOCK_PLACE) return false;
+        if (row.extra != null && row.extra.startsWith(STATE_ONLY_PREFIX)) return true;
+        var before = row.blockBefore;
+        var after = row.blockAfter;
+        if (before == null || after == null || before.equals(after) || !before.startsWith("{") || !after.startsWith("{")
+                || before.length() > MAX_INPUT || after.length() > MAX_INPUT) return false;
+        var oldState = NbtSerde.fromSnbt(before);
+        var newState = NbtSerde.fromSnbt(after);
+        if (oldState == null || newState == null) return false;
+        String id = oldState.getString("Name");
+        return !id.isEmpty() && id.equals(newState.getString("Name"))
+                && !oldState.getCompound("Properties").equals(newState.getCompound("Properties"));
+    }
+
     public static List<String> changes(LogEntry row){
         if(row==null||row.type==null||!Set.of(ActionType.BLOCK_BREAK,ActionType.BLOCK_PLACE,ActionType.BLOCK_INTERACT,ActionType.BLOCK_USE,
                 ActionType.BLOCK_ENTITY_NBT_CHANGE,ActionType.CART_STRUCTURE_CHANGE,ActionType.CART_STATUS).contains(row.type))return List.of();
