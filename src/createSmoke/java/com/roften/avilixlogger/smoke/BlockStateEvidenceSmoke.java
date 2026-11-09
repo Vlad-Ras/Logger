@@ -20,6 +20,17 @@ final class BlockStateEvidenceSmoke {
         check(row.x==pos.getX()&&row.y==pos.getY()&&row.z==pos.getZ(),"setting used actor/click position instead of changed block");
         check(BlockChangeDetails.changes(row).stream().anyMatch(s->s.contains("facing")),"setting property absent from details");
         check(changed(level,pos,before,after,null).actorUuid==null,"autonomous setting invented a player");
+        for (var crop : java.util.List.of(Blocks.WHEAT, Blocks.NETHER_WART)) {
+            var seed = crop.defaultBlockState();
+            var grown = seed.cycle(crop == Blocks.WHEAT ? BlockStateProperties.AGE_7 : BlockStateProperties.AGE_3);
+            var growth = changed(level, pos, seed, grown, null);
+            check(growth.type == ActionType.BLOCK_PLACE && growth.actorUuid == null, "growth altered the stored action or invented an actor");
+            check(LogText.toChatLine(level, growth).getString().contains("изменил состояние"), "growth displayed as placement");
+            growth.extra = "setBlock minecraft:wheat";
+            check(BlockChangeDetails.isStateOnlyPlacement(growth), "historical crop snapshots lost state change");
+        }
+        var planted = changed(level, pos, Blocks.AIR.defaultBlockState(), Blocks.WHEAT.defaultBlockState(), null);
+        check(!BlockChangeDetails.isStateOnlyPlacement(planted), "actual planting displayed as growth");
         org.slf4j.LoggerFactory.getLogger("AvilixLogger/StateEvidenceSmoke").info("BLOCK_STATE_EVIDENCE_NATIVE_OK: exact mutation position, actor/system separation, journal and property details");
     }
     static LogEntry changed(ServerLevel level,BlockPos target,BlockState before,BlockState after,CauseContext.Cause cause) {

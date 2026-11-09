@@ -30,7 +30,8 @@ public record SetBlockCapture(BlockPos pos, String dim, net.minecraft.world.leve
         row.deferBlockBefore(beforeState);
         row.deferBlockAfter(after);
         row.source = source;
-        row.extra = "setBlock " + afterId;
+        row.extra = (row.type == ActionType.BLOCK_PLACE && beforeState.getBlock() == after.getBlock()
+                ? BlockChangeDetails.STATE_ONLY_PREFIX : "setBlock ") + afterId;
         return row;
     }
 

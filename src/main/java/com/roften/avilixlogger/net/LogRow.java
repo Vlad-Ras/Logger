@@ -21,9 +21,11 @@ public record LogRow(long id,
                      long[] rawIds,
                      List<Component> groupedLines,
                      ActionType action,
-                     String originMod) {
+                     String originMod,
+                     String originSource) {
 
     public LogRow {
+        originSource = originSource == null ? "" : originSource;
         originMod = originMod == null ? "" : originMod;
         line = line == null ? Component.empty() : line;
         rawIds = rawIds == null ? new long[0] : rawIds;
@@ -32,7 +34,7 @@ public record LogRow(long id,
 
     public LogRow(long id, String dim, int x, int y, int z, Component line, boolean aggregated,
                   long[] rawIds, List<Component> groupedLines) {
-        this(id, dim, x, y, z, line, aggregated, rawIds, groupedLines, null, "");
+        this(id, dim, x, y, z, line, aggregated, rawIds, groupedLines, null, "", "");
     }
 
     /** Compatibility constructor for ordinary rows and existing call sites. */

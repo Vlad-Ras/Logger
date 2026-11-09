@@ -134,7 +134,7 @@ public final class CartGuiClientSmoke {
                     var viewer = new com.roften.avilixlogger.client.gui.LogViewerScreen();
                     var row = new com.roften.avilixlogger.net.LogRow(42, "minecraft:overworld", 1, 2, 3,
                             net.minecraft.network.chat.Component.literal("Create поставил компостницу"),
-                            false, new long[]{42}, List.of(), com.roften.avilixlogger.core.ActionType.BLOCK_PLACE, "create");
+                            false, new long[]{42}, List.of(), com.roften.avilixlogger.core.ActionType.BLOCK_PLACE, "create", "");
                     var screenClass = Class.forName("com.roften.avilixlogger.client.gui.LogRowActionsScreen");
                     var constructor = screenClass.getDeclaredConstructor(viewer.getClass(), row.getClass());
                     constructor.setAccessible(true);
@@ -143,6 +143,15 @@ public final class CartGuiClientSmoke {
                     check(menu.children().stream().anyMatch(widget -> widget instanceof net.minecraft.client.gui.components.Button button
                             && button.active && button.getMessage().getString().equals("Скрыть мод · create")),
                             "mod from the selected row was not exposed as a hide filter");
+                    var systemRow = new com.roften.avilixlogger.net.LogRow(43, "minecraft:overworld", 1, 2, 3,
+                            net.minecraft.network.chat.Component.literal("Система изменила состояние пшеницы"),
+                            false, new long[]{43}, List.of(), com.roften.avilixlogger.core.ActionType.BLOCK_PLACE, "",
+                            com.roften.avilixlogger.core.GuiEventVisibility.UNATTRIBUTED);
+                    var systemMenu = (Screen) constructor.newInstance(viewer, systemRow);
+                    mc.setScreen(systemMenu);
+                    check(systemMenu.children().stream().anyMatch(widget -> widget instanceof net.minecraft.client.gui.components.Button button
+                            && button.active && button.getMessage().getString().startsWith("Скрыть источник · ")),
+                            "a saved system origin did not expose a hide filter");
                 }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==14){

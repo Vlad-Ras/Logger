@@ -39,6 +39,19 @@ final class LogRowActionsScreen extends Screen {
         if (row.aggregated()) tooltip(hideType, exact);
 
         String mod = row.originMod();
+        String source = row.originSource();
+        if (!source.isEmpty()) {
+            var hideSource = button("Скрыть источник · " + GuiEventVisibility.systemOriginLabel(source), x, 108, w,
+                    () -> hide(visibility.toggleSource(source)));
+            hideSource.active = !visibility.sources().contains(source) && visibility.sources().size() < GuiEventVisibility.MAX_SOURCES;
+            tooltip(hideSource, "Источник записи: " + source);
+        } else {
+            addHideModButton(x, w, visibility, mod, exact);
+        }
+        button("Назад к журналу", x, height - 28, w, this::onClose);
+    }
+
+    private void addHideModButton(int x, int w, GuiEventVisibility visibility, String mod, String exact) {
         var hideMod = button(mod.isEmpty() ? "Скрыть мод" : "Скрыть мод · " + mod, x, 108, w,
                 () -> hide(visibility.toggleMod(mod)));
         hideMod.active = !mod.isEmpty() && !visibility.mods().contains(mod)
@@ -46,7 +59,6 @@ final class LogRowActionsScreen extends Screen {
         if (!hideMod.active) tooltip(hideMod, row.aggregated() ? exact : mod.isEmpty()
                 ? "В записи нет подтверждённого источника мода."
                 : "Достигнут лимит скрытых модов. Откройте настройки видимости.");
-        button("Назад к журналу", x, height - 28, w, this::onClose);
     }
 
     private Button button(String label, int x, int y, int w, Runnable action) {

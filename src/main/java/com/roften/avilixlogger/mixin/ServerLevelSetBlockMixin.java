@@ -126,7 +126,7 @@ public abstract class ServerLevelSetBlockMixin {
             if (source == null && cause == null) source = MutationSourceResolver.sourceFor(before.getBlock());
             if (source == null && cause == null) source = MutationSourceResolver.sourceFor(newState.getBlock());
             // Unknown mod callbacks still get an audit row; never guess a player or walk a stack.
-            if (source == null && cause == null) source = "system:unattributed";
+            if (source == null && cause == null) source = GuiEventVisibility.UNATTRIBUTED;
             if (source == null) source = "player:" + cause.kind().name().toLowerCase(java.util.Locale.ROOT);
 
             AVILIXLOGGER$REENTRY_GUARD.set(Boolean.TRUE);

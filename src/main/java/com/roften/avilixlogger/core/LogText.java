@@ -78,7 +78,7 @@ public final class LogText {
         c.append(Component.literal(" "));
 
         // Action label
-        String action=actionLabel(e.type);
+        String action = BlockChangeDetails.isStateOnlyPlacement(e) ? "изменил состояние" : actionLabel(e.type);
         String auditSummary=ModAuditDetails.feedSummary(e);
         if(e.type==ActionType.CLAIM_ACTION) {
             if(auditSummary.startsWith("расприватил"))action="расприватил чанк";
