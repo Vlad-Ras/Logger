@@ -6,6 +6,7 @@ import java.util.Locale;
 public final class MutationSourceResolver {
     public static final String VANILLA_SIMULATION = "minecraft:simulation";
     private static final ThreadLocal<String> CONTEXT = new ThreadLocal<>();
+    private static String serverContext;
     private static final ClassValue<String> CLASS_SOURCES = new ClassValue<>() {
         @Override protected String computeValue(Class<?> type) { return classify(type.getName()); }
     };
@@ -14,7 +15,7 @@ public final class MutationSourceResolver {
     private MutationSourceResolver() {}
 
     public static String resolveExternalSource() {
-        return CONTEXT.get();
+        return ServerCaptureGuard.onServerThread() ? serverContext : CONTEXT.get();
     }
 
     public static String sourceFor(Object object) {
@@ -33,14 +34,27 @@ public final class MutationSourceResolver {
 
     /** Allocation-free enter/restore for callbacks executed on every tick. */
     public static String enter(String source) {
+        if (ServerCaptureGuard.onServerThread()) {
+            String previous = serverContext;
+            serverContext = source;
+            return previous;
+        }
         String previous = CONTEXT.get();
         if (previous != source) CONTEXT.set(source);
         return previous;
     }
 
-    public static void restore(String previous) { CONTEXT.set(previous); }
+    public static void restore(String previous) {
+        if (ServerCaptureGuard.onServerThread()) serverContext = previous;
+        else CONTEXT.set(previous);
+    }
 
-    public static void clearCurrentThread() { CONTEXT.remove(); }
+    static void clearServerContext() { serverContext = null; }
+
+    public static void clearCurrentThread() {
+        if (ServerCaptureGuard.onServerThread()) clearServerContext();
+        CONTEXT.remove();
+    }
 
     public static Scope push(String source) { return new Scope(enter(source)); }
 

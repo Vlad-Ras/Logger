@@ -12,6 +12,7 @@ import com.roften.avilixlogger.core.CauseContext;
 import com.roften.avilixlogger.core.CreateContraptionKind;
 import com.roften.avilixlogger.core.CreateSupport;
 import com.roften.avilixlogger.core.MutationSourceResolver;
+import com.roften.avilixlogger.core.HotPathMetrics;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Block;
@@ -38,7 +39,11 @@ public abstract class BlockEntityTickSourceMixin {
             original.call();
             return;
         }
-        if (CartAuditContext.rollbackActive && CartRestoreLocks.blockLocked(level, blockEntity.getBlockPos())) return;
+        long measured = HotPathMetrics.beginBlockEntityTick();
+        if (CartAuditContext.rollbackActive && CartRestoreLocks.blockLocked(level, blockEntity.getBlockPos())) {
+            if (measured != 0) HotPathMetrics.blockEntityTick(measured, 0, 0);
+            return;
+        }
 
         // The ticker owns a final block entity. Only its block (and the live policy) can change.
         if (avilixlogger$source == null) {
@@ -64,25 +69,30 @@ public abstract class BlockEntityTickSourceMixin {
                     || (avilixlogger$mechanismGroup != 0 && !CaptureTypePolicy.enabled(avilixlogger$mechanismGroup));
         }
         if (!muted && !LoggerConfig.isTickCaptureEnabled()) {
+            if (measured != 0) HotPathMetrics.blockEntityTick(measured, 0, 0);
             original.call();
             return;
         }
 
         boolean previousSuppression = muted && CaptureTypePolicy.suppress(true);
         String previous = MutationSourceResolver.enter(muted ? MutationSourceResolver.VANILLA_SIMULATION : avilixlogger$source);
+        long nativeStart = 0, nativeEnd = 0;
         try (var actorScope = CauseContext.unattributed()) {
             var transfer = !muted && avilixlogger$createType
                     ? CartAutomationHooks.authorizedCreateTick(blockEntity, level) : null;
             boolean success = false;
+            if (measured != 0) nativeStart = System.nanoTime();
             try {
                 original.call();
                 success = true;
             } finally {
+                if (measured != 0) nativeEnd = System.nanoTime();
                 if (transfer != null) transfer.finish(success);
             }
         } finally {
             MutationSourceResolver.restore(previous);
             if (muted) CaptureTypePolicy.restoreSuppression(previousSuppression);
+            if (measured != 0) HotPathMetrics.blockEntityTick(measured, nativeStart, nativeEnd);
         }
     }
 }

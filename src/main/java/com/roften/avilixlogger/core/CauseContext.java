@@ -36,6 +36,7 @@ public final class CauseContext {
     }
 
     private static final ThreadLocal<Deque<Scope>> STACK = ThreadLocal.withInitial(ArrayDeque::new);
+    private static Deque<Scope> serverStack = new ArrayDeque<>();
     private static final int RETAINED_DEPTH = 64;
     // Safe only when no outer scope exists. Never pooled or repurposed for a later action.
     private static final Scope EMPTY_SCOPE = new Scope(null, null);
@@ -62,7 +63,7 @@ public final class CauseContext {
 
     public static Scope push(Cause cause) {
         Scope scope = new Scope(cause);
-        Deque<Scope> stack = STACK.get();
+        Deque<Scope> stack = stack();
         // Shrink only after an unusually deep action unwinds, never on normal ticks.
         if (stack.size() == RETAINED_DEPTH) stack.peekLast().releaseStack = true;
         stack.push(scope);
@@ -71,19 +72,31 @@ public final class CauseContext {
 
     /** Isolates unrelated simulation from an outer player action. */
     public static Scope unattributed() {
-        Deque<Scope> stack = STACK.get();
+        Deque<Scope> stack = stack();
         // A nested anonymous tick already hides the outer actor. Reusing the immutable
         // no-op token preserves that boundary without allocating one scope per callback.
         return stack.isEmpty() || stack.peek().cause == null ? EMPTY_SCOPE : push((Cause) null);
     }
 
     public static Cause peek() {
-        Deque<Scope> d = STACK.get();
+        Deque<Scope> d = stack();
         return d.isEmpty() ? null : d.peek().cause;
     }
 
+    private static Deque<Scope> stack() {
+        return ServerCaptureGuard.onServerThread() ? serverStack : STACK.get();
+    }
+
+    private static void releaseStack() {
+        if (ServerCaptureGuard.onServerThread()) clearServerContext();
+        else STACK.remove();
+    }
+
+    static void clearServerContext() { serverStack = new ArrayDeque<>(); }
+
     /** Called on the server thread when its logger lifecycle ends. */
     public static void clearCurrentThread() {
+        if (ServerCaptureGuard.onServerThread()) clearServerContext();
         STACK.remove();
     }
 
@@ -100,12 +113,12 @@ public final class CauseContext {
             if (this == EMPTY_SCOPE) return;
             if (closed || Thread.currentThread() != owner) return;
             closed = true;
-            Deque<Scope> d = STACK.get();
+            Deque<Scope> d = stack();
             if (d.peek() == this) d.pop();
             else d.removeFirstOccurrence(this);
             cause = null;
             if (releaseStack) {
-                if (d.isEmpty()) STACK.remove();
+                if (d.isEmpty()) releaseStack();
                 else d.peekLast().releaseStack = true;
             }
         }

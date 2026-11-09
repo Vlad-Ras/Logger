@@ -21,7 +21,17 @@ public final class ServerCaptureGuard {
     private static volatile Consumer<Gap> listener=gap->{};
     private ServerCaptureGuard(){}
     public static void start(Thread thread,Consumer<Gap> notices){fault=null;last=null;listener=notices;serverThread=thread;generation++;}
-    public static void stop(){var current=fault;if(current!=null)last=current.snapshot(System.currentTimeMillis());fault=null;serverThread=null;listener=gap->{};}
+    public static void stop() {
+        var current = fault;
+        if (current != null) last = current.snapshot(System.currentTimeMillis());
+        fault = null;
+        serverThread = null;
+        CauseContext.clearServerContext();
+        MutationSourceResolver.clearServerContext();
+        listener = gap -> {};
+    }
+    /** Main-thread contexts use this identity and keep separate storage for other threads. */
+    static boolean onServerThread() { return Thread.currentThread() == serverThread; }
     public static boolean paused(){return fault!=null;}
     public static long generation(){return generation;}
     public static boolean captureAllowed(){var current=fault;if(current==null||Thread.currentThread()!=serverThread)return true;current.suppressed.increment();return false;}

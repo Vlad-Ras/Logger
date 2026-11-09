@@ -46,7 +46,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         int size=inventory.getContainerSize();if(size<0||size>512)return null;
         var before=new ItemStack[size];for(int i=0;i<size;i++)before[i]=inventory.getItem(i).copy();
         boolean owns=current==null;Scope scope=current;
-        if(owns){activeServer=level.getServer();scope=new Scope();scope.reset(be);scope.entity=entity;scope.cargoDelivery=true;current=scope;}
+        if(owns){activeServer=level.getServer();scope=new Scope();scope.reset(be, level);scope.entity=entity;scope.cargoDelivery=true;current=scope;}
         else if(scope.entity!=null&&scope.entity!=entity){scope.complete=false;return null;}
         final Scope transfer=scope;var external=container(hopper,level,be.getBlockPos(),side);
         transfer.handlerDepth++;baseHopperContainer=inventory;
@@ -70,24 +70,25 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     public CartAutomationHooks.Capture authorizedCreateTick(BlockEntity source, ServerLevel level) {
         if (!CaptureHandlers.COMPAT_CREATE_CARTAUTOMATIONAUDIT_AUTHORIZEDTICK.enabled()
                 || current != null || publishing || CaptureTypePolicy.suppressed()
-                || CartAuditContext.restoring() || !com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()
-                || !level.getServer().isSameThread()) return null;
-        activeServer = level.getServer();
-        REUSABLE.reset(source);
+                || CartAuditContext.restoring() || !com.roften.avilixlogger.LoggerConfig.VALUES.logCreateCargoTransfers.get()) return null;
+        var server = level.getServer();
+        if (!server.isSameThread()) return null;
+        if (activeServer != server) activeServer = server;
+        REUSABLE.reset(source, level);
         REUSABLE.publish = true;
         return current = REUSABLE;
     }
     /** Detached native-operation capture; this scope never publishes to the journal. */
     public static Scope captureChanges(BlockEntity source){
         if(current!=null||!(source.getLevel() instanceof ServerLevel level)||!level.getServer().isSameThread())throw new IllegalStateException("Automation capture requires an unoccupied server-thread scope");
-        activeServer=level.getServer();var scope=new Scope();scope.reset(source);current=scope;return scope;
+        activeServer=level.getServer();var scope=new Scope();scope.reset(source, level);current=scope;return scope;
     }
     static boolean capturingChanges(){return current!=null&&serverThread();}
     public static Scope mounted(com.simibubi.create.content.contraptions.behaviour.MovementContext context,BlockPos pos){
         var entity=context.contraption.entity;
         if(current!=null||entity==null||!CreateCapturePolicy.actor(context)||!CreateCargoAudit.active(entity))return null;
         activeServer=((ServerLevel)entity.level()).getServer();var scope=new Scope();
-        scope.reset(null);scope.mounted=true;scope.entity=entity;
+        scope.reset(null, null);scope.mounted=true;scope.entity=entity;
         scope.machine=BuiltInRegistries.BLOCK.getKey(context.state.getBlock()).toString();
         scope.machineDim=entity.level().dimension().location().toString();scope.machinePos=pos.immutable();
         return current=scope;
@@ -347,7 +348,7 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
     private record RawExternal(Object handler,String kind,int slot,Object before,Object after,Endpoint endpoint,boolean direct) {}
     public static final class Scope implements CartAutomationHooks.Capture {
         private BlockEntity source;private AbstractContraptionEntity entity;private UUID id;
-        private String machine,machineDim;private net.minecraft.resources.ResourceLocation sourceDimension;private BlockPos machinePos;private boolean mounted,direct,cargoDelivery;
+        private String machine,machineDim;private ServerLevel sourceLevel;private BlockPos machinePos;private boolean mounted,direct,cargoDelivery;
         private List<Change> changes=new ArrayList<>();
         private final LinkedHashMap<Cell,Pair> external=new LinkedHashMap<>();
         private final ArrayList<RawExternal> rawExternal=new ArrayList<>();
@@ -360,18 +361,18 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
         private Map<Object,Integer> mountedCreative;
         private Object fluidHandler, itemHandler;
         private Scope(){}
-        private void reset(BlockEntity source){
+        private void reset(BlockEntity source, ServerLevel level){
             if(CreateDeployerAudit.capturing())CreateDeployerTransaction.unsupported("Вложенная автоматика активатора требует общего снимка всех внешних участников");
             this.source=source;entity=null;id=null;complete=true;publish=false;mountedDepth=handlerDepth=0;mounted=direct=false;
             cargoDelivery=false;
-            sourceDimension=source==null?null:source.getLevel().dimension().location();
-            machinePos=source==null?null:source.getBlockPos();
+            sourceLevel = level;
         }
 
         private void describeMachine() {
             if (machine == null && source != null) {
                 machine = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(source.getType()).toString();
-                machineDim = sourceDimension.toString();
+                machineDim = sourceLevel.dimension().location().toString();
+                machinePos = source.getBlockPos();
             }
         }
         private boolean cargo(CartStorageAudit.Ref ref,CompoundTag before,CompoundTag after,String detail){
@@ -548,8 +549,8 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
             return row;
         }
         private void clear(){
-            rawExternal.clear();
-            source=null;entity=null;id=null;machine=null;machineDim=null;sourceDimension=null;machinePos=null;
+            if (!rawExternal.isEmpty()) rawExternal.clear();
+            source=null;entity=null;id=null;machine=null;machineDim=null;sourceLevel=null;machinePos=null;
             if(changes.size()>64)changes=new ArrayList<>();else if(!changes.isEmpty())changes.clear();
             if(!external.isEmpty())external.clear();
             if(addresses.size()>64)addresses=new IdentityHashMap<>();else if(!addresses.isEmpty())addresses.clear();
@@ -559,15 +560,40 @@ public final class CartAutomationAudit implements CartAutomationHooks.Observer {
             if(!worldCreative.isEmpty())worldCreative.clear();
             if(!unverifiedCreative.isEmpty())unverifiedCreative.clear();
         }
-        public void finish(boolean success){
-            current=null;boolean previousPublishing=publishing;publishing=true;
-            try{if(mounted||cargoDelivery)for(var row:rows(success))CreateCargoAudit.deliver(entity,row);
-                else if(publish&&(!changes.isEmpty()||!worldCreative.isEmpty()||!unverifiedCreative.isEmpty())&&CreateCartAudit.enabled()){
-                    ServerLevel level=entity!=null?(ServerLevel)entity.level():source!=null&&source.getLevel() instanceof ServerLevel server?server:null;
-                    if(level!=null&&(entity!=null&&(!changes.isEmpty()||!unverifiedCreative.isEmpty())||!worldCreative.isEmpty()||!unverifiedCreative.isEmpty()))for(var row:rows(success))LoggerRuntime.storage(level).append(row);
-                }}
-            catch(RuntimeException e){CreateCartAudit.failed("automation transfer",e);}
-            finally{publishing=previousPublishing;clear();}
+        public void finish(boolean success) {
+            current = null;
+            boolean tickCapture = publish;
+            boolean hasEvidence = !changes.isEmpty() || !worldCreative.isEmpty() || !unverifiedCreative.isEmpty();
+            if (!mounted && !cargoDelivery && !(tickCapture && hasEvidence)) {
+                clear();
+                if (tickCapture) HotPathMetrics.automationTickFinished(false);
+                return;
+            }
+
+            boolean previousPublishing = publishing;
+            publishing = true;
+            boolean formedRows = false;
+            try {
+                if (mounted || cargoDelivery) {
+                    for (var row : rows(success)) CreateCargoAudit.deliver(entity, row);
+                } else if (CreateCartAudit.enabled()) {
+                    ServerLevel level = entity != null ? (ServerLevel) entity.level() : sourceLevel;
+                    if (level != null) {
+                        var recorded = rows(success);
+                        formedRows = !recorded.isEmpty();
+                        if (formedRows) {
+                            var storage = LoggerRuntime.storage(level);
+                            for (var row : recorded) storage.append(row);
+                        }
+                    }
+                }
+            } catch (RuntimeException e) {
+                CreateCartAudit.failed("automation transfer", e);
+            } finally {
+                publishing = previousPublishing;
+                clear();
+                if (tickCapture) HotPathMetrics.automationTickFinished(formedRows);
+            }
         }
     }
 }
