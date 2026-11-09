@@ -12,6 +12,9 @@ public final class HotPathMetrics {
         final long started = System.nanoTime();
         final LongAdder ticks=new LongAdder();
         final LongAdder automationDescriptors=new LongAdder();
+        final LongAdder beTicks = new LongAdder(), beScopedTicks = new LongAdder();
+        final LongAdder beSetupNs = new LongAdder(), beFinishNs = new LongAdder(), beNativeNs = new LongAdder();
+        final LongAdder automationTicksWithRows = new LongAdder(), automationTicksWithoutRows = new LongAdder();
         final LongAdder[] rows = counters(ActionType.values().length);
         final LongAdder[] families = counters(5);
         final LongAdder snapshots = new LongAdder(), snapshotNs = new LongAdder(), serverSnapshotNs = new LongAdder();
@@ -58,6 +61,30 @@ public final class HotPathMetrics {
     }
     private static volatile Thread serverThread;
     public static void serverThread(Thread thread) { serverThread=thread; }
+    public static long beginBlockEntityTick() { return session == null ? 0 : System.nanoTime(); }
+
+    /** Native and wrapper time are distinct. Called only while measurement is enabled. */
+    public static void blockEntityTick(long start, long nativeStart, long nativeEnd) {
+        var current = session;
+        if (current == null || start < current.started) return;
+        current.beTicks.increment();
+        if (nativeEnd == 0) {
+            current.beSetupNs.add(System.nanoTime() - start);
+        } else {
+            current.beScopedTicks.increment();
+            current.beSetupNs.add(nativeStart - start);
+            current.beNativeNs.add(nativeEnd - nativeStart);
+            current.beFinishNs.add(System.nanoTime() - nativeEnd);
+        }
+    }
+
+    public static void automationTickFinished(boolean formedRows) {
+        var current = session;
+        if (current == null) return;
+        if (formedRows) current.automationTicksWithRows.increment();
+        else current.automationTicksWithoutRows.increment();
+    }
+
     public static void automationDescriptor(){var current=session;if(current!=null)current.automationDescriptors.increment();}
     public static long automationDescriptors(){var current=session;return current==null?0:current.automationDescriptors.sum();}
     public static void tick(){var current=session;if(current!=null)current.ticks.increment();}
@@ -70,6 +97,14 @@ public final class HotPathMetrics {
         double wait=current.serverWaitNs.sum()/1e6;
         out.append(String.format(Locale.ROOT,"Снимки на серверном потоке: %.2f мс за период (%d вызовов; вложенные входят в сумму).\nОжидание очередей на серверном потоке: %.2f мс.\n",current.serverSnapshotNs.sum()/1e6,current.snapshots.sum(),wait));
         if(current.ticks.sum()>0)out.append(String.format(Locale.ROOT,"Ожидание очередей: %.3f мс/тик (%d тиков).\n",wait/current.ticks.sum(),current.ticks.sum()));
+        if (current.beTicks.sum() > 0) {
+            out.append(String.format(Locale.ROOT, "Тики блок-сущностей через обёртку: %d, с контекстом %d. Подготовка %.2f мс, завершение %.2f мс за период.%n"
+                            + "Вызовы игрового тика с контекстом: %.2f мс за период. Время включает код Minecraft и модов.%n",
+                    current.beTicks.sum(), current.beScopedTicks.sum(), current.beSetupNs.sum() / 1e6,
+                    current.beFinishNs.sum() / 1e6, current.beNativeNs.sum() / 1e6));
+            out.append(String.format(Locale.ROOT, "Контексты автоматики Create: сформировали записи %d, без записей %d.%n",
+                    current.automationTicksWithRows.sum(), current.automationTicksWithoutRows.sum()));
+        }
         out.append("Дескрипторов внешней автоматики Create: ").append(current.automationDescriptors.sum()).append(".\n");
         out.append("Это измеренные операции Logger; полный вклад в TPS проверяется профилировщиком сервера.");
         return out.toString();

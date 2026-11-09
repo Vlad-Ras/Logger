@@ -76,24 +76,25 @@ public final class InventoryDiffUtil {
             Tag t = items.get(i);
             if (!(t instanceof CompoundTag it)) continue;
 
-            CompoundTag stackTag = it.copy();
-            stackTag.remove("Slot"); // normalize (vanilla)
-            stackTag.remove("slot"); // normalize (some mods)
-
-            ItemStack st = NbtSerde.readItemStack(stackTag, provider);
+            // The item decoder reads only item fields and returns a detached stack.
+            ItemStack st = NbtSerde.readItemStack(it, provider);
             if (st == null || st.isEmpty()) continue;
 
             int count = Math.max(1, st.getCount());
 
             // Create normalized key so that different stack splits aggregate together.
-            ItemStack norm = st.copy();
-            norm.setCount(1);
-            String key = NbtSerde.writeItemStack(norm, provider);
+            st.setCount(1);
+            String key;
+            try {
+                key = NbtSerde.writeItemStack(st, provider);
+            } finally {
+                st.setCount(count);
+            }
             if (key == null) continue;
 
             StackAgg agg = map.get(key);
             if (agg == null) {
-                map.put(key, new StackAgg(count, st.copy()));
+                map.put(key, new StackAgg(count, st));
             } else {
                 agg.count += count;
             }
