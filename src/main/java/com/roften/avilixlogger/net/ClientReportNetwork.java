@@ -15,6 +15,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -36,16 +37,18 @@ import java.util.UUID;
 public final class ClientReportNetwork {
     private static final String ADMIN_PERMISSION = "avilixlogger.command.admin";
     private static final int TIMEOUT_TICKS = 200;
+    private static final long MANUAL_COOLDOWN_NANOS = Duration.ofSeconds(10).toNanos();
     private static final int CHAT_CHUNK_SIZE = 48;
     private static final int GUI_CHUNK_SIZE = 32;
     private static final DateTimeFormatter REPORT_TIME = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss XXX");
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final ClientReportCache LATEST = new ClientReportCache(LoggerNetwork.reportExpiryExecutor(), System::nanoTime);
-    private static final ClientReportQueue OFFLINE = new ClientReportQueue(LoggerNetwork.reportExpiryExecutor());
+    private static final Map<UUID, Long> LAST_MANUAL_REQUEST = new HashMap<>();
     private static final Map<UUID, Object> COMMAND_QUERIES = new HashMap<>();
     private static final Pattern PACK_SEPARATORS = Pattern.compile("[_\\s-]+");
     private static long lastId;
     private static Boolean enabledOverride;
+    private static int automaticCursor;
 
     private record Pending(long id, ServerGamePacketListenerImpl connection, Reply reply) {}
 
@@ -109,43 +112,37 @@ public final class ClientReportNetwork {
     }
 
     public static void onLogin(ServerPlayer player) {
-        if (!enabled() || !LoggerConfig.isEnabled()) return;
-        String key = name(player).toLowerCase(Locale.ROOT);
-        var ticket = OFFLINE.find(key);
-        if (ticket != null) {
-            var administrator = ticket.administrator();
-            if (administrator == null || stillAdministrator(player, administrator)) {
-                requestOnline(player, null);
-                return;
-            }
-            OFFLINE.cancel(key);
-        }
-        if (LoggerConfig.VALUES.clientAuditScanOnJoin.get()
-                && !LoggerConfig.VALUES.clientAuditSuspectPacks.get().isBlank()) requestOnline(player, null);
+        if (enabled() && LoggerConfig.isEnabled()) requestOnline(player, null);
     }
 
-    private static boolean stillAdministrator(ServerPlayer target, com.mojang.authlib.GameProfile profile) {
-        var server = target.getServer();
-        var online = server.getPlayerList().getPlayer(profile.getId());
-        return online != null ? canRequest(online.createCommandSourceStack()) : server.getProfilePermissions(profile) >= 2;
+    /** Check one connected client each second to spread daily refreshes across server ticks. */
+    public static void checkConnectedPlayer(MinecraftServer server) {
+        if (!enabled() || !LoggerConfig.isEnabled()) return;
+        var players = server.getPlayerList().getPlayers();
+        if (!players.isEmpty()) {
+            var player = players.get(Math.floorMod(automaticCursor++, players.size()));
+            requestOnline(player, null);
+        }
     }
 
     static void onLogout(ServerPlayer player) {
         UUID uuid = player.getUUID();
         var pending = PENDING.remove(uuid);
         COMMAND_QUERIES.remove(uuid);
+        LAST_MANUAL_REQUEST.remove(uuid);
         if (pending != null) notifyRequester(pending.reply(), name(player) + " вышел до получения отчёта.");
     }
 
     public static void clear() {
         enabledOverride = null;
+        automaticCursor = 0;
+        LAST_MANUAL_REQUEST.clear();
         clearReports();
     }
 
     private static void clearReports() {
         PENDING.clear();
         LATEST.clear();
-        OFFLINE.clear();
         COMMAND_QUERIES.clear();
     }
 
@@ -198,14 +195,8 @@ public final class ClientReportNetwork {
     private static int request(String playerName, Reply reply) {
         if (!ready(playerName, reply)) return 0;
         var target = reply.source().getServer().getPlayerList().getPlayerByName(playerName);
-        if (target != null) return requestOnline(target, reply);
-        var administrator = reply.source().getPlayer();
-        var result = OFFLINE.add(playerName.toLowerCase(Locale.ROOT), administrator == null ? null : administrator.getGameProfile());
-        return switch (result) {
-            case QUEUED -> feedback(reply, playerName + " офлайн. Запрос ждёт подходящего подключения до 24 часов.", false);
-            case ALREADY_QUEUED -> feedback(reply, "Запрос для " + playerName + " уже ждёт подключения.", false);
-            case FULL -> feedback(reply, "Очередь запросов для офлайн-игроков заполнена.", true);
-        };
+        if (target == null) return feedback(reply, playerName + " офлайн. Откройте последний сохранённый отчёт.", true);
+        return requestOnline(target, reply);
     }
 
     private static int requestOnline(ServerPlayer target, Reply reply) {
@@ -214,20 +205,30 @@ public final class ClientReportNetwork {
             return feedback(reply, "Клиент " + name(target) + " не поддерживает отчёты.", true);
         }
         UUID uuid = target.getUUID();
-        if (PENDING.containsKey(uuid)) return feedback(reply, "Для " + name(target) + " уже ожидается отчёт.", true);
-        var server = target.getServer();
-        long until = LoggerServerData.get(server.overworld()).reserveClientReport(uuid, System.currentTimeMillis());
-        if (until < 0) return feedback(reply, "Достигнут лимит сборов за последние 24 часа.", true);
-        if (until > 0) {
-            return feedback(reply, "Сбор для " + name(target) + " уже запрашивался. Следующий сбор после "
-                    + REPORT_TIME.format(Instant.ofEpochMilli(until).atZone(ZoneId.systemDefault()))
-                    + ". Можно открыть сохранённый отчёт.", true);
+        var existing = PENDING.get(uuid);
+        if (existing != null) {
+            if (reply != null && existing.reply() == null) {
+                PENDING.put(uuid, new Pending(existing.id(), existing.connection(), reply));
+                return feedback(reply, "Отчёт уже запрашивается. Ответ появится здесь.", false);
+            }
+            return feedback(reply, "Для " + name(target) + " уже ожидается отчёт.", true);
         }
+
+        long nowNanos = System.nanoTime();
+        if (reply != null) {
+            Long last = LAST_MANUAL_REQUEST.get(uuid);
+            if (last != null && nowNanos - last < MANUAL_COOLDOWN_NANOS) {
+                return feedback(reply, "Повторите ручное обновление через несколько секунд.", true);
+            }
+        }
+        var server = target.getServer();
+        long nextAuto = LoggerServerData.get(server.overworld()).reserveClientReport(uuid, System.currentTimeMillis());
+        if (reply == null && nextAuto != 0) return 0;
 
         long id = ++lastId;
         PENDING.put(uuid, new Pending(id, target.connection, reply));
+        if (reply != null) LAST_MANUAL_REQUEST.put(uuid, nowNanos);
         PacketDistributor.sendToPlayer(target, new ClientReportPayloads.Request(id));
-        OFFLINE.cancel(name(target).toLowerCase(Locale.ROOT));
         feedback(reply, "Запрос отправлен игроку " + name(target) + ".", false);
         String targetName = name(target);
         ServerTickScheduler.schedule(server, TIMEOUT_TICKS, () -> {
@@ -244,11 +245,7 @@ public final class ClientReportNetwork {
         if (!ready(playerName, reply)) return 0;
         var online = reply.source().getServer().getPlayerList().getPlayerByName(playerName);
         var snapshot = online == null ? LATEST.find(playerName) : LATEST.find(online.getUUID());
-        if (snapshot == null) {
-            boolean queued = OFFLINE.find(playerName.toLowerCase(Locale.ROOT)) != null;
-            return feedback(reply, queued ? "Запрос для " + playerName + " ещё ждёт подходящего подключения."
-                    : "Нет сохранённого отчёта игрока " + playerName + " за последние 24 часа.", true);
-        }
+        if (snapshot == null) return feedback(reply, "Нет сохранённого отчёта игрока " + playerName + " за последние 24 часа.", true);
         reply.report(snapshot);
         return 1;
     }

@@ -18,6 +18,9 @@ public final class ServerTickScheduler {
 
     public static void onServerTick(ServerTickEvent.Post event) {
         HotPathMetrics.tick();
+        if (event.getServer().getTickCount() % 20 == 0) {
+            com.roften.avilixlogger.net.ClientReportNetwork.checkConnectedPlayer(event.getServer());
+        }
         if (event.getServer().getTickCount() % 20 == 0 && ServerCaptureGuard.paused()) {
             LoggerRuntime.autoResumeCapture();
             if (!ServerCaptureGuard.paused()) com.roften.avilixlogger.net.LoggerNetwork.broadcastCaptureHealth(event.getServer());
