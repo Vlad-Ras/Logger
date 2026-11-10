@@ -11,6 +11,7 @@ import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.compat.airplanes.AirplanesCompatHooks;
 import com.roften.avilixlogger.core.*;
 import com.roften.avilixlogger.integrations.WorldEditIntegration;
+import com.roften.avilixlogger.net.ClientReportNetwork;
 import com.roften.avilixlogger.net.LoggerNetwork;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
@@ -82,6 +83,7 @@ public final class LoggerCommands {
             .then(CombatPositionCommand.node())
             .then(EntryPositionCommand.node())
             .then(EntryRollbackCommand.node())
+            .then(ClientReportNetwork.command())
             .then(literal("capture-status")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.gui", 2))
                 .executes(c -> {

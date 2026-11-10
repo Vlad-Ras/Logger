@@ -102,11 +102,18 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue guiPageSize;
         public final ModConfigSpec.ConfigValue<String> inspectToolItemId;
 
+        public final ModConfigSpec.BooleanValue clientReportOnJoin;
+
         Values(ModConfigSpec.Builder b) {
             b.push("general");
             enabled = b.comment("Master switch.").define("enabled", true);
             keepDays = b.comment("Delete log rows older than N days. Set to 0 to keep history indefinitely.")
                     .defineInRange("keepDays", 365, 0, 3650);
+            b.pop();
+
+            b.push("clientAudit");
+            clientReportOnJoin = b.comment("Request a client-reported list of loaded mods and selected resource packs when players join.")
+                    .define("reportOnJoin", false);
             b.pop();
 
             b.push("clickhouse");

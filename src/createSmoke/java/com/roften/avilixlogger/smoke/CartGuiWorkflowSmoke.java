@@ -12,6 +12,7 @@ import java.util.*;
 /** Wire compatibility and validation for the full GUI workflow, without a running client. */
 final class CartGuiWorkflowSmoke {
     static void run(){
+        checkClientReportWire();
         String id="51000000-0000-0000-0000-000000000001";
         var health=new S2CCaptureHealthPayload(S2CCaptureHealthPayload.State.PAUSED,"Захват остановлен");var healthBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
         try{S2CCaptureHealthPayload.STREAM_CODEC.encode(healthBuffer,health);check(S2CCaptureHealthPayload.STREAM_CODEC.decode(healthBuffer).equals(health),"health changed on wire");}finally{healthBuffer.release();}
@@ -81,6 +82,47 @@ final class CartGuiWorkflowSmoke {
         System.out.println("CART_GUI_WORKFLOW_OK: action/filter/result codecs, actor+ID+cursor+checkpoints before LIMIT, typed confirmation, mutation validation");
     }
     private static void reject(Runnable task,String message){try{task.run();}catch(IllegalArgumentException expected){return;}throw new AssertionError(message);}
+    private static void checkClientReportWire() {
+        var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+        try {
+            var request = new ClientReportPayloads.Request(42);
+            ClientReportPayloads.Request.CODEC.encode(buffer, request);
+            check(request.equals(ClientReportPayloads.Request.CODEC.decode(buffer)), "client report request changed on wire");
+            buffer.clear();
+
+            var mod = new ClientReportPayloads.Mod("client_mod", "1.2.3\n");
+            var report = ClientReportPayloads.collect(request.id(), List.of(mod), List.of("vanilla", "file/pack.zip"));
+            check(mod.version().equals("1.2.3") && !report.truncated(), "valid report lost fields");
+            ClientReportPayloads.Report.CODEC.encode(buffer, report);
+            check(report.equals(ClientReportPayloads.Report.CODEC.decode(buffer)) && !buffer.isReadable(),
+                    "client report changed on wire");
+            buffer.clear();
+
+            var longMod = new ClientReportPayloads.Mod("x".repeat(96), "ф".repeat(96));
+            var large = ClientReportPayloads.collect(request.id(), Collections.nCopies(512, longMod),
+                    List.of("file/private/textures.zip"));
+            check(large.truncated() && !large.mods().isEmpty() && large.packs().equals(List.of("file/textures.zip")),
+                    "large client report did not retain resource packs without their paths");
+            ClientReportPayloads.Report.CODEC.encode(buffer, large);
+            check(buffer.readableBytes() < 32 * 1024 && large.equals(ClientReportPayloads.Report.CODEC.decode(buffer)),
+                    "large client report exceeded the protocol limit");
+            buffer.clear();
+
+            buffer.writeLong(42);
+            buffer.writeBoolean(false);
+            buffer.writeVarInt(Integer.MAX_VALUE);
+            boolean rejected = false;
+            try {
+                ClientReportPayloads.Report.CODEC.decode(buffer);
+            } catch (IllegalArgumentException expected) {
+                rejected = true;
+            }
+            check(rejected, "client report accepted an unbounded entry count");
+        } finally {
+            buffer.release();
+        }
+    }
+
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
 
 }

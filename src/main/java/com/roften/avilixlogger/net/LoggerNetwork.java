@@ -131,6 +131,7 @@ public final class LoggerNetwork {
             UUID uuid = player.getUUID();
             CLIENT_PRESENT.remove(uuid);
             CartHistoryNetwork.logout(uuid);
+            ClientReportNetwork.onLogout(player);
             GUI_SESSIONS.remove(uuid);
             CAPTURE_SETTINGS_PEERS.remove(uuid);
             LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
@@ -282,6 +283,12 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
+        PayloadRegistrar audit = event.registrar("1").optional();
+        audit.playToClient(ClientReportPayloads.Request.TYPE, ClientReportPayloads.Request.CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportRequest",
+                        new Class<?>[]{ClientReportPayloads.Request.class}, new Object[]{payload})));
+        audit.playToServer(ClientReportPayloads.Report.TYPE, ClientReportPayloads.Report.CODEC, ClientReportNetwork::receive);
+
         PayloadRegistrar r = event.registrar("15").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 

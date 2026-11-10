@@ -3,14 +3,17 @@ package com.roften.avilixlogger.client.gui;
 import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.net.C2SHelloPayload;
 import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
+import com.roften.avilixlogger.net.ClientReportPayloads;
 import com.roften.avilixlogger.net.S2CLogPagePayload;
 import com.roften.avilixlogger.net.S2CLogDetailsPayload;
 import com.roften.avilixlogger.net.S2CInspectToolPayload;
 import com.roften.avilixlogger.net.S2CRollbackPreviewPayload;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -43,6 +46,20 @@ public final class LogViewerClientHooks {
         // Inform server that this player supports the GUI payloads.
         var connection=Minecraft.getInstance().getConnection();
         if(connection!=null&&connection.hasChannel(C2SHelloPayload.TYPE))PacketDistributor.sendToServer(new C2SHelloPayload());
+    }
+
+    public static void acceptClientReportRequest(ClientReportPayloads.Request request) {
+        Minecraft minecraft = Minecraft.getInstance();
+        var connection = minecraft.getConnection();
+        if (connection == null || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
+
+        var mods = ModList.get().getMods().stream()
+                .map(mod -> new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString()))
+                .sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
+        var report = ClientReportPayloads.collect(request.id(), mods, minecraft.getResourcePackRepository().getSelectedIds());
+        PacketDistributor.sendToServer(report);
+        minecraft.gui.getChat().addMessage(Component.literal(
+                "[AvilixLogger] Серверу отправлен список загруженных модов и активных ресурс-паков."));
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {

@@ -32,6 +32,7 @@
     public static void acceptInspectTool(...);
     public static void acceptCaptureTypes(...);
     public static void acceptCaptureHealth(...);
+    public static void acceptClientReportRequest(...);
     public static void acceptRollbackPreview(...);
 }
 
