@@ -2,6 +2,13 @@ package com.roften.avilixlogger.core;
 
 import com.roften.avilixlogger.LoggerConfig;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
@@ -17,6 +24,10 @@ public final class LoggerServerData extends SavedData {
     private static final String KEY_PRESETS = "presets";
     private static final String KEY_CAPTURE_MASK = "guiCaptureDisabledMask";
     private static final String KEY_CAPTURE_REVISION = "guiCaptureRevision";
+
+    private static final long REPORT_INTERVAL_MS = Duration.ofHours(24).toMillis();
+    private static final int MAX_REPORT_COOLDOWNS = 4096;
+    private final Map<UUID, Long> reportCooldowns = new HashMap<>();
 
     private String inspectToolItemId;
     private long guiCaptureDisabledMask;
@@ -57,6 +68,13 @@ public final class LoggerServerData extends SavedData {
                 }
             }
         }
+        var cooldowns = tag.getList("clientReportCooldowns", Tag.TAG_COMPOUND);
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < Math.min(MAX_REPORT_COOLDOWNS, cooldowns.size()); i++) {
+            var entry = cooldowns.getCompound(i);
+            long until = entry.getLong("until");
+            if (entry.hasUUID("player") && until > now) d.reportCooldowns.put(entry.getUUID("player"), until);
+        }
         return d;
     }
 
@@ -75,7 +93,35 @@ public final class LoggerServerData extends SavedData {
             }
         }
         tag.put(KEY_PRESETS, p);
+        pruneClientReportCooldowns(System.currentTimeMillis());
+        if (!reportCooldowns.isEmpty()) {
+            var cooldowns = new ListTag();
+            reportCooldowns.forEach((player, until) -> {
+                var entry = new CompoundTag();
+                entry.putUUID("player", player);
+                entry.putLong("until", until);
+                cooldowns.add(entry);
+            });
+            tag.put("clientReportCooldowns", cooldowns);
+        }
         return tag;
+    }
+
+    /** Zero reserves a collection, positive is the next allowed timestamp, -1 means capacity reached. */
+    public long reserveClientReport(UUID player, long now) {
+        long until = reportCooldowns.getOrDefault(player, 0L);
+        if (until > now) return until;
+        if (reportCooldowns.size() >= MAX_REPORT_COOLDOWNS) {
+            pruneClientReportCooldowns(now);
+            if (reportCooldowns.size() >= MAX_REPORT_COOLDOWNS) return -1;
+        }
+        reportCooldowns.put(player, now + REPORT_INTERVAL_MS);
+        setDirty();
+        return 0;
+    }
+
+    private void pruneClientReportCooldowns(long now) {
+        if (reportCooldowns.values().removeIf(until -> until <= now)) setDirty();
     }
 
     public long captureMask() { return guiCaptureDisabledMask; }

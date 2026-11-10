@@ -8,6 +8,7 @@ import com.roften.avilixlogger.core.LoggerEventHandlers;
 import com.roften.avilixlogger.core.LoggerRuntime;
 import com.roften.avilixlogger.core.HotPathMetrics;
 import com.roften.avilixlogger.core.RollbackCoordinator;
+import com.roften.avilixlogger.net.ClientReportNetwork;
 import com.roften.avilixlogger.net.LoggerNetwork;
 import com.roften.avilixlogger.net.LoggerNetworkHooks;
 import org.slf4j.Logger;
@@ -139,7 +140,10 @@ public final class AvilixLoggerMod {
 
     private void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (AuthCoreBridge.isAuthorized(player.getServer())) return;
+        if (AuthCoreBridge.isAuthorized(player.getServer())) {
+            ClientReportNetwork.onLogin(player);
+            return;
+        }
         player.sendSystemMessage(Component.literal(
                         "[Avilix Logger] AvilixAuthCore не подтвердил авторизацию. Все механики Logger отключены.")
                 .withStyle(ChatFormatting.RED));
@@ -154,6 +158,7 @@ public final class AvilixLoggerMod {
         com.roften.avilixlogger.compat.vibrantvaults.VibrantVaultAudit.clear();
         // Ensure we flush writers and stop GUI/database helper executors.
         com.roften.avilixlogger.command.EntryPositionCommand.stop();
+        ClientReportNetwork.clear();
         com.roften.avilixlogger.core.ServerTickScheduler.finish(event.getServer());
         LoggerEventHandlers.shutdownBackground();
         ChatLogPager.shutdown();

@@ -554,6 +554,11 @@ public final class LogViewerScreen extends Screen {
             if(moduleParent!=null){minecraft.setScreen(moduleParent);LogViewerClientHooks.resume(this.moduleParent);}
             else minecraft.setScreen(new ModulePickerScreen(this));
         },rightX,y2,rightW,btnH);
+        if (ClientReportScreen.available()) {
+            y2 += btnH + gap;
+            addButton(Component.literal("Отчёты о клиентах"), b -> minecraft.setScreen(new ClientReportScreen(this)),
+                    rightX, y2, rightW, btnH);
+        }
         y2 += btnH + gap;
         rowActions = addButton(Component.literal("Строка"), b -> openRowActions(rows.get(selected)),
                 rightX, y2, half, btnH);

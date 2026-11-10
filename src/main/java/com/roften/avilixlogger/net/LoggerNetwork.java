@@ -77,6 +77,15 @@ public final class LoggerNetwork {
     private static final ThreadPoolExecutor PAGE_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-PAGE-", 2, 256);
     private static final ThreadPoolExecutor DETAILS_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-DETAILS-", 2, 128);
     private static final java.util.concurrent.ScheduledThreadPoolExecutor GUI_WATCHDOG_EXECUTOR = createWatchdog();
+
+    static ScheduledExecutorService reportExpiryExecutor() {
+        return GUI_WATCHDOG_EXECUTOR;
+    }
+
+    static void executeClientReportQuery(Runnable query) {
+        PAGE_EXECUTOR.execute(query);
+    }
+
     private static java.util.concurrent.ScheduledThreadPoolExecutor createWatchdog() {
         var executor = new java.util.concurrent.ScheduledThreadPoolExecutor(1, r -> {
         Thread t = new Thread(r, "AvilixLogger-GUI-WATCHDOG");
@@ -131,6 +140,7 @@ public final class LoggerNetwork {
             UUID uuid = player.getUUID();
             CLIENT_PRESENT.remove(uuid);
             CartHistoryNetwork.logout(uuid);
+            ClientReportNetwork.onLogout(player);
             GUI_SESSIONS.remove(uuid);
             CAPTURE_SETTINGS_PEERS.remove(uuid);
             LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
@@ -282,6 +292,16 @@ public final class LoggerNetwork {
 
     public static void registerPayloads(RegisterPayloadHandlersEvent event) {
         // IMPORTANT: client is optional. Channels must be OPTIONAL, иначе кикает клиентов без мода.
+        PayloadRegistrar audit = event.registrar("1").optional();
+        audit.playToClient(ClientReportPayloads.Request.TYPE, ClientReportPayloads.Request.CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportRequest",
+                        new Class<?>[]{ClientReportPayloads.Request.class, IPayloadContext.class}, new Object[]{payload, ctx})));
+        audit.playToServer(ClientReportPayloads.Report.TYPE, ClientReportPayloads.Report.CODEC, ClientReportNetwork::receive);
+        audit.playToServer(ClientReportViewPayloads.Query.TYPE, ClientReportViewPayloads.Query.CODEC, ClientReportNetwork::handleView);
+        audit.playToClient(ClientReportViewPayloads.View.TYPE, ClientReportViewPayloads.View.CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportView",
+                        new Class<?>[]{ClientReportViewPayloads.View.class}, new Object[]{payload})));
+
         PayloadRegistrar r = event.registrar("15").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 

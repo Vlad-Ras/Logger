@@ -76,6 +76,7 @@ public final class CreateCartSmoke {
             CreateCartGuiSmoke.run(event.getServer());
             PreviewMaintenanceSmoke.run();
             CartGuiWorkflowSmoke.run();
+            com.roften.avilixlogger.net.ClientReportLoadSmoke.run(event.getServer());
             LoggerActionCatalogSmoke.run();
             System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental+cargo+fluid world=commit+cancel+32-drops recipients=commit+cancel+logout+conflict+strict-codec menu=native-in-place loot=full+partial+blocked+delay+cancel+conflict+reappear");
             event.getServer().halt(false);

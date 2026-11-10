@@ -3,6 +3,8 @@ package com.roften.avilixlogger.client.gui;
 import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.net.C2SHelloPayload;
 import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
+import com.roften.avilixlogger.net.ClientReportPayloads;
+import com.roften.avilixlogger.net.ClientReportViewPayloads;
 import com.roften.avilixlogger.net.S2CLogPagePayload;
 import com.roften.avilixlogger.net.S2CLogDetailsPayload;
 import com.roften.avilixlogger.net.S2CInspectToolPayload;
@@ -11,8 +13,10 @@ import com.roften.avilixlogger.net.S2CRollbackPreviewPayload;
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * Client-only glue for the optional log viewer screen.
@@ -43,6 +47,19 @@ public final class LogViewerClientHooks {
         // Inform server that this player supports the GUI payloads.
         var connection=Minecraft.getInstance().getConnection();
         if(connection!=null&&connection.hasChannel(C2SHelloPayload.TYPE))PacketDistributor.sendToServer(new C2SHelloPayload());
+    }
+
+    public static void acceptClientReportRequest(ClientReportPayloads.Request request, IPayloadContext context) {
+        Minecraft minecraft = Minecraft.getInstance();
+        var connection = minecraft.getConnection();
+        if (connection == null || connection.getConnection() != context.connection()
+                || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
+
+        var mods = ModList.get().getMods().stream()
+                .map(mod -> new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString()))
+                .sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
+        var report = ClientReportPayloads.collect(request.id(), mods, minecraft.getResourcePackRepository().getSelectedIds());
+        context.reply(report);
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
@@ -102,6 +119,10 @@ public final class LogViewerClientHooks {
 
     public static void acceptActionResult(com.roften.avilixlogger.net.S2CLoggerActionResultPayload payload) {
         LoggerActionsScreen.accept(payload);
+    }
+
+    public static void acceptClientReportView(ClientReportViewPayloads.View view) {
+        if (Minecraft.getInstance().screen instanceof ClientReportScreen screen) screen.accept(view);
     }
 
     static void openModule(net.minecraft.client.gui.screens.Screen parent,int preset) {

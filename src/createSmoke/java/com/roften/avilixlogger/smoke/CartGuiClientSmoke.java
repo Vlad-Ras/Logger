@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -56,8 +56,18 @@ public final class CartGuiClientSmoke {
                     var actions=screen.getClass().getDeclaredField("actions");actions.setAccessible(true);actions.set(screen,com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS);
                     var allActions=screen.getClass().getDeclaredField("allActions");allActions.setAccessible(true);allActions.set(screen,com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS);
                     var groups=screen.getClass().getDeclaredField("groups");groups.setAccessible(true);var categories=new ArrayList<String>();categories.add("Все");categories.addAll(com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS.stream().map(com.roften.avilixlogger.core.LoggerActionCatalog.Action::group).distinct().toList());groups.set(screen,List.copyOf(categories));
-                    var selected=screen.getClass().getDeclaredField("selected");selected.setAccessible(true);selected.setInt(screen,11);
                     mc.setScreen(screen);
+                    for (int i = 0; i < categories.indexOf("Клиенты"); i++) {
+                        var category = screen.children().stream()
+                                .filter(w -> w instanceof net.minecraft.client.gui.components.Button button
+                                        && button.getX() == 215 && button.getY() == 30)
+                                .map(w -> (net.minecraft.client.gui.components.Button) w).findFirst().orElseThrow();
+                        category.onPress();
+                    }
+                    check(screen.children().stream().anyMatch(w -> w instanceof net.minecraft.client.gui.components.Button button
+                            && button.getMessage().getString().equals("Клиенты")), "client report category did not open");
+                    check(screen.children().stream().anyMatch(net.minecraft.client.gui.components.EditBox.class::isInstance),
+                            "client report form has no player field");
                 }
                 else if(stage==5){
                     var screen=(com.roften.avilixlogger.client.gui.LoggerActionsScreen)mc.screen;
@@ -153,6 +163,40 @@ public final class CartGuiClientSmoke {
                             && button.active && button.getMessage().getString().startsWith("Скрыть источник · ")),
                             "a saved system origin did not expose a hide filter");
                 }
+                else if(stage==16) {
+                    var type = Class.forName("com.roften.avilixlogger.client.gui.ClientReportScreen");
+                    var constructor = type.getDeclaredConstructor(Screen.class);
+                    constructor.setAccessible(true);
+                    var screen = (Screen) constructor.newInstance(root);
+                    mc.setScreen(screen);
+                    var input = screen.children().stream().filter(net.minecraft.client.gui.components.EditBox.class::isInstance)
+                            .map(net.minecraft.client.gui.components.EditBox.class::cast).findFirst().orElseThrow();
+                    input.setValue("AuditTarget");
+                    check(input.getValue().equals("AuditTarget"), "report nickname input missing");
+                    var request = type.getDeclaredField("reportRequest");
+                    request.setAccessible(true);
+                    request.setLong(screen, 41L);
+                    var pack = "file/Xray_Ultimate-v1.21.zip";
+                    var report = com.roften.avilixlogger.net.ClientReportPayloads.collect(10,
+                            List.of(new com.roften.avilixlogger.net.ClientReportPayloads.Mod("create", "6.0")), List.of(pack));
+                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
+                            new com.roften.avilixlogger.net.ClientReportViewPayloads.View(41, "", "AuditTarget", 123, List.of(), List.of(pack), report));
+                    clickLabel(screen, "Моды");
+                    clickLabel(screen, "Копировать");
+                    check(mc.keyboardHandler.getClipboard().contains("create"), "mods tab did not show the reported mod");
+                    clickLabel(screen, "Ресурс-паки");
+                    clickLabel(screen, "Копировать");
+                    check(mc.keyboardHandler.getClipboard().contains("⚠ " + pack), "matched pack was not marked in its tab");
+                    var commandsRequest = type.getDeclaredField("commandsRequest");
+                    commandsRequest.setAccessible(true);
+                    commandsRequest.setLong(screen, 42L);
+                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
+                            new com.roften.avilixlogger.net.ClientReportViewPayloads.View(42, "", "AuditTarget", 0, List.of("/home"), List.of(), null));
+                    clickLabel(screen, "Команды");
+                    clickLabel(screen, "Копировать");
+                    check(mc.keyboardHandler.getClipboard().contains("/home"), "commands tab did not show its journal rows");
+                    clickLabel(screen, "Сводка");
+                }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==14){
                     var screen=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;
@@ -187,6 +231,14 @@ public final class CartGuiClientSmoke {
             finished=true;mc.stop();
         }
     }
+    private static void clickLabel(Screen screen, String label) {
+        var button = screen.children().stream()
+                .filter(w -> w instanceof net.minecraft.client.gui.components.Button b
+                        && b.active && b.getMessage().getString().equals(label))
+                .map(net.minecraft.client.gui.components.Button.class::cast).findFirst().orElseThrow();
+        button.onPress();
+    }
+
     private static void teleportReplies(Minecraft mc,com.roften.avilixlogger.client.gui.LogViewerScreen viewer)throws Exception {
         var hooks=com.roften.avilixlogger.client.gui.LogViewerClientHooks.class;
         var owner=hooks.getDeclaredField("teleportOwner");owner.setAccessible(true);

@@ -87,7 +87,11 @@ public final class LoggerActionCatalog {
         a("backpack_recover","Рюкзаки","Восстановить уничтоженный рюкзак","Подготовит выдачу сохранённого рюкзака указанному онлайн-игроку.","log backpack recover {0} {1}","ID рюкзака","","Получатель",""),
         a("backpack_return","Рюкзаки","Вернуть существующий рюкзак","Подготовит перенос учтённого рюкзака указанному онлайн-игроку.","log backpack return {0} {1}","ID рюкзака","","Получатель",""),
         a("backpack_confirm","Рюкзаки","Подтвердить операцию с рюкзаком","Применяет ваш действующий предпросмотр.","log backpack confirm"),
-        a("backpack_cancel","Рюкзаки","Отменить операцию с рюкзаком","Отменяет ваш запрос до применения.","log backpack cancel")
+        a("backpack_cancel","Рюкзаки","Отменить операцию с рюкзаком","Отменяет ваш запрос до применения.","log backpack cancel"),
+        a("client_report","Клиенты","Запросить отчёт","Загруженные моды и выбранные ресурс-паки подключённого игрока.","log client-report {0}","Ник игрока",""),
+        a("client_report_cached","Клиенты","Последний отчёт","Последний ответ за 24 часа. Игрок может быть офлайн.","log client-report-cache {0}","Ник игрока",""),
+        a("client_report_enable","Клиенты","Включить отчёты","Действует до перезапуска сервера. Значение по умолчанию берётся из серверного конфига.","log client-report-settings on"),
+        a("client_report_disable","Клиенты","Выключить отчёты","Отменяет запросы и очищает отчёты в памяти. Действует до перезапуска сервера.","log client-report-settings off")
     );
     public static Action find(String id){return ACTIONS.stream().filter(a->a.id().equals(id)).findFirst().orElseThrow(()->new IllegalArgumentException("Неизвестное действие"));}
     public record Selection(Action action,List<String> values){}
