@@ -90,7 +90,7 @@ public final class LoggerActionCatalog {
         a("backpack_cancel","Рюкзаки","Отменить операцию с рюкзаком","Отменяет ваш запрос до применения.","log backpack cancel"),
         a("client_report","Клиенты","Запросить отчёт","Загруженные моды и выбранные ресурс-паки подключённого игрока.","log client-report {0}","Ник игрока",""),
         a("client_report_cached","Клиенты","Последний отчёт","Ответ текущей сессии с временем получения, без нового запроса.","log client-report {0} cached","Ник игрока",""),
-        a("client_report_enable","Клиенты","Включить отчёты","Действует до перезапуска сервера. Постоянная настройка находится в серверном конфиге.","log client-report-settings on"),
+        a("client_report_enable","Клиенты","Включить отчёты","Действует до перезапуска сервера. Значение по умолчанию берётся из серверного конфига.","log client-report-settings on"),
         a("client_report_disable","Клиенты","Выключить отчёты","Отменяет запросы и очищает отчёты в памяти. Действует до перезапуска сервера.","log client-report-settings off")
     );
     public static Action find(String id){return ACTIONS.stream().filter(a->a.id().equals(id)).findFirst().orElseThrow(()->new IllegalArgumentException("Неизвестное действие"));}

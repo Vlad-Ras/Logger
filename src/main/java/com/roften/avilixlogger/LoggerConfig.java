@@ -114,7 +114,7 @@ public final class LoggerConfig {
 
             b.push("clientAudit");
             clientAuditEnabled = b.comment("Allow administrator requests for loaded mods and selected resource packs.")
-                    .define("enabled", false);
+                    .define("enabled", true);
             clientReportOnJoin = b.comment("Request a client-reported list of loaded mods and selected resource packs when players join.")
                     .define("reportOnJoin", false);
             b.pop();
