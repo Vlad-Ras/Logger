@@ -83,6 +83,11 @@ final class CartGuiWorkflowSmoke {
     }
     private static void reject(Runnable task,String message){try{task.run();}catch(IllegalArgumentException expected){return;}throw new AssertionError(message);}
     private static void checkClientReportWire() {
+        check(LoggerActionCatalog.find("client_report").command(List.of("AuditTarget")).equals("log client-report AuditTarget")
+                && LoggerActionCatalog.find("client_report_cached").command(List.of("AuditTarget")).equals("log client-report AuditTarget cached")
+                && LoggerActionCatalog.find("client_report_enable").command(List.of()).equals("log client-report-settings on")
+                && LoggerActionCatalog.find("client_report_disable").command(List.of()).equals("log client-report-settings off"),
+                "client report GUI actions are not wired to the administrator commands");
         var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
         try {
             var request = new ClientReportPayloads.Request(42);

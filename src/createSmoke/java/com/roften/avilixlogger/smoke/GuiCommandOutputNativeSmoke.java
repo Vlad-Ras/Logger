@@ -29,6 +29,9 @@ final class GuiCommandOutputNativeSmoke {
         var normal = player.createCommandSourceStack();
         normal.sendSystemMessage(Component.literal("normal-chat-before"));
         var gui = normal.withSource(new GuiCommandOutput(message -> replies.add(S2CLoggerActionResultPayload.from(17, message))));
+        check(gui instanceof GuiCommandOutput.Capture capture && capture.avilixlogger$capturesGuiOutput()
+                && normal instanceof GuiCommandOutput.Capture standard && !standard.avilixlogger$capturesGuiOutput(),
+                "GUI output destination did not survive command stack copying");
         check(gui.getPlayerOrException() == player && gui.getEntity() == player, "GUI lost real command actor");
         check(gui.hasPermission(2) == normal.hasPermission(2), "GUI changed permissions");
         var dispatcher = new CommandDispatcher<CommandSourceStack>();

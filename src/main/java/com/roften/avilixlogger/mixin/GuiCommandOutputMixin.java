@@ -13,13 +13,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** Vanilla sends system replies directly to the player entity, bypassing withSource(). */
 @Mixin(CommandSourceStack.class)
-public abstract class GuiCommandOutputMixin {
+public abstract class GuiCommandOutputMixin implements GuiCommandOutput.Capture {
     @Shadow @Final private CommandSource source;
     @Shadow @Final private boolean silent;
 
+    @Override
+    public boolean avilixlogger$capturesGuiOutput() {
+        return source instanceof GuiCommandOutput;
+    }
+
     @Inject(method = "sendSystemMessage", at = @At("HEAD"), cancellable = true, require = 1)
     private void avilixlogger$guiReply(Component message, CallbackInfo callback) {
-        if (source instanceof GuiCommandOutput) {
+        if (avilixlogger$capturesGuiOutput()) {
             if (!silent) source.sendSystemMessage(message);
             callback.cancel();
         }

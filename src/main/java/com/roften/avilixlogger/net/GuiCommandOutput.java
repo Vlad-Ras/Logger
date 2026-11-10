@@ -7,6 +7,10 @@ import java.util.function.Consumer;
 
 /** Reply destination retained by copied command stacks and asynchronous callbacks. */
 public final class GuiCommandOutput implements CommandSource {
+    public interface Capture {
+        boolean avilixlogger$capturesGuiOutput();
+    }
+
     private final Consumer<Component> replies;
     public GuiCommandOutput(Consumer<Component> replies) { this.replies = Objects.requireNonNull(replies); }
     @Override public void sendSystemMessage(Component message) { replies.accept(message); }

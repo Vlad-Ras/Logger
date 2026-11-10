@@ -102,6 +102,7 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue guiPageSize;
         public final ModConfigSpec.ConfigValue<String> inspectToolItemId;
 
+        public final ModConfigSpec.BooleanValue clientAuditEnabled;
         public final ModConfigSpec.BooleanValue clientReportOnJoin;
 
         Values(ModConfigSpec.Builder b) {
@@ -112,6 +113,8 @@ public final class LoggerConfig {
             b.pop();
 
             b.push("clientAudit");
+            clientAuditEnabled = b.comment("Allow administrator requests for loaded mods and selected resource packs.")
+                    .define("enabled", false);
             clientReportOnJoin = b.comment("Request a client-reported list of loaded mods and selected resource packs when players join.")
                     .define("reportOnJoin", false);
             b.pop();

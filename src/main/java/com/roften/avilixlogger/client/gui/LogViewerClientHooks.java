@@ -10,7 +10,6 @@ import com.roften.avilixlogger.net.S2CInspectToolPayload;
 import com.roften.avilixlogger.net.S2CRollbackPreviewPayload;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.fml.ModList;
@@ -60,8 +59,6 @@ public final class LogViewerClientHooks {
                 .sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
         var report = ClientReportPayloads.collect(request.id(), mods, minecraft.getResourcePackRepository().getSelectedIds());
         context.reply(report);
-        minecraft.gui.getChat().addMessage(Component.literal(
-                "[AvilixLogger] Серверу отправлен список загруженных модов и активных ресурс-паков."));
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {

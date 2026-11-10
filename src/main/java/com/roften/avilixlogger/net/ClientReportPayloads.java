@@ -128,21 +128,29 @@ public final class ClientReportPayloads {
 
     private static String cleanPackId(String id) {
         int lastSlash = Math.max(id.lastIndexOf('/'), id.lastIndexOf('\\'));
-        return clean(id.startsWith("file/") ? "file/" + id.substring(lastSlash + 1) : id, PACK_NAME_LENGTH);
+        if (lastSlash > 4 && id.startsWith("file/")) id = "file/" + id.substring(lastSlash + 1);
+        return clean(id, PACK_NAME_LENGTH);
     }
 
     private static String clean(String value, int maxLength) {
-        StringBuilder result = new StringBuilder(Math.min(value.length(), maxLength));
-        for (int offset = 0; offset < value.length() && result.length() < maxLength;) {
+        StringBuilder cleaned = null;
+        int offset = 0;
+        while (offset < value.length()) {
             int codePoint = value.codePointAt(offset);
-            offset += Character.charCount(codePoint);
+            int next = offset + Character.charCount(codePoint);
             int category = Character.getType(codePoint);
             if (Character.isISOControl(codePoint) || category == Character.FORMAT
                     || category == Character.LINE_SEPARATOR || category == Character.PARAGRAPH_SEPARATOR
-                    || category == Character.SURROGATE || codePoint == '§') continue;
-            if (result.length() + Character.charCount(codePoint) > maxLength) break;
-            result.appendCodePoint(codePoint);
+                    || category == Character.SURROGATE || codePoint == '§') {
+                if (cleaned == null) cleaned = new StringBuilder(Math.min(value.length(), maxLength)).append(value, 0, offset);
+            } else if (cleaned == null) {
+                if (next > maxLength) return value.substring(0, offset);
+            } else {
+                if (cleaned.length() + Character.charCount(codePoint) > maxLength) break;
+                cleaned.appendCodePoint(codePoint);
+            }
+            offset = next;
         }
-        return result.toString();
+        return cleaned == null ? value : cleaned.toString();
     }
 }

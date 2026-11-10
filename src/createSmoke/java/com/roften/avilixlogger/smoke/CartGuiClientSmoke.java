@@ -56,8 +56,18 @@ public final class CartGuiClientSmoke {
                     var actions=screen.getClass().getDeclaredField("actions");actions.setAccessible(true);actions.set(screen,com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS);
                     var allActions=screen.getClass().getDeclaredField("allActions");allActions.setAccessible(true);allActions.set(screen,com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS);
                     var groups=screen.getClass().getDeclaredField("groups");groups.setAccessible(true);var categories=new ArrayList<String>();categories.add("Все");categories.addAll(com.roften.avilixlogger.core.LoggerActionCatalog.ACTIONS.stream().map(com.roften.avilixlogger.core.LoggerActionCatalog.Action::group).distinct().toList());groups.set(screen,List.copyOf(categories));
-                    var selected=screen.getClass().getDeclaredField("selected");selected.setAccessible(true);selected.setInt(screen,11);
                     mc.setScreen(screen);
+                    for (int i = 0; i < categories.indexOf("Клиенты"); i++) {
+                        var category = screen.children().stream()
+                                .filter(w -> w instanceof net.minecraft.client.gui.components.Button button
+                                        && button.getX() == 215 && button.getY() == 30)
+                                .map(w -> (net.minecraft.client.gui.components.Button) w).findFirst().orElseThrow();
+                        category.onPress();
+                    }
+                    check(screen.children().stream().anyMatch(w -> w instanceof net.minecraft.client.gui.components.Button button
+                            && button.getMessage().getString().equals("Клиенты")), "client report category did not open");
+                    check(screen.children().stream().anyMatch(net.minecraft.client.gui.components.EditBox.class::isInstance),
+                            "client report form has no player field");
                 }
                 else if(stage==5){
                     var screen=(com.roften.avilixlogger.client.gui.LoggerActionsScreen)mc.screen;

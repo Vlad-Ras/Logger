@@ -17,6 +17,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,10 +29,13 @@ public final class ClientReportNetwork {
     private static final int TIMEOUT_TICKS = 200;
     private static final int COOLDOWN_TICKS = 60;
     private static final int CHAT_CHUNK_SIZE = 48;
+    private static final int GUI_CHUNK_SIZE = 32;
+    private static final DateTimeFormatter REPORT_TIME = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss XXX");
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final Map<UUID, Snapshot> LATEST = new HashMap<>();
     private static final Map<UUID, Long> NEXT_REQUEST = new HashMap<>();
     private static long lastId;
+    private static Boolean enabledOverride;
 
     private record Pending(long id, ServerGamePacketListenerImpl connection, CommandSourceStack requester) {}
     private record Snapshot(Instant receivedAt, ClientReportPayloads.Report report) {}
@@ -46,8 +51,32 @@ public final class ClientReportNetwork {
                                 .executes(ctx -> cached(EntityArgument.getPlayer(ctx, "player"), ctx.getSource()))));
     }
 
+    public static LiteralArgumentBuilder<CommandSourceStack> settingsCommand() {
+        return Commands.literal("client-report-settings")
+                .requires(ClientReportNetwork::canRequest)
+                .executes(ctx -> reportSettings(ctx.getSource()))
+                .then(Commands.literal("on").executes(ctx -> setEnabled(ctx.getSource(), true)))
+                .then(Commands.literal("off").executes(ctx -> setEnabled(ctx.getSource(), false)));
+    }
+
+    private static int setEnabled(CommandSourceStack source, boolean value) {
+        enabledOverride = value;
+        if (!value) clearReports();
+        return reportSettings(source);
+    }
+
+    private static int reportSettings(CommandSourceStack source) {
+        source.sendSystemMessage(Component.literal("[AvilixLogger] Отчёты о клиентах "
+                + (enabled() ? "включены" : "выключены") + (enabledOverride == null ? "." : " до перезапуска сервера.")));
+        return 1;
+    }
+
+    private static boolean enabled() {
+        return enabledOverride != null ? enabledOverride : LoggerConfig.VALUES.clientAuditEnabled.get();
+    }
+
     public static void onLogin(ServerPlayer target) {
-        if (LoggerConfig.VALUES.clientReportOnJoin.get() && LoggerConfig.isEnabled()
+        if (enabled() && LoggerConfig.VALUES.clientReportOnJoin.get() && LoggerConfig.isEnabled()
                 && AuthCoreBridge.isAuthorized(target.getServer())) {
             request(target, null);
         }
@@ -64,6 +93,11 @@ public final class ClientReportNetwork {
     }
 
     public static void clear() {
+        enabledOverride = null;
+        clearReports();
+    }
+
+    private static void clearReports() {
         PENDING.clear();
         LATEST.clear();
         NEXT_REQUEST.clear();
@@ -76,11 +110,11 @@ public final class ClientReportNetwork {
             Pending pending = PENDING.get(uuid);
             if (pending == null || pending.id() != report.id() || pending.connection() != player.connection) return;
             PENDING.remove(uuid);
-            if (!LoggerConfig.isEnabled() || !AuthCoreBridge.isAuthorized(player.getServer())) return;
+            if (!enabled() || !LoggerConfig.isEnabled() || !AuthCoreBridge.isAuthorized(player.getServer())) return;
             if (pending.requester() != null && !canDeliver(pending.requester())) return;
             Snapshot snapshot = new Snapshot(Instant.now(), report);
             LATEST.put(uuid, snapshot);
-            if (pending.requester() != null) show(pending.requester(), player, snapshot);
+            if (pending.requester() != null) writeReport(pending.requester(), name(player), snapshot.receivedAt(), snapshot.report());
         });
     }
 
@@ -93,13 +127,13 @@ public final class ClientReportNetwork {
     }
 
     private static boolean canDeliver(CommandSourceStack source) {
-        if (!canRequest(source)) return false;
-        if (!(source.getEntity() instanceof ServerPlayer player)) return true;
+        if (!(source.getEntity() instanceof ServerPlayer player)) return canRequest(source);
         ServerPlayer live = source.getServer().getPlayerList().getPlayer(player.getUUID());
         return live != null && live.connection == player.connection && canRequest(live.createCommandSourceStack());
     }
 
     private static int request(ServerPlayer target, CommandSourceStack requester) {
+        if (!enabled()) return fail(requester, "отчёты о клиентах выключены.");
         if (!LoggerConfig.isEnabled()) return fail(requester, "логгер выключен.");
         if (!target.connection.hasChannel(ClientReportPayloads.Request.TYPE)
                 || !target.connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
@@ -115,27 +149,30 @@ public final class ClientReportNetwork {
             return fail(requester, "повторите запрос через несколько секунд.");
         }
 
-        Pending pending = new Pending(++lastId, target.connection, requester);
-        PENDING.put(uuid, pending);
+        long id = ++lastId;
+        PENDING.put(uuid, new Pending(id, target.connection, requester));
         NEXT_REQUEST.put(uuid, tick + COOLDOWN_TICKS);
-        PacketDistributor.sendToPlayer(target, new ClientReportPayloads.Request(pending.id()));
+        PacketDistributor.sendToPlayer(target, new ClientReportPayloads.Request(id));
         if (requester != null) {
             requester.sendSystemMessage(Component.literal("[AvilixLogger] Запрос отправлен игроку " + name(target) + "."));
         }
         String targetName = name(target);
         ServerTickScheduler.schedule(server, TIMEOUT_TICKS, () -> {
-            if (PENDING.remove(uuid, pending)) {
-                notifyRequester(requester, "[AvilixLogger] " + targetName + " не прислал отчёт за отведённое время.");
+            Pending expired = PENDING.get(uuid);
+            if (expired != null && expired.id() == id) {
+                PENDING.remove(uuid);
+                notifyRequester(expired.requester(), "[AvilixLogger] " + targetName + " не прислал отчёт за отведённое время.");
             }
         });
         return 1;
     }
 
     private static int cached(ServerPlayer target, CommandSourceStack requester) {
+        if (!enabled()) return fail(requester, "отчёты о клиентах выключены.");
         if (!LoggerConfig.isEnabled()) return fail(requester, "логгер выключен.");
         Snapshot snapshot = LATEST.get(target.getUUID());
         if (snapshot == null) return fail(requester, "в этой сессии ещё нет отчёта игрока " + name(target) + ".");
-        show(requester, target, snapshot);
+        writeReport(requester, name(target), snapshot.receivedAt(), snapshot.report());
         return 1;
     }
 
@@ -152,11 +189,9 @@ public final class ClientReportNetwork {
         return player.getGameProfile().getName();
     }
 
-    private static void show(CommandSourceStack source, ServerPlayer target, Snapshot snapshot) {
-        var report = snapshot.report();
-        String time = java.time.format.DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss XXX")
-                .withZone(java.time.ZoneId.systemDefault()).format(snapshot.receivedAt());
-        source.sendSystemMessage(Component.literal("[AvilixLogger] Отчёт " + name(target) + " · " + time
+    static void writeReport(CommandSourceStack source, String playerName, Instant receivedAt, ClientReportPayloads.Report report) {
+        String time = REPORT_TIME.format(receivedAt.atZone(ZoneId.systemDefault()));
+        source.sendSystemMessage(Component.literal("[AvilixLogger] Отчёт " + playerName + " · " + time
                 + " · модов " + report.mods().size() + " · ресурс-паков " + report.packs().size()
                 + (report.truncated() ? " · список сокращён по лимиту" : "")
                 + ". Данные сообщены клиентом."));
@@ -166,12 +201,14 @@ public final class ClientReportNetwork {
 
     private static void showList(CommandSourceStack source, String title, List<String> entries) {
         if (entries.isEmpty()) return;
-        boolean inGame = source.getEntity() instanceof ServerPlayer;
-        for (int start = 0; start < entries.size(); start += CHAT_CHUNK_SIZE) {
-            int end = Math.min(start + CHAT_CHUNK_SIZE, entries.size());
+        boolean gui = source instanceof GuiCommandOutput.Capture capture && capture.avilixlogger$capturesGuiOutput();
+        boolean inChat = !gui && source.getEntity() instanceof ServerPlayer;
+        int chunkSize = gui ? GUI_CHUNK_SIZE : CHAT_CHUNK_SIZE;
+        for (int start = 0; start < entries.size(); start += chunkSize) {
+            int end = Math.min(start + chunkSize, entries.size());
             String text = String.join("\n", entries.subList(start, end));
             String label = title + " (" + (start + 1) + "–" + end + ")";
-            Component line = inGame
+            Component line = inChat
                     ? Component.literal("[" + label + " · копировать]").withStyle(style -> style
                             .withColor(ChatFormatting.AQUA)
                             .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, text)))
