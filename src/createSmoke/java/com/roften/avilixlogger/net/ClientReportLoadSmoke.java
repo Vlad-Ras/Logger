@@ -91,7 +91,9 @@ public final class ClientReportLoadSmoke {
             cache.store(player, "AuditFixture", report);
             time.addAndGet(day);
             // Drive the scheduled callback without waiting a day.
-            executor.getQueue().remove().run();
+            Runnable expiry = executor.getQueue().peek();
+            if (expiry == null || !executor.remove(expiry)) throw new AssertionError("Missing report expiry task");
+            expiry.run();
             time.decrementAndGet();
             if (cache.find(player) != null) throw new AssertionError("Background expiry did not remove the report");
 
