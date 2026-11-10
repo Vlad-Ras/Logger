@@ -2,7 +2,10 @@ package com.roften.avilixlogger.net;
 
 import com.sun.management.ThreadMXBean;
 import io.netty.buffer.Unpooled;
+import com.mojang.authlib.GameProfile;
+import com.roften.avilixlogger.core.LoggerServerData;
 import net.minecraft.commands.CommandSource;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -32,6 +35,8 @@ public final class ClientReportLoadSmoke {
         var packs = IntStream.range(0, 24).mapToObj(i -> "file/fixture-pack-" + i + ".zip").toList();
         var report = ClientReportPayloads.collect(1, mods, packs);
         checkRetention(report);
+        checkQueueAndDailyLimit(server);
+        checkStructuredReport(server);
         checkConsoleStatus(server, report);
         var inbound = new RegistryFriendlyByteBuf(Unpooled.buffer(), server.registryAccess());
         AtomicInteger printedCharacters = new AtomicInteger();
@@ -109,6 +114,71 @@ public final class ClientReportLoadSmoke {
             }
         } finally {
             executor.shutdownNow();
+        }
+    }
+
+    private static void checkQueueAndDailyLimit(MinecraftServer server) {
+        var executor = new ScheduledThreadPoolExecutor(1);
+        executor.setRemoveOnCancelPolicy(true);
+        var profile = new GameProfile(UUID.randomUUID(), "AuditAdmin");
+        var queue = new ClientReportQueue(executor);
+        try {
+            if (queue.add("offlineplayer", profile) != ClientReportQueue.Result.QUEUED
+                    || queue.add("offlineplayer", null) != ClientReportQueue.Result.ALREADY_QUEUED
+                    || !queue.find("offlineplayer").administrator().equals(profile)) {
+                throw new AssertionError("Offline report did not retain its original authorized requester");
+            }
+            queue.cancel("offlineplayer");
+            if (queue.find("offlineplayer") != null || !executor.getQueue().isEmpty()) {
+                throw new AssertionError("Offline report was not consumed exactly once");
+            }
+            queue.add("second", null);
+            Runnable expiry = executor.getQueue().peek();
+            if (expiry == null || !executor.remove(expiry)) throw new AssertionError("Offline request has no expiry");
+            expiry.run();
+            if (queue.find("second") != null) throw new AssertionError("Offline request outlived its expiry");
+        } finally {
+            queue.clear();
+            executor.shutdownNow();
+        }
+
+        long now = System.currentTimeMillis();
+        long day = java.time.Duration.ofHours(24).toMillis();
+        var data = LoggerServerData.load(new CompoundTag(), server.registryAccess());
+        UUID target = UUID.randomUUID();
+        if (data.reserveClientReport(target, now) != 0
+                || data.reserveClientReport(target, now + 1) != now + day) {
+            throw new AssertionError("Daily report quota failed");
+        }
+        var restored = LoggerServerData.load(data.save(new CompoundTag(), server.registryAccess()), server.registryAccess());
+        if (restored.reserveClientReport(target, now + day - 1) != now + day
+                || restored.reserveClientReport(target, now + day) != 0) {
+            throw new AssertionError("Daily report quota did not survive world save and reload");
+        }
+        System.out.println("CLIENT_REPORT_QUEUE_OK: offline queue, deduplication, expiry and durable daily limit");
+    }
+
+    private static void checkStructuredReport(MinecraftServer server) {
+        var packs = java.util.List.of("file/Xray_Ultimate-v1.21.zip", "file/AntiXray.zip", "file/X-ray - Ultimate.zip");
+        var matches = ClientReportNetwork.matchPacks(packs, "xray,x ray,xray ultimate,x ray ultimate");
+        if (!matches.equals(java.util.List.of(packs.getFirst(), packs.getLast()))) {
+            throw new AssertionError("Resource pack indicators did not match the expected names: " + matches);
+        }
+        var report = ClientReportPayloads.collect(42, java.util.List.of(new ClientReportPayloads.Mod("create", "6.0")), packs);
+        var snapshot = new ClientReportViewPayloads.View(11, "", "AuditTarget", 123, java.util.List.of(), matches, report);
+        var commands = new ClientReportViewPayloads.View(12, "", "AuditTarget", 0,
+                java.util.List.of("10.11.2026 23:00 · /home"), java.util.List.of(), null);
+        var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), server.registryAccess());
+        try {
+            for (var view : java.util.List.of(snapshot, commands)) {
+                buffer.clear();
+                ClientReportViewPayloads.View.CODEC.encode(buffer, view);
+                if (!view.equals(ClientReportViewPayloads.View.CODEC.decode(buffer)) || buffer.isReadable()) {
+                    throw new AssertionError("Structured client report changed on the wire");
+                }
+            }
+        } finally {
+            buffer.release();
         }
     }
 

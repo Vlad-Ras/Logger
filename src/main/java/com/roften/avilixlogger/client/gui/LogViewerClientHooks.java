@@ -4,6 +4,7 @@ import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.net.C2SHelloPayload;
 import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
 import com.roften.avilixlogger.net.ClientReportPayloads;
+import com.roften.avilixlogger.net.ClientReportViewPayloads;
 import com.roften.avilixlogger.net.S2CLogPagePayload;
 import com.roften.avilixlogger.net.S2CLogDetailsPayload;
 import com.roften.avilixlogger.net.S2CInspectToolPayload;
@@ -118,6 +119,10 @@ public final class LogViewerClientHooks {
 
     public static void acceptActionResult(com.roften.avilixlogger.net.S2CLoggerActionResultPayload payload) {
         LoggerActionsScreen.accept(payload);
+    }
+
+    public static void acceptClientReportView(ClientReportViewPayloads.View view) {
+        if (Minecraft.getInstance().screen instanceof ClientReportScreen screen) screen.accept(view);
     }
 
     static void openModule(net.minecraft.client.gui.screens.Screen parent,int preset) {

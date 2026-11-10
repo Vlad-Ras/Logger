@@ -82,6 +82,10 @@ public final class LoggerNetwork {
         return GUI_WATCHDOG_EXECUTOR;
     }
 
+    static void executeClientReportQuery(Runnable query) {
+        PAGE_EXECUTOR.execute(query);
+    }
+
     private static java.util.concurrent.ScheduledThreadPoolExecutor createWatchdog() {
         var executor = new java.util.concurrent.ScheduledThreadPoolExecutor(1, r -> {
         Thread t = new Thread(r, "AvilixLogger-GUI-WATCHDOG");
@@ -293,6 +297,10 @@ public final class LoggerNetwork {
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportRequest",
                         new Class<?>[]{ClientReportPayloads.Request.class, IPayloadContext.class}, new Object[]{payload, ctx})));
         audit.playToServer(ClientReportPayloads.Report.TYPE, ClientReportPayloads.Report.CODEC, ClientReportNetwork::receive);
+        audit.playToServer(ClientReportViewPayloads.Query.TYPE, ClientReportViewPayloads.Query.CODEC, ClientReportNetwork::handleView);
+        audit.playToClient(ClientReportViewPayloads.View.TYPE, ClientReportViewPayloads.View.CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportView",
+                        new Class<?>[]{ClientReportViewPayloads.View.class}, new Object[]{payload})));
 
         PayloadRegistrar r = event.registrar("15").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));

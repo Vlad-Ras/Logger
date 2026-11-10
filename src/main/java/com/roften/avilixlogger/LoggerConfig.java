@@ -103,6 +103,8 @@ public final class LoggerConfig {
         public final ModConfigSpec.ConfigValue<String> inspectToolItemId;
 
         public final ModConfigSpec.BooleanValue clientAuditEnabled;
+        public final ModConfigSpec.BooleanValue clientAuditScanOnJoin;
+        public final ModConfigSpec.ConfigValue<String> clientAuditSuspectPacks;
 
         Values(ModConfigSpec.Builder b) {
             b.push("general");
@@ -114,6 +116,10 @@ public final class LoggerConfig {
             b.push("clientAudit");
             clientAuditEnabled = b.comment("Allow administrator requests for loaded mods and selected resource packs.")
                     .define("enabled", true);
+            clientAuditScanOnJoin = b.comment("Check reports on join for pack indicators, at most once per player per 24 hours.")
+                    .define("scanOnJoin", false);
+            clientAuditSuspectPacks = b.comment("Comma-separated resource pack names that trigger an administrator alert. Blank disables alerts.")
+                    .define("suspectPackNames", "xray,x ray,xrayultimate,xray ultimate,x ray ultimate");
             b.pop();
 
             b.push("clickhouse");
