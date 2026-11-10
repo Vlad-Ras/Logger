@@ -2,7 +2,6 @@ package com.roften.avilixlogger.net;
 
 import com.sun.management.ThreadMXBean;
 import io.netty.buffer.Unpooled;
-import com.mojang.authlib.GameProfile;
 import com.roften.avilixlogger.core.LoggerServerData;
 import net.minecraft.commands.CommandSource;
 import net.minecraft.nbt.CompoundTag;
@@ -35,7 +34,7 @@ public final class ClientReportLoadSmoke {
         var packs = IntStream.range(0, 24).mapToObj(i -> "file/fixture-pack-" + i + ".zip").toList();
         var report = ClientReportPayloads.collect(1, mods, packs);
         checkRetention(report);
-        checkQueueAndDailyLimit(server);
+        checkDailyLimit(server);
         checkStructuredReport(server);
         checkConsoleStatus(server, report);
         var inbound = new RegistryFriendlyByteBuf(Unpooled.buffer(), server.registryAccess());
@@ -117,31 +116,7 @@ public final class ClientReportLoadSmoke {
         }
     }
 
-    private static void checkQueueAndDailyLimit(MinecraftServer server) {
-        var executor = new ScheduledThreadPoolExecutor(1);
-        executor.setRemoveOnCancelPolicy(true);
-        var profile = new GameProfile(UUID.randomUUID(), "AuditAdmin");
-        var queue = new ClientReportQueue(executor);
-        try {
-            if (queue.add("offlineplayer", profile) != ClientReportQueue.Result.QUEUED
-                    || queue.add("offlineplayer", null) != ClientReportQueue.Result.ALREADY_QUEUED
-                    || !queue.find("offlineplayer").administrator().equals(profile)) {
-                throw new AssertionError("Offline report did not retain its original authorized requester");
-            }
-            queue.cancel("offlineplayer");
-            if (queue.find("offlineplayer") != null || !executor.getQueue().isEmpty()) {
-                throw new AssertionError("Offline report was not consumed exactly once");
-            }
-            queue.add("second", null);
-            Runnable expiry = executor.getQueue().peek();
-            if (expiry == null || !executor.remove(expiry)) throw new AssertionError("Offline request has no expiry");
-            expiry.run();
-            if (queue.find("second") != null) throw new AssertionError("Offline request outlived its expiry");
-        } finally {
-            queue.clear();
-            executor.shutdownNow();
-        }
-
+    private static void checkDailyLimit(MinecraftServer server) {
         long now = System.currentTimeMillis();
         long day = java.time.Duration.ofHours(24).toMillis();
         var data = LoggerServerData.load(new CompoundTag(), server.registryAccess());
@@ -155,7 +130,7 @@ public final class ClientReportLoadSmoke {
                 || restored.reserveClientReport(target, now + day) != 0) {
             throw new AssertionError("Daily report quota did not survive world save and reload");
         }
-        System.out.println("CLIENT_REPORT_QUEUE_OK: offline queue, deduplication, expiry and durable daily limit");
+        System.out.println("CLIENT_REPORT_DAILY_LIMIT_OK: durable daily automatic collection limit");
     }
 
     private static void checkStructuredReport(MinecraftServer server) {

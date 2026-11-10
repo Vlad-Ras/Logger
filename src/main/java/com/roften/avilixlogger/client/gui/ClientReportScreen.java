@@ -72,8 +72,8 @@ final class ClientReportScreen extends Screen {
         input.setResponder(this::changeName);
         setInitialFocus(input);
 
-        freshButton = button("Запросить свежий", left + part + gap, 32, part, () -> send(Action.REQUEST));
-        freshButton.setTooltip(Tooltip.create(Component.literal("Для офлайн-игрока запрос ждёт подключения до 24 часов.")));
+        freshButton = button("Обновить отчёт", left + part + gap, 32, part, () -> send(Action.REQUEST));
+        freshButton.setTooltip(Tooltip.create(Component.literal("Запросить новый отчёт у игрока онлайн.")));
         cachedButton = button("Открыть сохранённый", left + 2 * (part + gap), 32, paneWidth - 2 * (part + gap),
                 () -> send(Action.CACHED));
         cachedButton.setTooltip(Tooltip.create(Component.literal("Последний отчёт за 24 часа, в том числе для офлайн-игрока.")));
@@ -107,7 +107,7 @@ final class ClientReportScreen extends Screen {
         snapshot = null;
         commands = List.of();
         commandsLoaded = false;
-        status = "Запросите свежий отчёт или откройте сохранённый.";
+        status = "Откройте сохранённый отчёт или обновите его, если игрок онлайн.";
         commandStatus = "Нажмите «Команды», чтобы загрузить записи для этого ника.";
         rebuild();
     }
