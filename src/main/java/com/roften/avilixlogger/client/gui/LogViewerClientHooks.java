@@ -16,6 +16,7 @@ import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 /**
  * Client-only glue for the optional log viewer screen.
@@ -48,16 +49,17 @@ public final class LogViewerClientHooks {
         if(connection!=null&&connection.hasChannel(C2SHelloPayload.TYPE))PacketDistributor.sendToServer(new C2SHelloPayload());
     }
 
-    public static void acceptClientReportRequest(ClientReportPayloads.Request request) {
+    public static void acceptClientReportRequest(ClientReportPayloads.Request request, IPayloadContext context) {
         Minecraft minecraft = Minecraft.getInstance();
         var connection = minecraft.getConnection();
-        if (connection == null || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
+        if (connection == null || connection.getConnection() != context.connection()
+                || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
 
         var mods = ModList.get().getMods().stream()
                 .map(mod -> new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString()))
                 .sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
         var report = ClientReportPayloads.collect(request.id(), mods, minecraft.getResourcePackRepository().getSelectedIds());
-        PacketDistributor.sendToServer(report);
+        context.reply(report);
         minecraft.gui.getChat().addMessage(Component.literal(
                 "[AvilixLogger] Серверу отправлен список загруженных модов и активных ресурс-паков."));
     }

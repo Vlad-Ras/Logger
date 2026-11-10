@@ -286,7 +286,7 @@ public final class LoggerNetwork {
         PayloadRegistrar audit = event.registrar("1").optional();
         audit.playToClient(ClientReportPayloads.Request.TYPE, ClientReportPayloads.Request.CODEC,
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportRequest",
-                        new Class<?>[]{ClientReportPayloads.Request.class}, new Object[]{payload})));
+                        new Class<?>[]{ClientReportPayloads.Request.class, IPayloadContext.class}, new Object[]{payload, ctx})));
         audit.playToServer(ClientReportPayloads.Report.TYPE, ClientReportPayloads.Report.CODEC, ClientReportNetwork::receive);
 
         PayloadRegistrar r = event.registrar("15").optional();
