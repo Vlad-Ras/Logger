@@ -84,6 +84,7 @@ public final class LoggerCommands {
             .then(EntryPositionCommand.node())
             .then(EntryRollbackCommand.node())
             .then(ClientReportNetwork.command())
+            .then(ClientReportNetwork.cacheCommand())
             .then(ClientReportNetwork.settingsCommand())
             .then(literal("capture-status")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.gui", 2))

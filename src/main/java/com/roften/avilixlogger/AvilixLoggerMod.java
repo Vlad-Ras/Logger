@@ -140,10 +140,7 @@ public final class AvilixLoggerMod {
 
     private void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        if (AuthCoreBridge.isAuthorized(player.getServer())) {
-            ClientReportNetwork.onLogin(player);
-            return;
-        }
+        if (AuthCoreBridge.isAuthorized(player.getServer())) return;
         player.sendSystemMessage(Component.literal(
                         "[Avilix Logger] AvilixAuthCore не подтвердил авторизацию. Все механики Logger отключены.")
                 .withStyle(ChatFormatting.RED));

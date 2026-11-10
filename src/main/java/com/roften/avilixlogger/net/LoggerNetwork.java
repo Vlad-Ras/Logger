@@ -77,6 +77,11 @@ public final class LoggerNetwork {
     private static final ThreadPoolExecutor PAGE_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-PAGE-", 2, 256);
     private static final ThreadPoolExecutor DETAILS_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-DETAILS-", 2, 128);
     private static final java.util.concurrent.ScheduledThreadPoolExecutor GUI_WATCHDOG_EXECUTOR = createWatchdog();
+
+    static ScheduledExecutorService reportExpiryExecutor() {
+        return GUI_WATCHDOG_EXECUTOR;
+    }
+
     private static java.util.concurrent.ScheduledThreadPoolExecutor createWatchdog() {
         var executor = new java.util.concurrent.ScheduledThreadPoolExecutor(1, r -> {
         Thread t = new Thread(r, "AvilixLogger-GUI-WATCHDOG");
