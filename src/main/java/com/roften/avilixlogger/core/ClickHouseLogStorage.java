@@ -1,9 +1,11 @@
 package com.roften.avilixlogger.core;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.LoggerConfig;
+import com.roften.avilixlogger.net.ClientReportPayloads;
 
 import net.minecraft.core.BlockPos;
 
@@ -14,6 +16,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumMap;
@@ -133,6 +136,10 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
     private final boolean storeNonRollbackDetails;
     private final String detailMode;
     private final boolean addSkippingIndexes;
+    private final Object clientReportSchemaLock = new Object();
+    private volatile boolean clientReportSchemaReady;
+
+    public record ClientReport(String playerName, Instant receivedAt, ClientReportPayloads.Report report) {}
 
     private volatile boolean running = true;
     private volatile long written;
@@ -198,6 +205,84 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             cooldown = 10_000L;
         }
         unhealthyUntilMs = System.currentTimeMillis() + cooldown;
+    }
+
+    String clientReportTable() {
+        return quoteIdent(database) + "." + quoteIdent(tablePrefix + "_client_reports");
+    }
+
+    private void ensureClientReportSchema() throws IOException {
+        if (clientReportSchemaReady) return;
+        synchronized (clientReportSchemaLock) {
+            if (clientReportSchemaReady) return;
+            execute("CREATE TABLE IF NOT EXISTS " + clientReportTable() + " ("
+                    + "player_uuid UUID, player_name String, received_ms UInt64, payload String) "
+                    + "ENGINE = ReplacingMergeTree ORDER BY (player_uuid, received_ms) "
+                    + "TTL toDateTime(intDiv(received_ms + 999, 1000), 'UTC') + INTERVAL 24 HOUR "
+                    + "SETTINGS merge_with_ttl_timeout = 300", timeoutSec());
+            clientReportSchemaReady = true;
+        }
+    }
+
+    /** Dedicated acknowledged insert, independent of the event feed and its retention. */
+    public void storeClientReport(UUID player, ClientReport snapshot) throws IOException {
+        ensureClientReportSchema();
+        JsonObject row = new JsonObject();
+        row.addProperty("player_uuid", player.toString());
+        row.addProperty("player_name", snapshot.playerName());
+        row.addProperty("received_ms", snapshot.receivedAt().toEpochMilli());
+        row.addProperty("payload", encodeClientReport(snapshot.report()));
+        execute("INSERT INTO " + clientReportTable()
+                + " SETTINGS async_insert=0 FORMAT JSONEachRow\n" + row + "\n", timeoutSec());
+    }
+
+    /** Expired rows are never returned, even before ClickHouse physically merges them away. */
+    public ClientReport findClientReport(UUID player, String nickname) throws IOException {
+        ensureClientReportSchema();
+        String match = player != null ? "player_uuid = toUUID(" + sqlString(player.toString()) + ")"
+                : "lowerUTF8(player_name) = " + sqlString(nickname.toLowerCase(Locale.ROOT));
+        String response = execute("SELECT player_name, received_ms, payload FROM " + clientReportTable()
+                + " WHERE " + match + " AND received_ms > toUnixTimestamp64Milli(now64(3) - INTERVAL 24 HOUR)"
+                + " ORDER BY received_ms DESC LIMIT 1 FORMAT JSONEachRow", timeoutSec());
+        if (response.isBlank()) return null;
+        JsonObject row = JsonParser.parseString(response).getAsJsonObject();
+        return new ClientReport(getString(row, "player_name"), Instant.ofEpochMilli(getRequiredLong(row, "received_ms")),
+                decodeClientReport(getString(row, "payload")));
+    }
+
+    private static String encodeClientReport(ClientReportPayloads.Report report) {
+        JsonObject payload = new JsonObject();
+        JsonArray mods = new JsonArray(report.mods().size());
+        for (var mod : report.mods()) {
+            JsonArray pair = new JsonArray(2);
+            pair.add(mod.id());
+            pair.add(mod.version());
+            mods.add(pair);
+        }
+        JsonArray packs = new JsonArray(report.packs().size());
+        report.packs().forEach(packs::add);
+        payload.add("mods", mods);
+        payload.add("packs", packs);
+        payload.addProperty("truncated", report.truncated());
+        return payload.toString();
+    }
+
+    private static ClientReportPayloads.Report decodeClientReport(String payload) {
+        if (payload.length() > 128 * 1024) throw new IllegalArgumentException("Stored client report exceeds the size limit");
+        JsonObject json = JsonParser.parseString(payload).getAsJsonObject();
+        JsonArray storedMods = json.getAsJsonArray("mods");
+        JsonArray storedPacks = json.getAsJsonArray("packs");
+        if (storedMods.size() > 512 || storedPacks.size() > 128) {
+            throw new IllegalArgumentException("Stored client report has too many entries");
+        }
+        var mods = new ArrayList<ClientReportPayloads.Mod>(storedMods.size());
+        for (var entry : storedMods) {
+            var pair = entry.getAsJsonArray();
+            mods.add(new ClientReportPayloads.Mod(pair.get(0).getAsString(), pair.get(1).getAsString()));
+        }
+        var packs = new ArrayList<String>(storedPacks.size());
+        for (var pack : storedPacks) packs.add(pack.getAsString());
+        return new ClientReportPayloads.Report(0, mods, packs, json.get("truncated").getAsBoolean());
     }
 
     private void ensureSchema() {

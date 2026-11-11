@@ -33,7 +33,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -78,8 +77,27 @@ public final class LoggerNetwork {
     private static final ThreadPoolExecutor DETAILS_EXECUTOR = createGuiExecutor("AvilixLogger-GUI-DETAILS-", 2, 128);
     private static final java.util.concurrent.ScheduledThreadPoolExecutor GUI_WATCHDOG_EXECUTOR = createWatchdog();
 
-    static ScheduledExecutorService reportExpiryExecutor() {
-        return GUI_WATCHDOG_EXECUTOR;
+    private static ThreadPoolExecutor clientReportIo;
+
+    static synchronized void executeClientReportIo(Runnable operation) {
+        if (clientReportIo == null) clientReportIo = createGuiExecutor("AvilixLogger-CLIENT-REPORT-", 1, 128);
+        clientReportIo.execute(operation);
+    }
+
+    private static void stopClientReportIo() {
+        ThreadPoolExecutor executor;
+        synchronized (LoggerNetwork.class) {
+            executor = clientReportIo;
+            clientReportIo = null;
+        }
+        if (executor == null) return;
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow();
+        } catch (InterruptedException interrupted) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     static void executeClientReportQuery(Runnable query) {
@@ -161,6 +179,7 @@ public final class LoggerNetwork {
     }
 
     public static void shutdown() {
+        stopClientReportIo();
         EntryRollbackCommand.clearAll();
         // Static registration survives an integrated-server restart. Invalidate requests
         // below, drop queued captures, and let idle workers time out instead of poisoning

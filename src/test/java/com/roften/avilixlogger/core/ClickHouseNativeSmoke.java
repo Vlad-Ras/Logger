@@ -2,8 +2,11 @@ package com.roften.avilixlogger.core;
 
 import com.electronwill.nightconfig.core.CommentedConfig;
 import com.roften.avilixlogger.LoggerConfig;
+import com.roften.avilixlogger.net.ClientReportPayloads;
 import net.neoforged.fml.config.IConfigSpec;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -106,15 +109,27 @@ public final class ClickHouseNativeSmoke {
         for(var job:meJobs)job.materializeSnapshots();
         List<LogEntry> pressureRows=List.of();
         var releaseStorage=ReleaseStorageEvidence.rows();
+        UUID reportPlayer = UUID.randomUUID();
+        UUID expiredReportPlayer = UUID.randomUUID();
+        Instant reportTime = Instant.ofEpochMilli(System.currentTimeMillis());
+        var report = ClientReportPayloads.collect(0,
+                List.of(new ClientReportPayloads.Mod("create", "6.0.10")),
+                List.of("file/Пак\" v1.zip"));
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();
             db.appendBatch("native-" + UUID.randomUUID(), List.of(block, item));
+            db.storeClientReport(reportPlayer, new ClickHouseLogStorage.ClientReport("NativeAudit",
+                    reportTime.minus(Duration.ofHours(2)), new ClientReportPayloads.Report(0, List.of(), List.of(), false)));
+            db.storeClientReport(reportPlayer, new ClickHouseLogStorage.ClientReport("NativeAudit", reportTime, report));
+            db.storeClientReport(expiredReportPlayer, new ClickHouseLogStorage.ClientReport("ExpiredAudit",
+                    reportTime.minus(Duration.ofHours(25)), report));
             db.shutdown();db=null;
             // Reproduce an existing split installation that predates weapon evidence columns.
             // This fixture touches only the explicitly named isolated CI database on loopback.
             seedOldWeaponSchema(endpoint,user,password);
             db = new ClickHouseLogStorage();
+            verifyClientReportRetention(db, endpoint, user, password, reportPlayer, expiredReportPlayer, reportTime, report);
             db.appendBatch("native-weapons-"+UUID.randomUUID(),weapons);
             db.appendBatch("native-setting-"+UUID.randomUUID(),List.of(setting));verifySetting(db,setting);
             db.appendBatch("native-interaction-"+UUID.randomUUID(),List.of(interaction));verifyInteraction(db,interaction);
@@ -343,21 +358,57 @@ public final class ClickHouseNativeSmoke {
         }
         System.out.println("AE2_CONFIGURATION_CLICKHOUSE_OK: minimal mode retains both full filter/upgrade/cell/setting states, components, exact long, actor/address, feed/ID and reopened connection");
     }
-    private static void seedOldWeaponSchema(String endpoint,String user,String password)throws Exception{
-        var url=java.net.URI.create(endpoint).toURL();
-        if(!java.util.Set.of("127.0.0.1","localhost","[::1]").contains(url.getHost()))
-            throw new IllegalArgumentException("Schema migration fixture requires isolated loopback ClickHouse");
-        for(String table:List.of("entities","items","players")){
-            var connection=(java.net.HttpURLConnection)url.openConnection(java.net.Proxy.NO_PROXY);
-            connection.setConnectTimeout(10000);connection.setReadTimeout(10000);connection.setRequestMethod("POST");connection.setDoOutput(true);
-            connection.setRequestProperty("Authorization","Basic "+java.util.Base64.getEncoder().encodeToString((user+":"+password).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-            try{
-                try(var output=connection.getOutputStream()){
-                    output.write(("ALTER TABLE avilixlogger_ci.avilixlogger_"+table+" DROP COLUMN IF EXISTS be_after").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    private static void verifyClientReportRetention(ClickHouseLogStorage db, String endpoint, String user, String password,
+                                                    UUID player, UUID expiredPlayer, Instant time,
+                                                    ClientReportPayloads.Report report) throws Exception {
+        var expected = new ClickHouseLogStorage.ClientReport("NativeAudit", time, report);
+        check(expected.equals(db.findClientReport(player, "UnrelatedName")), "Latest client report did not survive reconnect by UUID");
+        check(expected.equals(db.findClientReport(null, "nativeaudit")), "Offline report missing by case-insensitive nickname");
+        check(db.findClientReport(expiredPlayer, "ExpiredAudit") == null && db.findClientReport(null, "expiredaudit") == null,
+                "A report older than 24 hours was returned");
+        executeNativeSql(endpoint, user, password, "OPTIMIZE TABLE " + db.clientReportTable() + " FINAL");
+        String count = executeNativeSql(endpoint, user, password, "SELECT count() FROM " + db.clientReportTable()
+                + " WHERE player_uuid = toUUID('" + expiredPlayer + "')");
+        check(count.strip().equals("0"), "ClickHouse TTL merge retained an expired client report");
+        check(expected.equals(db.findClientReport(null, "nativeaudit")), "TTL merge removed a fresh report");
+        System.out.println("CLIENT_REPORT_CLICKHOUSE_OK: latest snapshot, reopened connection, offline lookup and physical TTL deletion");
+    }
+
+    private static void seedOldWeaponSchema(String endpoint, String user, String password) throws Exception {
+        for (String table : List.of("entities", "items", "players")) {
+            executeNativeSql(endpoint, user, password,
+                    "ALTER TABLE avilixlogger_ci.avilixlogger_" + table + " DROP COLUMN IF EXISTS be_after");
+        }
+    }
+
+    private static String executeNativeSql(String endpoint, String user, String password, String sql) throws Exception {
+        var url = java.net.URI.create(endpoint).toURL();
+        if (!java.util.Set.of("127.0.0.1", "localhost", "[::1]").contains(url.getHost())) {
+            throw new IllegalArgumentException("Native SQL fixture requires isolated loopback ClickHouse");
+        }
+        var connection = (java.net.HttpURLConnection) url.openConnection(java.net.Proxy.NO_PROXY);
+        connection.setConnectTimeout(10000);
+        connection.setReadTimeout(10000);
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Authorization", "Basic " + java.util.Base64.getEncoder()
+                .encodeToString((user + ":" + password).getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        try {
+            try (var output = connection.getOutputStream()) {
+                output.write(sql.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                try (var error = connection.getErrorStream()) {
+                    throw new AssertionError("Native ClickHouse SQL failed with HTTP " + status + ": "
+                            + (error == null ? "" : new String(error.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)));
                 }
-                check(connection.getResponseCode()==200,"Cannot prepare old "+table+" schema");
-                try(var input=connection.getInputStream()){input.readAllBytes();}
-            }finally{connection.disconnect();}
+            }
+            try (var input = connection.getInputStream()) {
+                return new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } finally {
+            connection.disconnect();
         }
     }
 

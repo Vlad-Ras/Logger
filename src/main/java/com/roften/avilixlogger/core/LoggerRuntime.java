@@ -94,6 +94,11 @@ public final class LoggerRuntime {
         return events;
     }
 
+    /** Non-blocking lookup of the existing connection. Client report SQL runs on its own worker. */
+    public static ClickHouseLogStorage clientReportStorage() {
+        return STORAGE instanceof ClickHouseLogStorage clickHouse ? clickHouse : null;
+    }
+
     public static void warmupAsync() {
         if (!LoggerConfig.isEnabled()) return;
         eventStorage();

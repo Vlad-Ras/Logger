@@ -15,9 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.UUID;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.IntStream;
 
 /** Measures report work in isolation on the native server, outside the regular tick loop. */
@@ -33,7 +31,6 @@ public final class ClientReportLoadSmoke {
                 .toList();
         var packs = IntStream.range(0, 24).mapToObj(i -> "file/fixture-pack-" + i + ".zip").toList();
         var report = ClientReportPayloads.collect(1, mods, packs);
-        checkRetention(report);
         checkDailyLimit(server);
         checkStructuredReport(server);
         checkConsoleStatus(server, report);
@@ -64,55 +61,6 @@ public final class ClientReportLoadSmoke {
             if (printedCharacters.get() < wireBytes * SAMPLES) throw new AssertionError("GUI received incomplete report");
         } finally {
             inbound.release();
-        }
-    }
-
-    private static void checkRetention(ClientReportPayloads.Report report) {
-        var executor = new ScheduledThreadPoolExecutor(1);
-        executor.setRemoveOnCancelPolicy(true);
-        var time = new AtomicLong();
-        var cache = new ClientReportCache(executor, time::get);
-        var player = new UUID(0, 0);
-        long day = ClientReportCache.RETENTION_NANOS;
-        try {
-            cache.store(player, "AuditFixture", report);
-            time.set(day - 1);
-            if (cache.find("auditfixture") == null || cache.find(player) == null) {
-                throw new AssertionError("Offline or UUID report lookup failed just before expiry");
-            }
-            // A new reply replaces the old snapshot and its timer.
-            var replacement = new ClientReportPayloads.Report(2, report.mods(), report.packs(), report.truncated());
-            cache.store(player, "AuditFixture", replacement);
-            time.set(day);
-            if (cache.find(player).report() != replacement || executor.getQueue().size() != 1) {
-                throw new AssertionError("Replacement did not reset expiry or cancel the old timer");
-            }
-            time.set(2 * day - 1);
-            if (cache.find(player) != null || !executor.getQueue().isEmpty()) {
-                throw new AssertionError("Read returned a report at its 24-hour deadline");
-            }
-
-            cache.store(player, "AuditFixture", report);
-            time.addAndGet(day);
-            // Drive the scheduled callback without waiting a day.
-            Runnable expiry = executor.getQueue().peek();
-            if (expiry == null || !executor.remove(expiry)) throw new AssertionError("Missing report expiry task");
-            expiry.run();
-            time.decrementAndGet();
-            if (cache.find(player) != null) throw new AssertionError("Background expiry did not remove the report");
-
-            for (int i = 0; i <= ClientReportCache.CAPACITY; i++) {
-                cache.store(new UUID(0, i), "Fixture" + i, report);
-            }
-            if (cache.find(player) != null || executor.getQueue().size() != ClientReportCache.CAPACITY) {
-                throw new AssertionError("Client report cache or expiry queue exceeded the capacity");
-            }
-            cache.clear();
-            if (cache.find("Fixture1") != null || !executor.getQueue().isEmpty()) {
-                throw new AssertionError("Clearing reports did not cancel expiry tasks");
-            }
-        } finally {
-            executor.shutdownNow();
         }
     }
 
@@ -169,7 +117,7 @@ public final class ClientReportLoadSmoke {
         if (!replies.equals(java.util.List.of("[AvilixLogger] Отчёт доступен. Полный список можно открыть в игре."))) {
             throw new AssertionError("Server console exposed client report data: " + replies);
         }
-        System.out.println("CLIENT_REPORT_RETENTION_OK: 24-hour expiry, replacement, capacity, offline lookup, console status");
+        System.out.println("CLIENT_REPORT_CONSOLE_OK: no report contents in console output");
     }
 
     private static void measure(String phase, int wireBytes, int modCount, Runnable task) {
