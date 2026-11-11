@@ -28,6 +28,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.nio.file.Files;
@@ -147,8 +148,6 @@ public final class LogViewerScreen extends Screen {
     private Button btnTp;
     private boolean teleportPending;
 
-    private Button btnCopyFull;
-    private Button btnCopyJson;
 
     private Button btnAgg;
     private Button btnRaw;
@@ -162,8 +161,6 @@ public final class LogViewerScreen extends Screen {
     private Button btnClear;
     private Button btnTabDetails;
     private Button btnTabRaw;
-    private Button btnSettings;
-    private Button btnCaptureTypes;
 
     private EditBox searchBox;
     private EditBox timeBox;
@@ -404,11 +401,6 @@ public final class LogViewerScreen extends Screen {
         this.btnRefresh = addButton(Component.literal("⟳"), b -> sendPage(C2SRequestPagePayload.Nav.FIRST),
                 cx - Math.round(20 * controlScale()), top, Math.max(controlH() * 2, Math.round(40 * controlScale())), controlH());
 
-        // Mode toggles moved to the right sidebar (people confuse them with Details/Raw).
-        // We'll create them later after we know rightX.
-        this.btnAgg = null;
-        this.btnRaw = null;
-
         // Left sidebar: compact rows (button + input on the same line)
         int y = leftTop;
         final int inputGap = sideInputGap();
@@ -502,79 +494,89 @@ public final class LogViewerScreen extends Screen {
                 leftX, y, leftPanelW, leftRowH);
         y += leftRowH + leftGap;
 
-        // Row action buttons (operate on selected row) - right sidebar.
-        // On large Minecraft GUI scale these are compact two-column rows, so the details panel keeps room.
         int rightX = rightPanelX();
         int rightW = rightPanelW();
         int btnH = controlH();
         int gap = controlGap();
-        int actionTop = top + btnH + gap + 2;
         int half = (rightW - gap) / 2;
-        this.btnAgg = addButton(Component.translatable("gui.avilixlogger.mode.agg"), b -> setAggregatedMode(true),
-                rightX, actionTop, half, btnH);
-        this.btnRaw = addButton(Component.translatable("gui.avilixlogger.mode.raw"), b -> setAggregatedMode(false),
-                rightX + half + gap, actionTop, rightW - half - gap, btnH);
-
-        int y2 = actionTop + btnH + gap;
-        this.btnSettings = addButton(Component.translatable("gui.avilixlogger.settings"), b -> openSettings(),
-                rightX, y2, half, btnH);
-        this.btnCaptureTypes = addButton(Component.literal("Запись событий"),
-                b -> Minecraft.getInstance().setScreen(new CaptureTypesScreen(this)),
-                rightX+half+gap,y2,rightW-half-gap,btnH);
-
-        y2 += btnH + gap;
-        this.btnCopy = addButton(sideLabel("gui.avilixlogger.copy_xyz", "XYZ"), b -> copySelectedXYZ(),
-                rightX, y2, half, btnH);
-        this.btnTp = addButton(sideLabel("gui.avilixlogger.copy_tp", "TP"), b -> runSelectedTpCmd(),
-                rightX + half + gap, y2, rightW - half - gap, btnH);
-
-        y2 += btnH + gap;
-        this.btnCopyFull = addButton(sideLabel("gui.avilixlogger.copy_full", "Full"), b -> copyCurrentTabText(),
-                rightX, y2, half, btnH);
-        this.btnCopyJson = addButton(sideLabel("gui.avilixlogger.copy_json", "JSON"), b -> requestJsonAndCopy(),
-                rightX + half + gap, y2, rightW - half - gap, btnH);
-
-        y2 += btnH + gap;
-        this.btnTabDetails = addButton(sideLabel("gui.avilixlogger.tab.details", "D"), b -> { showRawTab = false; saveGuiStateFromInstance(); requestDetailsIfNeeded(); },
-                rightX, y2, half, btnH);
-        this.btnTabRaw = addButton(sideLabel("gui.avilixlogger.tab.raw", "Raw"), b -> { showRawTab = true; saveGuiStateFromInstance(); requestRawIfNeeded(); },
-                rightX + half + gap, y2, rightW - half - gap, btnH);
-
-        y2 += btnH + gap;
-        addButton(Component.literal("Вагонеточные штуковины"), b -> {
-            var screen=new CartHistoryScreen(this, "");Minecraft.getInstance().setScreen(screen);screen.load();
-        }, rightX, y2, rightW, btnH);
-
-        y2 += btnH + gap;
-        addButton(Component.literal("Действия"), b -> Minecraft.getInstance().setScreen(new LoggerActionsScreen(this)),rightX,y2,half,btnH);
-        addButton(Component.literal("Справка"), b -> Minecraft.getInstance().setScreen(new LoggerGuideScreen(this)),rightX+half+gap,y2,rightW-half-gap,btnH);
-        y2 += btnH + gap;
-        addButton(Component.literal(module == null ? "Моды" : "Все журналы"), b -> {
-            saveGuiStateFromInstance();
-            if(moduleParent!=null){minecraft.setScreen(moduleParent);LogViewerClientHooks.resume(this.moduleParent);}
-            else minecraft.setScreen(new ModulePickerScreen(this));
-        },rightX,y2,rightW,btnH);
-        if (ClientReportScreen.available()) {
-            y2 += btnH + gap;
-            addButton(Component.literal("Отчёты о клиентах"), b -> minecraft.setScreen(new ClientReportScreen(this)),
-                    rightX, y2, rightW, btnH);
-        }
-        y2 += btnH + gap;
-        rowActions = addButton(Component.literal("Строка"), b -> openRowActions(rows.get(selected)),
-                rightX, y2, half, btnH);
-        undoVisibility = addButton(Component.literal("Вернуть"), b -> undoQuickHide(),
-                rightX + half + gap, y2, rightW - half - gap, btnH);
-        undoVisibility.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Отменить последнее скрытие в журнале")));
+        int otherHalf = rightW - half - gap;
+        int secondX = rightX + half + gap;
+        int sectionsWidth = rightW / 3;
         captureStatus = addButton(Component.empty(), b -> LoggerActionsScreen.run(this, "capture_status", List.of()),
-                leftX, top, leftPanelW, leftRowH);
+                rightX, top, rightW - sectionsWidth - gap, btnH);
         updateCaptureHealth();
+        addButton(Component.literal("Разделы"), b -> {
+            saveGuiStateFromInstance();
+            List<Map.Entry<Component, Runnable>> sections = new ArrayList<>();
+            sections.add(Map.entry(Component.literal(module == null ? "Журналы модов" : "Все журналы"), () -> {
+                if (moduleParent != null) {
+                    minecraft.setScreen(moduleParent);
+                    LogViewerClientHooks.resume(moduleParent);
+                } else {
+                    minecraft.setScreen(new ModulePickerScreen(this, List.of()));
+                }
+            }));
+            sections.add(Map.entry(Component.literal("Вагонеточные штуковины"), () -> {
+                var screen = new CartHistoryScreen(this, "");
+                minecraft.setScreen(screen);
+                screen.load();
+            }));
+            if (ClientReportScreen.available()) {
+                sections.add(Map.entry(Component.literal("Отчёты о клиентах"),
+                        () -> minecraft.setScreen(new ClientReportScreen(this))));
+            }
+            sections.add(Map.entry(Component.literal("Действия"),
+                    () -> minecraft.setScreen(new LoggerActionsScreen(this))));
+            sections.add(Map.entry(Component.literal("Запись событий"),
+                    () -> minecraft.setScreen(new CaptureTypesScreen(this))));
+            sections.add(Map.entry(Component.translatable("gui.avilixlogger.settings"), this::openSettings));
+            sections.add(Map.entry(Component.literal("Справка"),
+                    () -> minecraft.setScreen(new LoggerGuideScreen(this))));
+            minecraft.setScreen(new ModulePickerScreen(this, sections));
+        }, rightX + rightW - sectionsWidth, top, sectionsWidth, btnH);
 
-        this.detailSearchBox=makeEditBox(rightX,y2+btnH+gap,rightW,btnH,Component.literal("Поиск в деталях / RAW"));
+        int actionY = leftTop;
+        this.btnAgg = addButton(Component.translatable("gui.avilixlogger.mode.agg"), b -> setAggregatedMode(true),
+                rightX, actionY, half, btnH);
+        this.btnRaw = addButton(Component.translatable("gui.avilixlogger.mode.raw"), b -> setAggregatedMode(false),
+                secondX, actionY, otherHalf, btnH);
+
+        actionY += btnH + gap;
+        int moreWidth = btnH;
+        int quickWidth = (rightW - moreWidth - 2 * gap) / 2;
+        this.btnTp = addButton(Component.translatable("gui.avilixlogger.copy_tp"), b -> runSelectedTpCmd(),
+                rightX, actionY, quickWidth, btnH);
+        this.btnCopy = addButton(sideLabel("gui.avilixlogger.copy_xyz", "XYZ"), b -> copySelectedXYZ(),
+                rightX + quickWidth + gap, actionY, rightW - quickWidth - moreWidth - 2 * gap, btnH);
+        this.btnCopy.setTooltip(net.minecraft.client.gui.components.Tooltip.create(
+                Component.translatable("gui.avilixlogger.copy_xyz")));
+        rowActions = addButton(Component.literal("…"), b -> openRowActions(rows.get(selected)),
+                rightX + rightW - moreWidth, actionY, moreWidth, btnH);
+        rowActions.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Действия с записью")));
+
+        actionY += btnH + gap;
+        this.btnTabDetails = addButton(Component.translatable("gui.avilixlogger.tab.details"), b -> {
+            showRawTab = false;
+            saveGuiStateFromInstance();
+            requestDetailsIfNeeded();
+        }, rightX, actionY, half, btnH);
+        this.btnTabRaw = addButton(Component.translatable("gui.avilixlogger.tab.raw"), b -> {
+            showRawTab = true;
+            saveGuiStateFromInstance();
+            requestRawIfNeeded();
+        }, secondX, actionY, otherHalf, btnH);
+
+        actionY += btnH + gap;
+        undoVisibility = addButton(Component.literal("Вернуть"), b -> undoQuickHide(),
+                secondX, actionY, otherHalf, btnH);
+        undoVisibility.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Отменить последнее скрытие в журнале")));
+        this.detailSearchBox = makeEditBox(rightX, actionY, rightW, btnH, Component.literal("Поиск в деталях / RAW"));
         this.detailSearchBox.setHint(Component.literal("Найти параметр…"));
-        this.detailSearchBox.setMaxLength(128);this.detailSearchBox.setValue(detailNeedle);
-        this.detailSearchBox.setResponder(value->{detailNeedle=value;detailsScroll=0;});
+        this.detailSearchBox.setMaxLength(128);
+        this.detailSearchBox.setValue(detailNeedle);
+        this.detailSearchBox.setResponder(value -> { detailNeedle = value; detailsScroll = 0; });
         this.addRenderableWidget(this.detailSearchBox);
-        this.detailsPanelTop = y2 + 2*(btnH+gap) + 2;
+        this.detailsPanelTop = actionY + btnH + gap + 2;
 
         updateButtons();
         refreshFilterButtonLabels();
@@ -760,12 +762,17 @@ public final class LogViewerScreen extends Screen {
     private void updateButtons() {
         if (btnPrev != null) btnPrev.active = hasPrev;
         if (btnNext != null) btnNext.active = hasNext;
-        if (rowActions != null) rowActions.active = selectedEntryId > 0;
-        if (undoVisibility != null) undoVisibility.active = visibilityBeforeHide != null;
+        if (rowActions != null) rowActions.active = selectedEntryId > 0 && selected >= 0 && selected < rows.size();
+        if (undoVisibility != null) {
+            undoVisibility.visible = visibilityBeforeHide != null;
+            if (detailSearchBox != null) {
+                detailSearchBox.setWidth(undoVisibility.visible
+                        ? undoVisibility.getX() - detailSearchBox.getX() - controlGap()
+                        : rightPanelW());
+            }
+        }
         if (btnCopy != null) btnCopy.active = selected >= 0 && selected < rows.size();
         if (btnTp != null) btnTp.active = !teleportPending && selected >= 0 && selected < rows.size() && rows.get(selected).id()>0;
-        if (btnCopyFull != null) btnCopyFull.active = selectedEntryId > 0;
-        if (btnCopyJson != null) btnCopyJson.active = selectedEntryId > 0;
 
         if (btnAgg != null) btnAgg.active = !aggregatedMode;
         if (btnRaw != null) btnRaw.active = aggregatedMode;
@@ -837,11 +844,6 @@ public final class LogViewerScreen extends Screen {
                 int idx = clicked.rowIndex();
                 LogRow clickedRow = rows.get(idx);
 
-                if (button == 1 && clickedRow.id() > 0) {
-                    openRowActions(clickedRow);
-                    return true;
-                }
-
                 // The chevron is a real disclosure control: clicking it expands/collapses all
                 // underlying rows locally without issuing another database query.
                 if (button == 0 && clicked.groupHeader() && mouseX <= listLeft + 13) {
@@ -872,14 +874,18 @@ public final class LogViewerScreen extends Screen {
                     }
                 }
 
-                this.selected = idx;
-                this.selectedEntryId = clickedRow.id();
-                this.detailLines = List.of();
-                this.rawLines = List.of();
-                this.detailsScroll = 0;
-                if (showRawTab) requestRawIfNeeded();
-                else requestDetailsIfNeeded();
-                updateButtons();
+                if (button != 1 || selected != idx || selectedEntryId != clickedRow.id()) {
+                    this.selected = idx;
+                    this.selectedEntryId = clickedRow.id();
+                    this.detailLines = List.of();
+                    this.rawLines = List.of();
+                    this.detailsScroll = 0;
+                    this.pendingCopyJson = false;
+                    if (showRawTab) requestRawIfNeeded();
+                    else requestDetailsIfNeeded();
+                    updateButtons();
+                }
+                if (button == 1 && clickedRow.id() > 0) openRowActions(clickedRow);
                 return true;
             }
         }
@@ -1227,7 +1233,11 @@ public final class LogViewerScreen extends Screen {
 
     private void openRowActions(LogRow row) {
         saveGuiStateFromInstance();
-        minecraft.setScreen(new LogRowActionsScreen(this, row));
+        minecraft.setScreen(new LogRowActionsScreen(this, row, () -> {
+            if (selectedEntryId == row.id()) copyCurrentTabText();
+        }, () -> {
+            if (selectedEntryId == row.id()) requestJsonAndCopy();
+        }));
     }
 
     void quickHide(GuiEventVisibility visibility) {

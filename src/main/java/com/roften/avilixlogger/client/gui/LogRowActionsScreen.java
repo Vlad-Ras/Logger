@@ -15,16 +15,21 @@ final class LogRowActionsScreen extends Screen {
     private final LogViewerScreen viewer;
     private final LogRow row;
 
-    LogRowActionsScreen(LogViewerScreen viewer, LogRow row) {
+    private final Runnable copyText;
+    private final Runnable copyJson;
+
+    LogRowActionsScreen(LogViewerScreen viewer, LogRow row, Runnable copyText, Runnable copyJson) {
         super(Component.literal(row.aggregated() ? "Действия группы записей" : "Запись #" + row.id()));
         this.viewer = viewer;
         this.row = row;
+        this.copyText = copyText;
+        this.copyJson = copyJson;
     }
 
     @Override protected void init() {
         int w = Math.min(290, width - 20);
         int x = (width - w) / 2;
-        String exact = "Откройте режим Raw над журналом и выберите отдельную запись.";
+        String exact = "Откройте режим «По записям» и выберите отдельную запись.";
         var preview = button("Предпросмотр отката", x, 56, w,
                 () -> LoggerActionsScreen.run(viewer, "entry_rollback", List.of(Long.toString(row.id()))));
         boolean allowed = LoggerActionsScreen.canRun("entry_rollback");
@@ -48,6 +53,15 @@ final class LogRowActionsScreen extends Screen {
         } else {
             addHideModButton(x, w, visibility, mod, exact);
         }
+        int half = (w - 6) / 2;
+        button("Копировать всё", x, 134, half, () -> {
+            onClose();
+            copyText.run();
+        });
+        button("Копировать JSON", x + half + 6, 134, w - half - 6, () -> {
+            onClose();
+            copyJson.run();
+        });
         button("Назад к журналу", x, height - 28, w, this::onClose);
     }
 

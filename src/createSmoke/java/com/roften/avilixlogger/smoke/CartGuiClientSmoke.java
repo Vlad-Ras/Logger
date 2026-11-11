@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png","logger-sections.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -94,7 +94,56 @@ public final class CartGuiClientSmoke {
                     help.onClose();
                 }
                 else if(stage==7){
-                    var viewer=new com.roften.avilixlogger.client.gui.LogViewerScreen();mc.setScreen(viewer);teleportReplies(mc,viewer);
+                    var viewer = new com.roften.avilixlogger.client.gui.LogViewerScreen();
+                    mc.setScreen(viewer);
+                    teleportReplies(mc, viewer);
+                    var tp = viewer.children().stream()
+                            .filter(w -> w instanceof net.minecraft.client.gui.components.Button b
+                                    && b.getMessage().getString().equals("Телепорт"))
+                            .map(net.minecraft.client.gui.components.Button.class::cast).findFirst().orElseThrow();
+                    check(!tp.active, "teleport enabled with no entry selected");
+                    check(viewer.children().stream().noneMatch(w -> w instanceof AbstractWidget widget
+                            && widget.visible && widget.getMessage().getString().equals("Вернуть")), "undo shown before hiding");
+                    clickLabel(viewer, "Разделы");
+                    var sections = mc.screen;
+                    check(sections.getTitle().getString().equals("Разделы"), "sections menu did not open");
+                    for (String label : List.of("Журналы модов", "Вагонеточные штуковины", "Действия",
+                            "Запись событий", "Настройки GUI", "Справка")) {
+                        check(sections.children().stream().anyMatch(w -> w instanceof AbstractWidget widget
+                                && widget.visible && widget.getMessage().getString().equals(label)), "missing section: " + label);
+                    }
+                    clickLabel(sections, "Журналы модов");
+                    check(mc.screen.getTitle().getString().equals("Журналы модов"), "mod picker did not open");
+                    mc.screen.onClose();
+                    check(mc.screen == viewer, "back from mod picker lost the journal");
+
+                    var line = net.minecraft.network.chat.Component.literal("[01.11 23:25:42] Create поставил компостницу");
+                    var row = com.roften.avilixlogger.net.LogRow.single(42, "minecraft:overworld", 3173, 72, 3485, line);
+                    viewer.apply(new com.roften.avilixlogger.net.S2CLogPagePayload("Логи · 01.11.2026", 1, false, false, List.of(row)));
+                    var selected = viewer.getClass().getDeclaredField("selected");
+                    selected.setAccessible(true);
+                    selected.setInt(viewer, 0);
+                    var entryId = viewer.getClass().getDeclaredField("selectedEntryId");
+                    entryId.setAccessible(true);
+                    entryId.setLong(viewer, row.id());
+                    viewer.applyDetails(new com.roften.avilixlogger.net.S2CLogDetailsPayload(row.id(),
+                            com.roften.avilixlogger.net.C2SRequestDetailsPayload.Mode.DETAILS,
+                            List.of(net.minecraft.network.chat.Component.literal("Измерение: Верхний мир"),
+                                    net.minecraft.network.chat.Component.literal("Координаты: 3173 72 3485"))));
+                    layout(viewer, mc);
+                    check(viewer.children().stream().anyMatch(w -> w instanceof net.minecraft.client.gui.components.Button b
+                            && b.active && b.getMessage().getString().equals("Телепорт")), "selected entry lost quick teleport");
+                    var copyCoordinates = viewer.children().stream()
+                            .filter(w -> w instanceof net.minecraft.client.gui.components.Button b && b.active
+                                    && (b.getMessage().getString().equals("Копировать XYZ") || b.getMessage().getString().equals("XYZ")))
+                            .map(net.minecraft.client.gui.components.Button.class::cast).findFirst().orElseThrow();
+                    copyCoordinates.onPress();
+                    check(mc.keyboardHandler.getClipboard().equals("3173 72 3485"), "quick copy used wrong coordinates");
+                    clickLabel(viewer, "…");
+                    check(mc.screen.getTitle().getString().equals("Запись #42"), "entry menu lost selected row");
+                    clickLabel(mc.screen, "Копировать всё");
+                    check(mc.screen == viewer && mc.keyboardHandler.getClipboard().contains("3173 72 3485"),
+                            "entry menu failed to copy details");
                 }
                 else if(stage==8)mc.setScreen(new com.roften.avilixlogger.client.gui.CaptureTypesScreen(mc.screen));
                 else if(stage==9){
@@ -104,8 +153,8 @@ public final class CartGuiClientSmoke {
                 }
                 else if(stage==10){
                     var parent=new com.roften.avilixlogger.client.gui.LogViewerScreen();
-                    var constructor=Class.forName("com.roften.avilixlogger.client.gui.ModulePickerScreen").getDeclaredConstructor(parent.getClass());constructor.setAccessible(true);
-                    mc.setScreen((Screen)constructor.newInstance(parent));
+                    var constructor=Class.forName("com.roften.avilixlogger.client.gui.ModulePickerScreen").getDeclaredConstructor(parent.getClass(), List.class);constructor.setAccessible(true);
+                    mc.setScreen((Screen)constructor.newInstance(parent, List.of()));
                 }
                 else if(stage==11)mc.setScreen(com.roften.avilixlogger.client.gui.LogViewerScreen.forModule(new com.roften.avilixlogger.client.gui.LogViewerScreen(),14));
                 else if(stage==12){
@@ -146,9 +195,9 @@ public final class CartGuiClientSmoke {
                             net.minecraft.network.chat.Component.literal("Create поставил компостницу"),
                             false, new long[]{42}, List.of(), com.roften.avilixlogger.core.ActionType.BLOCK_PLACE, "create", "");
                     var screenClass = Class.forName("com.roften.avilixlogger.client.gui.LogRowActionsScreen");
-                    var constructor = screenClass.getDeclaredConstructor(viewer.getClass(), row.getClass());
+                    var constructor = screenClass.getDeclaredConstructor(viewer.getClass(), row.getClass(), Runnable.class, Runnable.class);
                     constructor.setAccessible(true);
-                    var menu = (Screen) constructor.newInstance(viewer, row);
+                    var menu = (Screen) constructor.newInstance(viewer, row, (Runnable) () -> {}, (Runnable) () -> {});
                     mc.setScreen(menu);
                     check(menu.children().stream().anyMatch(widget -> widget instanceof net.minecraft.client.gui.components.Button button
                             && button.active && button.getMessage().getString().equals("Скрыть мод · create")),
@@ -157,7 +206,7 @@ public final class CartGuiClientSmoke {
                             net.minecraft.network.chat.Component.literal("Система изменила состояние пшеницы"),
                             false, new long[]{43}, List.of(), com.roften.avilixlogger.core.ActionType.BLOCK_PLACE, "",
                             com.roften.avilixlogger.core.GuiEventVisibility.UNATTRIBUTED);
-                    var systemMenu = (Screen) constructor.newInstance(viewer, systemRow);
+                    var systemMenu = (Screen) constructor.newInstance(viewer, systemRow, (Runnable) () -> {}, (Runnable) () -> {});
                     mc.setScreen(systemMenu);
                     check(systemMenu.children().stream().anyMatch(widget -> widget instanceof net.minecraft.client.gui.components.Button button
                             && button.active && button.getMessage().getString().startsWith("Скрыть источник · ")),
@@ -196,6 +245,11 @@ public final class CartGuiClientSmoke {
                     clickLabel(screen, "Копировать");
                     check(mc.keyboardHandler.getClipboard().contains("/home"), "commands tab did not show its journal rows");
                     clickLabel(screen, "Сводка");
+                }
+                else if (stage == 17) {
+                    var viewer = new com.roften.avilixlogger.client.gui.LogViewerScreen();
+                    mc.setScreen(viewer);
+                    clickLabel(viewer, "Разделы");
                 }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==14){
