@@ -82,9 +82,14 @@ public final class ClientReportLoadSmoke {
     }
 
     private static void checkStructuredReport(MinecraftServer server) {
-        var packs = java.util.List.of("file/Xray_Ultimate-v1.21.zip", "file/AntiXray.zip", "file/X-ray - Ultimate.zip");
-        var matches = ClientReportNetwork.matchPacks(packs, "xray,x ray,xray ultimate,x ray ultimate");
-        if (!matches.equals(java.util.List.of(packs.getFirst(), packs.getLast()))) {
+        var packs = java.util.List.of("file/Xray_Ultimate-v1.21.zip", "file/AntiXray.zip",
+                "file/X-ray - Ultimate.zip", "file/Xray helper.zip", "file/Xray-v.zip", "file/Xray_3.zip",
+                "file/Xray_Ultimate-v1.21.zip");
+        String rules = "xray,x ray,xray ultimate,x ray ultimate";
+        var matches = ClientReportNetwork.matchPacks(packs, rules);
+        if (!matches.equals(java.util.List.of(packs.get(0), packs.get(2), packs.get(5), packs.get(6)))
+                || !ClientReportNetwork.matchPacks(packs, " ,_,--,").isEmpty()
+                || !ClientReportNetwork.matchPacks(java.util.List.of(), rules).isEmpty()) {
             throw new AssertionError("Resource pack indicators did not match the expected names: " + matches);
         }
         var report = ClientReportPayloads.collect(42, java.util.List.of(new ClientReportPayloads.Mod("create", "6.0")), packs);

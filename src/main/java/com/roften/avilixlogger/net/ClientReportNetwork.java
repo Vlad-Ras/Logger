@@ -28,7 +28,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.Duration;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -62,13 +62,13 @@ public final class ClientReportNetwork {
             else source.sendSystemMessage(Component.literal("[AvilixLogger] " + text));
         }
 
-        void report(ClickHouseLogStorage.ClientReport snapshot) {
+        void report(ClickHouseLogStorage.ClientReport snapshot, List<String> matches) {
             if (requestId == null) {
                 writeReport(source, snapshot.playerName(), snapshot.receivedAt(), snapshot.report());
                 return;
             }
             sendView(source, new ClientReportViewPayloads.View(requestId, "", snapshot.playerName(),
-                    snapshot.receivedAt().toEpochMilli(), List.of(), findMatches(snapshot.report()), snapshot.report()));
+                    snapshot.receivedAt().toEpochMilli(), List.of(), matches, snapshot.report()));
         }
     }
 
@@ -169,6 +169,7 @@ public final class ClientReportNetwork {
         }
         var server = player.getServer();
         var playerId = player.getUUID();
+        String watchedPacks = LoggerConfig.VALUES.clientAuditSuspectPacks.get();
         long generation = reportGeneration;
         try {
             LoggerNetwork.executeClientReportIo(() -> {
@@ -182,14 +183,15 @@ public final class ClientReportNetwork {
                     saved = false;
                 }
                 boolean acknowledged = saved;
+                List<String> matches = acknowledged ? matchPacks(snapshot.report().packs(), watchedPacks) : List.of();
                 server.execute(() -> {
                     if (generation != reportGeneration || !enabled() || !LoggerConfig.isEnabled()) return;
                     if (!acknowledged) {
                         notifyRequester(reply, "ClickHouse не подтвердил сохранение нового отчёта.");
                         return;
                     }
-                    if (reply != null && canDeliver(reply.source())) reply.report(snapshot);
-                    notifyMatches(server, playerId, snapshot.playerName(), findMatches(snapshot.report()));
+                    if (reply != null && canDeliver(reply.source())) reply.report(snapshot, matches);
+                    notifyMatches(server, playerId, snapshot.playerName(), matches);
                 });
             });
         } catch (RejectedExecutionException busy) {
@@ -298,17 +300,19 @@ public final class ClientReportNetwork {
         var server = reply.source().getServer();
         var online = server.getPlayerList().getPlayerByName(playerName);
         UUID playerId = online == null ? null : online.getUUID();
+        String watchedPacks = reply.requestId() == null ? "" : LoggerConfig.VALUES.clientAuditSuspectPacks.get();
         long generation = reportGeneration;
         try {
             LoggerNetwork.executeClientReportIo(() -> {
                 try {
                     var snapshot = storage.findClientReport(playerId, playerName);
+                    List<String> matches = snapshot == null ? List.of() : matchPacks(snapshot.report().packs(), watchedPacks);
                     server.execute(() -> {
                         if (generation != reportGeneration || !enabled() || !LoggerConfig.isEnabled()
                                 || !canDeliver(reply.source())) return;
                         if (snapshot == null || !snapshot.receivedAt().plus(Duration.ofHours(24)).isAfter(Instant.now())) {
                             feedback(reply, "Нет сохранённого отчёта игрока " + playerName + " за последние 24 часа.", true);
-                        } else reply.report(snapshot);
+                        } else reply.report(snapshot, matches);
                     });
                 } catch (IOException | RuntimeException failure) {
                     server.execute(() -> {
@@ -395,18 +399,26 @@ public final class ClientReportNetwork {
         return text.substring(0, end) + "…";
     }
 
-    private static List<String> findMatches(ClientReportPayloads.Report report) {
-        return matchPacks(report.packs(), LoggerConfig.VALUES.clientAuditSuspectPacks.get());
-    }
-
     static List<String> matchPacks(List<String> packs, String configured) {
         if (packs.isEmpty() || configured.isBlank()) return List.of();
-        var names = Arrays.stream(configured.split(",")).map(ClientReportNetwork::normalizePack)
-                .filter(value -> !value.isEmpty()).toList();
-        return packs.stream().filter(pack -> {
+        var names = new ArrayList<String>();
+        for (String raw : configured.split(",")) {
+            String watched = normalizePack(raw);
+            if (!watched.isEmpty()) names.add(watched);
+        }
+        if (names.isEmpty()) return List.of();
+
+        var matches = new ArrayList<String>();
+        for (String pack : packs) {
             String name = normalizePack(pack);
-            return names.stream().anyMatch(watched -> matchesPack(name, watched));
-        }).toList();
+            for (String watched : names) {
+                if (matchesPack(name, watched)) {
+                    matches.add(pack);
+                    break;
+                }
+            }
+        }
+        return List.copyOf(matches);
     }
 
     private static String normalizePack(String raw) {
@@ -418,8 +430,8 @@ public final class ClientReportNetwork {
 
     private static boolean matchesPack(String name, String watched) {
         if (name.equals(watched)) return true;
-        if (!name.startsWith(watched + " ")) return false;
         int version = watched.length() + 1;
+        if (name.length() <= version || !name.startsWith(watched) || name.charAt(version - 1) != ' ') return false;
         if (version < name.length() && name.charAt(version) == 'v') version++;
         return version < name.length() && Character.isDigit(name.charAt(version));
     }
