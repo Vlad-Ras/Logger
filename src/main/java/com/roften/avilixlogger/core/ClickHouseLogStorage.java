@@ -254,10 +254,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         JsonObject payload = new JsonObject();
         JsonArray mods = new JsonArray(report.mods().size());
         for (var mod : report.mods()) {
-            JsonArray pair = new JsonArray(2);
-            pair.add(mod.id());
-            pair.add(mod.version());
-            mods.add(pair);
+            JsonArray fields = new JsonArray(3);
+            fields.add(mod.id());
+            fields.add(mod.version());
+            if (!mod.displayName().equals(mod.id())) fields.add(mod.displayName());
+            mods.add(fields);
         }
         JsonArray packs = new JsonArray(report.packs().size());
         report.packs().forEach(packs::add);
@@ -277,8 +278,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         }
         var mods = new ArrayList<ClientReportPayloads.Mod>(storedMods.size());
         for (var entry : storedMods) {
-            var pair = entry.getAsJsonArray();
-            mods.add(new ClientReportPayloads.Mod(pair.get(0).getAsString(), pair.get(1).getAsString()));
+            var fields = entry.getAsJsonArray();
+            String displayName = fields.size() > 2 && !fields.get(2).isJsonNull() ? fields.get(2).getAsString() : "";
+            mods.add(new ClientReportPayloads.Mod(fields.get(0).getAsString(), fields.get(1).getAsString(), displayName));
         }
         var packs = new ArrayList<String>(storedPacks.size());
         for (var pack : storedPacks) packs.add(pack.getAsString());

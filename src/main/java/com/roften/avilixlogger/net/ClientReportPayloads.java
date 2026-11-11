@@ -37,7 +37,7 @@ public final class ClientReportPayloads {
             remaining -= size;
         }
         for (Mod mod : mods) {
-            int size = fieldBytes(mod.id()) + fieldBytes(mod.version());
+            int size = fieldBytes(mod.id()) + fieldBytes(mod.version()) + fieldBytes(mod.nameOnWire());
             if (includedMods.size() == MAX_MODS || size > remaining) {
                 truncated = true;
                 break;
@@ -49,7 +49,8 @@ public final class ClientReportPayloads {
     }
 
     private static int fieldBytes(String value) {
-        return ByteBufUtil.utf8Bytes(value) + 5;
+        int bytes = ByteBufUtil.utf8Bytes(value);
+        return bytes + (bytes < 128 ? 1 : 2);
     }
 
     public record Request(long id) implements CustomPacketPayload {
@@ -62,16 +63,30 @@ public final class ClientReportPayloads {
         public Type<Request> type() { return TYPE; }
     }
 
-    public record Mod(String id, String version) {
+    public record Mod(String id, String version, String displayName) {
         public Mod {
             id = clean(id, MOD_FIELD_LENGTH);
             version = clean(version, MOD_FIELD_LENGTH);
+            displayName = displayName == null ? "" : clean(displayName, MOD_FIELD_LENGTH).strip();
+            if (displayName.isEmpty()) displayName = id;
+        }
+
+        public Mod(String id, String version) {
+            this(id, version, "");
+        }
+
+        public String label() {
+            return displayName.equals(id) ? id : displayName + " (" + id + ")";
+        }
+
+        private String nameOnWire() {
+            return displayName.equals(id) ? "" : displayName;
         }
     }
 
     public record Report(long id, List<Mod> mods, List<String> packs, boolean truncated) implements CustomPacketPayload {
         public static final Type<Report> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report"));
+                ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_v2"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Report> CODEC = StreamCodec.of(
                 Report::encode, Report::decode);
 
@@ -92,6 +107,7 @@ public final class ClientReportPayloads {
             for (Mod mod : report.mods()) {
                 buf.writeUtf(mod.id(), MOD_FIELD_LENGTH);
                 buf.writeUtf(mod.version(), MOD_FIELD_LENGTH);
+                buf.writeUtf(mod.nameOnWire(), MOD_FIELD_LENGTH);
             }
             buf.writeVarInt(report.packs().size());
             for (String pack : report.packs()) {
@@ -108,7 +124,8 @@ public final class ClientReportPayloads {
             int modCount = checkCount(buf.readVarInt(), MAX_MODS);
             List<Mod> mods = new ArrayList<>(modCount);
             for (int i = 0; i < modCount; i++) {
-                mods.add(new Mod(buf.readUtf(MOD_FIELD_LENGTH), buf.readUtf(MOD_FIELD_LENGTH)));
+                mods.add(new Mod(buf.readUtf(MOD_FIELD_LENGTH), buf.readUtf(MOD_FIELD_LENGTH),
+                        buf.readUtf(MOD_FIELD_LENGTH)));
             }
             int packCount = checkCount(buf.readVarInt(), MAX_PACKS);
             List<String> packs = new ArrayList<>(packCount);

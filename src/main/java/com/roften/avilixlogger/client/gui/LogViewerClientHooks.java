@@ -56,7 +56,7 @@ public final class LogViewerClientHooks {
                 || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
 
         var mods = ModList.get().getMods().stream()
-                .map(mod -> new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString()))
+                .map(mod -> new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName()))
                 .sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
         var report = ClientReportPayloads.collect(request.id(), mods, minecraft.getResourcePackRepository().getSelectedIds());
         context.reply(report);

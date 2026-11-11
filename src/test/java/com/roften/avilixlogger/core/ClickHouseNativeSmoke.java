@@ -113,14 +113,15 @@ public final class ClickHouseNativeSmoke {
         UUID expiredReportPlayer = UUID.randomUUID();
         Instant reportTime = Instant.ofEpochMilli(System.currentTimeMillis());
         var report = ClientReportPayloads.collect(0,
-                List.of(new ClientReportPayloads.Mod("create", "6.0.10")),
+                List.of(new ClientReportPayloads.Mod("create", "6.0.10", "Create")),
                 List.of("file/Пак\" v1.zip"));
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();
             db.appendBatch("native-" + UUID.randomUUID(), List.of(block, item));
-            db.storeClientReport(reportPlayer, new ClickHouseLogStorage.ClientReport("NativeAudit",
-                    reportTime.minus(Duration.ofHours(2)), new ClientReportPayloads.Report(0, List.of(), List.of(), false)));
+            db.storeClientReport(reportPlayer, new ClickHouseLogStorage.ClientReport("LegacyAudit",
+                    reportTime.minus(Duration.ofHours(2)), new ClientReportPayloads.Report(0,
+                    List.of(new ClientReportPayloads.Mod("legacy_mod", "1")), List.of(), false)));
             db.storeClientReport(reportPlayer, new ClickHouseLogStorage.ClientReport("NativeAudit", reportTime, report));
             db.storeClientReport(expiredReportPlayer, new ClickHouseLogStorage.ClientReport("ExpiredAudit",
                     reportTime.minus(Duration.ofHours(25)), report));
@@ -377,6 +378,9 @@ public final class ClickHouseNativeSmoke {
         var expected = new ClickHouseLogStorage.ClientReport("NativeAudit", time, report);
         check(expected.equals(db.findClientReport(player, "UnrelatedName")), "Latest client report did not survive reconnect by UUID");
         check(expected.equals(db.findClientReport(null, "nativeaudit")), "Offline report missing by case-insensitive nickname");
+        var legacy = db.findClientReport(null, "legacyaudit");
+        check(legacy != null && legacy.report().mods().equals(List.of(new ClientReportPayloads.Mod("legacy_mod", "1"))),
+                "Stored two-field mod entry lost its ID fallback");
         check(db.findClientReport(expiredPlayer, "ExpiredAudit") == null && db.findClientReport(null, "expiredaudit") == null,
                 "A report older than 24 hours was returned");
         executeNativeSql(endpoint, user, password, "OPTIMIZE TABLE " + db.clientReportTable() + " FINAL");

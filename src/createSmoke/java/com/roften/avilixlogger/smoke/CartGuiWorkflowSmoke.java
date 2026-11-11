@@ -107,21 +107,24 @@ final class CartGuiWorkflowSmoke {
             check(request.equals(ClientReportPayloads.Request.CODEC.decode(buffer)), "client report request changed on wire");
             buffer.clear();
 
-            var mod = new ClientReportPayloads.Mod("client_mod", "1.2.3\n");
+            var mod = new ClientReportPayloads.Mod("client_mod", "1.2.3\n", "Пример мода\n");
             var report = ClientReportPayloads.collect(request.id(), List.of(mod), List.of("vanilla", "file/pack.zip"));
-            check(mod.version().equals("1.2.3") && !report.truncated(), "valid report lost fields");
+            check(mod.version().equals("1.2.3") && mod.displayName().equals("Пример мода")
+                    && mod.label().equals("Пример мода (client_mod)") && !report.truncated(), "valid report lost mod metadata");
+            var fallback = new ClientReportPayloads.Mod("fallback", "1", "  \n ");
+            check(fallback.displayName().equals("fallback") && fallback.label().equals("fallback"), "blank display name lost mod ID");
             ClientReportPayloads.Report.CODEC.encode(buffer, report);
             check(report.equals(ClientReportPayloads.Report.CODEC.decode(buffer)) && !buffer.isReadable(),
                     "client report changed on wire");
             buffer.clear();
 
-            var longMod = new ClientReportPayloads.Mod("x".repeat(96), "ф".repeat(96));
+            var longMod = new ClientReportPayloads.Mod("x".repeat(96), "ф".repeat(96), "🧰".repeat(48));
             var large = ClientReportPayloads.collect(request.id(), Collections.nCopies(512, longMod),
                     List.of("file/private/textures.zip"));
             check(large.truncated() && !large.mods().isEmpty() && large.packs().equals(List.of("file/textures.zip")),
                     "large client report did not retain resource packs without their paths");
             ClientReportPayloads.Report.CODEC.encode(buffer, large);
-            check(buffer.readableBytes() < 32 * 1024 && large.equals(ClientReportPayloads.Report.CODEC.decode(buffer)),
+            check(buffer.readableBytes() <= 30 * 1024 && large.equals(ClientReportPayloads.Report.CODEC.decode(buffer)),
                     "large client report exceeded the protocol limit");
             buffer.clear();
 

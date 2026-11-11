@@ -27,7 +27,7 @@ public final class ClientReportLoadSmoke {
 
     public static void run(MinecraftServer server) {
         var mods = IntStream.range(0, 512)
-                .mapToObj(i -> new ClientReportPayloads.Mod("fixture_mod_" + i + "_" + "m".repeat(60), "1.2.3+fixture"))
+                .mapToObj(i -> new ClientReportPayloads.Mod("fixture_mod_" + i + "_" + "m".repeat(60), "1.2.3+fixture", "Тестовый мод " + i))
                 .toList();
         var packs = IntStream.range(0, 24).mapToObj(i -> "file/fixture-pack-" + i + ".zip").toList();
         var report = ClientReportPayloads.collect(1, mods, packs);
@@ -92,7 +92,7 @@ public final class ClientReportLoadSmoke {
                 || !ClientReportNetwork.matchPacks(java.util.List.of(), rules).isEmpty()) {
             throw new AssertionError("Resource pack indicators did not match the expected names: " + matches);
         }
-        var report = ClientReportPayloads.collect(42, java.util.List.of(new ClientReportPayloads.Mod("create", "6.0")), packs);
+        var report = ClientReportPayloads.collect(42, java.util.List.of(new ClientReportPayloads.Mod("create", "6.0", "Create")), packs);
         var snapshot = new ClientReportViewPayloads.View(11, "", "AuditTarget", 123, java.util.List.of(), matches, report);
         var commands = new ClientReportViewPayloads.View(12, "", "AuditTarget", 0,
                 java.util.List.of("10.11.2026 23:00 · /home"), java.util.List.of(), null);

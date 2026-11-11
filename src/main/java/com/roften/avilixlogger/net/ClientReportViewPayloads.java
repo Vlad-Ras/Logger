@@ -37,7 +37,7 @@ public final class ClientReportViewPayloads {
 
     public record View(long id, String message, String player, long receivedAt, List<String> commands, List<String> matches,
                        ClientReportPayloads.Report report) implements CustomPacketPayload {
-        public static final Type<View> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_view"));
+        public static final Type<View> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_view_v2"));
         public static final StreamCodec<RegistryFriendlyByteBuf, View> CODEC = StreamCodec.of(View::encode, View::decode);
 
         public View {

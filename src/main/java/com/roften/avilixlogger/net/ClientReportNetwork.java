@@ -42,7 +42,7 @@ public final class ClientReportNetwork {
     private static final int TIMEOUT_TICKS = 200;
     private static final long MANUAL_COOLDOWN_NANOS = Duration.ofSeconds(10).toNanos();
     private static final int CHAT_CHUNK_SIZE = 48;
-    private static final int GUI_CHUNK_SIZE = 32;
+    private static final int GUI_CHUNK_SIZE = 24;
     private static final DateTimeFormatter REPORT_TIME = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss XXX");
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final Map<UUID, Long> LAST_MANUAL_REQUEST = new HashMap<>();
@@ -463,7 +463,7 @@ public final class ClientReportNetwork {
                 + " · модов " + report.mods().size() + " · ресурс-паков " + report.packs().size()
                 + (report.truncated() ? " · список сокращён по лимиту" : "")
                 + ". Данные сообщены клиентом."));
-        showList(source, "Моды", report.mods().stream().map(mod -> mod.id() + " " + mod.version()).toList(), gui);
+        showList(source, "Моды", report.mods().stream().map(mod -> mod.label() + " · " + mod.version()).toList(), gui);
         showList(source, "Ресурс-паки", report.packs(), gui);
     }
 

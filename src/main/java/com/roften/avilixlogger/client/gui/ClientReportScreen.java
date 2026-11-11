@@ -200,7 +200,7 @@ final class ClientReportScreen extends LoggerScreen {
                 json.addProperty("receivedAt", Instant.ofEpochMilli(current.receivedAt()).toString());
                 json.addProperty("truncated", current.report().truncated());
                 json.add("mods", gson.toJsonTree(current.report().mods().stream().map(mod ->
-                        java.util.Map.of("id", mod.id(), "version", mod.version())).toList()));
+                        java.util.Map.of("id", mod.id(), "version", mod.version(), "displayName", mod.displayName())).toList()));
                 json.add("resourcePacks", gson.toJsonTree(current.report().packs()));
                 json.add("matchedResourcePacks", gson.toJsonTree(current.matches()));
                 json.add("serverCommands", gson.toJsonTree(currentCommands));
@@ -252,7 +252,7 @@ final class ClientReportScreen extends LoggerScreen {
                 }
                 case MODS -> {
                     content.add(heading("Загруженные моды · " + report.mods().size()));
-                    report.mods().forEach(mod -> content.add(Component.literal(mod.id())
+                    report.mods().forEach(mod -> content.add(Component.literal(mod.label())
                             .append(Component.literal("  ·  " + mod.version()).withStyle(ChatFormatting.GRAY))));
                 }
                 case PACKS -> {

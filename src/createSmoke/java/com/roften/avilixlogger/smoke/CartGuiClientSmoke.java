@@ -250,12 +250,12 @@ public final class CartGuiClientSmoke {
                     request.setLong(screen, 41L);
                     var pack = "file/Xray_Ultimate-v1.21.zip";
                     var report = com.roften.avilixlogger.net.ClientReportPayloads.collect(10,
-                            List.of(new com.roften.avilixlogger.net.ClientReportPayloads.Mod("create", "6.0")), List.of(pack));
+                            List.of(new com.roften.avilixlogger.net.ClientReportPayloads.Mod("create", "6.0", "Create")), List.of(pack));
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
                             new com.roften.avilixlogger.net.ClientReportViewPayloads.View(41, "", "AuditTarget", 123, List.of(), List.of(pack), report));
                     clickLabel(screen, "Моды");
                     clickLabel(screen, "Копировать вкладку");
-                    check(mc.keyboardHandler.getClipboard().contains("create"), "mods tab did not show the reported mod");
+                    check(mc.keyboardHandler.getClipboard().contains("Create (create)"), "mods tab did not show the display name and ID");
                     clickLabel(screen, "Ресурс-паки");
                     clickLabel(screen, "Копировать вкладку");
                     check(mc.keyboardHandler.getClipboard().contains("⚠ " + pack), "matched pack was not marked in its tab");
@@ -305,6 +305,7 @@ public final class CartGuiClientSmoke {
                     var file = files.stream().max(java.util.Comparator.comparingLong(path -> path.toFile().lastModified())).orElseThrow();
                     var reportJson = com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(file)).getAsJsonObject();
                     check(reportJson.get("player").getAsString().equals("AuditTarget")
+                            && reportJson.getAsJsonArray("mods").get(0).getAsJsonObject().get("displayName").getAsString().equals("Create")
                             && reportJson.getAsJsonArray("serverCommands").get(0).getAsString().equals("/home")
                             && reportJson.getAsJsonArray("matchedResourcePacks").size() == 1, "report JSON missing sections");
                     java.nio.file.Files.delete(file);
