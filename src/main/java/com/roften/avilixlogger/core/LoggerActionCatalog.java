@@ -91,7 +91,7 @@ public final class LoggerActionCatalog {
         a("client_report","Клиенты","Обновить отчёт","Запрашивает загруженные моды и выбранные ресурс-паки у игрока онлайн.","log client-report {0}","Ник игрока",""),
         a("client_report_cached","Клиенты","Последний отчёт","Последний ответ за 24 часа. Игрок может быть офлайн.","log client-report-cache {0}","Ник игрока",""),
         a("client_report_enable","Клиенты","Включить отчёты","Действует до перезапуска сервера. Значение по умолчанию берётся из серверного конфига.","log client-report-settings on"),
-        a("client_report_disable","Клиенты","Выключить отчёты","Отменяет запросы и очищает отчёты в памяти. Действует до перезапуска сервера.","log client-report-settings off")
+        a("client_report_disable","Клиенты","Выключить отчёты","Отменяет запросы. Сохранённые отчёты удаляются по TTL. Действует до перезапуска сервера.","log client-report-settings off")
     );
     public static Action find(String id){return ACTIONS.stream().filter(a->a.id().equals(id)).findFirst().orElseThrow(()->new IllegalArgumentException("Неизвестное действие"));}
     public record Selection(Action action,List<String> values){}

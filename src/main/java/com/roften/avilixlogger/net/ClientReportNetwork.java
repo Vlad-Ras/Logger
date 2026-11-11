@@ -2,9 +2,11 @@ package com.roften.avilixlogger.net;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.LoggerConfig;
 import com.roften.avilixlogger.auth.AuthCoreBridge;
 import com.roften.avilixlogger.core.ActionType;
+import com.roften.avilixlogger.core.ClickHouseLogStorage;
 import com.roften.avilixlogger.core.LogQuery;
 import com.roften.avilixlogger.core.LoggerRuntime;
 import com.roften.avilixlogger.core.LoggerServerData;
@@ -21,6 +23,7 @@ import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -42,13 +45,13 @@ public final class ClientReportNetwork {
     private static final int GUI_CHUNK_SIZE = 32;
     private static final DateTimeFormatter REPORT_TIME = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss XXX");
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
-    private static final ClientReportCache LATEST = new ClientReportCache(LoggerNetwork.reportExpiryExecutor(), System::nanoTime);
     private static final Map<UUID, Long> LAST_MANUAL_REQUEST = new HashMap<>();
     private static final Map<UUID, Object> COMMAND_QUERIES = new HashMap<>();
     private static final Pattern PACK_SEPARATORS = Pattern.compile("[_\\s-]+");
     private static long lastId;
     private static Boolean enabledOverride;
     private static int automaticCursor;
+    private static long reportGeneration;
 
     private record Pending(long id, ServerGamePacketListenerImpl connection, Reply reply) {}
 
@@ -59,7 +62,7 @@ public final class ClientReportNetwork {
             else source.sendSystemMessage(Component.literal("[AvilixLogger] " + text));
         }
 
-        void report(ClientReportCache.Snapshot snapshot) {
+        void report(ClickHouseLogStorage.ClientReport snapshot) {
             if (requestId == null) {
                 writeReport(source, snapshot.playerName(), snapshot.receivedAt(), snapshot.report());
                 return;
@@ -141,8 +144,8 @@ public final class ClientReportNetwork {
     }
 
     private static void clearReports() {
+        reportGeneration++;
         PENDING.clear();
-        LATEST.clear();
         COMMAND_QUERIES.clear();
     }
 
@@ -154,10 +157,56 @@ public final class ClientReportNetwork {
             if (pending == null || pending.id() != report.id() || pending.connection() != player.connection) return;
             PENDING.remove(uuid);
             if (!enabled() || !LoggerConfig.isEnabled() || !AuthCoreBridge.isAuthorized(player.getServer())) return;
-            var snapshot = LATEST.store(uuid, name(player), report);
-            if (pending.reply() != null && canDeliver(pending.reply().source())) pending.reply().report(snapshot);
-            notifyMatches(player, findMatches(report));
+            saveReport(player, pending.reply(), new ClickHouseLogStorage.ClientReport(name(player), Instant.now(), report));
         });
+    }
+
+    private static void saveReport(ServerPlayer player, Reply reply, ClickHouseLogStorage.ClientReport snapshot) {
+        var storage = LoggerRuntime.clientReportStorage();
+        if (storage == null) {
+            notifyRequester(reply, "Сохранение отчёта не подтверждено: ClickHouse ещё недоступен.");
+            return;
+        }
+        var server = player.getServer();
+        var playerId = player.getUUID();
+        long generation = reportGeneration;
+        try {
+            LoggerNetwork.executeClientReportIo(() -> {
+                boolean saved;
+                try {
+                    storeWithRetry(storage, playerId, snapshot);
+                    saved = true;
+                } catch (IOException | RuntimeException failure) {
+                    AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report write not confirmed ({})",
+                            failure.getClass().getSimpleName());
+                    saved = false;
+                }
+                boolean acknowledged = saved;
+                server.execute(() -> {
+                    if (generation != reportGeneration || !enabled() || !LoggerConfig.isEnabled()) return;
+                    if (!acknowledged) {
+                        notifyRequester(reply, "ClickHouse не подтвердил сохранение нового отчёта.");
+                        return;
+                    }
+                    if (reply != null && canDeliver(reply.source())) reply.report(snapshot);
+                    notifyMatches(server, playerId, snapshot.playerName(), findMatches(snapshot.report()));
+                });
+            });
+        } catch (RejectedExecutionException busy) {
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report I/O queue is full; a report was not saved.");
+            notifyRequester(reply, "Очередь сохранения отчётов заполнена. Повторите ручное обновление позже.");
+        }
+    }
+
+    private static void storeWithRetry(ClickHouseLogStorage storage, UUID playerId,
+                                       ClickHouseLogStorage.ClientReport snapshot) throws IOException {
+        try {
+            storage.storeClientReport(playerId, snapshot);
+        } catch (IOException failure) {
+            if (Thread.currentThread().isInterrupted()) throw failure;
+            // The same UUID and timestamp let ClickHouse merge duplicates if the first ACK was lost.
+            storage.storeClientReport(playerId, snapshot);
+        }
     }
 
     private static boolean canRequest(CommandSourceStack source) {
@@ -222,6 +271,7 @@ public final class ClientReportNetwork {
             }
         }
         var server = target.getServer();
+        if (LoggerRuntime.clientReportStorage() == null) return feedback(reply, "ClickHouse ещё недоступен. Повторите запрос позже.", true);
         long nextAuto = LoggerServerData.get(server.overworld()).reserveClientReport(uuid, System.currentTimeMillis());
         if (reply == null && nextAuto != 0) return 0;
 
@@ -243,11 +293,35 @@ public final class ClientReportNetwork {
 
     private static int cached(String playerName, Reply reply) {
         if (!ready(playerName, reply)) return 0;
-        var online = reply.source().getServer().getPlayerList().getPlayerByName(playerName);
-        var snapshot = online == null ? LATEST.find(playerName) : LATEST.find(online.getUUID());
-        if (snapshot == null) return feedback(reply, "Нет сохранённого отчёта игрока " + playerName + " за последние 24 часа.", true);
-        reply.report(snapshot);
-        return 1;
+        var storage = LoggerRuntime.clientReportStorage();
+        if (storage == null) return feedback(reply, "ClickHouse ещё недоступен. Повторите запрос позже.", true);
+        var server = reply.source().getServer();
+        var online = server.getPlayerList().getPlayerByName(playerName);
+        UUID playerId = online == null ? null : online.getUUID();
+        long generation = reportGeneration;
+        try {
+            LoggerNetwork.executeClientReportIo(() -> {
+                try {
+                    var snapshot = storage.findClientReport(playerId, playerName);
+                    server.execute(() -> {
+                        if (generation != reportGeneration || !enabled() || !LoggerConfig.isEnabled()
+                                || !canDeliver(reply.source())) return;
+                        if (snapshot == null || !snapshot.receivedAt().plus(Duration.ofHours(24)).isAfter(Instant.now())) {
+                            feedback(reply, "Нет сохранённого отчёта игрока " + playerName + " за последние 24 часа.", true);
+                        } else reply.report(snapshot);
+                    });
+                } catch (IOException | RuntimeException failure) {
+                    server.execute(() -> {
+                        if (generation == reportGeneration && enabled() && LoggerConfig.isEnabled()) {
+                            notifyRequester(reply, "Отчёт не удалось прочитать из ClickHouse. Повторите запрос позже.");
+                        }
+                    });
+                }
+            });
+            return feedback(reply, "Загружаю сохранённый отчёт из ClickHouse…", false);
+        } catch (RejectedExecutionException busy) {
+            return feedback(reply, "Очередь отчётов занята. Повторите запрос позже.", true);
+        }
     }
 
     private static boolean ready(String playerName, Reply reply) {
@@ -350,12 +424,12 @@ public final class ClientReportNetwork {
         return version < name.length() && Character.isDigit(name.charAt(version));
     }
 
-    private static void notifyMatches(ServerPlayer target, List<String> matches) {
+    private static void notifyMatches(MinecraftServer server, UUID target, String targetName, List<String> matches) {
         if (matches.isEmpty()) return;
-        var message = Component.literal("[AvilixLogger] " + name(target) + " · совпадений по ресурс-пакам: "
+        var message = Component.literal("[AvilixLogger] " + targetName + " · совпадений по ресурс-пакам: "
                 + matches.size() + ". Откройте отчёт для проверки.").withStyle(ChatFormatting.GOLD);
-        for (var admin : target.getServer().getPlayerList().getPlayers()) {
-            if (admin != target && admin.hasPermissions(2) && canRequest(admin.createCommandSourceStack())) {
+        for (var admin : server.getPlayerList().getPlayers()) {
+            if (!admin.getUUID().equals(target) && admin.hasPermissions(2) && canRequest(admin.createCommandSourceStack())) {
                 admin.sendSystemMessage(message);
             }
         }
