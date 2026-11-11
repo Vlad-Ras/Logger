@@ -8,13 +8,22 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 
 /** Client -> Server: request a page for the GUI (nav: FIRST/PREV/NEXT), with mode toggle. */
-public record C2SRequestPagePayload(Nav nav, boolean aggregated, GuiFilters filters, int pageSize) implements CustomPacketPayload {
+public record C2SRequestPagePayload(Nav nav, boolean aggregated, GuiFilters filters, int pageSize, int targetPage, long requestId) implements CustomPacketPayload {
 
     public static final int DEFAULT_PAGE_SIZE = 60;
     public static final int MIN_PAGE_SIZE = 10;
     public static final int MAX_PAGE_SIZE = 400;
 
-    public enum Nav { FIRST, PREV, NEXT, SAME }
+    public static final int MAX_PAGE_NUMBER = 10_000;
+    public enum Nav { FIRST, PREV, NEXT, SAME, JUMP }
+
+    public C2SRequestPagePayload {
+        targetPage = Math.max(1, Math.min(MAX_PAGE_NUMBER, targetPage));
+    }
+
+    public C2SRequestPagePayload(Nav nav, boolean aggregated, GuiFilters filters, int pageSize) {
+        this(nav, aggregated, filters, pageSize, 1, 0);
+    }
 
     public static final Type<C2SRequestPagePayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "gui_page"));
 
@@ -24,13 +33,15 @@ public record C2SRequestPagePayload(Nav nav, boolean aggregated, GuiFilters filt
                 buf.writeBoolean(msg.aggregated);
                 GuiFilters.STREAM_CODEC.encode(buf, msg.filters == null ? GuiFilters.DEFAULT : msg.filters);
                 buf.writeVarInt(clampPageSize(msg.pageSize));
+                buf.writeVarInt(msg.targetPage);
+                buf.writeVarLong(msg.requestId);
             },
             buf -> {
                 int o = buf.readByte();
                 Nav nav = (o >= 0 && o < Nav.values().length) ? Nav.values()[o] : Nav.FIRST;
                 boolean aggregated = buf.readBoolean();
                 GuiFilters filters = GuiFilters.STREAM_CODEC.decode(buf);
-                return new C2SRequestPagePayload(nav, aggregated, filters, clampPageSize(buf.readVarInt()));
+                return new C2SRequestPagePayload(nav, aggregated, filters, clampPageSize(buf.readVarInt()), buf.readVarInt(), buf.readVarLong());
             }
     );
 

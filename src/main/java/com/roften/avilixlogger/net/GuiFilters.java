@@ -27,7 +27,7 @@ public record GuiFilters(
     public GuiFilters {
         searchIds=com.roften.avilixlogger.core.LocalizedSearchTerms.checked(searchIds);
         blockIds=com.roften.avilixlogger.core.LocalizedSearchTerms.checked(blockIds);
-        visibility = GuiEventVisibility.of(visibility.categories(), visibility.actions(), visibility.mods(), visibility.sources());
+        visibility = GuiEventVisibility.of(visibility.categories(), visibility.actions(), visibility.mods(), visibility.sources(), visibility.modActions());
     }
     public GuiFilters(int t,int r,int y,int minutes,int radius,String actor,String train,String plane,String block,
                       long since,long until,String search,java.util.List<String> searchIds,java.util.List<String> blockIds){
@@ -69,7 +69,16 @@ public record GuiFilters(
         if (sourceCount < 0 || sourceCount > GuiEventVisibility.MAX_SOURCES) throw new IllegalArgumentException("Неверный список скрытых источников");
         var sources = new java.util.HashSet<String>();
         for (int i = 0; i < sourceCount; i++) sources.add(buf.readUtf(128));
-        return GuiEventVisibility.of(categories, actions, mods, sources);
+        int pairCount = buf.readVarInt();
+        if (pairCount < 0 || pairCount > GuiEventVisibility.MAX_MOD_ACTIONS) throw new IllegalArgumentException("Неверный список действий модов");
+        var pairs = new java.util.HashSet<GuiEventVisibility.ModAction>();
+        for (int i = 0; i < pairCount; i++) {
+            String mod = buf.readUtf(128);
+            int ordinal = buf.readVarInt();
+            if (ordinal < 0 || ordinal >= types.length) throw new IllegalArgumentException("Неизвестный тип события");
+            pairs.add(new GuiEventVisibility.ModAction(mod, types[ordinal]));
+        }
+        return GuiEventVisibility.of(categories, actions, mods, sources, pairs);
     }
 
     public static final StreamCodec<RegistryFriendlyByteBuf, GuiFilters> STREAM_CODEC = StreamCodec.of(
@@ -93,6 +102,11 @@ public record GuiFilters(
                 for (String mod : f.visibility.mods()) buf.writeUtf(mod, 128);
                 buf.writeVarInt(f.visibility.sources().size());
                 for (String source : f.visibility.sources()) buf.writeUtf(source, 128);
+                buf.writeVarInt(f.visibility.modActions().size());
+                for (var pair : f.visibility.modActions()) {
+                    buf.writeUtf(pair.mod(), 128);
+                    buf.writeVarInt(pair.action().ordinal());
+                }
             },
             buf -> {
                 int t = buf.readVarInt();

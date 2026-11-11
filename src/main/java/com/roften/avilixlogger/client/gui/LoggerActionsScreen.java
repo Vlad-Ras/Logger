@@ -13,7 +13,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import java.util.*;
 
 /** The command catalogue as forms, using the journal's shared widgets and bounded result pane. */
-public final class LoggerActionsScreen extends Screen {
+public final class LoggerActionsScreen extends LoggerScreen {
     private static java.lang.ref.WeakReference<LoggerActionsScreen> current=new java.lang.ref.WeakReference<>(null);
     private static long sequence;
     private final Screen parent;

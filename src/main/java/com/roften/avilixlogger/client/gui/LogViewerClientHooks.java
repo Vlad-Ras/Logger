@@ -78,7 +78,7 @@ public final class LogViewerClientHooks {
         LogViewerScreen.setLogTimeZone(timeZone);
         Minecraft mc = Minecraft.getInstance();
         if (mc == null) return;
-        var screen = new LogViewerScreen();
+        var screen = new LogViewerScreen(mc.screen);
         OPEN_SCREEN = new java.lang.ref.WeakReference<>(screen);
         mc.setScreen(screen);
         // Load using the filters/mode restored by the screen, not hard-coded defaults.
@@ -125,13 +125,13 @@ public final class LogViewerClientHooks {
         if (Minecraft.getInstance().screen instanceof ClientReportScreen screen) screen.accept(view);
     }
 
-    static void openModule(net.minecraft.client.gui.screens.Screen parent,int preset) {
-        var screen=LogViewerScreen.forModule(parent,preset);
+    static void openModule(net.minecraft.client.gui.screens.Screen parent, LogViewerScreen journal, int preset) {
+        var screen=LogViewerScreen.forModule(parent,journal,preset);
         OPEN_SCREEN=new java.lang.ref.WeakReference<>(screen);
         Minecraft.getInstance().setScreen(screen);screen.requestInitialData();
     }
     static void resume(net.minecraft.client.gui.screens.Screen screen) {
-        if(screen instanceof LogViewerScreen journal){OPEN_SCREEN=new java.lang.ref.WeakReference<>(journal);journal.requestInitialData();}
+        if(screen instanceof LogViewerScreen journal){OPEN_SCREEN=new java.lang.ref.WeakReference<>(journal);journal.refreshVisibilityOnReturn();}
     }
 
     public static void acceptPage(S2CLogPagePayload payload) {

@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Separate admin page: same type presets as search, but controls future capture. */
-public final class CaptureTypesScreen extends Screen {
+public final class CaptureTypesScreen extends LoggerScreen {
     private static final String[] KEYS = {
             "all","block","container","entity","item","train","cannon",
             "chat","plane","cart","backpack","bearing","contraption"
@@ -44,9 +44,16 @@ public final class CaptureTypesScreen extends Screen {
     private int scroll;
     private Button enableAll, disableAll;
 
+    private final LogViewerScreen viewer;
+
     public CaptureTypesScreen(Screen parent) {
+        this(parent, parent instanceof LogViewerScreen journal ? journal : null);
+    }
+
+    CaptureTypesScreen(Screen parent, LogViewerScreen viewer) {
         super(Component.literal("AvilixLogger — Запись событий"));
         this.parent = parent;
+        this.viewer = viewer;
     }
 
     private static List<HandlerGroup> handlerGroups() {
@@ -76,7 +83,7 @@ public final class CaptureTypesScreen extends Screen {
         switches.clear();
         int x = Math.max(8,(width - Math.min(width-20,450))/2);
         int w = Math.min(width-16,450);
-        int tabWidth = parent instanceof LogViewerScreen ? (w - 6) * 3 / 5 : w;
+        int tabWidth = viewer != null ? (w - 6) * 3 / 5 : w;
         tab = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,28,tabWidth,18,
                 Component.empty(), b -> {
                     if (handlers && selectedGroup != null) selectedGroup = null;
@@ -85,7 +92,7 @@ public final class CaptureTypesScreen extends Screen {
                     search.setValue("");
                     relayout();
                 }, () -> 1));
-        if (parent instanceof LogViewerScreen viewer) {
+        if (viewer != null) {
             addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x + tabWidth + 6, 28, w - tabWidth - 6, 18,
                     Component.literal("Видимость в GUI"), b -> minecraft.setScreen(new GuiVisibilityScreen(this, viewer)), () -> 1));
         }

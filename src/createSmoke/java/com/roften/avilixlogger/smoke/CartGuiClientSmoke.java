@@ -114,8 +114,31 @@ public final class CartGuiClientSmoke {
                     }
                     clickLabel(sections, "Журналы модов");
                     check(mc.screen.getTitle().getString().equals("Журналы модов"), "mod picker did not open");
+                    var mods = mc.screen;
+                    var firstMod = mods.children().stream().filter(net.minecraft.client.gui.components.Button.class::isInstance)
+                            .map(net.minecraft.client.gui.components.Button.class::cast).findFirst().orElseThrow();
+                    firstMod.onPress();
+                    check(mc.screen != mods && mc.screen != viewer, "mod journal did not open");
+                    clickLabel(mc.screen, "Общий лог");
+                    check(mc.screen == viewer, "direct return lost the main journal");
+                    mc.setScreen(mods);
+                    check(mc.screen.mouseClicked(0, 0, 3) && mc.screen == sections, "mouse Back skipped sections");
+                    clickLabel(sections, "Справка");
                     mc.screen.onClose();
-                    check(mc.screen == viewer, "back from mod picker lost the journal");
+                    check(mc.screen == sections, "guide Back skipped sections");
+                    sections.onClose();
+                    check(mc.screen == viewer, "sections Back lost the journal");
+
+                    var timeField = viewer.getClass().getDeclaredField("btnTime");
+                    timeField.setAccessible(true);
+                    var timeButton = (net.minecraft.client.gui.components.Button) timeField.get(viewer);
+                    String previousTime = timeButton.getMessage().getString();
+                    check(viewer.mouseClicked(timeButton.getX() + 2, timeButton.getY() + 2, 0)
+                            && mc.screen == viewer && !timeButton.getMessage().getString().equals(previousTime), "left click did not cycle time");
+                    check(viewer.mouseClicked(timeButton.getX() + 2, timeButton.getY() + 2, 1)
+                            && mc.screen != viewer, "right click did not open date form");
+                    mc.screen.onClose();
+                    check(mc.screen == viewer, "date form lost parent");
 
                     var line = net.minecraft.network.chat.Component.literal("[01.11 23:25:42] Create поставил компостницу");
                     var row = com.roften.avilixlogger.net.LogRow.single(42, "minecraft:overworld", 3173, 72, 3485, line);
@@ -231,10 +254,10 @@ public final class CartGuiClientSmoke {
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
                             new com.roften.avilixlogger.net.ClientReportViewPayloads.View(41, "", "AuditTarget", 123, List.of(), List.of(pack), report));
                     clickLabel(screen, "Моды");
-                    clickLabel(screen, "Копировать");
+                    clickLabel(screen, "Копировать вкладку");
                     check(mc.keyboardHandler.getClipboard().contains("create"), "mods tab did not show the reported mod");
                     clickLabel(screen, "Ресурс-паки");
-                    clickLabel(screen, "Копировать");
+                    clickLabel(screen, "Копировать вкладку");
                     check(mc.keyboardHandler.getClipboard().contains("⚠ " + pack), "matched pack was not marked in its tab");
                     var commandsRequest = type.getDeclaredField("commandsRequest");
                     commandsRequest.setAccessible(true);
@@ -242,9 +265,10 @@ public final class CartGuiClientSmoke {
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
                             new com.roften.avilixlogger.net.ClientReportViewPayloads.View(42, "", "AuditTarget", 0, List.of("/home"), List.of(), null));
                     clickLabel(screen, "Команды");
-                    clickLabel(screen, "Копировать");
+                    clickLabel(screen, "Копировать вкладку");
                     check(mc.keyboardHandler.getClipboard().contains("/home"), "commands tab did not show its journal rows");
                     clickLabel(screen, "Сводка");
+                    clickLabel(screen, "Сохранить JSON");
                 }
                 else if (stage == 17) {
                     var viewer = new com.roften.avilixlogger.client.gui.LogViewerScreen();
@@ -274,6 +298,17 @@ public final class CartGuiClientSmoke {
                     capture.apply(new com.roften.avilixlogger.net.S2CCaptureTypesPayload(1<<10,7,true,true,"Подшипники отключены без перезагрузки"));
                 }
             }else{
+                var reportDir = mc.gameDirectory.toPath().resolve("avilixlogger-reports");
+                try (var exports = java.nio.file.Files.list(reportDir)) {
+                    var files = exports.filter(file -> file.getFileName().toString().startsWith("AuditTarget-")).toList();
+                    check(!files.isEmpty(), "report JSON export missing");
+                    var file = files.stream().max(java.util.Comparator.comparingLong(path -> path.toFile().lastModified())).orElseThrow();
+                    var reportJson = com.google.gson.JsonParser.parseString(java.nio.file.Files.readString(file)).getAsJsonObject();
+                    check(reportJson.get("player").getAsString().equals("AuditTarget")
+                            && reportJson.getAsJsonArray("serverCommands").get(0).getAsString().equals("/home")
+                            && reportJson.getAsJsonArray("matchedResourcePacks").size() == 1, "report JSON missing sections");
+                    java.nio.file.Files.delete(file);
+                }
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);
                 String result="CART_GUI_CLIENT_OK: actual history/actions/confirmation/results, performance report, shared action forms, help and journal rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks";
                 java.nio.file.Files.writeString(mc.gameDirectory.toPath().resolve("gui-smoke-result.txt"),result+"\n");

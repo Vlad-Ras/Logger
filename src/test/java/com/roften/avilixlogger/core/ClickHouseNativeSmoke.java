@@ -229,6 +229,19 @@ public final class ClickHouseNativeSmoke {
         var modVisible = db.queryReverse(modQuery);
         check(modVisible.size() == 1 && modVisible.getFirst().id == addOn.id, "SQL visibility hid an unrelated mod or leaked legacy source");
 
+        var modBreak = modRow.copyForQueue();
+        modBreak.id = 0;
+        modBreak.type = ActionType.BLOCK_BREAK;
+        db.appendBatch("scoped-visibility-" + UUID.randomUUID(), List.of(modBreak));
+        modQuery.guiVisibility = GuiEventVisibility.ALL_VISIBLE.toggle(new GuiEventVisibility.ModAction(fixture, ActionType.BLOCK_PLACE));
+        for (boolean details : List.of(false, true)) {
+            modQuery.requireDetails = details;
+            var scoped = db.queryReverse(modQuery);
+            check(scoped.size() == 2 && scoped.stream().anyMatch(row -> row.id == modBreak.id)
+                    && scoped.stream().anyMatch(row -> row.id == addOn.id),
+                    "scoped SQL visibility excluded a different action or mod");
+        }
+
         var state = AsyncPipelineTest.row("native-visibility-system");
         state.type = ActionType.BLOCK_PLACE;
         state.dim = "minecraft:overworld";

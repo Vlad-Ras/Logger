@@ -3,7 +3,10 @@ package com.roften.avilixlogger.client.gui;
 import com.roften.avilixlogger.net.ClientReportViewPayloads;
 import com.roften.avilixlogger.net.ClientReportViewPayloads.Action;
 import com.roften.avilixlogger.net.ClientReportViewPayloads.View;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
 import net.minecraft.ChatFormatting;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -12,6 +15,9 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -20,7 +26,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.stream.Collectors;
 
-final class ClientReportScreen extends Screen {
+final class ClientReportScreen extends LoggerScreen {
     private enum Tab {
         OVERVIEW("Сводка"), MODS("Моды"), PACKS("Ресурс-паки"), COMMANDS("Команды");
         private final String label;
@@ -43,7 +49,9 @@ final class ClientReportScreen extends Screen {
     private long reportRequest;
     private long commandsRequest;
     private boolean commandsLoaded;
-    private Button freshButton, cachedButton, copyButton;
+    private Button freshButton, cachedButton, copyButton, exportButton;
+    private boolean exportPending;
+    private String exportStatus = "";
     private int left, paneWidth, scroll;
 
     ClientReportScreen(Screen parent) {
@@ -60,7 +68,7 @@ final class ClientReportScreen extends Screen {
     }
 
     @Override protected void init() {
-        paneWidth = Math.min(720, width - 24);
+        paneWidth = Math.min(450, width - 20);
         left = (width - paneWidth) / 2;
         int gap = 5;
         int part = (paneWidth - 2 * gap) / 3;
@@ -86,10 +94,13 @@ final class ClientReportScreen extends Screen {
                     () -> openTab(value));
             tabs.add(button);
         }
-        int footerWidth = Math.min(110, paneWidth / 3);
+        int footerWidth = (paneWidth - 2 * gap) / 3;
         button("Назад", left, height - 30, footerWidth, this::onClose);
-        copyButton = button("Копировать", left + paneWidth - footerWidth, height - 30, footerWidth, () ->
+        copyButton = button("Копировать вкладку", left + footerWidth + gap, height - 30, footerWidth, () ->
                 minecraft.keyboardHandler.setClipboard(lines.stream().map(Component::getString).collect(Collectors.joining("\n"))));
+        exportButton = button("Сохранить JSON", left + 2 * (footerWidth + gap), height - 30,
+                paneWidth - 2 * (footerWidth + gap), this::exportReport);
+        exportButton.setTooltip(Tooltip.create(Component.literal("Сохранить весь отчёт в avilixlogger-reports внутри папки игры")));
         rebuild();
     }
 
@@ -105,6 +116,8 @@ final class ClientReportScreen extends Screen {
         nickname = value;
         reportRequest = commandsRequest = 0;
         snapshot = null;
+        exportPending = false;
+        exportStatus = "";
         commands = List.of();
         commandsLoaded = false;
         status = "Откройте сохранённый отчёт или обновите его, если игрок онлайн.";
@@ -129,6 +142,8 @@ final class ClientReportScreen extends Screen {
         } else {
             reportRequest = id;
             snapshot = null;
+            exportPending = false;
+            exportStatus = "";
             status = "Отправляю запрос для " + nickname + "…";
             tab = Tab.OVERVIEW;
         }
@@ -147,8 +162,69 @@ final class ClientReportScreen extends Screen {
             commandsLoaded = !view.commands().isEmpty();
             commands = view.commands();
             commandStatus = view.message();
+            if (exportPending && snapshot != null) saveReport();
         } else return;
         rebuild();
+    }
+
+    private void exportReport() {
+        if (snapshot == null || exportPending) return;
+        exportPending = true;
+        if (!commandsLoaded && (commandsRequest != 0 || available())) {
+            exportStatus = "Загружаю команды для файла…";
+            if (commandsRequest == 0) send(Action.COMMANDS);
+            else rebuild();
+        } else saveReport();
+    }
+
+    private void saveReport() {
+        View current = snapshot;
+        if (current == null || !ClientReportViewPayloads.validName(current.player())) {
+            exportPending = false;
+            exportStatus = "Ник в отчёте не подходит для имени файла.";
+            rebuild();
+            return;
+        }
+        List<String> currentCommands = commands;
+        String currentCommandStatus = commandStatus;
+        Path directory = minecraft.gameDirectory.toPath().resolve("avilixlogger-reports");
+        Minecraft client = minecraft;
+        exportStatus = "Сохраняю отчёт…";
+        rebuild();
+        Util.ioPool().execute(() -> {
+            String result;
+            try {
+                var gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+                var json = new JsonObject();
+                json.addProperty("player", current.player());
+                json.addProperty("receivedAt", Instant.ofEpochMilli(current.receivedAt()).toString());
+                json.addProperty("truncated", current.report().truncated());
+                json.add("mods", gson.toJsonTree(current.report().mods().stream().map(mod ->
+                        java.util.Map.of("id", mod.id(), "version", mod.version())).toList()));
+                json.add("resourcePacks", gson.toJsonTree(current.report().packs()));
+                json.add("matchedResourcePacks", gson.toJsonTree(current.matches()));
+                json.add("serverCommands", gson.toJsonTree(currentCommands));
+                json.addProperty("serverCommandsStatus", currentCommandStatus);
+                Files.createDirectories(directory);
+                Path file = Files.createTempFile(directory, current.player() + "-", ".json");
+                try {
+                    Files.writeString(file, gson.toJson(json));
+                } catch (IOException failure) {
+                    Files.deleteIfExists(file);
+                    throw failure;
+                }
+                result = "Сохранено · avilixlogger-reports/" + file.getFileName();
+            } catch (IOException | SecurityException failure) {
+                result = "Не удалось сохранить файл: " + failure.getClass().getSimpleName();
+            }
+            String message = result;
+            client.execute(() -> {
+                if (snapshot != current) return;
+                exportPending = false;
+                exportStatus = message;
+                rebuild();
+            });
+        });
     }
 
     private void rebuild() {
@@ -196,6 +272,7 @@ final class ClientReportScreen extends Screen {
             boolean valid = ClientReportViewPayloads.validName(nickname);
             freshButton.active = valid;
             cachedButton.active = valid;
+            exportButton.active = snapshot != null && !exportPending;
             copyButton.active = snapshot != null && tab != Tab.COMMANDS || tab == Tab.COMMANDS && !commands.isEmpty();
         }
     }
@@ -204,13 +281,12 @@ final class ClientReportScreen extends Screen {
     private static Component match(String pack) { return Component.literal("⚠ " + pack).withStyle(ChatFormatting.YELLOW); }
 
     @Override public void render(GuiGraphics g, int x, int y, float dt) {
-        LoggerGuiWidgets.beginFrame(g, width, height);
-        g.drawCenteredString(font, title, width / 2, 13, 0xFFDB87);
+        LoggerGuiWidgets.beginFrame(g, width, height, false);
+        g.drawCenteredString(font, title, width / 2, 13, 0xFFD700);
         int top = 85;
-        int bottom = height - 37;
+        int bottom = height - 45;
         if (bottom > top) {
-            g.fill(left, top, left + paneWidth, bottom, 0xE519202A);
-            g.fill(left, top, left + paneWidth, top + 1, 0xFF425368);
+            LoggerGuiWidgets.journalBackground(g, left, top, left + paneWidth, bottom);
             var wrapped = layout.get(font, lines, paneWidth - 20);
             int visible = Math.max(1, (bottom - top - 12) / LINE_HEIGHT);
             scroll = Math.min(scroll, Math.max(0, wrapped.size() - visible));
@@ -226,11 +302,14 @@ final class ClientReportScreen extends Screen {
                 g.fill(left + paneWidth - 5, start, left + paneWidth - 2, start + thumb, 0xFF8295AE);
             }
         }
+        if (!exportStatus.isEmpty()) {
+            g.drawString(font, font.plainSubstrByWidth(exportStatus, paneWidth), left, height - 42, 0xD9E0EA);
+        }
         for (var widget : renderables) widget.render(g, x, y, dt);
     }
 
     @Override public boolean mouseScrolled(double x, double y, double dx, double dy) {
-        if (x < left || x >= left + paneWidth || y < 85 || y >= height - 37) return super.mouseScrolled(x, y, dx, dy);
+        if (x < left || x >= left + paneWidth || y < 85 || y >= height - 45) return super.mouseScrolled(x, y, dx, dy);
         scroll = Math.max(0, scroll - 3 * (int) Math.signum(dy));
         return true;
     }

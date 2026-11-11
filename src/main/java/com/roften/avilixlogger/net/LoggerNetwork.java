@@ -145,7 +145,7 @@ public final class LoggerNetwork {
     private static final java.util.Set<UUID> CAPTURE_SETTINGS_PEERS = ConcurrentHashMap.newKeySet();
 
     // Chat lookup has its own cursor and must never replace an active GUI time window.
-    private record GuiSession(GuiFilters filters, int pageSize, LastQueryManager.State page) {}
+    private record GuiSession(GuiFilters filters, int pageSize, boolean aggregated, LastQueryManager.State page) {}
     private static final Map<UUID, GuiSession> GUI_SESSIONS = new ConcurrentHashMap<>();
 
     public static boolean isClientPresent(ServerPlayer player) {
@@ -240,12 +240,12 @@ public final class LoggerNetwork {
         return new LogRow(0L, dim, 0, 0, 0, text, false, new long[0]);
     }
 
-    private static void sendGuiPageStatus(ServerPlayer sp, ServerLevel level, LastQueryManager.State state, Component text) {
+    private static void sendGuiPageStatus(ServerPlayer sp, ServerLevel level, LastQueryManager.State state, Component text, long requestId) {
         if (sp == null) return;
         String title = state == null || state.title == null ? "Логи" : state.title;
         int page = state == null ? 1 : state.pageIndex();
         boolean hasPrev = state != null && state.hasPrev();
-        PacketDistributor.sendToPlayer(sp, new S2CLogPagePayload(title, page, hasPrev, false, List.of(statusRow(level, text))));
+        PacketDistributor.sendToPlayer(sp, new S2CLogPagePayload(title, page, hasPrev, false, List.of(statusRow(level, text)), requestId));
     }
 
     private static Component longPageQueryMessage() {
@@ -258,7 +258,7 @@ public final class LoggerNetwork {
                 .withStyle(net.minecraft.ChatFormatting.YELLOW);
     }
 
-    private static void scheduleLongPageWarning(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State state) {
+    private static void scheduleLongPageWarning(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State state, long requestId) {
         if (sp == null) return;
         final UUID playerId = sp.getUUID();
         final java.lang.ref.WeakReference<ServerPlayer> ref = new java.lang.ref.WeakReference<>(sp);
@@ -274,7 +274,7 @@ public final class LoggerNetwork {
                 if (serverLatestSeq == null || serverLatestSeq.longValue() != seq || serverPendingSeq == null || serverPendingSeq.longValue() != seq) return;
                 ServerPlayer live = ref.get();
                 if (live == null || live.server == null || !live.isAlive()) return;
-                sendGuiPageStatus(live, level, state, longPageQueryMessage());
+                sendGuiPageStatus(live, level, state, longPageQueryMessage(), requestId);
             });
         }, GUI_PAGE_LONG_QUERY_WARNING_MS, TimeUnit.MILLISECONDS);
     }
@@ -321,7 +321,7 @@ public final class LoggerNetwork {
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportView",
                         new Class<?>[]{ClientReportViewPayloads.View.class}, new Object[]{payload})));
 
-        PayloadRegistrar r = event.registrar("15").optional();
+        PayloadRegistrar r = event.registrar("16").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 
         r.playToServer(C2SEntryTeleportPayload.TYPE,C2SEntryTeleportPayload.STREAM_CODEC,LoggerNetwork::handleEntryTeleport);
@@ -391,9 +391,11 @@ public final class LoggerNetwork {
         private final boolean aggregated;
         private final GuiFilters filters;
         private final int pageSize;
+        private final int targetPage;
+        private final long requestId;
 
         private GuiPageTask(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State snapshotState,
-                            boolean aggregated, GuiFilters filters, int pageSize) {
+                            boolean aggregated, GuiFilters filters, int pageSize, int targetPage, long requestId) {
             this.playerId = sp.getUUID();
             this.playerRef = new java.lang.ref.WeakReference<>(sp);
             this.seq = seq;
@@ -402,6 +404,8 @@ public final class LoggerNetwork {
             this.aggregated = aggregated;
             this.filters = filters;
             this.pageSize = C2SRequestPagePayload.clampPageSize(pageSize);
+            this.targetPage = targetPage;
+            this.requestId = requestId;
         }
 
         @Override
@@ -413,9 +417,23 @@ public final class LoggerNetwork {
 
                 Page page;
                 try {
-                    page = buildPage(level, snapshotState, aggregated, filters, pageSize,
-                            () -> Thread.currentThread().isInterrupted()
-                                    || !Long.valueOf(seq).equals(LATEST_GUI_PAGE_SEQ.get(playerId)));
+                    java.util.function.BooleanSupplier cancelled = () -> Thread.currentThread().isInterrupted()
+                            || !Long.valueOf(seq).equals(LATEST_GUI_PAGE_SEQ.get(playerId));
+                    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                    int advanced = 0;
+                    while (targetPage > snapshotState.pageIndex() && advanced < 64
+                            && System.nanoTime() < deadline && !cancelled.getAsBoolean()) {
+                        if (advanced != 0 || !snapshotState.hasNext()) {
+                            buildPage(level, snapshotState, aggregated, filters, pageSize, cancelled, false);
+                        }
+                        if (!snapshotState.hasNext() || !advanceGuiCursor(snapshotState)) break;
+                        advanced++;
+                    }
+                    page = buildPage(level, snapshotState, aggregated, filters, pageSize, cancelled, true);
+                    if (targetPage > page.pageIndex && page.hasNext) {
+                        page = new Page(page.title + " · продолжите переход к стр. " + targetPage,
+                                page.pageIndex, page.hasPrev, true, page.rows);
+                    }
                 } catch (Throwable t) {
                     if (LoggerRuntime.isInitializing()) {
                         page = errorPage(level, snapshotState, "ClickHouse подключается. Повтори запрос через несколько секунд.");
@@ -440,12 +458,8 @@ public final class LoggerNetwork {
                     if (livePlayer == null || livePlayer.server == null || !livePlayer.isAlive()) return;
 
                     var session = GUI_SESSIONS.get(playerId);
-                    var current = session == null ? null : session.page();
-                    if (current != null) {
-                        current.nextCursorCandidate = snapshotState.nextCursorCandidate();
-                        current.nextCursorTsCandidate = snapshotState.nextCursorTsCandidate;
-                        current.hasNext = snapshotState.hasNext();
-                    }
+                    if (!hasGuiPermission(livePlayer) || !AuthCoreBridge.isAuthorized(livePlayer.server)) return;
+                    if (session != null) GUI_SESSIONS.replace(playerId, session, new GuiSession(filters, pageSize, aggregated, snapshotState));
 
                     PacketDistributor.sendToPlayer(livePlayer,
                             new S2CLogPagePayload(
@@ -453,7 +467,7 @@ public final class LoggerNetwork {
                                     pageToSend.pageIndex,
                                     pageToSend.hasPrev,
                                     pageToSend.hasNext,
-                                    pageToSend.rows
+                                    pageToSend.rows, requestId
                             ));
                 });
             } finally {
@@ -697,8 +711,8 @@ public final class LoggerNetwork {
 
             long now = System.currentTimeMillis();
             int pageSize = C2SRequestPagePayload.clampPageSize(payload.pageSize());
-            String requestSig = String.valueOf(payload.nav()) + "|" + payload.aggregated() + "|"
-                    + String.valueOf(payload.filters()) + "|" + pageSize;
+            String requestSig = payload.nav() + "|" + payload.aggregated() + "|" + payload.filters()
+                    + "|" + pageSize + "|" + payload.targetPage() + "|" + payload.requestId();
             long last = LAST_GUI_PAGE_REQUEST_AT.getOrDefault(sp.getUUID(), 0L);
             String lastSig = LAST_GUI_PAGE_REQUEST_SIG.get(sp.getUUID());
 
@@ -712,7 +726,7 @@ public final class LoggerNetwork {
             if (!hasGuiPermission(sp)) {
                 PacketDistributor.sendToPlayer(sp, new S2CLogPagePayload("Logger", 1, false, false,
                         List.of(new LogRow(0L, sp.serverLevel().dimension().location().toString(), 0, 0, 0,
-                                Component.literal("Нет прав на GUI (avilixlogger.gui)").withStyle(net.minecraft.ChatFormatting.RED), false, new long[0]))));
+                                Component.literal("Нет прав на GUI (avilixlogger.gui)").withStyle(net.minecraft.ChatFormatting.RED), false, new long[0])), payload.requestId()));
                 return;
             }
 
@@ -721,24 +735,15 @@ public final class LoggerNetwork {
             UUID playerId = sp.getUUID();
             GuiSession session = GUI_SESSIONS.get(playerId);
             boolean restart = session == null || !session.filters().equals(gf) || session.pageSize() != pageSize
-                    || payload.nav() == C2SRequestPagePayload.Nav.FIRST;
+                    || session.aggregated() != payload.aggregated() || payload.nav() == C2SRequestPagePayload.Nav.FIRST;
             if (restart) {
                 var cursors = new ArrayDeque<Long>();
                 cursors.addLast(0L);
                 var query = buildBaseGuiQuery(sp, gf, pageSize);
-                session = new GuiSession(gf, pageSize, new LastQueryManager.State(query, cursors, guiTimeTitle(query, gf)));
+                session = new GuiSession(gf, pageSize, payload.aggregated(), new LastQueryManager.State(query, cursors, guiTimeTitle(query, gf)));
                 GUI_SESSIONS.put(playerId, session);
             }
             LastQueryManager.State liveState = session.page();
-            if (!restart && payload.nav() == C2SRequestPagePayload.Nav.NEXT
-                    && liveState.hasNext() && liveState.nextCursorCandidate() > 0) {
-                long cursor = liveState.nextCursorCandidate();
-                liveState.cursors.addLast(cursor);
-                liveState.cursorTimes.put(cursor, liveState.nextCursorTsCandidate);
-            } else if (!restart && payload.nav() == C2SRequestPagePayload.Nav.PREV && liveState.hasPrev()) {
-                liveState.cursorTimes.remove(liveState.cursors.removeLast());
-            }
-
             ServerLevel lvl = safeLevel(sp, liveState.baseQuery.dim);
             if (lvl == null) lvl = sp.serverLevel();
 
@@ -751,6 +756,16 @@ public final class LoggerNetwork {
             snapshotState.nextCursorTsCandidate = liveState.nextCursorTsCandidate;
             snapshotState.nextCursorCandidate = liveState.nextCursorCandidate();
             snapshotState.hasNext = liveState.hasNext();
+            int targetPage = switch (payload.nav()) {
+                case JUMP -> payload.targetPage();
+                case NEXT -> restart ? 1 : Math.min(C2SRequestPagePayload.MAX_PAGE_NUMBER, liveState.pageIndex() + 1);
+                case PREV -> Math.max(1, liveState.pageIndex() - 1);
+                default -> liveState.pageIndex();
+            };
+            if (targetPage < snapshotState.pageIndex()) {
+                while (targetPage < snapshotState.pageIndex()) snapshotState.cursorTimes.remove(snapshotState.cursors.removeLast());
+                snapshotState.hasNext = false;
+            }
             ServerLevel finalLvl = lvl;
 
             pruneQueuedPageTasks(sp.getUUID());
@@ -758,15 +773,15 @@ public final class LoggerNetwork {
                 pruneQueuedPageTasks(sp.getUUID());
             }
 
-            sendGuiPageStatus(sp, finalLvl, snapshotState, Component.literal("Загрузка логов...").withStyle(net.minecraft.ChatFormatting.AQUA));
+            sendGuiPageStatus(sp, finalLvl, snapshotState, Component.literal("Загрузка логов...").withStyle(net.minecraft.ChatFormatting.AQUA), payload.requestId());
 
             try {
                 PAGE_EXECUTOR.execute(new GuiPageTask(
-                        sp, seq, finalLvl, snapshotState, payload.aggregated(), gf, pageSize));
-                scheduleLongPageWarning(sp, seq, finalLvl, snapshotState);
+                        sp, seq, finalLvl, snapshotState, payload.aggregated(), gf, pageSize, targetPage, payload.requestId()));
+                scheduleLongPageWarning(sp, seq, finalLvl, liveState, payload.requestId());
             } catch (java.util.concurrent.RejectedExecutionException rejected) {
                 completeGuiPageSeq(sp.getUUID(), seq);
-                sendGuiPageStatus(sp, finalLvl, snapshotState, Component.literal("Очередь GUI-запросов перегружена. Повтори запрос через пару секунд.").withStyle(net.minecraft.ChatFormatting.RED));
+                sendGuiPageStatus(sp, finalLvl, snapshotState, Component.literal("Очередь GUI-запросов перегружена. Повтори запрос через пару секунд.").withStyle(net.minecraft.ChatFormatting.RED), payload.requestId());
             }
         });
     }
@@ -1077,9 +1092,17 @@ public final class LoggerNetwork {
     /**
      * Produces a page similarly to {@link ChatLogPager} but returns components instead of sending to chat.
      */
+    private static boolean advanceGuiCursor(LastQueryManager.State state) {
+        long cursor = state.nextCursorCandidate();
+        if (cursor <= 0 || cursor == state.currentBeforeId()) return false;
+        state.cursors.addLast(cursor);
+        state.cursorTimes.put(cursor, state.nextCursorTsCandidate);
+        return true;
+    }
+
     private static Page buildPage(ServerLevel level, LastQueryManager.State state, boolean aggregated, GuiFilters gf,
                                   int requestedPageSize,
-                                  java.util.function.BooleanSupplier cancelled) {
+                                  java.util.function.BooleanSupplier cancelled, boolean renderRows) {
         int size = C2SRequestPagePayload.clampPageSize(requestedPageSize);
 
         LogQuery q = state.baseQuery.copy();
@@ -1088,7 +1111,7 @@ public final class LoggerNetwork {
         q.cursorTs=state.currentCursorTs();
 
         var slice = com.roften.avilixlogger.core.GuiPageLoader.load(LoggerRuntime.storage(level), q, size, aggregated, cancelled,
-                candidates -> aggregateForGui(level, candidates, size).hasNext);
+                candidates -> aggregateForGui(level, candidates, size, false).hasNext);
         List<LogEntry> filtered = slice.entries();
         boolean exhausted = slice.exhausted();
 
@@ -1099,30 +1122,22 @@ public final class LoggerNetwork {
         List<LogRow> rows;
         if (aggregated) {
             // Aggregate ONLY for GUI output. Chat commands remain raw.
-            AggregationResult agg = aggregateForGui(level, filtered, size);
+            AggregationResult agg = aggregateForGui(level, filtered, size, renderRows);
             hasNext = agg.hasNext || !exhausted;
             nextCursorCandidate = agg.nextCursorCandidate;
             rows = agg.rows;
         } else {
-            // Raw mode (GUI only): just take first pageSize rows.
-            List<LogRow> rr = new ArrayList<>(Math.min(size, filtered.size()));
-            int n = 0;
-            for (LogEntry e : filtered) {
-                rr.add(singleRow(level, e));
-                n++;
-                if (n >= size) break;
-            }
+            int count = Math.min(size, filtered.size());
             hasNext = filtered.size() > size || !exhausted;
-            nextCursorCandidate = (rr.isEmpty() ? 0L : rr.get(rr.size() - 1).id());
-            rows = List.copyOf(rr);
+            nextCursorCandidate = count == 0 ? 0 : filtered.get(count - 1).id;
+            if (renderRows) {
+                var visible = new ArrayList<LogRow>(count);
+                for (int i = 0; i < count; i++) visible.add(singleRow(level, filtered.get(i)));
+                rows = visible;
+            } else rows = List.of();
         }
 
-        if (rows.isEmpty()) {
-            // Cursor pagination is based on the last displayed row. Without a visible row there is
-            // no safe cursor to continue from, so do not expose a broken "next" button.
-            hasNext = false;
-            nextCursorCandidate = 0L;
-        }
+        if (nextCursorCandidate == 0) hasNext = false;
 
         state.nextCursorCandidate = nextCursorCandidate;
         state.nextCursorTsCandidate = 0;
@@ -1132,6 +1147,7 @@ public final class LoggerNetwork {
         boolean hasPrev = state.cursors.size() > 1;
 
         List<com.roften.avilixlogger.net.LogRow> outRows = new ArrayList<>();
+        if (!renderRows) return new Page(state.title, state.pageIndex(), hasPrev, hasNext, List.of());
         if (rows.isEmpty()) {
             Component empty = Component.literal("Нет записей.");
             outRows.add(new com.roften.avilixlogger.net.LogRow(0L, level.dimension().location().toString(), 0, 0, 0, empty, false, new long[0]));
@@ -1513,62 +1529,49 @@ public final class LoggerNetwork {
     private static final long GUI_BURST_MAX_MS = 5000L;
     private static final int GUI_INLINE_TOP_N = 5;
 
-    private static AggregationResult aggregateForGui(ServerLevel level, List<LogEntry> in, int pageSize) {
+    private static AggregationResult aggregateForGui(ServerLevel level, List<LogEntry> in, int pageSize, boolean renderRows) {
         if (in == null || in.isEmpty()) {
             return new AggregationResult(List.of(), false, 0L);
         }
 
-        List<com.roften.avilixlogger.net.LogRow> out = new ArrayList<>(pageSize);
+        List<LogRow> out = renderRows ? new ArrayList<>(pageSize) : List.of();
+        int count = 0;
 
-        // input is newest -> older
         Burst burst = null;
         long nextCursorCandidate = 0L;
+        boolean hasNext = false;
 
         for (int i = 0; i < in.size(); i++) {
             LogEntry e = in.get(i);
-
             BurstKey key = BurstKey.of(level, e);
-            if (key == null) {
-                // flush pending burst
-                if (burst != null) {
-                    out.add(burst.toRow(level));
-                    nextCursorCandidate = burst.oldestId();
-                    burst = null;
-                    if (out.size() >= pageSize) break;
+
+            if (burst != null && (key == null || !burst.canAccept(e, key))) {
+                if (renderRows) out.add(burst.toRow(level));
+                nextCursorCandidate = burst.oldestId();
+                burst = null;
+                if (++count == pageSize) {
+                    hasNext = true;
+                    break;
                 }
-                out.add(singleRow(level, e));
-                nextCursorCandidate = e.id;
-                if (out.size() >= pageSize) break;
-                continue;
             }
 
-            if (burst == null || !burst.canAccept(e, key)) {
-                if (burst != null) {
-                    out.add(burst.toRow(level));
-                    nextCursorCandidate = burst.oldestId();
-                    if (out.size() >= pageSize) break;
+            if (key == null) {
+                if (renderRows) out.add(singleRow(level, e));
+                nextCursorCandidate = e.id;
+                if (++count == pageSize) {
+                    hasNext = i + 1 < in.size();
+                    break;
                 }
+            } else if (burst == null) {
                 burst = new Burst(key, e);
             } else {
                 burst.add(e);
             }
         }
 
-        if (out.size() < pageSize && burst != null) {
-            out.add(burst.toRow(level));
+        if (count < pageSize && burst != null) {
+            if (renderRows) out.add(burst.toRow(level));
             nextCursorCandidate = burst.oldestId();
-        }
-
-        // if we didn't exhaust the input, there is more to show
-        boolean hasNext = false;
-        if (out.size() >= pageSize) {
-            // We may have cut mid-input; consider that as next page exists if there are remaining rows.
-            // Also keep "nextCursorCandidate" as the oldest id we included.
-            // If we included exactly pageSize but still have input remaining -> next.
-            hasNext = true;
-        } else {
-            // We used all available input; no next.
-            hasNext = false;
         }
 
         return new AggregationResult(List.copyOf(out), hasNext, nextCursorCandidate);

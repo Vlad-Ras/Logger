@@ -16,20 +16,32 @@ final class CartGuiWorkflowSmoke {
         String id="51000000-0000-0000-0000-000000000001";
         var health=new S2CCaptureHealthPayload(S2CCaptureHealthPayload.State.PAUSED,"Захват остановлен");var healthBuffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
         try{S2CCaptureHealthPayload.STREAM_CODEC.encode(healthBuffer,health);check(S2CCaptureHealthPayload.STREAM_CODEC.decode(healthBuffer).equals(health),"health changed on wire");}finally{healthBuffer.release();}
+        var modAction = new GuiEventVisibility.ModAction("create", ActionType.BLOCK_PLACE);
+        var scoped = GuiEventVisibility.ALL_VISIBLE.toggle(modAction);
+        check(scoped.hidden(ActionType.BLOCK_PLACE, "mod:create", "") && scoped.hidden(ActionType.BLOCK_PLACE, "create:cart:1", "")
+                        && !scoped.hidden(ActionType.BLOCK_PLACE, "mod:createaddon", "")
+                        && !scoped.hidden(ActionType.BLOCK_PLACE, "player:place", "")
+                        && !scoped.hidden(ActionType.BLOCK_BREAK, "mod:create", ""), "scoped visibility excluded the wrong event");
         var journalFilters = new GuiFilters(1, 3, 0, -1, 0, "", "", "", "", -1, -1, "", List.of(), List.of(),
-                GuiEventVisibility.ALL_VISIBLE.toggleMod("create").toggleSource(GuiEventVisibility.UNATTRIBUTED).toggle(ActionType.BLOCK_BREAK));
+                scoped.toggleMod("ae2").toggleSource(GuiEventVisibility.UNATTRIBUTED).toggle(ActionType.BLOCK_BREAK));
         var journalBuffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
         try {
             GuiFilters.STREAM_CODEC.encode(journalBuffer, journalFilters);
             check(GuiFilters.STREAM_CODEC.decode(journalBuffer).equals(journalFilters), "journal hide filters changed on wire");
+            journalBuffer.clear();
+            var jump = new C2SRequestPagePayload(C2SRequestPagePayload.Nav.JUMP, false, journalFilters, 60, 121, 18);
+            C2SRequestPagePayload.STREAM_CODEC.encode(journalBuffer, jump);
+            check(C2SRequestPagePayload.STREAM_CODEC.decode(journalBuffer).equals(jump), "page jump changed on wire");
         } finally { journalBuffer.release(); }
         var systemRow = new LogRow(42, "minecraft:overworld", 1, 2, 3,
                 net.minecraft.network.chat.Component.literal("Система"), false, new long[]{42},
                 List.of(), ActionType.BLOCK_PLACE, "", GuiEventVisibility.UNATTRIBUTED);
         var pageBuffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
         try {
-            S2CLogPagePayload.STREAM_CODEC.encode(pageBuffer, new S2CLogPagePayload("Журнал", 1, false, false, List.of(systemRow)));
-            var decoded = S2CLogPagePayload.STREAM_CODEC.decode(pageBuffer).rows().getFirst();
+            S2CLogPagePayload.STREAM_CODEC.encode(pageBuffer, new S2CLogPagePayload("Журнал", 1, false, false, List.of(systemRow), 18));
+            var page = S2CLogPagePayload.STREAM_CODEC.decode(pageBuffer);
+            check(page.requestId() == 18, "page response lost request identity");
+            var decoded = page.rows().getFirst();
             check(decoded.originSource().equals(systemRow.originSource()) && decoded.originMod().isEmpty(),
                     "system origin was lost or converted into a mod");
         } finally { pageBuffer.release(); }

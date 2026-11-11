@@ -14,8 +14,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-final class GuiVisibilityScreen extends Screen {
-    private record Choice(String label, String key, int preset, ActionType action) {}
+final class GuiVisibilityScreen extends LoggerScreen {
+    private record Choice(String label, String key, int preset, ActionType action, GuiEventVisibility.ModAction pair) {
+        Choice(String label, String key, int preset, ActionType action) { this(label, key, preset, action, null); }
+    }
 
     private final List<Choice> categories = GuiEventVisibility.supportedCategories().stream()
             .map(category -> new Choice(CaptureTypesScreen.categoryLabel(category.preset()), "", category.preset(), null))
@@ -75,7 +77,7 @@ final class GuiVisibilityScreen extends Screen {
         });
         button("Отмена", x + third + 6, height - 28, third, this::onClose);
         button("Применить", x + 2 * (third + 6), height - 28, w - 2 * (third + 6), () -> {
-            minecraft.setScreen(viewer);
+            minecraft.setScreen(parent);
             viewer.applyVisibility(selection);
         });
         refreshRows();
@@ -91,7 +93,7 @@ final class GuiVisibilityScreen extends Screen {
 
     private void toggle(Choice choice) {
         selection = switch (tab) {
-            case 2 -> selection.sources().contains(choice.key())
+            case 2 -> choice.pair() != null ? selection.toggle(choice.pair()) : selection.sources().contains(choice.key())
                     ? selection.toggleSource(choice.key()) : selection.toggleMod(choice.key());
             case 1 -> selection.toggle(choice.action());
             default -> selection.toggle(choice.preset());
@@ -102,10 +104,12 @@ final class GuiVisibilityScreen extends Screen {
     private void refreshRows() {
         String query = needle.strip().toLowerCase(Locale.ROOT);
         var choices = switch (tab) {
-            case 2 -> java.util.stream.Stream.concat(
+            case 2 -> java.util.stream.Stream.of(
                     selection.mods().stream().map(mod -> new Choice(mod, mod, 0, null)),
-                    selection.sources().stream().map(source ->
-                            new Choice(GuiEventVisibility.systemOriginLabel(source), source, 0, null)))
+                    selection.sources().stream().map(source -> new Choice(GuiEventVisibility.systemOriginLabel(source), source, 0, null)),
+                    selection.modActions().stream().map(pair -> new Choice(pair.mod() + " · " + LogText.actionLabel(pair.action()),
+                            pair.mod() + ":" + pair.action().name(), 0, null, pair)))
+                    .flatMap(stream -> stream)
                     .sorted(java.util.Comparator.comparing(Choice::key)).toList();
             case 1 -> ACTIONS;
             default -> categories;

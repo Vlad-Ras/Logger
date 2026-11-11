@@ -13,7 +13,11 @@ import java.util.List;
 import com.roften.avilixlogger.core.ActionType;
 
 /** Server -> Client: a rendered page for the GUI (+ row metadata for actions). */
-public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, boolean hasNext, List<LogRow> rows) implements CustomPacketPayload {
+public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, boolean hasNext, List<LogRow> rows, long requestId) implements CustomPacketPayload {
+
+    public S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, boolean hasNext, List<LogRow> rows) {
+        this(title, pageIndex, hasPrev, hasNext, rows, 0);
+    }
 
     private static final ActionType[] ACTIONS = ActionType.values();
 
@@ -22,6 +26,7 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
 
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CLogPagePayload> STREAM_CODEC = StreamCodec.of(
             (buf, msg) -> {
+                buf.writeVarLong(msg.requestId);
                 buf.writeUtf(msg.title == null ? "" : msg.title, 32767);
                 buf.writeVarInt(msg.pageIndex);
                 buf.writeBoolean(msg.hasPrev);
@@ -57,6 +62,7 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                 }
             },
             buf -> {
+                long requestId = buf.readVarLong();
                 String title = buf.readUtf(32767);
                 int pageIndex = buf.readVarInt();
                 boolean hasPrev = buf.readBoolean();
@@ -97,7 +103,7 @@ public record S2CLogPagePayload(String title, int pageIndex, boolean hasPrev, bo
                     rows.add(new LogRow(id, dim, x, y, z, line, aggregated, ids, groupedLines,
                             action >= 0 && action < ACTIONS.length ? ACTIONS[action] : null, originMod, originSource));
                 }
-                return new S2CLogPagePayload(title, pageIndex, hasPrev, hasNext, List.copyOf(rows));
+                return new S2CLogPagePayload(title, pageIndex, hasPrev, hasNext, List.copyOf(rows), requestId);
             }
     );
 

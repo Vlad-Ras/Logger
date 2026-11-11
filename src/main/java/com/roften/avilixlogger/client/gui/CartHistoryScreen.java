@@ -11,7 +11,7 @@ import java.util.*;
 import static com.roften.avilixlogger.net.C2SCartActionPayload.Action;
 
 /** Complete minecart workflow. GUI uses typed payloads, including confirmation and cancellation. */
-public final class CartHistoryScreen extends Screen {
+public final class CartHistoryScreen extends LoggerScreen {
     private static long sequence;
     private final Screen parent;
     private String id,actor="";
@@ -127,6 +127,8 @@ public final class CartHistoryScreen extends Screen {
     private String journalText(){if(journalText==null)journalText=journal.isEmpty()?"Операций пока нет.":String.join("\n\n",journal);return journalText;}
     private String details(){var r=chosen();if(formattedDetails!=null&&formattedRow==r&&formattedExtra==extraDetails)return formattedDetails;formattedRow=r;formattedExtra=extraDetails;return formattedDetails=r==null?"Выберите строку.\n\nВернуть саму штуковину: состояние → предмет.\nВсе операции и ввод entry — в «Все действия».\nХод выполнения и ошибки — в «Результаты».":"ID: "+r.cartId()+"\nentry="+r.entry()+"\n"+r.action()+"\n"+r.time()+"\n"+r.actor()+"\n"+r.location()+"\n\n"+r.detail()+extraDetails;}
     public boolean mouseClicked(double x,double y,int button){
+        if (button == MOUSE_BACK && !hasShiftDown() && prev.active) { prev.onPress(); return true; }
+        if (button == MOUSE_FORWARD) { if (nextButton.active) nextButton.onPress(); return true; }
         if(button==0&&x>=listX&&x<listX+listW&&y>=listY&&y<listY+listH){int row=listScroll+(int)(y-listY)/38;if(row<rows.size()){select(row);return true;}}
         if(button==0&&detailW>0&&x>=detailX&&x<detailX+detailW&&y>=detailY&&y<detailY+detailH){Minecraft.getInstance().setScreen(new Details(this));return true;}
         return super.mouseClicked(x,y,button);
@@ -137,8 +139,9 @@ public final class CartHistoryScreen extends Screen {
         if(detailW>0&&x>=detailX&&x<detailX+detailW&&y>=detailY&&y<detailY+detailH){detailScroll=Math.max(0,detailScroll-(int)Math.signum(dy)*3);return true;}return super.mouseScrolled(x,y,dx,dy);
     }
     public void render(GuiGraphics g,int mx,int my,float dt){
-        LoggerGuiWidgets.beginFrame(g,width,height);
+        LoggerGuiWidgets.beginFrame(g,width,height,false);
         g.drawCenteredString(font,title,width/2,9,0xFFFFFF);
+        LoggerGuiWidgets.journalBackground(g,listX,listY,listX+listW,listY+listH);
         g.enableScissor(listX,listY,listX+listW,listY+listH);
         if(rows.isEmpty())g.drawString(font,loading?"Загрузка…":"Нет записей. Измените фильтры или нажмите «Все записи».",listX+5,listY+8,0xAABBCD);
         for(int i=listScroll;i<rows.size();i++){int y=listY+(i-listScroll)*38;if(y>=listY+listH)break;var r=rows.get(i);
@@ -147,7 +150,8 @@ public final class CartHistoryScreen extends Screen {
             g.drawString(font,font.plainSubstrByWidth(r.actor()+" · "+r.location(),listW-12),listX+6,y+16,0xB5C5D5);
             g.drawString(font,font.plainSubstrByWidth("ID: "+r.cartId()+(r.snapshot()?" · полный снимок":""),listW-12),listX+6,y+27,r.snapshot()?0x8ED5A1:0x8294A6);
         }g.disableScissor();
-        if(detailW>0){var lines=detailLayout.get(font,details(),detailW-12);detailScroll=Math.min(detailScroll,Math.max(0,lines.size()-Math.max(1,detailH/11)));g.enableScissor(detailX,detailY,detailX+detailW,detailY+detailH);
+        if(detailW>0){LoggerGuiWidgets.journalBackground(g,detailX,detailY,detailX+detailW,detailY+detailH);
+            var lines=detailLayout.get(font,details(),detailW-12);detailScroll=Math.min(detailScroll,Math.max(0,lines.size()-Math.max(1,detailH/11)));g.enableScissor(detailX,detailY,detailX+detailW,detailY+detailH);
             for(int i=detailScroll;i<lines.size();i++){int y=detailY+5+(i-detailScroll)*11;if(y>=detailY+detailH)break;g.drawString(font,lines.get(i),detailX+6,y,0xDCE6F0);}g.disableScissor();}
         g.drawString(font,font.plainSubstrByWidth((operationRunning?"Выполняется · ":"")+status,width-110),10,height-19,0xC9D7E4);for(var widget:renderables)widget.render(g,mx,my,dt);
     }
@@ -159,7 +163,7 @@ public final class CartHistoryScreen extends Screen {
         operationRunning=false;updateButtons();try{Minecraft.getInstance().setScreen(new Confirmation(this,message,C2SCartActionPayload.confirmation(command)));}
         catch(IllegalArgumentException e){message("Неверное подтверждение сервера: "+e.getMessage(),true);}
     }
-    private abstract static class Panel extends Screen {
+    private abstract static class Panel extends LoggerScreen {
         final CartHistoryScreen parent;int scroll;final WrappedLogText layout=new WrappedLogText();
         Panel(CartHistoryScreen parent,String title){super(Component.literal(title));this.parent=parent;}
         void widget(Button b){addRenderableWidget(b);}

@@ -9,7 +9,7 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 
 /** Date and time are edited separately; the existing wire still carries absolute bounds. */
-final class TimeRangeScreen extends Screen {
+final class TimeRangeScreen extends LoggerScreen {
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("dd.MM.uuuu");
     private final LogViewerScreen parent;
     private final ZoneId zone;

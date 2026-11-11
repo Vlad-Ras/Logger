@@ -11,7 +11,7 @@ import net.minecraft.network.chat.Component;
 
 import java.util.List;
 
-final class LogRowActionsScreen extends Screen {
+final class LogRowActionsScreen extends LoggerScreen {
     private final LogViewerScreen viewer;
     private final LogRow row;
 
@@ -38,12 +38,17 @@ final class LogRowActionsScreen extends Screen {
 
         var visibility = viewer.visibility();
         var action = row.action();
-        var hideType = button(action == null ? "Скрыть тип" : "Скрыть тип · " + LogText.actionLabel(action),
-                x, 82, w, () -> hide(visibility.toggle(action)));
-        hideType.active = action != null && !visibility.actions().contains(action);
+        String mod = row.originMod();
+        var pair = action == null || mod.isEmpty() ? null : new GuiEventVisibility.ModAction(mod, action);
+        var hideType = button(action == null ? "Скрыть тип"
+                        : pair == null ? "Скрыть тип везде · " + LogText.actionLabel(action)
+                        : "Скрыть " + mod + " · " + LogText.actionLabel(action),
+                x, 82, w, () -> hide(pair == null ? visibility.toggle(action) : visibility.toggle(pair)));
+        hideType.active = action != null && !visibility.actions().contains(action)
+                && (pair == null || !visibility.mods().contains(mod) && !visibility.modActions().contains(pair)
+                && visibility.modActions().size() < GuiEventVisibility.MAX_MOD_ACTIONS);
         if (row.aggregated()) tooltip(hideType, exact);
 
-        String mod = row.originMod();
         String source = row.originSource();
         if (!source.isEmpty()) {
             var hideSource = button("Скрыть источник · " + GuiEventVisibility.systemOriginLabel(source), x, 108, w,

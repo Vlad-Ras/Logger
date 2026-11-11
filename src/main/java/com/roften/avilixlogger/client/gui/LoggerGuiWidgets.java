@@ -16,6 +16,11 @@ final class LoggerGuiWidgets {
         if(net.minecraft.client.Minecraft.getInstance().level==null)g.fill(0,0,width,height,0xFF101010);
         else if(dim)g.fill(4,4,width-4,height-4,LogViewerScreen.backgroundDimAlpha()<<24);
     }
+    static void journalBackground(GuiGraphics g, int left, int top, int right, int bottom) {
+        int alpha = LogViewerScreen.backgroundDimAlpha();
+        if (alpha != 0 && left < right && top < bottom) g.fill(left, top, right, bottom, alpha << 24);
+    }
+
     private static float clampFloat(float value,float min,float max){return Math.max(min,Math.min(max,value));}
     /**
      * Vanilla Button scales only the rectangle. The label is always drawn with the normal Minecraft font size.

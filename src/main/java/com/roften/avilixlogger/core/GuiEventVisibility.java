@@ -11,10 +11,11 @@ import java.util.stream.Collectors;
 import static com.roften.avilixlogger.core.ActionType.*;
 
 /** Personal journal exclusions. Rules use saved fields and are independent of capture policy. */
-public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<String> mods, Set<String> sources) {
-    public static final GuiEventVisibility ALL_VISIBLE = new GuiEventVisibility(0, Set.of(), Set.of(), Set.of());
+public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<String> mods, Set<String> sources, Set<ModAction> modActions) {
+    public static final GuiEventVisibility ALL_VISIBLE = new GuiEventVisibility(0, Set.of(), Set.of(), Set.of(), Set.of());
     public static final int MAX_MODS = 64;
     public static final int MAX_SOURCES = 64;
+    public static final int MAX_MOD_ACTIONS = 128;
     public static final String UNATTRIBUTED = "system:unattributed";
     private static final java.util.regex.Pattern SYSTEM_SOURCE = java.util.regex.Pattern.compile("system:[a-z0-9_][a-z0-9_.-]{0,120}");
     private static final java.util.regex.Pattern MOD_ID = java.util.regex.Pattern.compile("[a-z0-9_][a-z0-9_.-]{0,127}");
@@ -23,7 +24,15 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<S
 
     public record Category(int preset, Set<ActionType> actions, List<String> prefixes, List<String> markers) {}
 
+    public record ModAction(String mod, ActionType action) {
+        public ModAction {
+            if (!MOD_ID.matcher(mod).matches()) throw new IllegalArgumentException("Invalid mod ID");
+            java.util.Objects.requireNonNull(action);
+        }
+    }
+
     public GuiEventVisibility {
+        modActions = modActions.stream().limit(MAX_MOD_ACTIONS).collect(Collectors.toUnmodifiableSet());
         actions = Set.copyOf(actions);
         sources = sources.stream().filter(id -> SYSTEM_SOURCE.matcher(id).matches()).sorted()
                 .limit(MAX_SOURCES).collect(Collectors.toUnmodifiableSet());
@@ -37,30 +46,41 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<S
     }
 
     public static GuiEventVisibility of(long categories, Set<ActionType> actions, Set<String> mods, Set<String> sources) {
-        return new GuiEventVisibility(categories & CATEGORY_MASK, actions, mods, sources);
+        return of(categories, actions, mods, sources, Set.of());
     }
 
-    public boolean active() { return categories != 0 || !actions.isEmpty() || !mods.isEmpty() || !sources.isEmpty(); }
+    public static GuiEventVisibility of(long categories, Set<ActionType> actions, Set<String> mods,
+                                        Set<String> sources, Set<ModAction> modActions) {
+        return new GuiEventVisibility(categories & CATEGORY_MASK, actions, mods, sources, modActions);
+    }
+
+    public boolean active() { return categories != 0 || !actions.isEmpty() || !mods.isEmpty() || !sources.isEmpty() || !modActions.isEmpty(); }
     public boolean hides(int preset) { return (categories & bit(preset)) != 0; }
-    public GuiEventVisibility toggle(int preset) { return of(categories ^ bit(preset), actions, mods, sources); }
+    public GuiEventVisibility toggle(int preset) { return of(categories ^ bit(preset), actions, mods, sources, modActions); }
 
     public GuiEventVisibility toggle(ActionType action) {
         var next = EnumSet.noneOf(ActionType.class);
         next.addAll(actions);
         if (!next.remove(action)) next.add(action);
-        return of(categories, next, mods, sources);
+        return of(categories, next, mods, sources, modActions);
     }
 
     public GuiEventVisibility toggleMod(String mod) {
         var next = new java.util.HashSet<>(mods);
         if (!next.remove(mod) && next.size() < MAX_MODS) next.add(mod);
-        return of(categories, actions, next, sources);
+        return of(categories, actions, next, sources, modActions);
     }
 
     public GuiEventVisibility toggleSource(String source) {
         var next = new java.util.HashSet<>(sources);
         if (!next.remove(source) && next.size() < MAX_SOURCES) next.add(source);
-        return of(categories, actions, mods, next);
+        return of(categories, actions, mods, next, modActions);
+    }
+
+    public GuiEventVisibility toggle(ModAction pair) {
+        var next = new java.util.HashSet<>(modActions);
+        if (!next.remove(pair) && next.size() < MAX_MOD_ACTIONS) next.add(pair);
+        return of(categories, actions, mods, sources, next);
     }
 
     public static String systemOrigin(String source) {
@@ -162,7 +182,11 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<S
         if (!active()) return false;
         if (action != null && actions.contains(action)) return true;
         String origin = source == null ? "" : source;
-        if (sources.contains(origin) || !mods.isEmpty() && mods.contains(modOrigin(origin))) return true;
+        if (sources.contains(origin)) return true;
+        if (!mods.isEmpty() || !modActions.isEmpty()) {
+            String mod = modOrigin(origin);
+            if (mods.contains(mod) || modActions.stream().anyMatch(pair -> pair.action() == action && pair.mod().equals(mod))) return true;
+        }
         for (var category : CATEGORIES) {
             if (!hides(category.preset())) continue;
             if (action != null && category.actions().contains(action)) return true;
@@ -177,15 +201,23 @@ public record GuiEventVisibility(long categories, Set<ActionType> actions, Set<S
         return value.startsWith(prefix) || (prefix.endsWith(":") && value.equals(prefix.substring(0, prefix.length() - 1)));
     }
 
+    private static List<String> modClauses(String mod, Function<String, String> quote) {
+        var clauses = new ArrayList<String>();
+        for (String prefix : modPrefixes(mod)) {
+            clauses.add("startsWith(source, " + quote.apply(prefix) + ")");
+            if (prefix.startsWith("mod:")) clauses.add("source = " + quote.apply(prefix.substring(0, prefix.length() - 1)));
+        }
+        return clauses;
+    }
+
     public void appendWhere(StringBuilder sql, Function<String, String> quote, String extraColumn) {
         if (!active()) return;
         var clauses = new ArrayList<String>();
         for (String source : sources) clauses.add("source = " + quote.apply(source));
-        for (String mod : mods) {
-            for (String prefix : modPrefixes(mod)) {
-                clauses.add("startsWith(source, " + quote.apply(prefix) + ")");
-                if (prefix.startsWith("mod:")) clauses.add("source = " + quote.apply(prefix.substring(0, prefix.length() - 1)));
-            }
+        for (String mod : mods) clauses.addAll(modClauses(mod, quote));
+        for (ModAction pair : modActions) {
+            clauses.add("(action = " + pair.action().ordinal() + " AND ("
+                    + String.join(" OR ", modClauses(pair.mod(), quote)) + "))");
         }
         var hiddenTypes = EnumSet.noneOf(ActionType.class);
         hiddenTypes.addAll(actions);

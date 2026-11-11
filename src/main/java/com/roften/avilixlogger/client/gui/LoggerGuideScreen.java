@@ -5,7 +5,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
-final class LoggerGuideScreen extends Screen {
+final class LoggerGuideScreen extends LoggerScreen {
     private final Screen parent;
     private final WrappedLogText layout = new WrappedLogText();
     private LoggerUserGuide.Topic topic;
