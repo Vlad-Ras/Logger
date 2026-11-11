@@ -393,6 +393,7 @@ public final class LoggerNetwork {
         private final int pageSize;
         private final int targetPage;
         private final long requestId;
+        private boolean needsPageProbe;
 
         private GuiPageTask(ServerPlayer sp, long seq, ServerLevel level, LastQueryManager.State snapshotState,
                             boolean aggregated, GuiFilters filters, int pageSize, int targetPage, long requestId) {
@@ -410,6 +411,7 @@ public final class LoggerNetwork {
 
         @Override
         public void run() {
+            boolean rescheduled = false;
             try {
                 if (!AuthCoreBridge.isAuthorized(level.getServer())) return;
                 Long latestSeq = LATEST_GUI_PAGE_SEQ.get(playerId);
@@ -419,19 +421,28 @@ public final class LoggerNetwork {
                 try {
                     java.util.function.BooleanSupplier cancelled = () -> Thread.currentThread().isInterrupted()
                             || !Long.valueOf(seq).equals(LATEST_GUI_PAGE_SEQ.get(playerId));
-                    long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                    int advanced = 0;
-                    while (targetPage > snapshotState.pageIndex() && advanced < 64
-                            && System.nanoTime() < deadline && !cancelled.getAsBoolean()) {
-                        if (advanced != 0 || !snapshotState.hasNext()) {
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+                    for (int advanced = 0; targetPage > snapshotState.pageIndex() && !cancelled.getAsBoolean(); advanced++) {
+                        if (needsPageProbe || !snapshotState.hasNext()) {
                             buildPage(level, snapshotState, aggregated, filters, pageSize, cancelled, false);
                         }
                         if (!snapshotState.hasNext() || !advanceGuiCursor(snapshotState)) break;
-                        advanced++;
+                        needsPageProbe = true;
+                        if (targetPage > snapshotState.pageIndex() && (advanced >= 7 || System.nanoTime() >= deadline)) {
+                            // Let other journal queries run between batches of cursor advances.
+                            try {
+                                PAGE_EXECUTOR.execute(this);
+                                rescheduled = true;
+                                return;
+                            } catch (java.util.concurrent.RejectedExecutionException busy) {
+                                break;
+                            }
+                        }
                     }
+                    if (cancelled.getAsBoolean()) return;
                     page = buildPage(level, snapshotState, aggregated, filters, pageSize, cancelled, true);
                     if (targetPage > page.pageIndex && page.hasNext) {
-                        page = new Page(page.title + " · продолжите переход к стр. " + targetPage,
+                        page = new Page(page.title + " · очередь занята, цель: стр. " + targetPage,
                                 page.pageIndex, page.hasPrev, true, page.rows);
                     }
                 } catch (Throwable t) {
@@ -471,7 +482,7 @@ public final class LoggerNetwork {
                             ));
                 });
             } finally {
-                completeGuiPageSeq(playerId, seq);
+                if (!rescheduled) completeGuiPageSeq(playerId, seq);
             }
         }
     }
