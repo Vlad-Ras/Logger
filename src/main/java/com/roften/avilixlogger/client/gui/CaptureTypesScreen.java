@@ -43,7 +43,7 @@ public final class CaptureTypesScreen extends LoggerScreen {
     private boolean lastSuccess = true;
     private String status = "Получение состояния сервера...";
     private int scroll;
-    private Button enableAll, disableAll;
+    private Button enableAll, disableAll, movingDeployers;
 
     private final LogViewerScreen viewer;
 
@@ -126,6 +126,10 @@ public final class CaptureTypesScreen extends LoggerScreen {
                 Component.literal("Включить все"),b->setAll(true),()->1));
         disableAll = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x+half+6,headerY,w-half-6,18,
                 Component.literal("Выключить все"),b->setAll(false),()->1));
+        movingDeployers = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,headerY,w,18,
+                Component.empty(), b -> toggle(CaptureTypePolicy.CREATE_DEPLOYER), () -> 1));
+        movingDeployers.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                "Удары, использование блоков и обмен предметами активаторов на движущихся штуковинах.")));
         for (int row = 0; row < visibleCount(); row++) {
             final int index = row;
             var button = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,98,w,18,
@@ -215,13 +219,19 @@ public final class CaptureTypesScreen extends LoggerScreen {
                         + (active ? "  —  ВКЛ" : "  —  ВЫКЛ")));
                 button.active = loaded && canEdit && !pending;
             }
-            button.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(title)));
+            var handler = showGroups() ? null : CaptureHandlers.fromPreset(filtered.get(index));
+            button.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                    handler == null ? title : title + "\nКлюч: " + handler.key())));
         }
         boolean bulk = !handlers || showGroups();
         enableAll.setMessage(Component.literal(handlers ? "Включить все обработчики" : "Включить все категории"));
         disableAll.setMessage(Component.literal(handlers ? "Выключить все обработчики" : "Выключить все категории"));
         enableAll.visible = disableAll.visible = bulk;
         enableAll.active = disableAll.active = bulk && loaded && canEdit && !pending;
+        movingDeployers.visible = handlers && selectedGroup != null && selectedGroup.name().equals("Create");
+        movingDeployers.active = movingDeployers.visible && loaded && canEdit && !pending;
+        if (movingDeployers.visible) movingDeployers.setMessage(Component.literal(
+                "Активаторы на движущихся штуковинах — " + (!loaded ? "…" : enabled(CaptureTypePolicy.CREATE_DEPLOYER) ? "ВКЛ" : "ВЫКЛ")));
     }
 
     private void toggle(int preset) {

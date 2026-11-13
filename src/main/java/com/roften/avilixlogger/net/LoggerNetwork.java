@@ -159,6 +159,7 @@ public final class LoggerNetwork {
             CLIENT_PRESENT.remove(uuid);
             CartHistoryNetwork.logout(uuid);
             ClientReportNetwork.onLogout(player);
+            ServerLogNetwork.logout(player);
             GUI_SESSIONS.remove(uuid);
             CAPTURE_SETTINGS_PEERS.remove(uuid);
             LAST_GUI_PAGE_REQUEST_AT.remove(uuid);
@@ -180,6 +181,7 @@ public final class LoggerNetwork {
 
     public static void shutdown() {
         stopClientReportIo();
+        ServerLogNetwork.stop();
         EntryRollbackCommand.clearAll();
         // Static registration survives an integrated-server restart. Invalidate requests
         // below, drop queued captures, and let idle workers time out instead of poisoning
@@ -325,6 +327,11 @@ public final class LoggerNetwork {
         audit.playToClient(ClientReportAlertPayloads.View.TYPE, ClientReportAlertPayloads.View.CODEC,
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportAlerts",
                         new Class<?>[]{ClientReportAlertPayloads.View.class}, new Object[]{payload})));
+
+        audit.playToServer(ServerLogPayloads.Query.TYPE, ServerLogPayloads.Query.CODEC, ServerLogNetwork::handle);
+        audit.playToClient(ServerLogPayloads.View.TYPE, ServerLogPayloads.View.CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptServerLog",
+                        new Class<?>[]{ServerLogPayloads.View.class}, new Object[]{payload})));
 
         PayloadRegistrar r = event.registrar("16").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));

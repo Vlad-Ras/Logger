@@ -20,6 +20,7 @@ public final class ServerTickScheduler {
         HotPathMetrics.tick();
         if (event.getServer().getTickCount() % 20 == 0) {
             com.roften.avilixlogger.net.ClientReportNetwork.checkConnectedPlayer(event.getServer());
+            com.roften.avilixlogger.net.ServerLogNetwork.expire(event.getServer());
         }
         if (event.getServer().getTickCount() % 20 == 0 && ServerCaptureGuard.paused()) {
             LoggerRuntime.autoResumeCapture();

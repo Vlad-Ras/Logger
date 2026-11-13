@@ -55,6 +55,7 @@ public final class AsyncPipelineTest {
         GuiSearchTest.run();
         ReleaseUiContractsTest.run();
         EntryPositionResolverTest.run();
+        ServerLogFilesTest.run();
         StorageUiEvidenceTest.run();
         StorageRollbackEvidenceTest.run();
         ClickHouseDeliveryTest.run();

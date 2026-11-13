@@ -35,6 +35,7 @@
     public static void acceptClientReportRequest(...);
     public static void acceptClientReportView(...);
     public static void acceptClientReportAlerts(...);
+    public static void acceptServerLog(...);
     public static void acceptRollbackPreview(...);
 }
 

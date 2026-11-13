@@ -109,12 +109,12 @@ public final class CaptureTypePolicy {
             case 28 -> "AE2: настройки, фильтры, ячейки и улучшения";
             case 29 -> "Смерти и убийства игроков";
             case 30 -> "Переполнение: пауза записи для защиты TPS";
-            case CREATE_DEPLOYER -> "Create: активаторы";
-            case CREATE_DRILL -> "Create: буры";
-            case CREATE_SAW -> "Create: пилы";
-            case CREATE_HARVESTER -> "Create: комбайны";
-            case CREATE_PLOUGH -> "Create: плуги";
-            case CREATE_ROLLER -> "Create: катки";
+            case CREATE_DEPLOYER -> "Create: активаторы на движущихся штуковинах";
+            case CREATE_DRILL -> "Create: буры на движущихся штуковинах";
+            case CREATE_SAW -> "Create: пилы на движущихся штуковинах";
+            case CREATE_HARVESTER -> "Create: комбайны на движущихся штуковинах";
+            case CREATE_PLOUGH -> "Create: плуги на движущихся штуковинах";
+            case CREATE_ROLLER -> "Create: катки на движущихся штуковинах";
             case CREATE_CHUTE -> "Create: желоба и умные желоба";
             case CREATE_FUNNEL -> "Create: воронки";
             case CREATE_PORTABLE_STORAGE -> "Create: переносные интерфейсы";

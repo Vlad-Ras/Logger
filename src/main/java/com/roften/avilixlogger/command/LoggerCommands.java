@@ -87,6 +87,7 @@ public final class LoggerCommands {
             .then(ClientReportNetwork.cacheCommand())
             .then(ClientReportNetwork.settingsCommand())
             .then(ClientReportNetwork.alertsCommand())
+            .then(com.roften.avilixlogger.net.ServerLogNetwork.command())
             .then(literal("capture-status")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.gui", 2))
                 .executes(c -> {

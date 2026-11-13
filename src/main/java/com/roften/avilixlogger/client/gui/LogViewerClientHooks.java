@@ -84,6 +84,7 @@ public final class LogViewerClientHooks {
     private static java.util.concurrent.CompletableFuture<java.util.List<ClientReportPayloads.Mod>> modInventory;
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
+        if (Minecraft.getInstance().screen instanceof ServerLogsScreen screen) screen.disconnected();
         captureHealth = null;
         OPEN_SCREEN.clear();
         teleportOwner.clear();teleportRequest=0;
@@ -140,6 +141,10 @@ public final class LogViewerClientHooks {
 
     public static void acceptActionResult(com.roften.avilixlogger.net.S2CLoggerActionResultPayload payload) {
         LoggerActionsScreen.accept(payload);
+    }
+
+    public static void acceptServerLog(com.roften.avilixlogger.net.ServerLogPayloads.View view) {
+        if (Minecraft.getInstance().screen instanceof ServerLogsScreen screen) screen.accept(view);
     }
 
     public static void acceptClientReportAlerts(com.roften.avilixlogger.net.ClientReportAlertPayloads.View view) {
