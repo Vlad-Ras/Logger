@@ -18,6 +18,29 @@ public final class CartGuiClientSmoke {
     private static CartHistoryScreen root;
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
+    private static final long[] frameIntervals = new long[8192];
+    private static int frameCount;
+    private static long lastFrame;
+
+    @SubscribeEvent
+    public static void frame(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
+        if (root == null || finished || frameCount == frameIntervals.length) return;
+        long now = System.nanoTime();
+        if (lastFrame != 0) frameIntervals[frameCount++] = now - lastFrame;
+        lastFrame = now;
+    }
+
+    private static void reportFrames() {
+        if (frameCount == 0) return;
+        Arrays.sort(frameIntervals, 0, frameCount);
+        long total = 0;
+        for (int i = 0; i < frameCount; i++) total += frameIntervals[i];
+        System.out.printf(Locale.ROOT,
+                "LOGGER_GUI_FRAME_PROFILE frames=%d mean_fps=%.1f p95_interval_ms=%.2f p99_interval_ms=%.2f heap_used_mib=%.1f%n",
+                frameCount, frameCount * 1e9 / total, frameIntervals[frameCount * 95 / 100] / 1e6,
+                frameIntervals[frameCount * 99 / 100] / 1e6,
+                java.lang.management.ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed() / 1048576.0);
+    }
     private static final String ID="51000000-0000-0000-0000-000000000001";
     private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png","logger-sections.png","logger-server-logs.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
@@ -399,6 +422,7 @@ public final class CartGuiClientSmoke {
                     java.nio.file.Files.delete(file);
                 }
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);
+                reportFrames();
                 String result="CART_GUI_CLIENT_OK: actual history/actions/confirmation/results, performance report, shared action forms, help and journal rendered; 320x240, 640x360, 960x540 widget bounds and overlap checks";
                 java.nio.file.Files.writeString(mc.gameDirectory.toPath().resolve("gui-smoke-result.txt"),result+"\n");
                 com.roften.avilixlogger.AvilixLoggerMod.LOGGER.info(result);finished=true;mc.stop();

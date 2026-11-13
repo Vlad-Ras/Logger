@@ -78,8 +78,8 @@ public final class CreateCartSmoke {
             CartGuiWorkflowSmoke.run();
             com.roften.avilixlogger.net.ClientReportLoadSmoke.run(event.getServer());
             LoggerActionCatalogSmoke.run();
+            PlayerProgressCostSmoke.start(SupplementariesTextSmoke.player(world, "ProgressBench"));
             System.out.println("AVILIX_CREATE_SMOKE_OK identity=pack+save+load restore=detached+incremental+cargo+fluid world=commit+cancel+32-drops recipients=commit+cancel+logout+conflict+strict-codec menu=native-in-place loot=full+partial+blocked+delay+cancel+conflict+reappear");
-            event.getServer().halt(false);
         }catch(Throwable failure){
             failure.printStackTrace();System.out.println("AVILIX_CREATE_SMOKE_FAILED");
             event.getServer().halt(false);

@@ -357,7 +357,7 @@ public final class RollbackEngine {
                     report.onSkipped("no_entity_snapshot");
                     return;
                 }
-                String entitySnapshot = entry.rollbackEntity();
+                CompoundTag entitySnapshot = entry.rollbackEntity();
                 String invalid = NbtSerde.validateEntitySnapshot(entry.entityType, entry.entityUuid, entitySnapshot);
                 if (invalid != null) {
                     report.onSkipped(invalid);

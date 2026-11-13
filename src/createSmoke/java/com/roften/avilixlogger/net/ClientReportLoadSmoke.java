@@ -31,6 +31,7 @@ public final class ClientReportLoadSmoke {
                 .toList();
         var packs = IntStream.range(0, 24).mapToObj(i -> "file/fixture-pack-" + i + ".zip").toList();
         var report = ClientReportPayloads.collect(1, mods, packs);
+        checkNetworkSizes(server);
         checkDailyLimit(server);
         checkStructuredReport(server);
         checkConsoleStatus(server, report);
@@ -61,6 +62,38 @@ public final class ClientReportLoadSmoke {
             if (printedCharacters.get() < wireBytes * SAMPLES) throw new AssertionError("GUI received incomplete report");
         } finally {
             inbound.release();
+        }
+    }
+
+    private static void checkNetworkSizes(MinecraftServer server) {
+        var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), server.registryAccess());
+        try {
+            var markers = IntStream.range(0, S2CRollbackPreviewPayload.MAX_MARKERS)
+                    .mapToObj(i -> new S2CRollbackPreviewPayload.Marker(new net.minecraft.core.BlockPos(i, 64, i),
+                            S2CRollbackPreviewPayload.Kind.BLOCK, "minecraft:stone")).toList();
+            var preview = new S2CRollbackPreviewPayload(true, "fixture", "minecraft:overworld",
+                    0, 0, 0, 512, 255, 512, 0, Long.MAX_VALUE, markers);
+            S2CRollbackPreviewPayload.STREAM_CODEC.encode(buffer, preview);
+            int previewBytes = buffer.readableBytes();
+            if (!preview.equals(S2CRollbackPreviewPayload.STREAM_CODEC.decode(buffer))) throw new AssertionError("Preview changed on wire");
+            buffer.clear();
+            var alerts = new ClientReportAlertPayloads.View(true, IntStream.range(0, 32)
+                    .mapToObj(i -> "Player · совпадений: " + i + " · resourcepack.zip").toList());
+            ClientReportAlertPayloads.View.CODEC.encode(buffer, alerts);
+            int alertBytes = buffer.readableBytes();
+            if (!alerts.equals(ClientReportAlertPayloads.View.CODEC.decode(buffer))) throw new AssertionError("Alerts changed on wire");
+            buffer.clear();
+            var chunk = new byte[ServerLogPayloads.CHUNK_BYTES];
+            ServerLogPayloads.View.CODEC.encode(buffer, ServerLogPayloads.View.data(2, "latest.log", 0, chunk.length, chunk));
+            int exportBytes = buffer.readableBytes();
+            if (!Arrays.equals(chunk, ServerLogPayloads.View.CODEC.decode(buffer).data())) throw new AssertionError("Log data changed on wire");
+            buffer.clear();
+            C2SEntryTeleportPayload.STREAM_CODEC.encode(buffer, new C2SEntryTeleportPayload(2, 81));
+            int teleportBytes = buffer.readableBytes();
+            System.out.printf(Locale.ROOT, "LOGGER_PAYLOAD_PROFILE preview_512_bytes=%d alerts_32_bytes=%d log_chunk_bytes=%d teleport_request_bytes=%d%n",
+                    previewBytes, alertBytes, exportBytes, teleportBytes);
+        } finally {
+            buffer.release();
         }
     }
 
