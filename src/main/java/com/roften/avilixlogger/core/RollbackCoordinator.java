@@ -9,6 +9,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.TicketType;
+import net.minecraft.world.level.ChunkPos;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 import java.util.ArrayList;
@@ -36,6 +38,7 @@ public final class RollbackCoordinator {
     private static final ConcurrentHashMap<UUID, Preparation> PREPARATIONS = new ConcurrentHashMap<>();
     private static volatile ThreadPoolExecutor executor;
     private static volatile ActiveJob active;
+    private static final TicketType<Long> ROLLBACK_CHUNK = TicketType.create("avilixlogger_rollback", Long::compare, 220);
     // Only one prepared preview is retained across confirmations to keep the global memory bounded.
     private static CachedPreview cachedPreview;
     private record CachedPreview(RollbackPlanManager.Plan plan, List<PreparedScope> scopes) {}
@@ -178,6 +181,7 @@ public final class RollbackCoordinator {
         }
         ActiveJob job = active;
         if (job != null && playerId.equals(job.playerId)) {
+            job.releaseChunk();
             active = null;
             return CancelResult.ACTIVE;
         }
@@ -205,11 +209,17 @@ public final class RollbackCoordinator {
             return;
         }
         if (job == null) return;
-        // NeoForge's own tick budget is the first guard: under load the rollback simply waits.
-        if (!event.hasTime()) return;
+        if (!event.hasTime()) {
+            job.reportDelay(event.getServer());
+            return;
+        }
         try {
-            if (job.tick(event.getServer())) active = null;
+            if (job.tick(event.getServer())) {
+                job.releaseChunk();
+                active = null;
+            } else job.reportDelay(event.getServer());
         } catch (Throwable t) {
+            job.releaseChunk();
             active = null;
             AvilixLoggerMod.LOGGER.error("[AvilixLogger] Tick-budgeted rollback failed", t);
             job.onError.accept("Откат остановлен из-за ошибки: " + concise(t));
@@ -221,6 +231,7 @@ public final class RollbackCoordinator {
         cachedPreview = null;
         for (Preparation preparation : PREPARATIONS.values()) preparation.cancelled = true;
         PREPARATIONS.clear();
+        if (active != null) active.releaseChunk();
         active = null;
         ThreadPoolExecutor ex = executor;
         executor = null;
@@ -291,6 +302,56 @@ public final class RollbackCoordinator {
         int blockIndex;
         int removalIndex;
         int deferredIndex;
+        ServerLevel ticketLevel;
+        ChunkPos ticketChunk;
+        int ticketTick;
+        ServerLevel timedOutLevel;
+        int timedOutX, timedOutZ;
+        int lastProgressTick = Integer.MIN_VALUE;
+        int lastReportedProcessed;
+
+        void releaseChunk() {
+            if (ticketLevel != null) ticketLevel.getChunkSource().removeRegionTicket(ROLLBACK_CHUNK, ticketChunk, 1, ticketChunk.toLong());
+            ticketLevel = null;
+            ticketChunk = null;
+        }
+
+        private boolean waitForChunk(ServerLevel level, BlockPos pos) {
+            int x = pos.getX() >> 4, z = pos.getZ() >> 4;
+            if (timedOutLevel == level && timedOutX == x && timedOutZ == z) return false;
+            int tick = level.getServer().getTickCount();
+            if (ticketLevel == level && ticketChunk.x == x && ticketChunk.z == z) {
+                if (tick - ticketTick < 200) return true;
+                timedOutLevel = level;
+                timedOutX = x;
+                timedOutZ = z;
+                releaseChunk();
+                return false;
+            }
+            releaseChunk();
+            ticketLevel = level;
+            ticketChunk = new ChunkPos(x, z);
+            ticketTick = tick;
+            level.getChunkSource().addRegionTicket(ROLLBACK_CHUNK, ticketChunk, 1, ticketChunk.toLong());
+            return true;
+        }
+
+        void reportDelay(MinecraftServer server) {
+            int tick = server.getTickCount();
+            if (lastProgressTick == Integer.MIN_VALUE) {
+                lastProgressTick = tick;
+                return;
+            }
+            if (tick - lastProgressTick < 200) return;
+            lastProgressTick = tick;
+            var player = server.getPlayerList().getPlayer(playerId);
+            if (player == null || !PermissionUtil.has(player.createCommandSourceStack(), "avilixlogger.command.admin", 2)) return;
+            String state = report.processed != lastReportedProcessed ? "Выполняется"
+                    : ticketChunk == null ? "Ожидание свободного времени тика" : "Ожидание чанка " + ticketChunk;
+            lastReportedProcessed = report.processed;
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(state + " · обработано " + report.processed));
+        }
+
 
         ActiveJob(UUID playerId, RollbackPlanManager.Plan plan, List<PreparedScope> scopes,
                   Consumer<RollbackReport> onComplete, Consumer<String> onError) {
@@ -309,7 +370,6 @@ public final class RollbackCoordinator {
             int millis = configInt(() -> LoggerConfig.VALUES.rollbackMaxMillisPerTick.get(), 2, 1, 25);
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis);
             int used = 0;
-            int chunkLoads = 0;
 
             while (scopeIndex < scopes.size() && used < operationBudget && System.nanoTime() < deadline) {
                 PreparedScope scope = scopes.get(scopeIndex);
@@ -323,16 +383,11 @@ public final class RollbackCoordinator {
                 if (blockIndex < prepared.blocks().size()) {
                     RollbackEngine.PreparedBlockSnapshot first = prepared.blocks().get(blockIndex);
                     if (!level.hasChunkAt(first.pos())) {
-                        if (chunkLoadBudget == 0) {
-                            report.onSkipped("chunk_unloaded");
-                            blockIndex++;
-                            used++;
-                            continue;
-                        }
-                        if (chunkLoads >= chunkLoadBudget) return false;
-                        level.getChunk(first.pos().getX() >> 4, first.pos().getZ() >> 4);
-                        chunkLoads++;
-                        if (!level.hasChunkAt(first.pos())) return false;
+                        if (chunkLoadBudget > 0 && waitForChunk(level, first.pos())) return false;
+                        report.onSkipped(chunkLoadBudget == 0 ? "chunk_unloaded" : "chunk_timeout");
+                        blockIndex++;
+                        used++;
+                        continue;
                     }
                     int chunkX = first.pos().getX() >> 4;
                     int chunkZ = first.pos().getZ() >> 4;
@@ -353,16 +408,11 @@ public final class RollbackCoordinator {
                     LogEntry entry = prepared.entityRemovals().get(removalIndex);
                     BlockPos pos = new BlockPos(entry.x, entry.y, entry.z);
                     if (!level.hasChunkAt(pos)) {
-                        if (chunkLoadBudget == 0) {
-                            report.onSkipped("chunk_unloaded");
-                            removalIndex++;
-                            used++;
-                            continue;
-                        }
-                        if (chunkLoads >= chunkLoadBudget) return false;
-                        level.getChunk(entry.x >> 4, entry.z >> 4);
-                        chunkLoads++;
-                        if (!level.hasChunkAt(pos)) return false;
+                        if (chunkLoadBudget > 0 && waitForChunk(level, pos)) return false;
+                        report.onSkipped(chunkLoadBudget == 0 ? "chunk_unloaded" : "chunk_timeout");
+                        removalIndex++;
+                        used++;
+                        continue;
                     }
                     report.merge(RollbackEngine.applyPreparedEntry(level, entry));
                     removalIndex++;
@@ -374,16 +424,11 @@ public final class RollbackCoordinator {
                     LogEntry entry = prepared.deferred().get(deferredIndex);
                     BlockPos pos = new BlockPos(entry.x, entry.y, entry.z);
                     if (!level.hasChunkAt(pos)) {
-                        if (chunkLoadBudget == 0) {
-                            report.onSkipped("chunk_unloaded");
-                            deferredIndex++;
-                            used++;
-                            continue;
-                        }
-                        if (chunkLoads >= chunkLoadBudget) return false;
-                        level.getChunk(entry.x >> 4, entry.z >> 4);
-                        chunkLoads++;
-                        if (!level.hasChunkAt(pos)) return false;
+                        if (chunkLoadBudget > 0 && waitForChunk(level, pos)) return false;
+                        report.onSkipped(chunkLoadBudget == 0 ? "chunk_unloaded" : "chunk_timeout");
+                        deferredIndex++;
+                        used++;
+                        continue;
                     }
                     report.merge(RollbackEngine.applyPreparedEntry(level, entry));
                     deferredIndex++;

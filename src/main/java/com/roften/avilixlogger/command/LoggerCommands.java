@@ -86,6 +86,7 @@ public final class LoggerCommands {
             .then(ClientReportNetwork.command())
             .then(ClientReportNetwork.cacheCommand())
             .then(ClientReportNetwork.settingsCommand())
+            .then(ClientReportNetwork.alertsCommand())
             .then(literal("capture-status")
                 .requires(s -> PermissionUtil.has(s, "avilixlogger.gui", 2))
                 .executes(c -> {
@@ -1474,6 +1475,7 @@ public final class LoggerCommands {
         Integer seconds;           // from --time
         long[] dayRange;           // from --date/--day
         Long targetMoment;         // from --at (absolute server time)
+        Long untilMoment;
         Integer radius;            // from --radius
         boolean allDims;           // --all-dims
         String dim;                // --dim
@@ -1495,6 +1497,7 @@ public final class LoggerCommands {
             p.seconds = this.seconds;
             p.dayRange = this.dayRange;
             p.targetMoment = this.targetMoment;
+            p.untilMoment = this.untilMoment;
             p.radius = this.radius;
             p.allDims = this.allDims;
             p.dim = this.dim;
@@ -1562,6 +1565,11 @@ public final class LoggerCommands {
                     Long target = parseTargetMomentMillis(val);
                     if (target == null) errors.add("Неверный --at: " + val + " (ожидается yyyy-MM-ddTHH:mm)");
                     else out.targetMoment = target;
+                }
+                case "until" -> {
+                    Long end = val == null ? null : parseTargetMomentMillis(val);
+                    if (end == null) errors.add("--until требует момент, например 2026-11-13T18:30");
+                    else out.untilMoment = end;
                 }
                 case "radius", "r" -> {
                     if (val == null) { errors.add("--radius требует число"); break; }
@@ -1771,6 +1779,7 @@ public final class LoggerCommands {
             merged.dayRange = null;
             merged.targetMoment = direct.targetMoment;
         }
+        if (direct.untilMoment != null) merged.untilMoment = direct.untilMoment;
         if (direct.radius != null) merged.radius = direct.radius;
         if (direct.allDims) merged.allDims = true;
         if (direct.dim != null) merged.dim = direct.dim;
@@ -1975,12 +1984,18 @@ public final class LoggerCommands {
         }
 
         final long now = System.currentTimeMillis();
-        final long cutoffTs = replay && f.dayRange != null && f.targetMoment == null ? Math.min(now, f.dayRange[1]) : now;
+        if (f.untilMoment != null && (!replay || f.untilMoment > now)) {
+            ctx.getSource().sendFailure(Component.literal("--until задаёт конец периода воспроизведения в прошлом."));
+            return 0;
+        }
+        final long cutoffTs = f.untilMoment != null ? f.untilMoment
+                : replay && f.dayRange != null && f.targetMoment == null ? Math.min(now, f.dayRange[1] - 1) : now;
         final long targetTs = f.targetMoment != null
                 ? f.targetMoment
                 : (f.dayRange != null ? f.dayRange[0] : cutoffTs - (f.seconds * 1000L));
-        if (replay && (f.actor == null || f.actor.isBlank() || f.world || f.allDims || Integer.valueOf(0).equals(f.radius))) {
-            ctx.getSource().sendFailure(Component.literal("Для воспроизведения укажите одного игрока через --p и ограниченную область."));
+        if (replay && (f.actor == null || !f.actor.matches("[A-Za-z0-9_]{1,16}(,[A-Za-z0-9_]{1,16}){0,15}")
+                || f.world || f.allDims || Integer.valueOf(0).equals(f.radius))) {
+            ctx.getSource().sendFailure(Component.literal("Для воспроизведения укажите --p Ник или --p Ник1,Ник2 (до 16) и ограниченную область."));
             return 0;
         }
         if (targetTs <= 0L || targetTs >= cutoffTs) {

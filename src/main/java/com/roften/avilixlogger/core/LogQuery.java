@@ -21,6 +21,7 @@ public final class LogQuery {
 
     /** Optional player name filter (case-insensitive exact match). */
     public String actorName;
+    public java.util.List<String> actorNames = java.util.List.of();
 
     /** Optional owner filter (case-insensitive). Used primarily for plane log searches. */
     public String owner;
@@ -92,6 +93,7 @@ public final class LogQuery {
         q.includeIntersectingClaims = this.includeIntersectingClaims;
         q.maxPos = this.maxPos;
         q.actorName = this.actorName;
+        q.actorNames = this.actorNames;
         q.owner = this.owner;
         q.blockIdFilter = this.blockIdFilter;
         q.planeNameFilter = this.planeNameFilter;

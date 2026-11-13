@@ -287,7 +287,7 @@ final class ClientReportScreen extends LoggerScreen {
     }
 
     private static Component heading(String text) { return Component.literal(text).withStyle(ChatFormatting.GOLD); }
-    private static Component match(String pack) { return Component.literal("⚠ " + pack).withStyle(ChatFormatting.YELLOW); }
+    private static net.minecraft.network.chat.MutableComponent match(String pack) { return Component.literal("⚠ " + pack).withStyle(ChatFormatting.YELLOW); }
 
     @Override public void render(GuiGraphics g, int x, int y, float dt) {
         LoggerGuiWidgets.beginFrame(g, width, height, false);

@@ -47,7 +47,7 @@ public final class ClientReportNetwork {
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final Map<UUID, Long> LAST_MANUAL_REQUEST = new HashMap<>();
     private static final Map<UUID, Object> COMMAND_QUERIES = new HashMap<>();
-    private static final String ALERT_PERMISSION = "avilixlogger.clientaudit.alerts";
+    public static final String ALERT_PERMISSION = "avilixlogger.clientaudit.alerts";
     private static final java.util.ArrayDeque<AuditAlert> ALERTS = new java.util.ArrayDeque<>();
     private static final Pattern PACK_SEPARATORS = Pattern.compile("[_\\s-]+");
     private static long lastId;
@@ -112,6 +112,29 @@ public final class ClientReportNetwork {
                 .executes(ctx -> reportSettings(ctx.getSource()))
                 .then(Commands.literal("on").executes(ctx -> setEnabled(ctx.getSource(), true)))
                 .then(Commands.literal("off").executes(ctx -> setEnabled(ctx.getSource(), false)));
+    }
+
+    public static LiteralArgumentBuilder<CommandSourceStack> alertsCommand() {
+        return Commands.literal("client-report-alerts")
+                .requires(source -> source.getEntity() instanceof ServerPlayer && PermissionUtil.has(source, ALERT_PERMISSION, 2))
+                .then(Commands.literal("on").executes(ctx -> setAlerts(ctx.getSource(), true)))
+                .then(Commands.literal("off").executes(ctx -> setAlerts(ctx.getSource(), false)))
+                .executes(ctx -> {
+                    var player = ctx.getSource().getPlayerOrException();
+                    var data = LoggerServerData.get(player.getServer().overworld());
+                    return showAlertSetting(ctx.getSource(), data.clientReportAlerts(player.getUUID()));
+                });
+    }
+
+    private static int setAlerts(CommandSourceStack source, boolean value) {
+        if (!(source.getEntity() instanceof ServerPlayer player)) return 0;
+        LoggerServerData.get(player.getServer().overworld()).setClientReportAlerts(player.getUUID(), value);
+        return showAlertSetting(source, value);
+    }
+
+    private static int showAlertSetting(CommandSourceStack source, boolean value) {
+        source.sendSystemMessage(Component.literal("Личные уведомления об отчётах: " + (value ? "включены." : "выключены.")));
+        return 1;
     }
 
     private static int setEnabled(CommandSourceStack source, boolean value) {
@@ -455,7 +478,7 @@ public final class ClientReportNetwork {
 
     private static List<String> splitRules(String value) {
         return java.util.Arrays.stream(value.split(",")).map(ClientReportNetwork::normalizePack)
-                .filter(word -> !word.isEmpty()).distinct().toList();
+                .filter(word -> !word.isEmpty()).distinct().limit(128).toList();
     }
 
     private static Matches matchReport(ClientReportPayloads.Report report, TriggerRules rules) {

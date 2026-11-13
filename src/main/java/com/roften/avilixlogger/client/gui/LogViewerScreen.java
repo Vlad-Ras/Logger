@@ -565,7 +565,7 @@ public final class LogViewerScreen extends LoggerScreen {
                 sections.add(Map.entry(Component.literal("Отчёты о клиентах"),
                         menu -> minecraft.setScreen(new ClientReportScreen(menu))));
             }
-            if (ClientReportScreen.available() && ClientReportAlertsScreen.available()) {
+            if (ClientReportAlertsScreen.available()) {
                 sections.add(Map.entry(Component.literal("Уведомления об отчётах"),
                         menu -> minecraft.setScreen(new ClientReportAlertsScreen(menu))));
             }

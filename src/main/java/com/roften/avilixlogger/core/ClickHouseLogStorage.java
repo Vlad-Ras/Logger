@@ -1217,7 +1217,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             sql.append(" AND action = ").append(q.type.ordinal());
         }
 
-        if (q.actorName != null && !q.actorName.isBlank()) {
+        if (!q.actorNames.isEmpty()) {
+            appendActorsWhere(sql, q.actorNames, useActorNameLcFilter);
+        } else if (q.actorName != null && !q.actorName.isBlank()) {
             appendActorWhere(sql, q.actorName);
         }
 
@@ -1255,7 +1257,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             sql.append(" AND action = ").append(q.type.ordinal());
         }
 
-        if (q.actorName != null && !q.actorName.isBlank()) {
+        if (!q.actorNames.isEmpty()) {
+            appendActorsWhere(sql, q.actorNames, useActorNameLcFilter);
+        } else if (q.actorName != null && !q.actorName.isBlank()) {
             appendActorWhere(sql, q.actorName);
         }
 
@@ -1379,6 +1383,15 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         return out;
     }
 
+    private static void appendActorsWhere(StringBuilder sql, List<String> names, boolean indexed) {
+        sql.append(indexed ? " AND actor_name_lc IN (" : " AND lowerUTF8(actor_name) IN (");
+        for (int i = 0; i < names.size(); i++) {
+            if (i != 0) sql.append(',');
+            sql.append(sqlString(names.get(i).toLowerCase(Locale.ROOT)));
+        }
+        sql.append(')');
+    }
+
     private void appendActorWhere(StringBuilder sql, String actorName) {
         String normalized = safeString(actorName).toLowerCase(Locale.ROOT);
         if (useActorNameLcFilter) {
@@ -1459,7 +1472,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             sql.append(" AND action = ").append(q.type.ordinal());
         }
 
-        if (q.actorName != null && !q.actorName.isBlank()) {
+        if (!q.actorNames.isEmpty()) {
+            appendActorsWhere(sql, q.actorNames, false);
+        } else if (q.actorName != null && !q.actorName.isBlank()) {
             sql.append(" AND lowerUTF8(actor_name) = ").append(sqlString(q.actorName.toLowerCase(Locale.ROOT)));
         }
 

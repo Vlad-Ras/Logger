@@ -26,8 +26,10 @@ final class ClientReportAlertsScreen extends LoggerScreen {
 
     static boolean available() {
         var connection = Minecraft.getInstance().getConnection();
-        return connection != null && connection.hasChannel(ClientReportAlertPayloads.Query.TYPE)
-                && connection.hasChannel(ClientReportAlertPayloads.View.TYPE);
+        if (connection == null || !connection.hasChannel(ClientReportAlertPayloads.Query.TYPE)
+                || !connection.hasChannel(ClientReportAlertPayloads.View.TYPE)) return false;
+        var log = connection.getCommands().getRoot().getChild("log");
+        return log != null && log.getChild("client-report-alerts") != null;
     }
 
     @Override protected void init() {

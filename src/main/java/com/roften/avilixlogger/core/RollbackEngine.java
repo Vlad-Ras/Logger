@@ -188,7 +188,7 @@ public final class RollbackEngine {
         query.maxPos = scope.max();
         query.sinceTs = plan.targetTs();
         query.untilTs = plan.cutoffTs();
-        query.actorName = plan.actor();
+        query.actorNames = java.util.List.of(plan.actor().split(","));
         query.types = java.util.EnumSet.of(ActionType.BLOCK_PLACE, ActionType.BLOCK_BREAK);
         if (plan.types() != null) query.types.retainAll(plan.types());
         if (query.types.isEmpty()) return new PreparedRollback(List.of(), List.of(), List.of(), 0);
@@ -199,6 +199,8 @@ public final class RollbackEngine {
         var chains = new java.util.LinkedHashMap<BlockPos, ReplayChain>();
         var rejected = new java.util.HashSet<BlockPos>();
         int examined = 0;
+        long retained = 0;
+        long limit = LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get() * 1024L * 1024L;
         while (!cancelled.getAsBoolean()) {
             var rows = storage.query(query);
             if (rows.isEmpty()) break;
@@ -214,10 +216,14 @@ public final class RollbackEngine {
                         || row.actorUuid == null || CreateContraptionKind.fromSource(row.source) != CreateContraptionKind.UNKNOWN
                         || existing != null && !existing.last().equals(before)) {
                     rejected.add(pos);
-                    chains.remove(pos);
+                    if (chains.remove(pos) != null) retained -= PayloadSizeEstimator.estimateTags(existing.first(), existing.last());
                     continue;
                 }
-                chains.put(pos, new ReplayChain(existing == null ? before : existing.first(), after, row.type));
+                var chain = new ReplayChain(existing == null ? before : existing.first(), after, row.type);
+                chains.put(pos, chain);
+                retained += PayloadSizeEstimator.estimateTags(after)
+                        + (existing == null ? 128 + PayloadSizeEstimator.estimateTags(before) : -PayloadSizeEstimator.estimateTags(existing.last()));
+                if (retained > limit) throw new IllegalStateException("План воспроизведения превышает лимит памяти.");
             }
             var last = rows.getLast();
             if (rows.size() < PAGE) break;
