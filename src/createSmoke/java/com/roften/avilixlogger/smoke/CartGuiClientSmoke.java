@@ -249,16 +249,42 @@ public final class CartGuiClientSmoke {
                     request.setAccessible(true);
                     request.setLong(screen, 41L);
                     var pack = "file/Xray_Ultimate-v1.21.zip";
+                    var otherPack = "file/DefaultTweaks.zip";
+                    var modHash = "ab".repeat(32);
+                    var packHash = "cd".repeat(32);
                     var report = com.roften.avilixlogger.net.ClientReportPayloads.collect(10,
-                            List.of(new com.roften.avilixlogger.net.ClientReportPayloads.Mod("create", "6.0", "Create")), List.of(pack));
+                            List.of(new com.roften.avilixlogger.net.ClientReportPayloads.Mod("create", "6.0", "Create", modHash),
+                                    new com.roften.avilixlogger.net.ClientReportPayloads.Mod("ae2", "1", "Applied Energistics 2")),
+                            List.of(pack, otherPack), java.util.Map.of(pack, packHash));
+                    var searchField = type.getDeclaredField("inventorySearch");
+                    searchField.setAccessible(true);
+                    var search = (net.minecraft.client.gui.components.EditBox) searchField.get(screen);
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
                             new com.roften.avilixlogger.net.ClientReportViewPayloads.View(41, "", "AuditTarget", 123, List.of(), List.of(pack), report));
                     clickLabel(screen, "Моды");
                     clickLabel(screen, "Копировать вкладку");
                     check(mc.keyboardHandler.getClipboard().contains("Create (create)"), "mods tab did not show the display name and ID");
+                    search.setValue("ABABAB");
+                    clickLabel(screen, "Копировать вкладку");
+                    check(mc.keyboardHandler.getClipboard().contains("Create (create)")
+                            && !mc.keyboardHandler.getClipboard().contains("Applied Energistics"), "mod SHA-256 filter did not isolate Create");
+                    search.setValue("ENERGISTICS");
+                    clickLabel(screen, "Копировать вкладку");
+                    check(mc.keyboardHandler.getClipboard().contains("Applied Energistics")
+                            && !mc.keyboardHandler.getClipboard().contains("Create (create)"), "mod name filter failed");
                     clickLabel(screen, "Ресурс-паки");
                     clickLabel(screen, "Копировать вкладку");
                     check(mc.keyboardHandler.getClipboard().contains("⚠ " + pack), "matched pack was not marked in its tab");
+                    search.setValue("CDCDCD");
+                    clickLabel(screen, "Копировать вкладку");
+                    check(mc.keyboardHandler.getClipboard().contains(pack) && !mc.keyboardHandler.getClipboard().contains(otherPack),
+                            "pack SHA-256 filter failed");
+                    search.setValue("defaulttweaks");
+                    clickLabel(screen, "Копировать вкладку");
+                    check(mc.keyboardHandler.getClipboard().contains(otherPack) && !mc.keyboardHandler.getClipboard().contains(pack),
+                            "pack name filter failed");
+                    clickLabel(screen, "Моды");
+                    check(search.getValue().equals("ENERGISTICS"), "switching tabs lost the mod search");
                     var commandsRequest = type.getDeclaredField("commandsRequest");
                     commandsRequest.setAccessible(true);
                     commandsRequest.setLong(screen, 42L);
@@ -307,7 +333,9 @@ public final class CartGuiClientSmoke {
                     check(reportJson.get("player").getAsString().equals("AuditTarget")
                             && reportJson.getAsJsonArray("mods").get(0).getAsJsonObject().get("displayName").getAsString().equals("Create")
                             && reportJson.getAsJsonArray("serverCommands").get(0).getAsString().equals("/home")
-                            && reportJson.getAsJsonArray("matchedResourcePacks").size() == 1, "report JSON missing sections");
+                            && reportJson.getAsJsonArray("matchedResourcePacks").size() == 1
+                            && reportJson.getAsJsonObject("resourcePackHashes").get("file/Xray_Ultimate-v1.21.zip")
+                                    .getAsString().equals("cd".repeat(32)), "report JSON missing sections");
                     java.nio.file.Files.delete(file);
                 }
                 for(var name:FILES)check(new java.io.File(new java.io.File(mc.gameDirectory,"screenshots"),name).isFile(),"missing screenshot "+name);
@@ -338,7 +366,7 @@ public final class CartGuiClientSmoke {
         check(mc.screen==viewer,"stale teleport response closed journal");
         com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(71,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.PREPARING,"Подготовка перехода"));
         check(mc.screen==viewer,"teleport progress opened an action screen");
-        com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(71,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,"Не найдено безопасное место"));
+        com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(71,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,"Измерение записи недоступно"));
         check(mc.screen==viewer,"failed teleport closed journal");
         owner.set(null,new java.lang.ref.WeakReference<>(viewer));request.setLong(null,72);
         com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptEntryTeleport(new com.roften.avilixlogger.net.S2CEntryTeleportPayload(72,com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.SUCCESS,"Запись: minecraft:the_nether · -1020 15 -820"));
