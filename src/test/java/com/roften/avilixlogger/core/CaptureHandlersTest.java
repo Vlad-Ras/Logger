@@ -9,8 +9,11 @@ public final class CaptureHandlersTest {
         long mask = CaptureTypePolicy.mask();
         try {
             var keys = new HashSet<String>();
+            var titles = new HashSet<String>();
             for (var handler : CaptureHandlers.values()) {
                 if (!keys.add(handler.key())) throw new AssertionError("Duplicate handler key");
+                if (!titles.add(handler.title()) || handler.title().codePoints().noneMatch(c -> c >= 0x400 && c <= 0x4FF))
+                    throw new AssertionError("Duplicate or untranslated handler title: " + handler.title());
                 CaptureHandlers.install(Set.of(handler.key()));
                 for (var other : CaptureHandlers.values()) {
                     if (other.enabled() == (other == handler)) throw new AssertionError("Crossed handler controls");

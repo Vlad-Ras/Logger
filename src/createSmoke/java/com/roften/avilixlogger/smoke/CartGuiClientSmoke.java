@@ -19,7 +19,7 @@ public final class CartGuiClientSmoke {
     private static int ticks,stage,readyTicks,waitingTicks;
     private static boolean finished;
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png","logger-sections.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png","logger-sections.png","logger-server-logs.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -301,6 +301,37 @@ public final class CartGuiClientSmoke {
                     mc.setScreen(viewer);
                     clickLabel(viewer, "Разделы");
                 }
+                else if (stage == 18) {
+                    var type = Class.forName("com.roften.avilixlogger.client.gui.ServerLogsScreen");
+                    var constructor = type.getDeclaredConstructor(Screen.class);
+                    constructor.setAccessible(true);
+                    var screen = (Screen) constructor.newInstance(root);
+                    mc.setScreen(screen);
+                    var listing = type.getDeclaredField("listing");
+                    listing.setAccessible(true);
+                    listing.setLong(screen, 81);
+                    var name = "2026-11-13-7.log.gz";
+                    byte[] file = {31, (byte) 139, 8, 0, 4};
+                    var result = com.roften.avilixlogger.net.ServerLogPayloads.Result.LIST;
+                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptServerLog(
+                            new com.roften.avilixlogger.net.ServerLogPayloads.View(81, result, "", 0, 0, new byte[0],
+                                    List.of(new com.roften.avilixlogger.net.ServerLogPayloads.FileInfo(name, file.length, 1794600000000L)), ""));
+                    check(screen.children().stream().anyMatch(widget -> widget instanceof AbstractWidget row
+                            && row.getMessage().getString().contains(name)), "server archive missing from export screen");
+                    var download = type.getDeclaredField("download");
+                    download.setAccessible(true);
+                    var transfer = download.getType().getDeclaredConstructor(long.class, String.class, java.nio.file.Path.class);
+                    transfer.setAccessible(true);
+                    var directory = mc.gameDirectory.toPath().resolve("avilixlogger-server-logs");
+                    java.nio.file.Files.deleteIfExists(directory.resolve(name));
+                    download.set(screen, transfer.newInstance(82L, name, directory));
+                    var deadline = type.getDeclaredField("deadline");
+                    deadline.setAccessible(true);
+                    deadline.setLong(screen, System.nanoTime() + 30_000_000_000L);
+                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptServerLog(
+                            new com.roften.avilixlogger.net.ServerLogPayloads.View(82,
+                                    com.roften.avilixlogger.net.ServerLogPayloads.Result.DATA, name, 0, file.length, file, List.of(), ""));
+                }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==14){
                     var screen=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;
@@ -318,12 +349,27 @@ public final class CartGuiClientSmoke {
                     check(screen.children().stream().anyMatch(w -> w instanceof net.minecraft.client.gui.components.Button button
                             && button.visible && button.getMessage().getString().contains("Промышленные машины ·")),
                             "group did not show its individual switches");
+                    clickLabel(screen, "← Моды · Промышленные машины");
+                    ((net.minecraft.client.gui.components.EditBox)search.get(screen)).setValue("create.actor");
+                    var createGroup = screen.children().stream()
+                            .filter(w -> w instanceof net.minecraft.client.gui.components.Button button
+                                    && button.visible && button.getMessage().getString().startsWith("Create  ·"))
+                            .map(w -> (net.minecraft.client.gui.components.Button)w).findFirst().orElseThrow();
+                    createGroup.onPress();
+                    clickLabelPresent(screen, "Активаторы на движущихся штуковинах — ВКЛ");
+                    screen.apply(new com.roften.avilixlogger.net.S2CCaptureTypesPayload(1L << 30, 10, true, true, "", List.of()));
+                    clickLabelPresent(screen, "Активаторы на движущихся штуковинах — ВЫКЛ");
                 }
                 if(stage==8){
                     var capture=(com.roften.avilixlogger.client.gui.CaptureTypesScreen)mc.screen;
                     capture.apply(new com.roften.avilixlogger.net.S2CCaptureTypesPayload(1<<10,7,true,true,"Подшипники отключены без перезагрузки"));
                 }
             }else{
+                var exportedLog = mc.gameDirectory.toPath().resolve("avilixlogger-server-logs/2026-11-13-7.log.gz");
+                check(java.util.Arrays.equals(java.nio.file.Files.readAllBytes(exportedLog),
+                        new byte[]{31, (byte) 139, 8, 0, 4}), "server log bytes changed while saving to disk");
+                java.nio.file.Files.delete(exportedLog);
+                System.out.println("SERVER_LOG_GUI_OK: archive listing, file output and moving deployer switch");
                 var reportDir = mc.gameDirectory.toPath().resolve("avilixlogger-reports");
                 try (var exports = java.nio.file.Files.list(reportDir)) {
                     var files = exports.filter(file -> file.getFileName().toString().startsWith("AuditTarget-")).toList();
@@ -382,6 +428,10 @@ public final class CartGuiClientSmoke {
                 for(int j=i+1;j<widgets.size();j++){var b=widgets.get(j);check(a.getX()+a.getWidth()<=b.getX()||b.getX()+b.getWidth()<=a.getX()||a.getY()+a.getHeight()<=b.getY()||b.getY()+b.getHeight()<=a.getY(),"widgets overlap: "+a.getMessage().getString()+" / "+b.getMessage().getString());}}
         }
         screen.resize(mc,mc.getWindow().getGuiScaledWidth(),mc.getWindow().getGuiScaledHeight());
+    }
+    private static void clickLabelPresent(Screen screen, String label) {
+        check(screen.children().stream().anyMatch(w -> w instanceof AbstractWidget widget
+                && widget.visible && widget.active && widget.getMessage().getString().equals(label)), "missing control: " + label);
     }
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
 }
