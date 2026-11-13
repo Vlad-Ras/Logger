@@ -53,6 +53,10 @@ public final class RollbackCoordinator {
     public static void startRollback(MinecraftServer server, UUID playerId, RollbackPlanManager.Plan plan,
                                      Runnable onStarted, Consumer<RollbackReport> onComplete,
                                      Consumer<String> onError) {
+        if (!LoggerConfig.isEnabled()) {
+            onError.accept("Logger отключён. Откат недоступен.");
+            return;
+        }
         if (active != null || CartAuditContext.rollbackActive) {
             onError.accept("Другой откат уже изменяет мир. Дождитесь его завершения.");
             return;
@@ -142,7 +146,7 @@ public final class RollbackCoordinator {
     }
 
     private static void collectPreviewMarkers(RollbackEngine.PreparedRollback prepared, RollbackReport preview) {
-        var markers = new ArrayList<S2CRollbackPreviewPayload.Marker>();
+        var markers = new ArrayList<S2CRollbackPreviewPayload.Marker>(S2CRollbackPreviewPayload.MAX_MARKERS);
         int limit = S2CRollbackPreviewPayload.MAX_MARKERS;
         int blockLimit = prepared.deferred().isEmpty() ? limit : limit - 64;
         for (var block : prepared.blocks()) {
@@ -199,7 +203,8 @@ public final class RollbackCoordinator {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
-        if (cachedPreview != null && RollbackPlanManager.getValid(cachedPreview.plan().playerId()) != cachedPreview.plan()) {
+        if (cachedPreview != null && (!LoggerConfig.isEnabled()
+                || RollbackPlanManager.getValid(cachedPreview.plan().playerId()) != cachedPreview.plan())) {
             cachedPreview = null;
         }
         ActiveJob job = active;
@@ -391,6 +396,7 @@ public final class RollbackCoordinator {
                     }
                     int chunkX = first.pos().getX() >> 4;
                     int chunkZ = first.pos().getZ() >> 4;
+                    if (ticketLevel != null && (ticketLevel != level || ticketChunk.x != chunkX || ticketChunk.z != chunkZ)) releaseChunk();
                     int count = Math.min(blockBatchSize, operationBudget - used);
                     ArrayList<RollbackEngine.PreparedBlockSnapshot> batch = new ArrayList<>(count);
                     while (blockIndex + batch.size() < prepared.blocks().size() && batch.size() < count) {

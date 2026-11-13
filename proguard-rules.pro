@@ -34,6 +34,7 @@
     public static void acceptCaptureHealth(...);
     public static void acceptClientReportRequest(...);
     public static void acceptClientReportView(...);
+    public static void acceptClientReportAlerts(...);
     public static void acceptRollbackPreview(...);
 }
 

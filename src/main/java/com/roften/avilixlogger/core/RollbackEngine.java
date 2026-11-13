@@ -200,7 +200,12 @@ public final class RollbackEngine {
         var rejected = new java.util.HashSet<BlockPos>();
         int examined = 0;
         long retained = 0;
-        long limit = LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get() * 1024L * 1024L;
+        long limit;
+        try {
+            limit = LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get() * 1024L * 1024L;
+        } catch (IllegalStateException unloadedConfig) {
+            limit = 512L * 1024L * 1024L;
+        }
         while (!cancelled.getAsBoolean()) {
             var rows = storage.query(query);
             if (rows.isEmpty()) break;
@@ -216,7 +221,7 @@ public final class RollbackEngine {
                         || row.actorUuid == null || CreateContraptionKind.fromSource(row.source) != CreateContraptionKind.UNKNOWN
                         || existing != null && !existing.last().equals(before)) {
                     rejected.add(pos);
-                    if (chains.remove(pos) != null) retained -= PayloadSizeEstimator.estimateTags(existing.first(), existing.last());
+                    if (chains.remove(pos) != null) retained -= 128 + PayloadSizeEstimator.estimateTags(existing.first(), existing.last());
                     continue;
                 }
                 var chain = new ReplayChain(existing == null ? before : existing.first(), after, row.type);

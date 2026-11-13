@@ -1953,7 +1953,7 @@ public final class LoggerCommands {
             RollbackPlanManager.clear(sp.getUUID());
             clearRollbackPreview(sp);
             CommandSourceStack src = ctx.getSource();
-            src.sendSystemMessage(Component.literal("План #" + plan.id() + " принят. ClickHouse готовит точный список операций вне серверного тика…")
+            src.sendSystemMessage(Component.literal("План #" + plan.id() + " принят. Подготавливаю выполнение…")
                     .withStyle(ChatFormatting.YELLOW));
             RollbackCoordinator.startRollback(src.getServer(), sp.getUUID(), plan,
                     () -> src.sendSystemMessage(Component.literal(plan.replay() ? "Воспроизведение блоков началось и выполняется порциями."
@@ -2240,6 +2240,8 @@ public final class LoggerCommands {
         if (key == null) return "неизвестно";
         return switch (key) {
             case "chunk_unloaded" -> "чанк не загружен";
+            case "chunk_timeout" -> "чанк не загрузился за 200 тиков";
+            case "replay_conflict_or_unsupported" -> "текущее состояние отличается или блок не поддерживается";
             case "no_snapshot" -> "нет снимка";
             case "no_entity_snapshot" -> "нет снимка сущности";
             case "unsafe_entity_snapshot" -> "опасная сущность Create/contraption";
