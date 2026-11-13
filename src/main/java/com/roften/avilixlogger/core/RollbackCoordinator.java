@@ -111,10 +111,11 @@ public final class RollbackCoordinator {
                                     + (maxPreparedBytes / (1024L * 1024L)) + " MiB; сузьте область или период");
                         }
                         if (!apply) {
-                            preview.merge(RollbackEngine.previewPrepared(prepared));
-                            if (collectMarkers) collectPreviewMarkers(prepared, preview);
+                            if (collectMarkers) collectBlockMarkers(prepared, preview);
+                            preview.merge(RollbackEngine.previewPrepared(prepared, collectMarkers ? entry -> addEntityMarker(preview, entry) : null));
                         }
                     }
+                    if (collectMarkers) preview.previewMarkers = List.copyOf(preview.previewMarkers);
                     server.execute(() -> {
                         if (next.cancelled || !PREPARATIONS.remove(playerId, next)) return;
                         if (!apply) {
@@ -146,7 +147,7 @@ public final class RollbackCoordinator {
         }
     }
 
-    private static void collectPreviewMarkers(RollbackEngine.PreparedRollback prepared, RollbackReport preview) {
+    private static void collectBlockMarkers(RollbackEngine.PreparedRollback prepared, RollbackReport preview) {
         var markers = new ArrayList<S2CRollbackPreviewPayload.Marker>(S2CRollbackPreviewPayload.MAX_MARKERS);
         markers.addAll(preview.previewMarkers);
         int limit = S2CRollbackPreviewPayload.MAX_MARKERS;
@@ -163,18 +164,17 @@ public final class RollbackCoordinator {
                     || id.equals("minecraft:void_air") ? S2CRollbackPreviewPayload.Kind.REMOVE : S2CRollbackPreviewPayload.Kind.BLOCK;
             markers.add(new S2CRollbackPreviewPayload.Marker(block.pos(), kind, id.length() <= 256 ? id : ""));
         }
-        for (var row : prepared.deferred()) {
-            if (row.type != ActionType.ENTITY_DEATH && row.type != ActionType.PLANE_REMOVE) continue;
-            if (row.entityType == null || row.entityType.length() > 256 || row.entityNbt == null) continue;
-            if (markers.size() == limit) {
-                preview.previewLimited = true;
-                break;
-            }
-            if (NbtSerde.validateEntitySnapshot(row.entityType, row.entityUuid, row.rollbackEntity()) != null) continue;
-            markers.add(new S2CRollbackPreviewPayload.Marker(new BlockPos(row.x, row.y, row.z),
-                    S2CRollbackPreviewPayload.Kind.ENTITY, row.entityType));
+        preview.previewMarkers = markers;
+    }
+
+    private static void addEntityMarker(RollbackReport preview, LogEntry row) {
+        if (row.entityType.length() > 256) return;
+        if (preview.previewMarkers.size() == S2CRollbackPreviewPayload.MAX_MARKERS) {
+            preview.previewLimited = true;
+            return;
         }
-        preview.previewMarkers = List.copyOf(markers);
+        preview.previewMarkers.add(new S2CRollbackPreviewPayload.Marker(new BlockPos(row.x, row.y, row.z),
+                S2CRollbackPreviewPayload.Kind.ENTITY, row.entityType));
     }
 
     public static CancelResult cancel(UUID playerId) {

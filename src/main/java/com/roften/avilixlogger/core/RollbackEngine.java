@@ -260,6 +260,10 @@ public final class RollbackEngine {
 
     /** Counts a prepared plan without reading chunks, registries or any other live world state. */
     public static RollbackReport previewPrepared(PreparedRollback prepared) {
+        return previewPrepared(prepared, null);
+    }
+
+    static RollbackReport previewPrepared(PreparedRollback prepared, java.util.function.Consumer<LogEntry> entityMarkers) {
         RollbackReport report = new RollbackReport();
         if (prepared == null) return report;
         for (PreparedBlockSnapshot block : prepared.blocks()) {
@@ -274,8 +278,8 @@ public final class RollbackEngine {
             if (block.containerSlotsBeforeSnbt() != null) report.containersRestored++;
             report.onApplied(block.type());
         }
-        for (LogEntry entry : prepared.entityRemovals()) countPreparedEntry(entry, report);
-        for (LogEntry entry : prepared.deferred()) countPreparedEntry(entry, report);
+        for (LogEntry entry : prepared.entityRemovals()) countPreparedEntry(entry, report, entityMarkers);
+        for (LogEntry entry : prepared.deferred()) countPreparedEntry(entry, report, entityMarkers);
         return report;
     }
 
@@ -341,7 +345,7 @@ public final class RollbackEngine {
                 || source.startsWith("mod:createcobblestone:") || source.startsWith("mod:create_vibrant_vaults:")
                 || source.startsWith("mod:create_enchantment_industry:") || source.startsWith("mod:createdieselgenerators:")));
     }
-    private static void countPreparedEntry(LogEntry entry, RollbackReport report) {
+    private static void countPreparedEntry(LogEntry entry, RollbackReport report, java.util.function.Consumer<LogEntry> entityMarkers) {
         if (modAuditOnly(entry)) { report.onSkipped("not_rollbackable"); return; }
         if (entry == null || entry.type == null) {
             report.onSkipped("not_rollbackable");
@@ -353,14 +357,16 @@ public final class RollbackEngine {
                     report.onSkipped("no_entity_snapshot");
                     return;
                 }
-                String invalid = NbtSerde.validateEntitySnapshot(entry.entityType, entry.entityUuid, entry.entityNbt);
+                String entitySnapshot = entry.rollbackEntity();
+                String invalid = NbtSerde.validateEntitySnapshot(entry.entityType, entry.entityUuid, entitySnapshot);
                 if (invalid != null) {
                     report.onSkipped(invalid);
                     return;
                 }
-                if (NbtSerde.isCreateContraptionSnapshot(entry.entityType, entry.entityNbt)) report.createStructuresRestored++;
+                if (NbtSerde.isCreateContraptionSnapshot(entry.entityType, entitySnapshot)) report.createStructuresRestored++;
                 else report.entitiesRespawned++;
                 report.onApplied(entry.type);
+                if (entityMarkers != null) entityMarkers.accept(entry);
             }
             case ENTITY_SPAWN, PLANE_PLACE -> {
                 if (entry.entityUuid == null) report.onSkipped("missing_uuid");
