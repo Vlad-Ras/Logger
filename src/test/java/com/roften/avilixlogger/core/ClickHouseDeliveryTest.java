@@ -38,10 +38,10 @@ final class ClickHouseDeliveryTest {
             } catch (Throwable failure) { handlerFailure.set(failure); status = 500; }
             String responseText=body.startsWith("SELECT") ? body.contains("JSONEachRow")?Objects.toString(lookupResponse.get(),""):"0\n" : status == 200 ? "" : "simulated failure";
             if(schemaFailure.get()&&body.startsWith("SELECT"))responseText="UNKNOWN_IDENTIFIER target_id";
-            if(legacyRows.get()!=null&&body.startsWith("SELECT id, data")){
+            if(legacyRows.get()!=null&&body.startsWith("SELECT id, ts_ms, data")){
                 var cursor=java.util.regex.Pattern.compile("AND id < ([0-9]+)").matcher(body);long beforeId=cursor.find()?Long.parseLong(cursor.group(1)):Long.MAX_VALUE;
                 var limit=java.util.regex.Pattern.compile("LIMIT ([0-9]+)").matcher(body);check(limit.find(),"legacy LIMIT missing");int max=Integer.parseInt(limit.group(1));
-                responseText=legacyRows.get().stream().filter(e->e.id<beforeId).limit(max).map(e->e.id+"\t"+Base64.getEncoder().encodeToString(GzipJson.toGzippedJsonBytes(e))+"\n").collect(java.util.stream.Collectors.joining());
+                responseText=legacyRows.get().stream().filter(e->e.id<beforeId).limit(max).map(e->e.id+"\t"+e.ts+"\t"+Base64.getEncoder().encodeToString(GzipJson.toGzippedJsonBytes(e))+"\n").collect(java.util.stream.Collectors.joining());
             }
             byte[] response=responseText.getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(status, response.length == 0 ? -1 : response.length);

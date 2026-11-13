@@ -22,7 +22,9 @@ final class CartGuiWorkflowSmoke {
                         && !scoped.hidden(ActionType.BLOCK_PLACE, "mod:createaddon", "")
                         && !scoped.hidden(ActionType.BLOCK_PLACE, "player:place", "")
                         && !scoped.hidden(ActionType.BLOCK_BREAK, "mod:create", ""), "scoped visibility excluded the wrong event");
-        var journalFilters = new GuiFilters(1, 3, 0, -1, 0, "", "", "", "", -1, -1, "", List.of(), List.of(),
+        var zone = java.time.ZoneId.of("Europe/Moscow");
+        var calendar = GuiTimeFilter.parse("11.11.2026 22:11..11.11.2026 22:12", java.time.ZonedDateTime.now(zone));
+        var journalFilters = new GuiFilters(1, 3, 0, -1, 0, "", "", "", "", calendar.since(), calendar.until(), "", List.of(), List.of(),
                 scoped.toggleMod("ae2").toggleSource(GuiEventVisibility.UNATTRIBUTED).toggle(ActionType.BLOCK_BREAK));
         var journalBuffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
         try {

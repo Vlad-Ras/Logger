@@ -221,6 +221,12 @@ public final class ClickHouseNativeSmoke {
                 db.shutdown();
                 db = null;
             }
+            config.set(List.of("clickhouse", "schemaMode"), "legacy");
+            LoggerConfig.SPEC.acceptConfig((IConfigSpec.ILoadedConfig) ctor.newInstance(config, null, null));
+            db = new ClickHouseLogStorage();
+            verifyGuiCalendarBounds(db);
+            db.shutdown();
+            db = null;
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {
             if (db != null) db.shutdown();
