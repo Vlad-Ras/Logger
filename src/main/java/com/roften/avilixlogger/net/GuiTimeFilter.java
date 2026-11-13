@@ -52,10 +52,13 @@ public final class GuiTimeFilter {
         parse(result,now);return result;
     }
     public static Selection parse(String input, ZonedDateTime now) {
-        String value = input == null ? "" : input.trim();
+        // Pasted dates can contain a non-breaking space between the date and time.
+        String value = input == null ? "" : input.replace('\u00A0', ' ').replace('\u202F', ' ').strip();
         if (value.isEmpty()) return new Selection(-1, -1, -1);
         try {
-            if (value.matches("[0-9]+[mMhHdD]?")) {
+            boolean fromPrefix = value.startsWith("от ") || value.startsWith("с ");
+            if (fromPrefix) value = value.substring(value.indexOf(' ') + 1).strip();
+            if (!fromPrefix && value.matches("[0-9]+[mMhHdD]?")) {
                 char last = Character.toLowerCase(value.charAt(value.length() - 1));
                 boolean suffix = Character.isLetter(last);
                 int amount = Integer.parseInt(suffix ? value.substring(0, value.length() - 1) : value);
@@ -63,36 +66,40 @@ public final class GuiTimeFilter {
             }
             String[] range = value.split("\\.\\.", -1);
             if (range.length > 2 || range.length==1&&range[0].isBlank() || range.length == 2 && range[1].isBlank()) throw new IllegalArgumentException();
-            long since = range[0].isBlank()?0:instant(range[0].trim(), now, false);
-            long until = range.length == 2 ? instant(range[1].trim(), now, true) : -1;
+            DateTime start = range[0].isBlank() ? null : parseDateTime(range[0].strip(), now.toLocalDate());
+            LocalDate firstDate = start == null ? now.toLocalDate() : start.date();
+            long since = start == null ? 0 : instant(start, now.getZone(), false);
+            long until = range.length == 2 ? instant(parseDateTime(range[1].strip(), firstDate), now.getZone(), true) : -1;
             if (since < 0 || until >= 0 && until < since) throw new IllegalArgumentException();
             return new Selection(-1, since, until);
         } catch (RuntimeException failure) {
             throw new IllegalArgumentException("Время: 30m, 13.10.2026, 03:00 или 13.10.2026 03:00; диапазон разделяется ..", failure);
         }
     }
-    private static long instant(String value, ZonedDateTime now, boolean upper) {
-        String[] parts = value.replace('T', ' ').trim().split("\\s+");
+    private record DateTime(LocalDate date, String clock) {}
+
+    private static DateTime parseDateTime(String value, LocalDate defaultDate) {
+        String[] parts = value.replace('T', ' ').strip().split("\\s+");
         if (parts.length > 2) throw new IllegalArgumentException();
-        LocalDate date;
-        LocalTime time;
-        String clock = "";
-        boolean dateOnly = false;
-        if (parts.length == 1 && parts[0].contains(":")) {
-            date = now.toLocalDate(); clock = parts[0]; time = LocalTime.parse(clock);
-        } else {
-            String day = parts[0];
-            date = day.contains("-") ? LocalDate.parse(day) : LocalDate.parse(day.matches("[0-9]{2}\\.[0-9]{2}") ? day + "." + now.getYear() : day, DATE);
-            dateOnly = parts.length == 1;
-            if (!dateOnly) clock = parts[1];
-            time = dateOnly ? LocalTime.MIDNIGHT : LocalTime.parse(clock);
+        if (parts.length == 1 && parts[0].contains(":")) return new DateTime(defaultDate, parts[0]);
+        String day = parts[0];
+        LocalDate date = day.contains("-") ? LocalDate.parse(day)
+                : LocalDate.parse(day.matches("[0-9]{2}\\.[0-9]{2}") ? day + "." + defaultDate.getYear() : day, DATE);
+        return new DateTime(date, parts.length == 1 ? "" : parts[1]);
+    }
+
+    private static long instant(DateTime value, ZoneId zone, boolean upper) {
+        var date = value.date();
+        String clock = value.clock();
+        if (clock.isEmpty()) {
+            return upper ? date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
+                    : date.atStartOfDay(zone).toInstant().toEpochMilli();
         }
-        var local = date.atTime(time);
-        var zoned = local.atZone(now.getZone());
+        var local = date.atTime(LocalTime.parse(clock));
+        var zoned = local.atZone(zone);
         if (!zoned.toLocalDateTime().equals(local)) throw new IllegalArgumentException("Время отсутствует при смене часового пояса");
-        if (!upper) return zoned.toInstant().toEpochMilli();
-        if (dateOnly) return date.plusDays(1).atStartOfDay(now.getZone()).toInstant().toEpochMilli() - 1;
         long millis = zoned.toInstant().toEpochMilli();
+        if (!upper) return millis;
         if (clock.length() == 5) return millis + 59_999;
         if (clock.length() == 8) return millis + 999;
         return millis;

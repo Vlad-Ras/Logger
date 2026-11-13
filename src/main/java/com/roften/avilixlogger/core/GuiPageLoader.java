@@ -16,10 +16,14 @@ public final class GuiPageLoader {
             var page=query.copy();if(query.chronological)page.afterId=cursor;else page.beforeId=cursor;page.cursorTs=cursorTs;page.limit=Math.min(batch,32000-entries.size());
             var raw=query.chronological?storage.query(page):storage.queryReverse(page);
             if(raw==null||raw.isEmpty()){exhausted=true;break;}
-            long next=raw.getLast().id;
-            if(next<=0||cursor>0&&(!query.chronological?next>=cursor:raw.getLast().ts<cursorTs||raw.getLast().ts==cursorTs&&next<=cursor))throw new IllegalStateException("БД вернула неверный курсор страницы");
             boolean memoryLimit=false;
             for(var row:raw){
+                if (row.ts < query.sinceTs || row.ts > query.untilTs)
+                    throw new IllegalStateException("БД вернула строку за границами периода");
+                if (row.id <= 0 || cursor > 0 && (query.chronological
+                        ? row.ts < cursorTs || row.ts == cursorTs && row.id <= cursor
+                        : row.id >= cursor))
+                    throw new IllegalStateException("БД вернула неверный порядок записей");
                 long weight=PayloadSizeEstimator.estimate(row);
                 // Never skip a row: unconsumed results are fetched again after the last
                 // displayed cursor. One oversized row is still available by itself.

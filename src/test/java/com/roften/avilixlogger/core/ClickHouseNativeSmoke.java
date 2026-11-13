@@ -7,6 +7,7 @@ import net.neoforged.fml.config.IConfigSpec;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -29,6 +30,51 @@ public final class ClickHouseNativeSmoke {
             check(page.size()==2&&page.stream().noneMatch(e->e.id==later.id),"exact selected-ID read broadened");
         }
         System.out.println("CHRONOLOGICAL_SEARCH_NATIVE_OK: real feed/details, From boundary, equal timestamps, clock-adjusted IDs and exact selection");
+    }
+    private static void verifyGuiCalendarBounds(ClickHouseLogStorage db) throws Exception {
+        var zone = java.time.ZoneId.of("Europe/Moscow");
+        var now = java.time.ZonedDateTime.of(2026, 11, 14, 12, 0, 0, 0, zone);
+        var day = java.time.LocalDate.of(2026, 11, 11);
+        long midnight = day.atStartOfDay(zone).toInstant().toEpochMilli();
+        long lower = midnight + (14 * 60 + 30) * 60_000L;
+        long rangeStart = midnight + (22 * 60 + 11) * 60_000L;
+        long rangeEnd = rangeStart + 119_999L;
+        String source = "native:gui-calendar:" + UUID.randomUUID();
+        var rows = new ArrayList<LogEntry>();
+        for (long time : new long[]{midnight - 1, midnight, lower - 1, lower, rangeStart - 1, rangeStart,
+                rangeStart + 500, rangeEnd, rangeEnd + 1, midnight + 86_400_000L}) {
+            var entry = AsyncPipelineTest.row("calendar boundary");
+            entry.dim = "minecraft:overworld";
+            entry.type = ActionType.BLOCK_PLACE;
+            entry.source = source;
+            entry.x = 32; entry.y = 70; entry.z = 32;
+            entry.ts = time;
+            rows.add(entry);
+        }
+        db.appendBatch(source, rows.reversed());
+
+        var since = com.roften.avilixlogger.net.GuiTimeFilter.parse("11.11.2026 14:30", now);
+        var range = com.roften.avilixlogger.net.GuiTimeFilter.parse("11.11.2026 22:11..11.11.2026 22:12", now);
+        for (boolean details : List.of(false, true)) {
+            var q = new LogQuery();
+            q.dim = "minecraft:overworld";
+            q.minPos = new net.minecraft.core.BlockPos(0, 0, 0);
+            q.maxPos = new net.minecraft.core.BlockPos(100, 120, 100);
+            q.includeIntersectingClaims = true;
+            q.sourcePrefix = source;
+            q.requireDetails = details;
+            new com.roften.avilixlogger.net.GuiFilters(1, 1, 0, -1, -1, "", "", "", "",
+                    since.since(), since.until(), "").applyTime(q, now.toInstant().toEpochMilli());
+            var page = GuiPageLoader.load(db, q, 1, false, () -> false, null);
+            check(page.entries().size() == 2 && page.entries().getFirst().ts == lower,
+                    "14:30 lookup did not start at 14:30");
+            new com.roften.avilixlogger.net.GuiFilters(1, 1, 0, -1, -1, "", "", "", "",
+                    range.since(), range.until(), "").applyTime(q, now.toInstant().toEpochMilli());
+            var window = GuiPageLoader.load(db, q, 10, true, () -> false, batch -> false);
+            check(window.entries().stream().map(row -> row.ts).toList().equals(List.of(rangeStart, rangeStart + 500, rangeEnd)),
+                    "22:11–22:12 lookup included an adjacent date or lost a boundary");
+        }
+        System.out.println("GUI_CALENDAR_BOUNDS_NATIVE_OK: exact dates through GUI filters, bounded spatial SQL and chronological pages");
     }
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);
@@ -169,7 +215,11 @@ public final class ClickHouseNativeSmoke {
             for(boolean useFeed:new boolean[]{true,false}) {
                 config.set(List.of("clickhouse","useFeedTable"),useFeed);
                 LoggerConfig.SPEC.acceptConfig((IConfigSpec.ILoadedConfig)ctor.newInstance(config,null,null));
-                db=new ClickHouseLogStorage();verifyPlayerDeathFeed(db,useFeed);db.shutdown();db=null;
+                db = new ClickHouseLogStorage();
+                verifyPlayerDeathFeed(db, useFeed);
+                verifyGuiCalendarBounds(db);
+                db.shutdown();
+                db = null;
             }
             System.out.println("CLICKHOUSE_NATIVE_OK: old split schema migration, exact details, GUI feed, acknowledged insert, restart; player v1 and turret v2 shot/hit/kill/reload/player-death evidence survives detail pruning and exact ID lookup");
         } finally {

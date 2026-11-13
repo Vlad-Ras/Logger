@@ -50,6 +50,26 @@ public record GuiFilters(
     }
     public static final GuiFilters DEFAULT = new GuiFilters(1, 1, 0, -1, -1, "", "", "", "");
 
+    public void applyTime(com.roften.avilixlogger.core.LogQuery query, long now) {
+        query.untilTs = now;
+        if (absoluteSinceTs >= 0) {
+            query.sinceTs = absoluteSinceTs;
+            query.untilTs = absoluteUntilTs < 0 ? now : absoluteUntilTs;
+            query.chronological = absoluteSinceTs > 0;
+            return;
+        }
+        int preset = switch (timePresetIdx) {
+            case 0 -> 5;
+            case 2 -> 120;
+            case 3 -> 1440;
+            case 4 -> 10080;
+            default -> 30;
+        };
+        int minutes = customTimeMinutes < 0 ? preset : customTimeMinutes;
+        query.sinceTs = minutes == 0 ? 0 : now - minutes * 60_000L;
+        query.chronological = false;
+    }
+
     private static GuiEventVisibility readVisibility(RegistryFriendlyByteBuf buf) {
         long categories = buf.readLong();
         var types = ActionType.values();

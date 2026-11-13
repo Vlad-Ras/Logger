@@ -40,12 +40,15 @@ public final class LogText {
         return toChatLine(null, e);
     }
 
+    public static MutableComponent timePrefix(long timestamp) {
+        String time = TIME_FMT.format(Instant.ofEpochMilli(timestamp).atZone(ZONE));
+        return Component.empty().append(Component.literal("[" + time + "] ").withStyle(ChatFormatting.DARK_GRAY));
+    }
+
     public static Component toChatLine(ServerLevel level, LogEntry e) {
         if (e == null) return Component.empty();
 
-        String ts = TIME_FMT.format(Instant.ofEpochMilli(e.ts).atZone(ZONE));
-        MutableComponent c = Component.empty();
-        c.append(Component.literal("[" + ts + "] ").withStyle(ChatFormatting.DARK_GRAY));
+        MutableComponent c = timePrefix(e.ts);
 
         // New player-death rows persist the exact vanilla/modded death text produced by the combat
         // tracker. Render that text directly instead of rebuilding it from killer/victim fields.

@@ -18,6 +18,11 @@ public final class ReleaseUiContractsTest {
         check(Instant.parse("2026-11-01T20:25:42Z").toEpochMilli()>narrow.until(),"23:25 entered a 14:00–15:00 search");
         check(GuiTimeFilter.parse("01.11.2026 14:00..02.11.2026 15:00:59.999",now).mode()==GuiTimeFilter.Mode.RANGE,
                 "saved absolute range is incompatible");
+        var exactInput = GuiTimeFilter.parse("от 11.11.2026\u202F14:30", now);
+        check(exactInput.since() == Instant.parse("2026-11-11T11:30:00Z").toEpochMilli(), "pasted time lost its lower bound");
+        var sameDay = GuiTimeFilter.parse("11.11.2026 22:11..22:12", now);
+        check(sameDay.equals(GuiTimeFilter.parse("11.11.2026 22:11..11.11.2026 22:12", now)),
+                "second time without a date used today");
         reject(()->GuiTimeFilter.form(GuiTimeFilter.Mode.RANGE,"01.11.2026","14:00","","",now));
         reject(()->GuiTimeFilter.form(GuiTimeFilter.Mode.RANGE,"","","01.11.2026","15:00",now));
         var day=GuiTimeFilter.parse(GuiTimeFilter.rangeInput("01.11.2026","","01.11.2026","",now),now);

@@ -1467,7 +1467,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (splitSchema && !shouldReadLegacyUnifiedTable()) return List.of();
         StringBuilder sql = new StringBuilder();
         boolean allDims = isAllDimensions(q.dim);
-        sql.append("SELECT id, data FROM ").append(qualifiedLegacyTable())
+        sql.append("SELECT id, ts_ms, data FROM ").append(qualifiedLegacyTable())
                 .append(" WHERE ts_ms >= ").append(Math.max(0L, q.sinceTs))
                 .append(" AND ts_ms <= ").append(Math.max(0L, q.untilTs));
 
@@ -1518,18 +1518,23 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 String line = lines.next();
                 if (line == null || line.isBlank()) continue;
                 int tab = line.indexOf('\t');
-                if (tab <= 0) throw new IllegalStateException("Invalid unified ClickHouse row at response line " + (lineNumber + 1));
-                long id;
-                try { id = Long.parseLong(line.substring(0, tab).trim()); }
-                catch (NumberFormatException invalidId) {
-                    throw new IllegalStateException("Invalid unified ClickHouse id at response line " + (lineNumber + 1), invalidId);
+                int timestampEnd = tab < 0 ? -1 : line.indexOf('\t', tab + 1);
+                if (tab <= 0 || timestampEnd < 0)
+                    throw new IllegalStateException("Invalid unified ClickHouse row at response line " + (lineNumber + 1));
+                long id, timestamp;
+                try {
+                    id = Long.parseLong(line, 0, tab, 10);
+                    timestamp = Long.parseLong(line, tab + 1, timestampEnd, 10);
+                } catch (NumberFormatException invalidKey) {
+                    throw new IllegalStateException("Invalid unified ClickHouse key at response line " + (lineNumber + 1), invalidKey);
                 }
-                String data = line.substring(tab + 1).trim();
+                String data = line.substring(timestampEnd + 1).trim();
                 if (data.isBlank()) throw new IllegalStateException("Missing unified ClickHouse payload at response line " + (lineNumber + 1));
                 byte[] gz = Base64.getDecoder().decode(data);
                 LogEntry e = GzipJson.fromGzippedJsonBytes(gz, LogEntry.class);
                 if (e == null) throw new IllegalStateException("Empty unified ClickHouse payload at response line " + (lineNumber + 1));
                 e.id = id;
+                e.ts = timestamp;
                 out.add(e);
             }
             markHealthy();

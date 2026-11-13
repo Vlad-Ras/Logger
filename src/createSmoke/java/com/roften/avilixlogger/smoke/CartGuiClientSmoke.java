@@ -172,7 +172,21 @@ public final class CartGuiClientSmoke {
                 else if(stage==9){
                     var parent=new com.roften.avilixlogger.client.gui.LogViewerScreen();
                     var constructor=Class.forName("com.roften.avilixlogger.client.gui.TimeRangeScreen").getDeclaredConstructor(parent.getClass(),java.time.ZoneId.class,String.class,java.util.function.Consumer.class);
-                    constructor.setAccessible(true);mc.setScreen((Screen)constructor.newInstance(parent,java.time.ZoneId.of("Europe/Moscow"),"01.11.2026 10:30..02.11.2026 12:45",(java.util.function.Consumer<String>)value->{}));
+                    constructor.setAccessible(true);
+                    var zone = java.time.ZoneId.of("Europe/Moscow");
+                    var applied = new java.util.concurrent.atomic.AtomicReference<String>();
+                    var now = java.time.ZonedDateTime.now(zone);
+                    for (String input : List.of("11.11.2026 14:30", "11.11.2026 22:11..11.11.2026 22:12",
+                            "11.11.2026 22:11:00.021..11.11.2026 22:12:00.000")) {
+                        var exact = (Screen) constructor.newInstance(parent, zone, input, (java.util.function.Consumer<String>)applied::set);
+                        mc.setScreen(exact);
+                        clickLabel(exact, "Применить");
+                        check(com.roften.avilixlogger.net.GuiTimeFilter.parse(input, now)
+                                        .equals(com.roften.avilixlogger.net.GuiTimeFilter.parse(applied.get(), now)),
+                                "opening and applying exact time changed the bounds: " + input + " → " + applied.get());
+                    }
+                    mc.setScreen((Screen) constructor.newInstance(parent, zone,
+                            "11.11.2026 22:11..11.11.2026 22:12", (java.util.function.Consumer<String>) value -> {}));
                 }
                 else if(stage==10){
                     var parent=new com.roften.avilixlogger.client.gui.LogViewerScreen();

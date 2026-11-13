@@ -34,10 +34,13 @@ final class TimeRangeScreen extends LoggerScreen {
     private void set(int index, ZonedDateTime time) {
         values[index] = time.format(DATE);
         LocalTime clock = time.toLocalTime();
-        if (index == 2 && clock.getNano() == 999_000_000) {
-            values[index + 1] = clock.format(DateTimeFormatter.ofPattern(clock.getSecond() == 59 ? "HH:mm" : "HH:mm:ss"));
+        if (index == 2) {
+            String format = clock.getNano() == 999_000_000
+                    ? (clock.getSecond() == 59 ? "HH:mm" : "HH:mm:ss") : "HH:mm:ss.SSS";
+            values[index + 1] = clock.format(DateTimeFormatter.ofPattern(format));
         } else {
-            values[index + 1] = clock.toString();
+            values[index + 1] = clock.getNano() == 0 ? clock.toString()
+                    : clock.format(DateTimeFormatter.ofPattern("HH:mm:ss.SSS"));
         }
     }
     private double scale() { return LogViewerScreen.sharedControlScale(width, height); }

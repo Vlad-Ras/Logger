@@ -11,6 +11,7 @@ import com.roften.avilixlogger.core.ChatLogPager;
 import com.roften.avilixlogger.core.LastQueryManager;
 import com.roften.avilixlogger.core.LogEntry;
 import com.roften.avilixlogger.core.LogQuery;
+import com.roften.avilixlogger.core.LogText;
 import com.roften.avilixlogger.core.LoggerServerData;
 import com.roften.avilixlogger.core.LoggerRuntime;
 import com.roften.avilixlogger.core.RollbackPlanManager;
@@ -865,7 +866,7 @@ public final class LoggerNetwork {
 
     private static String guiTimeTitle(LogQuery query, GuiFilters filters) {
         if (filters.absoluteSinceTs() < 0) return "Логи (GUI)";
-        var format = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss")
+        var format = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss[.SSS]")
                 .withZone(java.time.ZoneId.systemDefault());
         String from = query.sinceTs == 0 ? "" : format.format(java.time.Instant.ofEpochMilli(query.sinceTs));
         String until = format.format(java.time.Instant.ofEpochMilli(query.untilTs));
@@ -879,25 +880,7 @@ public final class LoggerNetwork {
         if (gf != null) q.guiVisibility = gf.visibility();
         ServerLevel level = sp.serverLevel();
 
-        long now = System.currentTimeMillis();
-        q.untilTs = now;
-
-        // Time: custom minutes override presets.
-        int customTime = gf != null ? gf.customTimeMinutes() : -1;
-        if (customTime >= 0) {
-            q.sinceTs = customTime == 0 ? 0 : now - (customTime * 60_000L);
-        } else {
-            // Presets (minutes): 5m, 30m, 2h, 1d, 7d
-            int[] mins = new int[] { 5, 30, 120, 1440, 10080 };
-            int tidx = gf != null ? gf.timePresetIdx() : 1;
-            if (tidx < 0 || tidx >= mins.length) tidx = 1;
-            q.sinceTs = now - (mins[tidx] * 60_000L);
-        }
-
-        if (gf != null && gf.absoluteSinceTs() >= 0) {
-            q.chronological = gf.absoluteSinceTs() > 0;
-            q.sinceTs = gf.absoluteSinceTs(); q.untilTs = gf.absoluteUntilTs() >= 0 ? Math.min(now, gf.absoluteUntilTs()) : now;
-        }
+        (gf == null ? GuiFilters.DEFAULT : gf).applyTime(q, System.currentTimeMillis());
 
         // Radius: custom blocks override presets. Radius=0 means WORLD.
         int r;
@@ -1129,7 +1112,7 @@ public final class LoggerNetwork {
         int size = C2SRequestPagePayload.clampPageSize(requestedPageSize);
 
         LogQuery q = state.baseQuery.copy();
-        if (q.sinceTs > q.untilTs) return errorPage(level, state, "Нет записей: начало периода ещё не наступило.");
+        if (q.sinceTs > q.untilTs) return errorPage(level, state, "Нет записей: проверьте начало и конец периода.");
         if(q.chronological)q.afterId=state.currentBeforeId();else q.beforeId=state.currentBeforeId();
         q.cursorTs=state.currentCursorTs();
 
@@ -1570,7 +1553,7 @@ public final class LoggerNetwork {
 
             if (burst != null && (key == null || !burst.canAccept(e, key))) {
                 if (renderRows) out.add(burst.toRow(level));
-                nextCursorCandidate = burst.oldestId();
+                nextCursorCandidate = burst.lastId();
                 burst = null;
                 if (++count == pageSize) {
                     hasNext = true;
@@ -1594,7 +1577,7 @@ public final class LoggerNetwork {
 
         if (count < pageSize && burst != null) {
             if (renderRows) out.add(burst.toRow(level));
-            nextCursorCandidate = burst.oldestId();
+            nextCursorCandidate = burst.lastId();
         }
 
         return new AggregationResult(List.copyOf(out), hasNext, nextCursorCandidate);
@@ -1664,8 +1647,6 @@ public final class LoggerNetwork {
         private final List<LogEntry> events = new ArrayList<>();
         private long newestTs;
         private long oldestTs;
-        private long newestId;
-        private long oldestId;
 
         Burst(BurstKey key, LogEntry first) {
             this.key = key;
@@ -1676,10 +1657,10 @@ public final class LoggerNetwork {
             if (e == null || k == null) return false;
             // Must match aggregation key.
             if (!k.equals(this.key)) return false;
-            if (this.key.kind == BurstKind.SYSTEM) return true;
-            // Window based on newest event time.
-            long dt = Math.abs(this.newestTs - e.ts);
-            return dt <= GUI_BURST_WINDOW_MS && (this.newestTs - this.oldestTs) <= GUI_BURST_MAX_MS;
+            long last = events.getLast().ts;
+            long earliest = Math.min(oldestTs, e.ts);
+            long latest = Math.max(newestTs, e.ts);
+            return Math.abs(last - e.ts) <= GUI_BURST_WINDOW_MS && latest - earliest <= GUI_BURST_MAX_MS;
         }
 
         void add(LogEntry e) {
@@ -1687,15 +1668,13 @@ public final class LoggerNetwork {
             events.add(e);
             if (events.size() == 1) {
                 newestTs = oldestTs = e.ts;
-                newestId = oldestId = e.id;
             } else {
-                // list is newest->older; we append in that order
-                oldestTs = Math.min(oldestTs,e.ts); newestTs = Math.max(newestTs,e.ts);
-                oldestId = e.id;
+                oldestTs = Math.min(oldestTs, e.ts);
+                newestTs = Math.max(newestTs, e.ts);
             }
         }
 
-        long oldestId() { return oldestId; }
+        long lastId() { return events.getLast().id; }
 
         com.roften.avilixlogger.net.LogRow toRow(ServerLevel level) {
             if (events.size() == 1) {
@@ -1770,6 +1749,8 @@ public final class LoggerNetwork {
                     line = Component.literal(actor + " сделал x" + events.size() + " (" + dur + ")");
                 }
             }
+
+            if (key.kind != BurstKind.SYSTEM) line = LogText.timePrefix(first.ts).append(line);
 
             ActionType commonAction = first.type;
             String commonMod = GuiEventVisibility.modOrigin(first.source);

@@ -1516,21 +1516,6 @@ public final class LogViewerScreen extends LoggerScreen {
         sendPage(C2SRequestPagePayload.Nav.FIRST);
     }
 
-    private static int parseTimeMinutes(String s) {
-        if (s == null) return -1;
-        s = s.trim().toLowerCase();
-        if (s.isEmpty()) return -1;
-        try {
-            // Accept: 30m / 2h / 1d / 7d, or just number = minutes.
-            if (s.endsWith("m")) return Math.max(0, Integer.parseInt(s.substring(0, s.length() - 1)));
-            if (s.endsWith("h")) return Math.max(0, Integer.parseInt(s.substring(0, s.length() - 1)) * 60);
-            if (s.endsWith("d")) return Math.max(0, Integer.parseInt(s.substring(0, s.length() - 1)) * 1440);
-            return Math.max(0, Integer.parseInt(s));
-        } catch (Exception ignored) {
-            return -1;
-        }
-    }
-
     private static int parseRadius(String s) {
         if (s == null) return -1;
         s = s.trim().toLowerCase();
@@ -1633,24 +1618,26 @@ public final class LogViewerScreen extends LoggerScreen {
     }
 
     private String timeLabel() {
-        String entered = timeBox == null ? "" : timeBox.getValue().trim();
-        if(entered.equals("0")||entered.equalsIgnoreCase("0m"))return "всё время";
-        if (!entered.isEmpty() && !entered.matches("[0-9]+[mMhHdD]?")) {
-            try {
-                return switch (com.roften.avilixlogger.net.GuiTimeFilter.parse(entered, java.time.ZonedDateTime.now(logTimeZone)).mode()) {
+        int custom;
+        try {
+            var time = com.roften.avilixlogger.net.GuiTimeFilter.parse(timeBox == null ? "" : timeBox.getValue(),
+                    java.time.ZonedDateTime.now(logTimeZone));
+            if (time.mode() != null) {
+                return switch (time.mode()) {
                     case SINCE -> "начиная с";
                     case UNTIL -> "до";
                     case MINUTE -> "минута";
                     case RANGE -> "период";
                 };
-            } catch (IllegalArgumentException ignored) {
-                return "ошибка";
             }
+            custom = time.minutes();
+        } catch (IllegalArgumentException invalid) {
+            return "ошибка";
         }
-        int custom = parseTimeMinutes(timeBox != null ? timeBox.getValue() : "");
-        if (custom >= 0) {
-            if (custom % 1440 == 0 && custom >= 1440) return (custom / 1440) + "d";
-            if (custom % 60 == 0 && custom >= 60) return (custom / 60) + "h";
+        if (custom == 0) return "всё время";
+        if (custom > 0) {
+            if (custom % 1440 == 0) return (custom / 1440) + "d";
+            if (custom % 60 == 0) return (custom / 60) + "h";
             return custom + "m";
         }
         return switch (timePresetIdx) {
