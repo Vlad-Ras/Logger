@@ -107,7 +107,7 @@ final class CartGuiWorkflowSmoke {
             check(request.equals(ClientReportPayloads.Request.CODEC.decode(buffer)), "client report request changed on wire");
             buffer.clear();
 
-            var mod = new ClientReportPayloads.Mod("client_mod", "1.2.3\n", "Пример мода\n");
+            var mod = new ClientReportPayloads.Mod("client_mod", "1.2.3\n", "Пример мода\n", "ab".repeat(32));
             var report = ClientReportPayloads.collect(request.id(), List.of(mod), List.of("vanilla", "file/pack.zip"));
             check(mod.version().equals("1.2.3") && mod.displayName().equals("Пример мода")
                     && mod.label().equals("Пример мода (client_mod)") && !report.truncated(), "valid report lost mod metadata");
@@ -116,6 +116,19 @@ final class CartGuiWorkflowSmoke {
             ClientReportPayloads.Report.CODEC.encode(buffer, report);
             check(report.equals(ClientReportPayloads.Report.CODEC.decode(buffer)) && !buffer.isReadable(),
                     "client report changed on wire");
+            buffer.clear();
+
+            var marker = new S2CRollbackPreviewPayload.Marker(net.minecraft.core.BlockPos.ZERO,
+                    S2CRollbackPreviewPayload.Kind.CONTAINER, "minecraft:chest");
+            var preview = new S2CRollbackPreviewPayload(true, "plan", "minecraft:overworld", 0, 0, 0,
+                    1, 1, 1, 100, 200, List.of(marker));
+            S2CRollbackPreviewPayload.STREAM_CODEC.encode(buffer, preview);
+            check(preview.equals(S2CRollbackPreviewPayload.STREAM_CODEC.decode(buffer)) && !buffer.isReadable(), "preview markers changed on wire");
+            buffer.clear();
+
+            var alerts = new ClientReportAlertPayloads.View(true, List.of("Player · test match"));
+            ClientReportAlertPayloads.View.CODEC.encode(buffer, alerts);
+            check(alerts.equals(ClientReportAlertPayloads.View.CODEC.decode(buffer)) && !buffer.isReadable(), "alert list changed on wire");
             buffer.clear();
 
             var longMod = new ClientReportPayloads.Mod("x".repeat(96), "ф".repeat(96), "🧰".repeat(48));

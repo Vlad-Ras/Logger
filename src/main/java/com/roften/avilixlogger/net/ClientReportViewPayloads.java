@@ -36,11 +36,18 @@ public final class ClientReportViewPayloads {
     }
 
     public record View(long id, String message, String player, long receivedAt, List<String> commands, List<String> matches,
-                       ClientReportPayloads.Report report) implements CustomPacketPayload {
-        public static final Type<View> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_view_v2"));
+                       ClientReportPayloads.Report report, List<String> matchedModIds) implements CustomPacketPayload {
+        public static final Type<View> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_view_v3"));
         public static final StreamCodec<RegistryFriendlyByteBuf, View> CODEC = StreamCodec.of(View::encode, View::decode);
 
+        public View(long id, String message, String player, long receivedAt, List<String> commands, List<String> matches,
+                    ClientReportPayloads.Report report) {
+            this(id, message, player, receivedAt, commands, matches, report, List.of());
+        }
+
         public View {
+            matchedModIds = List.copyOf(matchedModIds);
+            if (matchedModIds.size() > 512) throw new IllegalArgumentException("Too many matched mods");
             commands = List.copyOf(commands);
             matches = List.copyOf(matches);
             if (commands.size() > MAX_COMMANDS || matches.size() > 128) throw new IllegalArgumentException("Too many report command rows");
@@ -59,6 +66,8 @@ public final class ClientReportViewPayloads {
             for (String command : view.commands()) buf.writeUtf(command, COMMAND_LENGTH);
             buf.writeVarInt(view.matches().size());
             for (String pack : view.matches()) buf.writeUtf(pack, 128);
+            buf.writeVarInt(view.matchedModIds().size());
+            for (String mod : view.matchedModIds()) buf.writeUtf(mod, 96);
             buf.writeBoolean(view.report() != null);
             if (view.report() != null) ClientReportPayloads.Report.CODEC.encode(buf, view.report());
         }
@@ -76,8 +85,12 @@ public final class ClientReportViewPayloads {
             if (matchCount < 0 || matchCount > 128) throw new IllegalArgumentException("Invalid report match count");
             List<String> matches = new ArrayList<>(matchCount);
             for (int i = 0; i < matchCount; i++) matches.add(buf.readUtf(128));
+            int modCount = buf.readVarInt();
+            if (modCount < 0 || modCount > 512) throw new IllegalArgumentException("Invalid mod match count");
+            var modMatches = new ArrayList<String>(modCount);
+            for (int i = 0; i < modCount; i++) modMatches.add(buf.readUtf(96));
             var report = buf.readBoolean() ? ClientReportPayloads.Report.CODEC.decode(buf) : null;
-            return new View(id, message, player, receivedAt, commands, matches, report);
+            return new View(id, message, player, receivedAt, commands, matches, report, modMatches);
         }
 
         @Override public Type<View> type() { return TYPE; }

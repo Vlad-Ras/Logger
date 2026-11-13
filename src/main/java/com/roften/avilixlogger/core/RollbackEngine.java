@@ -126,9 +126,13 @@ public final class RollbackEngine {
      */
     public record PreparedBlockSnapshot(BlockPos pos, String blockBeforeSnbt, String beBeforeSnbt,
                                         String containerSlotsBeforeSnbt, ActionType type,
-                                        CompoundTag stateTag, CompoundTag beTag, CompoundTag slotsTag) {
+                                        CompoundTag stateTag, CompoundTag beTag, CompoundTag slotsTag, CompoundTag expectedState) {
         public PreparedBlockSnapshot(BlockPos pos, String state, String be, String slots, ActionType type) {
-            this(pos, state, be, slots, type, NbtSerde.fromSnbt(state), NbtSerde.fromSnbt(be), NbtSerde.fromSnbt(slots));
+            this(pos, state, be, slots, type, NbtSerde.fromSnbt(state), NbtSerde.fromSnbt(be), NbtSerde.fromSnbt(slots), null);
+        }
+        public PreparedBlockSnapshot(BlockPos pos, String state, String be, String slots, ActionType type,
+                                     CompoundTag stateTag, CompoundTag beTag, CompoundTag slotsTag) {
+            this(pos, state, be, slots, type, stateTag, beTag, slotsTag, null);
         }
         public PreparedBlockSnapshot {
             pos = pos == null ? BlockPos.ZERO : pos.immutable();
@@ -154,6 +158,12 @@ public final class RollbackEngine {
                                                     BlockPos min, BlockPos max,
                                                     long fromTs, long untilTs, String actorName,
                                                     java.util.EnumSet<ActionType> types) {
+        return prepareBoxRange(storage, dimension, min, max, fromTs, untilTs, actorName, types, () -> false);
+    }
+
+    public static PreparedRollback prepareBoxRange(LogStorage storage, String dimension, BlockPos min, BlockPos max,
+                                                    long fromTs, long untilTs, String actorName,
+                                                    java.util.EnumSet<ActionType> types, java.util.function.BooleanSupplier cancelled) {
         if (storage == null) throw new IllegalArgumentException("storage");
         LogQuery q = new LogQuery();
         q.dim = dimension;
@@ -165,7 +175,76 @@ public final class RollbackEngine {
         q.types = types == null ? null : types.clone();
         q.limit = PAGE;
         q.debugSource = "rollback_prepare";
-        return prepareByQueryPaged(storage, q);
+        return prepareByQueryPaged(storage, q, cancelled);
+    }
+
+    private record ReplayChain(CompoundTag first, CompoundTag last, ActionType type) {}
+
+    public static PreparedRollback prepareBlockReplay(LogStorage storage, RollbackPlanManager.Plan plan,
+                                                      RollbackPlanManager.Scope scope, java.util.function.BooleanSupplier cancelled) {
+        var query = new LogQuery();
+        query.dim = scope.dimension();
+        query.minPos = scope.min();
+        query.maxPos = scope.max();
+        query.sinceTs = plan.targetTs();
+        query.untilTs = plan.cutoffTs();
+        query.actorName = plan.actor();
+        query.types = java.util.EnumSet.of(ActionType.BLOCK_PLACE, ActionType.BLOCK_BREAK);
+        if (plan.types() != null) query.types.retainAll(plan.types());
+        if (query.types.isEmpty()) return new PreparedRollback(List.of(), List.of(), List.of(), 0);
+        query.requireDetails = true;
+        query.chronological = true;
+        query.limit = PAGE;
+        query.debugSource = "block_replay_prepare";
+        var chains = new java.util.LinkedHashMap<BlockPos, ReplayChain>();
+        var rejected = new java.util.HashSet<BlockPos>();
+        int examined = 0;
+        while (!cancelled.getAsBoolean()) {
+            var rows = storage.query(query);
+            if (rows.isEmpty()) break;
+            for (var row : rows) {
+                if (++examined > 100_000) throw new IllegalStateException("Слишком много записей для воспроизведения. Сузьте период или область.");
+                var pos = new BlockPos(row.x, row.y, row.z);
+                if (rejected.contains(pos)) continue;
+                CompoundTag before = replayState(row.blockBefore);
+                CompoundTag after = replayState(row.blockAfter);
+                var existing = chains.get(pos);
+                if (before == null || after == null || row.beBefore != null || row.beAfter != null
+                        || row.containerSlotsBefore != null || row.containerSlotsAfter != null
+                        || row.actorUuid == null || CreateContraptionKind.fromSource(row.source) != CreateContraptionKind.UNKNOWN
+                        || existing != null && !existing.last().equals(before)) {
+                    rejected.add(pos);
+                    chains.remove(pos);
+                    continue;
+                }
+                chains.put(pos, new ReplayChain(existing == null ? before : existing.first(), after, row.type));
+            }
+            var last = rows.getLast();
+            if (rows.size() < PAGE) break;
+            if (last.ts < query.cursorTs || last.ts == query.cursorTs && last.id <= query.afterId) {
+                throw new IllegalStateException("Хранилище не продвинуло курсор воспроизведения");
+            }
+            query.afterId = last.id;
+            query.cursorTs = last.ts;
+        }
+        if (cancelled.getAsBoolean()) throw new java.util.concurrent.CancellationException();
+        var blocks = new java.util.ArrayList<PreparedBlockSnapshot>();
+        long bytes = 0;
+        for (var entry : chains.entrySet()) {
+            var chain = entry.getValue();
+            if (chain.first().equals(chain.last())) continue;
+            blocks.add(new PreparedBlockSnapshot(entry.getKey(), chain.last().toString(), null, null,
+                    chain.type(), chain.last(), null, null, chain.first()));
+            bytes += 128 + PayloadSizeEstimator.estimateTags(chain.first(), chain.last());
+        }
+        blocks.sort(java.util.Comparator.comparingInt((PreparedBlockSnapshot block) -> block.pos().getX() >> 4)
+                .thenComparingInt(block -> block.pos().getZ() >> 4));
+        return new PreparedRollback(blocks, List.of(), List.of(), bytes);
+    }
+
+    private static CompoundTag replayState(String state) {
+        if (state == null || state.length() > 512) return null;
+        return NbtSerde.fromSnbt(state);
     }
 
     /** Counts a prepared plan without reading chunks, registries or any other live world state. */
@@ -197,12 +276,28 @@ public final class RollbackEngine {
         java.util.LinkedHashMap<BlockPos, BlockSnapshot> snapshots = new java.util.LinkedHashMap<>();
         for (PreparedBlockSnapshot block : blocks) {
             if (block == null) continue;
+            if (block.expectedState() != null) {
+                var expected = NbtSerde.readBlockState(level, block.expectedState());
+                var target = NbtSerde.readBlockState(level, block.stateTag());
+                if (!level.hasChunkAt(block.pos()) || !safeReplayBlock(expected) || !safeReplayBlock(target)
+                        || !net.minecraft.nbt.NbtUtils.writeBlockState(expected).equals(block.expectedState())
+                        || !net.minecraft.nbt.NbtUtils.writeBlockState(target).equals(block.stateTag())
+                        || !level.getBlockState(block.pos()).equals(expected)) {
+                    report.onSkipped("replay_conflict_or_unsupported");
+                    continue;
+                }
+            }
             snapshots.put(block.pos(), new BlockSnapshot(block));
         }
         boolean restoring = CartAuditContext.restoring(true);
         try { applyConsolidatedBlocks(level, snapshots, report, true); }
         finally { CartAuditContext.restoring(restoring); }
         return report;
+    }
+
+    private static boolean safeReplayBlock(BlockState state) {
+        return state != null && (state.isAir() || state.getBlock().getClass() == net.minecraft.world.level.block.Block.class)
+                && !state.hasBlockEntity() && state.getFluidState().isEmpty();
     }
 
     /** Applies a single non-block rollback operation on the server thread. */
@@ -217,7 +312,7 @@ public final class RollbackEngine {
     }
 
     private static RollbackReport rollbackByQueryPaged(ServerLevel level, LogQuery q, boolean apply) {
-        PreparedRollback prepared = prepareByQueryPaged(LoggerRuntime.storage(level), q);
+        PreparedRollback prepared = prepareByQueryPaged(LoggerRuntime.storage(level), q, () -> false);
         if (!apply) return previewPrepared(prepared);
         RollbackReport report = new RollbackReport();
         report.merge(applyPreparedBlockBatch(level, prepared.blocks()));
@@ -227,11 +322,13 @@ public final class RollbackEngine {
     }
 
     private static boolean modAuditOnly(LogEntry entry) {
-        return entry != null && ("createdieselgenerators:chemical_sprayer_projectile".equals(entry.entityType)
-                || entry.source != null && (entry.source.startsWith("mod:corpse:") || entry.source.startsWith("mod:accessories:")
-                || entry.source.startsWith("mod:ftbteams:") || entry.source.startsWith("mod:openpartiesandclaims:")
-                || entry.source.startsWith("mod:createcobblestone:") || entry.source.startsWith("mod:create_vibrant_vaults:")
-                || entry.source.startsWith("mod:create_enchantment_industry:") || entry.source.startsWith("mod:createdieselgenerators:")));
+        if (entry == null) return false;
+        String source = java.util.Objects.toString(entry.source, "");
+        return ("createdieselgenerators:chemical_sprayer_projectile".equals(entry.entityType)
+                || entry.source != null && (source.startsWith("mod:corpse:") || source.startsWith("mod:accessories:")
+                || source.startsWith("mod:ftbteams:") || source.startsWith("mod:openpartiesandclaims:")
+                || source.startsWith("mod:createcobblestone:") || source.startsWith("mod:create_vibrant_vaults:")
+                || source.startsWith("mod:create_enchantment_industry:") || source.startsWith("mod:createdieselgenerators:")));
     }
     private static void countPreparedEntry(LogEntry entry, RollbackReport report) {
         if (modAuditOnly(entry)) { report.onSkipped("not_rollbackable"); return; }
@@ -279,7 +376,7 @@ public final class RollbackEngine {
         }
     }
 
-    private static PreparedRollback prepareByQueryPaged(LogStorage storage, LogQuery q) {
+    private static PreparedRollback prepareByQueryPaged(LogStorage storage, LogQuery q, java.util.function.BooleanSupplier cancelled) {
         java.util.HashMap<BlockPos, BlockSnapshot> blockSnapshots = new java.util.HashMap<>();
         java.util.ArrayList<LogEntry> entityRemovals = new java.util.ArrayList<>();
         java.util.ArrayList<LogEntry> deferred = new java.util.ArrayList<>();
@@ -293,6 +390,7 @@ public final class RollbackEngine {
 
         long beforeId = Long.MAX_VALUE;
         while (true) {
+            if (cancelled.getAsBoolean()) throw new java.util.concurrent.CancellationException();
             q.beforeId = beforeId;
             q.limit = PAGE;
             q.requireDetails = true;

@@ -69,11 +69,18 @@ public final class ClientReportLoadSmoke {
         long day = java.time.Duration.ofHours(24).toMillis();
         var data = LoggerServerData.load(new CompoundTag(), server.registryAccess());
         UUID target = UUID.randomUUID();
+        if (data.clientReportAlerts(target)) throw new AssertionError("Report alerts must be disabled by default");
+        data.setClientReportAlerts(target, true);
         if (data.reserveClientReport(target, now) != 0
                 || data.reserveClientReport(target, now + 1) != now + day) {
             throw new AssertionError("Daily report quota failed");
         }
         var restored = LoggerServerData.load(data.save(new CompoundTag(), server.registryAccess()), server.registryAccess());
+        if (!restored.clientReportAlerts(target)) throw new AssertionError("Report alert subscription lost on reload");
+        restored.setClientReportAlerts(target, false);
+        if (LoggerServerData.load(restored.save(new CompoundTag(), server.registryAccess()), server.registryAccess()).clientReportAlerts(target)) {
+            throw new AssertionError("Disabling report alerts was not saved");
+        }
         if (restored.reserveClientReport(target, now + day - 1) != now + day
                 || restored.reserveClientReport(target, now + day) != 0) {
             throw new AssertionError("Daily report quota did not survive world save and reload");

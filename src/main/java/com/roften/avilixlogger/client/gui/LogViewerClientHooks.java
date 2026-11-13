@@ -55,11 +55,42 @@ public final class LogViewerClientHooks {
         if (connection == null || connection.getConnection() != context.connection()
                 || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
 
-        var mods = ModList.get().getMods().stream()
-                .map(mod -> new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName()))
-                .sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
-        var report = ClientReportPayloads.collect(request.id(), mods, minecraft.getResourcePackRepository().getSelectedIds());
-        context.reply(report);
+        var packs = java.util.List.copyOf(minecraft.getResourcePackRepository().getSelectedIds());
+        if (modInventory == null) {
+            var metadata = java.util.List.copyOf(ModList.get().getMods());
+            modInventory = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                var hashes = new java.util.HashMap<java.nio.file.Path, String>();
+                return metadata.stream().map(mod -> {
+                    var file = mod.getOwningFile();
+                    var path = file == null || file.getFile() == null ? null : file.getFile().getFilePath();
+                    String hash = path == null ? "" : hashes.computeIfAbsent(path, LogViewerClientHooks::hashModFile);
+                    return new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName(), hash);
+                }).sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
+            }, net.minecraft.Util.ioPool());
+        }
+        modInventory.whenComplete((mods, failure) -> minecraft.execute(() -> {
+            if (failure != null) {
+                modInventory = null;
+                return;
+            }
+            if (minecraft.getConnection() == connection && connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
+                PacketDistributor.sendToServer(ClientReportPayloads.collect(request.id(), mods, packs));
+            }
+        }));
+    }
+
+    private static java.util.concurrent.CompletableFuture<java.util.List<ClientReportPayloads.Mod>> modInventory;
+
+    private static String hashModFile(java.nio.file.Path file) {
+        if (!java.nio.file.Files.isRegularFile(file)) return "";
+        try (var input = java.nio.file.Files.newInputStream(file)) {
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[32 * 1024];
+            for (int read; (read = input.read(buffer)) != -1;) digest.update(buffer, 0, read);
+            return java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (java.io.IOException | java.security.GeneralSecurityException | SecurityException failure) {
+            return "";
+        }
     }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
@@ -119,6 +150,10 @@ public final class LogViewerClientHooks {
 
     public static void acceptActionResult(com.roften.avilixlogger.net.S2CLoggerActionResultPayload payload) {
         LoggerActionsScreen.accept(payload);
+    }
+
+    public static void acceptClientReportAlerts(com.roften.avilixlogger.net.ClientReportAlertPayloads.View view) {
+        if (Minecraft.getInstance().screen instanceof ClientReportAlertsScreen screen) screen.accept(view);
     }
 
     public static void acceptClientReportView(ClientReportViewPayloads.View view) {

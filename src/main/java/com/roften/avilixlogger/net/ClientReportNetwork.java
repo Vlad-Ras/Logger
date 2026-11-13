@@ -47,11 +47,27 @@ public final class ClientReportNetwork {
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final Map<UUID, Long> LAST_MANUAL_REQUEST = new HashMap<>();
     private static final Map<UUID, Object> COMMAND_QUERIES = new HashMap<>();
+    private static final String ALERT_PERMISSION = "avilixlogger.clientaudit.alerts";
+    private static final java.util.ArrayDeque<AuditAlert> ALERTS = new java.util.ArrayDeque<>();
     private static final Pattern PACK_SEPARATORS = Pattern.compile("[_\\s-]+");
     private static long lastId;
     private static Boolean enabledOverride;
     private static int automaticCursor;
     private static long reportGeneration;
+
+    private record AuditAlert(Instant time, String text) {}
+
+    private record TriggerRules(String packs, List<String> mods, List<String> words) {
+        static TriggerRules configured() {
+            return new TriggerRules(LoggerConfig.VALUES.clientAuditSuspectPacks.get(),
+                    splitRules(LoggerConfig.VALUES.clientAuditSuspectMods.get()),
+                    splitRules(LoggerConfig.VALUES.clientAuditAlertWords.get()));
+        }
+    }
+
+    private record Matches(List<String> packs, List<String> mods) {
+        boolean empty() { return packs.isEmpty() && mods.isEmpty(); }
+    }
 
     private record Pending(long id, ServerGamePacketListenerImpl connection, Reply reply) {}
 
@@ -62,13 +78,13 @@ public final class ClientReportNetwork {
             else source.sendSystemMessage(Component.literal("[AvilixLogger] " + text));
         }
 
-        void report(ClickHouseLogStorage.ClientReport snapshot, List<String> matches) {
+        void report(ClickHouseLogStorage.ClientReport snapshot, Matches matches) {
             if (requestId == null) {
                 writeReport(source, snapshot.playerName(), snapshot.receivedAt(), snapshot.report());
                 return;
             }
             sendView(source, new ClientReportViewPayloads.View(requestId, "", snapshot.playerName(),
-                    snapshot.receivedAt().toEpochMilli(), List.of(), matches, snapshot.report()));
+                    snapshot.receivedAt().toEpochMilli(), List.of(), matches.packs(), snapshot.report(), matches.mods()));
         }
     }
 
@@ -140,6 +156,7 @@ public final class ClientReportNetwork {
         enabledOverride = null;
         automaticCursor = 0;
         LAST_MANUAL_REQUEST.clear();
+        ALERTS.clear();
         clearReports();
     }
 
@@ -169,7 +186,7 @@ public final class ClientReportNetwork {
         }
         var server = player.getServer();
         var playerId = player.getUUID();
-        String watchedPacks = LoggerConfig.VALUES.clientAuditSuspectPacks.get();
+
         long generation = reportGeneration;
         try {
             LoggerNetwork.executeClientReportIo(() -> {
@@ -183,7 +200,7 @@ public final class ClientReportNetwork {
                     saved = false;
                 }
                 boolean acknowledged = saved;
-                List<String> matches = acknowledged ? matchPacks(snapshot.report().packs(), watchedPacks) : List.of();
+                Matches matches = acknowledged ? matchReport(snapshot.report(), TriggerRules.configured()) : new Matches(List.of(), List.of());
                 server.execute(() -> {
                     if (generation != reportGeneration || !enabled() || !LoggerConfig.isEnabled()) return;
                     if (!acknowledged) {
@@ -191,7 +208,7 @@ public final class ClientReportNetwork {
                         return;
                     }
                     if (reply != null && canDeliver(reply.source())) reply.report(snapshot, matches);
-                    notifyMatches(server, playerId, snapshot.playerName(), matches);
+                    notifyMatches(server, snapshot.playerName(), matches);
                 });
             });
         } catch (RejectedExecutionException busy) {
@@ -300,13 +317,13 @@ public final class ClientReportNetwork {
         var server = reply.source().getServer();
         var online = server.getPlayerList().getPlayerByName(playerName);
         UUID playerId = online == null ? null : online.getUUID();
-        String watchedPacks = reply.requestId() == null ? "" : LoggerConfig.VALUES.clientAuditSuspectPacks.get();
         long generation = reportGeneration;
         try {
             LoggerNetwork.executeClientReportIo(() -> {
                 try {
                     var snapshot = storage.findClientReport(playerId, playerName);
-                    List<String> matches = snapshot == null ? List.of() : matchPacks(snapshot.report().packs(), watchedPacks);
+                    Matches matches = snapshot == null || reply.requestId() == null
+                            ? new Matches(List.of(), List.of()) : matchReport(snapshot.report(), TriggerRules.configured());
                     server.execute(() -> {
                         if (generation != reportGeneration || !enabled() || !LoggerConfig.isEnabled()
                                 || !canDeliver(reply.source())) return;
@@ -436,13 +453,74 @@ public final class ClientReportNetwork {
         return version < name.length() && Character.isDigit(name.charAt(version));
     }
 
-    private static void notifyMatches(MinecraftServer server, UUID target, String targetName, List<String> matches) {
-        if (matches.isEmpty()) return;
-        var message = Component.literal("[AvilixLogger] " + targetName + " · совпадений по ресурс-пакам: "
-                + matches.size() + ". Откройте отчёт для проверки.").withStyle(ChatFormatting.GOLD);
+    private static List<String> splitRules(String value) {
+        return java.util.Arrays.stream(value.split(",")).map(ClientReportNetwork::normalizePack)
+                .filter(word -> !word.isEmpty()).distinct().toList();
+    }
+
+    private static Matches matchReport(ClientReportPayloads.Report report, TriggerRules rules) {
+        var packs = matchPacks(report.packs(), rules.packs());
+        if (!rules.words().isEmpty()) {
+            var combined = new java.util.LinkedHashSet<>(packs);
+            for (String pack : report.packs()) {
+                if (containsWord(normalizePack(pack), rules.words())) combined.add(pack);
+            }
+            packs = List.copyOf(combined);
+        }
+        if (rules.mods().isEmpty() && rules.words().isEmpty()) return new Matches(packs, List.of());
+        var mods = new ArrayList<String>();
+        for (var mod : report.mods()) {
+            String id = normalizePack(mod.id());
+            String name = normalizePack(mod.displayName());
+            if (rules.mods().contains(id) || rules.mods().contains(name)
+                    || containsWord(id, rules.words()) || containsWord(name, rules.words())) mods.add(mod.id());
+        }
+        return new Matches(packs, List.copyOf(mods));
+    }
+
+    private static boolean containsWord(String value, List<String> words) {
+        for (String word : words) if (value.contains(word)) return true;
+        return false;
+    }
+
+    static void handleAlerts(ClientReportAlertPayloads.Query query, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer admin)
+                    || !admin.connection.hasChannel(ClientReportAlertPayloads.View.TYPE)
+                    || !PermissionUtil.has(admin.createCommandSourceStack(), ALERT_PERMISSION, 2)) return;
+            var data = LoggerServerData.get(admin.getServer().overworld());
+            switch (query.action()) {
+                case ENABLE -> data.setClientReportAlerts(admin.getUUID(), true);
+                case DISABLE -> data.setClientReportAlerts(admin.getUUID(), false);
+                case READ -> {}
+            }
+            sendAlerts(admin, data.clientReportAlerts(admin.getUUID()));
+        });
+    }
+
+    private static void sendAlerts(ServerPlayer admin, boolean subscribed) {
+        if (!admin.connection.hasChannel(ClientReportAlertPayloads.View.TYPE)) return;
+        var since = Instant.now().minus(Duration.ofHours(24));
+        while (!ALERTS.isEmpty() && ALERTS.getFirst().time().isBefore(since)) ALERTS.removeFirst();
+        var history = subscribed ? ALERTS.reversed().stream().map(AuditAlert::text).toList() : List.<String>of();
+        PacketDistributor.sendToPlayer(admin, new ClientReportAlertPayloads.View(subscribed, history));
+    }
+
+    private static void notifyMatches(MinecraftServer server, String targetName, Matches matches) {
+        if (matches.empty()) return;
+        String summary = targetName + " · совпадений: моды " + matches.mods().size() + ", ресурс-паки " + matches.packs().size();
+        String example = matches.mods().isEmpty() ? matches.packs().getFirst() : matches.mods().getFirst();
+        String line = REPORT_TIME.format(Instant.now().atZone(ZoneId.systemDefault())) + " · " + summary + " · " + example;
+        ALERTS.addLast(new AuditAlert(Instant.now(), line));
+        while (ALERTS.size() > ClientReportAlertPayloads.MAX_ALERTS) ALERTS.removeFirst();
+        var message = Component.literal("[AvilixLogger] " + summary + ". Подробнее в «Уведомлениях об отчётах».")
+                .withStyle(ChatFormatting.GOLD);
+        var data = LoggerServerData.get(server.overworld());
         for (var admin : server.getPlayerList().getPlayers()) {
-            if (!admin.getUUID().equals(target) && admin.hasPermissions(2) && canRequest(admin.createCommandSourceStack())) {
+            if (data.clientReportAlerts(admin.getUUID())
+                    && PermissionUtil.has(admin.createCommandSourceStack(), ALERT_PERMISSION, 2)) {
                 admin.sendSystemMessage(message);
+                sendAlerts(admin, true);
             }
         }
     }

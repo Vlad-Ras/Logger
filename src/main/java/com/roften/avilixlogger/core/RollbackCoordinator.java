@@ -2,6 +2,7 @@ package com.roften.avilixlogger.core;
 
 import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.LoggerConfig;
+import com.roften.avilixlogger.net.S2CRollbackPreviewPayload;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -35,6 +36,9 @@ public final class RollbackCoordinator {
     private static final ConcurrentHashMap<UUID, Preparation> PREPARATIONS = new ConcurrentHashMap<>();
     private static volatile ThreadPoolExecutor executor;
     private static volatile ActiveJob active;
+    // Only one prepared preview is retained across confirmations to keep the global memory bounded.
+    private static CachedPreview cachedPreview;
+    private record CachedPreview(RollbackPlanManager.Plan plan, List<PreparedScope> scopes) {}
 
     private RollbackCoordinator() {}
 
@@ -48,6 +52,13 @@ public final class RollbackCoordinator {
                                      Consumer<String> onError) {
         if (active != null || CartAuditContext.rollbackActive) {
             onError.accept("Другой откат уже изменяет мир. Дождитесь его завершения.");
+            return;
+        }
+        CachedPreview cached = cachedPreview;
+        if (cached != null && cached.plan() == plan) {
+            cachedPreview = null;
+            active = new ActiveJob(playerId, plan, cached.scopes(), onComplete, onError);
+            if (onStarted != null) onStarted.run();
             return;
         }
         submitPreparation(server, playerId, plan, true, onComplete, onStarted, onError);
@@ -64,6 +75,7 @@ public final class RollbackCoordinator {
             onError.accept("Не удалось подготовить откат: сервер или план недоступен.");
             return;
         }
+        if (cachedPreview != null) cachedPreview = null;
         Preparation next = new Preparation();
         Preparation previous = PREPARATIONS.put(playerId, next);
         if (previous != null) previous.cancelled = true;
@@ -79,20 +91,27 @@ public final class RollbackCoordinator {
                             512, 64, 8192) * 1024L * 1024L;
                     for (RollbackPlanManager.Scope scope : plan.scopes()) {
                         if (next.cancelled || PREPARATIONS.get(playerId) != next) return;
-                        RollbackEngine.PreparedRollback prepared = RollbackEngine.prepareBoxRange(
-                                storage, scope.dimension(), scope.min(), scope.max(),
-                                plan.targetTs(), plan.cutoffTs(), plan.actor(), plan.types());
+                        java.util.function.BooleanSupplier cancelled = () -> next.cancelled || Thread.currentThread().isInterrupted();
+                        RollbackEngine.PreparedRollback prepared = plan.replay()
+                                ? RollbackEngine.prepareBlockReplay(storage, plan, scope, cancelled)
+                                : RollbackEngine.prepareBoxRange(storage, scope.dimension(), scope.min(), scope.max(),
+                                        plan.targetTs(), plan.cutoffTs(), plan.actor(), plan.types(), cancelled);
                         scopes.add(new PreparedScope(scope.dimension(), prepared));
                         totalPreparedBytes += prepared.estimatedBytes();
                         if (totalPreparedBytes > maxPreparedBytes) {
                             throw new IllegalStateException("план превышает "
                                     + (maxPreparedBytes / (1024L * 1024L)) + " MiB; сузьте область или период");
                         }
-                        preview.merge(RollbackEngine.previewPrepared(prepared));
+                        if (!apply) {
+                            preview.merge(RollbackEngine.previewPrepared(prepared));
+                            if (plan.scopes().size() == 1) collectPreviewMarkers(prepared, preview);
+                        }
                     }
                     server.execute(() -> {
                         if (next.cancelled || !PREPARATIONS.remove(playerId, next)) return;
                         if (!apply) {
+                            if (RollbackPlanManager.getValid(playerId) != plan) return;
+                            cachedPreview = new CachedPreview(plan, scopes);
                             onComplete.accept(preview);
                             return;
                         }
@@ -104,6 +123,7 @@ public final class RollbackCoordinator {
                         if (onStarted != null) onStarted.run();
                     });
                 } catch (Throwable t) {
+                    if (next.cancelled || Thread.currentThread().isInterrupted()) return;
                     AvilixLoggerMod.LOGGER.error("[AvilixLogger] Rollback preparation failed", t);
                     server.execute(() -> {
                         if (PREPARATIONS.remove(playerId, next) && !next.cancelled) {
@@ -118,8 +138,39 @@ public final class RollbackCoordinator {
         }
     }
 
+    private static void collectPreviewMarkers(RollbackEngine.PreparedRollback prepared, RollbackReport preview) {
+        var markers = new ArrayList<S2CRollbackPreviewPayload.Marker>();
+        int limit = S2CRollbackPreviewPayload.MAX_MARKERS;
+        int blockLimit = prepared.deferred().isEmpty() ? limit : limit - 64;
+        for (var block : prepared.blocks()) {
+            if (markers.size() == blockLimit) {
+                preview.previewLimited = true;
+                break;
+            }
+            if (block.blockBeforeSnbt() != null && block.stateTag() == null) continue;
+            String id = block.stateTag() == null ? "" : block.stateTag().getString("Name");
+            var kind = block.containerSlotsBeforeSnbt() != null || block.beBeforeSnbt() != null
+                    ? S2CRollbackPreviewPayload.Kind.CONTAINER : id.equals("minecraft:air") || id.equals("minecraft:cave_air")
+                    || id.equals("minecraft:void_air") ? S2CRollbackPreviewPayload.Kind.REMOVE : S2CRollbackPreviewPayload.Kind.BLOCK;
+            markers.add(new S2CRollbackPreviewPayload.Marker(block.pos(), kind, id.length() <= 256 ? id : ""));
+        }
+        for (var row : prepared.deferred()) {
+            if (row.type != ActionType.ENTITY_DEATH && row.type != ActionType.PLANE_REMOVE) continue;
+            if (row.entityType == null || row.entityType.length() > 256 || row.entityNbt == null) continue;
+            if (NbtSerde.validateEntitySnapshot(row.entityType, row.entityUuid, row.rollbackEntity()) != null) continue;
+            if (markers.size() == limit) {
+                preview.previewLimited = true;
+                break;
+            }
+            markers.add(new S2CRollbackPreviewPayload.Marker(new BlockPos(row.x, row.y, row.z),
+                    S2CRollbackPreviewPayload.Kind.ENTITY, row.entityType));
+        }
+        preview.previewMarkers = List.copyOf(markers);
+    }
+
     public static CancelResult cancel(UUID playerId) {
         if (playerId == null) return CancelResult.NONE;
+        if (cachedPreview != null && playerId.equals(cachedPreview.plan().playerId())) cachedPreview = null;
         Preparation preparing = PREPARATIONS.remove(playerId);
         if (preparing != null) {
             preparing.cancelled = true;
@@ -144,6 +195,9 @@ public final class RollbackCoordinator {
     }
 
     public static void onServerTick(ServerTickEvent.Post event) {
+        if (cachedPreview != null && RollbackPlanManager.getValid(cachedPreview.plan().playerId()) != cachedPreview.plan()) {
+            cachedPreview = null;
+        }
         ActiveJob job = active;
         if (job == null && PREPARATIONS.isEmpty()) return;
         if (!LoggerConfig.isEnabled()) {
@@ -164,6 +218,7 @@ public final class RollbackCoordinator {
 
     public static void shutdown() {
         RollbackPlanManager.clearAll();
+        cachedPreview = null;
         for (Preparation preparation : PREPARATIONS.values()) preparation.cancelled = true;
         PREPARATIONS.clear();
         active = null;
@@ -268,6 +323,12 @@ public final class RollbackCoordinator {
                 if (blockIndex < prepared.blocks().size()) {
                     RollbackEngine.PreparedBlockSnapshot first = prepared.blocks().get(blockIndex);
                     if (!level.hasChunkAt(first.pos())) {
+                        if (chunkLoadBudget == 0) {
+                            report.onSkipped("chunk_unloaded");
+                            blockIndex++;
+                            used++;
+                            continue;
+                        }
                         if (chunkLoads >= chunkLoadBudget) return false;
                         level.getChunk(first.pos().getX() >> 4, first.pos().getZ() >> 4);
                         chunkLoads++;
@@ -292,6 +353,12 @@ public final class RollbackCoordinator {
                     LogEntry entry = prepared.entityRemovals().get(removalIndex);
                     BlockPos pos = new BlockPos(entry.x, entry.y, entry.z);
                     if (!level.hasChunkAt(pos)) {
+                        if (chunkLoadBudget == 0) {
+                            report.onSkipped("chunk_unloaded");
+                            removalIndex++;
+                            used++;
+                            continue;
+                        }
                         if (chunkLoads >= chunkLoadBudget) return false;
                         level.getChunk(entry.x >> 4, entry.z >> 4);
                         chunkLoads++;
@@ -307,6 +374,12 @@ public final class RollbackCoordinator {
                     LogEntry entry = prepared.deferred().get(deferredIndex);
                     BlockPos pos = new BlockPos(entry.x, entry.y, entry.z);
                     if (!level.hasChunkAt(pos)) {
+                        if (chunkLoadBudget == 0) {
+                            report.onSkipped("chunk_unloaded");
+                            deferredIndex++;
+                            used++;
+                            continue;
+                        }
                         if (chunkLoads >= chunkLoadBudget) return false;
                         level.getChunk(entry.x >> 4, entry.z >> 4);
                         chunkLoads++;

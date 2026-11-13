@@ -113,7 +113,7 @@ public final class ClickHouseNativeSmoke {
         UUID expiredReportPlayer = UUID.randomUUID();
         Instant reportTime = Instant.ofEpochMilli(System.currentTimeMillis());
         var report = ClientReportPayloads.collect(0,
-                List.of(new ClientReportPayloads.Mod("create", "6.0.10", "Create")),
+                List.of(new ClientReportPayloads.Mod("create", "6.0.10", "Create", "a5".repeat(32))),
                 List.of("file/Пак\" v1.zip"));
         ClickHouseLogStorage db = null;
         try {

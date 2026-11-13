@@ -28,6 +28,7 @@ public final class LoggerServerData extends SavedData {
     private static final long REPORT_INTERVAL_MS = Duration.ofHours(24).toMillis();
     private static final int MAX_REPORT_COOLDOWNS = 4096;
     private final Map<UUID, Long> reportCooldowns = new HashMap<>();
+    private final java.util.Set<UUID> reportAlertSubscribers = new java.util.HashSet<>();
 
     private String inspectToolItemId;
     private long guiCaptureDisabledMask;
@@ -68,6 +69,12 @@ public final class LoggerServerData extends SavedData {
                 }
             }
         }
+        var subscriptions = tag.getCompound("clientReportAlertSubscribers");
+        for (String uuid : subscriptions.getAllKeys()) {
+            try {
+                if (subscriptions.getBoolean(uuid)) d.reportAlertSubscribers.add(UUID.fromString(uuid));
+            } catch (IllegalArgumentException ignored) {}
+        }
         var cooldowns = tag.getList("clientReportCooldowns", Tag.TAG_COMPOUND);
         long now = System.currentTimeMillis();
         for (int i = 0; i < Math.min(MAX_REPORT_COOLDOWNS, cooldowns.size()); i++) {
@@ -104,7 +111,18 @@ public final class LoggerServerData extends SavedData {
             });
             tag.put("clientReportCooldowns", cooldowns);
         }
+        var subscriptions = new CompoundTag();
+        reportAlertSubscribers.forEach(uuid -> subscriptions.putBoolean(uuid.toString(), true));
+        tag.put("clientReportAlertSubscribers", subscriptions);
         return tag;
+    }
+
+    public boolean clientReportAlerts(UUID player) {
+        return reportAlertSubscribers.contains(player);
+    }
+
+    public void setClientReportAlerts(UUID player, boolean enabled) {
+        if (enabled ? reportAlertSubscribers.add(player) : reportAlertSubscribers.remove(player)) setDirty();
     }
 
     /** Zero reserves a collection, positive is the next allowed timestamp, -1 means capacity reached. */

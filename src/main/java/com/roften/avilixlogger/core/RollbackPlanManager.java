@@ -47,9 +47,10 @@ public final class RollbackPlanManager {
         private final String actor;
         private final EnumSet<ActionType> types;
         private final List<Scope> scopes;
+        private final boolean replay;
 
         private Plan(String id, UUID playerId, long targetTs, long cutoffTs, long expiresAt,
-                     String actor, EnumSet<ActionType> types, List<Scope> scopes) {
+                     String actor, EnumSet<ActionType> types, List<Scope> scopes, boolean replay) {
             this.id = id;
             this.playerId = playerId;
             this.targetTs = targetTs;
@@ -58,6 +59,7 @@ public final class RollbackPlanManager {
             this.actor = actor;
             this.types = types == null ? null : types.clone();
             this.scopes = List.copyOf(scopes);
+            this.replay = replay;
         }
 
         public String id() { return id; }
@@ -67,6 +69,7 @@ public final class RollbackPlanManager {
         public long expiresAt() { return expiresAt; }
         public String actor() { return actor; }
         public EnumSet<ActionType> types() { return types == null ? null : types.clone(); }
+        public boolean replay() { return replay; }
         public List<Scope> scopes() { return scopes; }
     }
 
@@ -76,10 +79,15 @@ public final class RollbackPlanManager {
 
     public static Plan save(UUID playerId, long targetTs, long cutoffTs, String actor,
                             EnumSet<ActionType> types, List<Scope> scopes) {
+        return save(playerId, targetTs, cutoffTs, actor, types, scopes, false);
+    }
+
+    public static Plan save(UUID playerId, long targetTs, long cutoffTs, String actor,
+                            EnumSet<ActionType> types, List<Scope> scopes, boolean replay) {
         if (playerId == null || scopes == null || scopes.isEmpty()) return null;
         long now = System.currentTimeMillis();
         String id = UUID.randomUUID().toString().substring(0, 8);
-        Plan plan = new Plan(id, playerId, targetTs, cutoffTs, now + PLAN_TTL_MS, actor, types, scopes);
+        Plan plan = new Plan(id, playerId, targetTs, cutoffTs, now + PLAN_TTL_MS, actor, types, scopes, replay);
         PLANS.put(playerId, plan);
         return plan;
     }

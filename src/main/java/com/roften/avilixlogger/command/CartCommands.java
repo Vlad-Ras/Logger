@@ -98,7 +98,13 @@ public final class CartCommands {
             return;
         }
         var phase = CreateContraptionKind.phase(row.source);
-        if (row.type == ActionType.CREATE_DEPLOYER_ACTION
+        if (CreateContraptionKind.fromSource(row.source) == CreateContraptionKind.TRAIN
+                && row.type == ActionType.CART_STATUS && phase.equals("state_checkpoint")) {
+            com.roften.avilixlogger.compat.create.CreateTrainRecovery.preview(source, id, row.id);
+        } else if (CreateContraptionKind.fromSource(row.source) == CreateContraptionKind.TRAIN
+                && (row.type == ActionType.CART_UNLOAD || row.type == ActionType.CART_REMOVE)) {
+            com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.preview(source, id, row.id);
+        } else if (row.type == ActionType.CREATE_DEPLOYER_ACTION
                 || row.type == ActionType.CART_TRANSFER && phase.equals("automation_transfer")) {
             CreateTransferRollbackCoordinator.preview(source, id, row.id);
         } else if (row.type == ActionType.CART_DISASSEMBLE && phase.equals("structural_disassemble")) {

@@ -321,6 +321,11 @@ public final class LoggerNetwork {
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportView",
                         new Class<?>[]{ClientReportViewPayloads.View.class}, new Object[]{payload})));
 
+        audit.playToServer(ClientReportAlertPayloads.Query.TYPE, ClientReportAlertPayloads.Query.CODEC, ClientReportNetwork::handleAlerts);
+        audit.playToClient(ClientReportAlertPayloads.View.TYPE, ClientReportAlertPayloads.View.CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportAlerts",
+                        new Class<?>[]{ClientReportAlertPayloads.View.class}, new Object[]{payload})));
+
         PayloadRegistrar r = event.registrar("16").optional();
         r.playToClient(S2CCaptureHealthPayload.TYPE,S2CCaptureHealthPayload.STREAM_CODEC,(payload,ctx)->ctx.enqueueWork(()->invokeClientHook("acceptCaptureHealth",new Class<?>[]{S2CCaptureHealthPayload.class},new Object[]{payload})));
 

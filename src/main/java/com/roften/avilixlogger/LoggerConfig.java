@@ -104,6 +104,8 @@ public final class LoggerConfig {
 
         public final ModConfigSpec.BooleanValue clientAuditEnabled;
         public final ModConfigSpec.ConfigValue<String> clientAuditSuspectPacks;
+        public final ModConfigSpec.ConfigValue<String> clientAuditSuspectMods;
+        public final ModConfigSpec.ConfigValue<String> clientAuditAlertWords;
 
         Values(ModConfigSpec.Builder b) {
             b.push("general");
@@ -117,6 +119,10 @@ public final class LoggerConfig {
                     .define("enabled", true);
             clientAuditSuspectPacks = b.comment("Comma-separated resource pack names that trigger an administrator alert. Blank disables alerts.")
                     .define("suspectPackNames", "xray,x ray,xrayultimate,xray ultimate,x ray ultimate");
+            clientAuditSuspectMods = b.comment("Comma-separated exact mod IDs or display names for alerts.")
+                    .define("suspectModNames", "");
+            clientAuditAlertWords = b.comment("Comma-separated text fragments matched against mod IDs, display names and resource packs.")
+                    .define("alertWords", "");
             b.pop();
 
             b.push("clickhouse");

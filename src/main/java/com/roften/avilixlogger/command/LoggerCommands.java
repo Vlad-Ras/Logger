@@ -195,6 +195,11 @@ public final class LoggerCommands {
                             .executes(ctx -> rollbackFromFlags(ctx, StringArgumentType.getString(ctx, "args"))))
                     .executes(ctx -> rollbackFromFlags(ctx, "")))
 
+            .then(literal("replay")
+                    .requires(source -> PermissionUtil.has(source, "avilixlogger.command.admin", 2))
+                    .then(argument("args", StringArgumentType.greedyString())
+                            .executes(ctx -> rollbackFromFlags(ctx, StringArgumentType.getString(ctx, "args"), true))))
+
             // Flag-based lookup: /log --time 30m --radius 10 --mode theft ...
             .then(argument("args", StringArgumentType.greedyString())
                     .requires(LoggerCommands::hasLookupPermission)
@@ -1887,6 +1892,10 @@ public final class LoggerCommands {
     }
 
     private static int rollbackFromFlags(CommandContext<CommandSourceStack> ctx, String rawArgs) {
+        return rollbackFromFlags(ctx, rawArgs, false);
+    }
+
+    private static int rollbackFromFlags(CommandContext<CommandSourceStack> ctx, String rawArgs, boolean replay) {
         if (!(ctx.getSource().getEntity() instanceof ServerPlayer sp)) {
             ctx.getSource().sendFailure(Component.literal("Эту команду может использовать только игрок."));
             return 0;
@@ -1921,6 +1930,10 @@ public final class LoggerCommands {
         }
         if (f.confirm) {
             RollbackPlanManager.Plan plan = RollbackPlanManager.getValid(sp.getUUID());
+            if (plan != null && plan.replay() != replay) {
+                ctx.getSource().sendFailure(Component.literal("Используйте команду подтверждения того режима, в котором создан план."));
+                return 0;
+            }
             if (plan == null) {
                 clearRollbackPreview(sp);
                 ctx.getSource().sendFailure(Component.literal("Нет активного предпросмотра или он истёк. Сначала создайте новый план без --confirm."));
@@ -1934,12 +1947,15 @@ public final class LoggerCommands {
             src.sendSystemMessage(Component.literal("План #" + plan.id() + " принят. ClickHouse готовит точный список операций вне серверного тика…")
                     .withStyle(ChatFormatting.YELLOW));
             RollbackCoordinator.startRollback(src.getServer(), sp.getUUID(), plan,
-                    () -> src.sendSystemMessage(Component.literal("План подготовлен. Откат выполняется небольшими порциями; сервер продолжает работать.")
+                    () -> src.sendSystemMessage(Component.literal(plan.replay() ? "Воспроизведение блоков началось и выполняется порциями."
+                            : "План подготовлен. Откат выполняется небольшими порциями.")
                             .withStyle(ChatFormatting.AQUA)),
                     total -> {
                         src.sendSystemMessage(Component.literal("План #" + plan.id() + ", состояние на "
                                 + formatRollbackMoment(plan.targetTs())).withStyle(ChatFormatting.DARK_GRAY));
-                        sendRollbackSummary(src, true, total);
+                        if (plan.replay()) src.sendSystemMessage(Component.literal("Воспроизведение: применено " + total.applied
+                                + ", пропущено " + total.skipped + " · " + total.skippedReasons));
+                        else sendRollbackSummary(src, true, total);
                     },
                     message -> src.sendFailure(Component.literal(message)));
             return 1;
@@ -1958,10 +1974,15 @@ public final class LoggerCommands {
             return 0;
         }
 
-        final long cutoffTs = System.currentTimeMillis();
+        final long now = System.currentTimeMillis();
+        final long cutoffTs = replay && f.dayRange != null && f.targetMoment == null ? Math.min(now, f.dayRange[1]) : now;
         final long targetTs = f.targetMoment != null
                 ? f.targetMoment
                 : (f.dayRange != null ? f.dayRange[0] : cutoffTs - (f.seconds * 1000L));
+        if (replay && (f.actor == null || f.actor.isBlank() || f.world || f.allDims || Integer.valueOf(0).equals(f.radius))) {
+            ctx.getSource().sendFailure(Component.literal("Для воспроизведения укажите одного игрока через --p и ограниченную область."));
+            return 0;
+        }
         if (targetTs <= 0L || targetTs >= cutoffTs) {
             ctx.getSource().sendFailure(Component.literal("Целевой момент должен находиться в прошлом."));
             return 0;
@@ -1987,20 +2008,20 @@ public final class LoggerCommands {
         }
 
         RollbackPlanManager.Plan plan = RollbackPlanManager.save(
-                sp.getUUID(), targetTs, cutoffTs, actor, f.types, scopes);
+                sp.getUUID(), targetTs, cutoffTs, actor, f.types, scopes, replay);
         if (plan == null) {
             ctx.getSource().sendFailure(Component.literal("Не удалось сохранить план отката."));
             return 0;
         }
 
         CommandSourceStack src = ctx.getSource();
-        showRollbackPreview(src, sp, plan);
         src.sendSystemMessage(Component.literal("Считаю точный предпросмотр в ClickHouse вне серверного тика…")
                 .withStyle(ChatFormatting.YELLOW));
         RollbackCoordinator.preparePreview(src.getServer(), sp.getUUID(), plan,
                 total -> {
                     RollbackPlanManager.Plan current = RollbackPlanManager.getValid(sp.getUUID());
                     if (current == null || !current.id().equals(plan.id())) return;
+                    showRollbackPreview(src, sp, plan, total);
                     sendRollbackPlanSummary(src, plan, total);
                 },
                 message -> {
@@ -2083,9 +2104,9 @@ public final class LoggerCommands {
 
     private static void sendRollbackPlanSummary(CommandSourceStack src, RollbackPlanManager.Plan plan, RollbackReport report) {
         src.sendSystemMessage(Component.literal("Предпросмотр плана #" + plan.id()).withStyle(ChatFormatting.AQUA));
-        src.sendSystemMessage(Component.literal("Цель: вернуть состояние на " + formatRollbackMoment(plan.targetTs()))
-                .withStyle(ChatFormatting.YELLOW));
-        src.sendSystemMessage(Component.literal("Будут отменены действия после цели и до снимка предпросмотра "
+        src.sendSystemMessage(Component.literal((plan.replay() ? "Воспроизведение простых блоков с " : "Цель: вернуть состояние на ")
+                + formatRollbackMoment(plan.targetTs())).withStyle(ChatFormatting.YELLOW));
+        src.sendSystemMessage(Component.literal((plan.replay() ? "Конец периода: " : "Будут отменены действия после цели и до снимка предпросмотра ")
                 + formatRollbackMoment(plan.cutoffTs()) + ".").withStyle(ChatFormatting.GRAY));
 
         if (plan.scopes().size() == 1) {
@@ -2104,14 +2125,15 @@ public final class LoggerCommands {
         src.sendSystemMessage(Component.literal("План действует " + ttlSeconds + " сек. Параметры и позиция уже зафиксированы.")
                 .withStyle(ChatFormatting.DARK_GRAY));
 
-        MutableComponent confirm = Component.literal("[ПОДТВЕРДИТЬ ОТКАТ]").withStyle(style -> style
+        String command = plan.replay() ? "/log replay" : "/log rollback";
+        MutableComponent confirm = Component.literal(plan.replay() ? "[ПОДТВЕРДИТЬ ВОСПРОИЗВЕДЕНИЕ]" : "[ПОДТВЕРДИТЬ ОТКАТ]").withStyle(style -> style
                 .withColor(ChatFormatting.GREEN)
                 .withClickEvent(new net.minecraft.network.chat.ClickEvent(
-                        net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/log rollback --confirm")));
+                        net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, command + " --confirm")));
         MutableComponent cancel = Component.literal("  [ОТМЕНИТЬ]").withStyle(style -> style
                 .withColor(ChatFormatting.RED)
                 .withClickEvent(new net.minecraft.network.chat.ClickEvent(
-                        net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/log rollback --cancel")));
+                        net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, command + " --cancel")));
         src.sendSystemMessage(confirm.append(cancel));
     }
 
@@ -2125,8 +2147,9 @@ public final class LoggerCommands {
         }
     }
 
-    private static void showRollbackPreview(CommandSourceStack source, ServerPlayer player, RollbackPlanManager.Plan plan) {
-        if (player == null || plan == null || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
+    private static void showRollbackPreview(CommandSourceStack source, ServerPlayer player, RollbackPlanManager.Plan plan, RollbackReport report) {
+        if (player == null || plan == null || !player.connection.hasChannel(com.roften.avilixlogger.net.S2CRollbackPreviewPayload.TYPE)
+                || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
         if (plan.scopes().size() != 1) {
             clearRollbackPreview(player);
             source.sendSystemMessage(Component.literal("Глобальный план нельзя показать одной рамкой; точные измерения сохранены в плане.")
@@ -2134,24 +2157,21 @@ public final class LoggerCommands {
             return;
         }
         RollbackPlanManager.Scope scope = plan.scopes().get(0);
-        // A full-world box is intentionally not sent to the renderer because its coordinates lose precision on the GPU.
-        if (scope.min().getX() <= -1_000_000 || scope.max().getX() >= 1_000_000
-                || scope.min().getZ() <= -1_000_000 || scope.max().getZ() >= 1_000_000) {
-            clearRollbackPreview(player);
-            source.sendSystemMessage(Component.literal("Откат всего измерения не имеет конечной отображаемой рамки.")
-                    .withStyle(ChatFormatting.DARK_GRAY));
-            return;
+        if (report.previewLimited) {
+            source.sendSystemMessage(Component.literal("В мире показана часть плана. Полный объём указан ниже.")
+                    .withStyle(ChatFormatting.YELLOW));
         }
         net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(player,
                 new com.roften.avilixlogger.net.S2CRollbackPreviewPayload(
                         true, plan.id(), scope.dimension(),
                         scope.min().getX(), scope.min().getY(), scope.min().getZ(),
                         scope.max().getX(), scope.max().getY(), scope.max().getZ(),
-                        plan.targetTs(), plan.expiresAt()));
+                        plan.targetTs(), plan.expiresAt(), report.previewMarkers));
     }
 
     private static void clearRollbackPreview(ServerPlayer player) {
-        if (player == null || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
+        if (player == null || !player.connection.hasChannel(com.roften.avilixlogger.net.S2CRollbackPreviewPayload.TYPE)
+                || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
         net.neoforged.neoforge.network.PacketDistributor.sendToPlayer(
                 player, com.roften.avilixlogger.net.S2CRollbackPreviewPayload.clear());
     }

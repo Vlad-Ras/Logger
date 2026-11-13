@@ -200,9 +200,10 @@ final class ClientReportScreen extends LoggerScreen {
                 json.addProperty("receivedAt", Instant.ofEpochMilli(current.receivedAt()).toString());
                 json.addProperty("truncated", current.report().truncated());
                 json.add("mods", gson.toJsonTree(current.report().mods().stream().map(mod ->
-                        java.util.Map.of("id", mod.id(), "version", mod.version(), "displayName", mod.displayName())).toList()));
+                        java.util.Map.of("id", mod.id(), "version", mod.version(), "displayName", mod.displayName(), "sha256", mod.sha256())).toList()));
                 json.add("resourcePacks", gson.toJsonTree(current.report().packs()));
                 json.add("matchedResourcePacks", gson.toJsonTree(current.matches()));
+                json.add("matchedModIds", gson.toJsonTree(current.matchedModIds()));
                 json.add("serverCommands", gson.toJsonTree(currentCommands));
                 json.addProperty("serverCommandsStatus", currentCommandStatus);
                 Files.createDirectories(directory);
@@ -244,6 +245,10 @@ final class ClientReportScreen extends LoggerScreen {
                             Instant.ofEpochMilli(snapshot.receivedAt()).atZone(ZoneId.systemDefault()))));
                     content.add(Component.literal("Моды · " + report.mods().size() + "    Ресурс-паки · " + report.packs().size()));
                     if (report.truncated()) content.add(Component.literal("Список сокращён по лимиту отчёта.").withStyle(ChatFormatting.YELLOW));
+                    if (!snapshot.matchedModIds().isEmpty()) {
+                        content.add(heading("Совпадения по модам · " + snapshot.matchedModIds().size()));
+                        snapshot.matchedModIds().forEach(id -> content.add(match(id)));
+                    }
                     if (!snapshot.matches().isEmpty()) {
                         content.add(heading("Совпадения по ресурс-пакам · " + snapshot.matches().size()));
                         snapshot.matches().forEach(pack -> content.add(match(pack)));
@@ -252,8 +257,12 @@ final class ClientReportScreen extends LoggerScreen {
                 }
                 case MODS -> {
                     content.add(heading("Загруженные моды · " + report.mods().size()));
-                    report.mods().forEach(mod -> content.add(Component.literal(mod.label())
-                            .append(Component.literal("  ·  " + mod.version()).withStyle(ChatFormatting.GRAY))));
+                    var matchedMods = new HashSet<>(snapshot.matchedModIds());
+                    for (var mod : report.mods()) {
+                        content.add((matchedMods.contains(mod.id()) ? match(mod.label()) : Component.literal(mod.label()))
+                                .append(Component.literal("  ·  " + mod.version()).withStyle(ChatFormatting.GRAY)));
+                        if (!mod.sha256().isEmpty()) content.add(Component.literal("SHA-256  " + mod.sha256()).withStyle(ChatFormatting.GRAY));
+                    }
                 }
                 case PACKS -> {
                     content.add(heading("Выбранные ресурс-паки · " + report.packs().size()));

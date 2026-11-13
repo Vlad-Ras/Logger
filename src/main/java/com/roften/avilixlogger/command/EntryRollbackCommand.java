@@ -14,6 +14,8 @@ import com.roften.avilixlogger.core.NbtSerde;
 import com.roften.avilixlogger.core.PermissionUtil;
 import com.roften.avilixlogger.core.RollbackCoordinator;
 import com.roften.avilixlogger.core.RollbackEngine;
+import com.roften.avilixlogger.net.S2CRollbackPreviewPayload;
+import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
@@ -155,7 +157,15 @@ public final class EntryRollbackCommand {
         }
         var snapshot = new RollbackEngine.PreparedBlockSnapshot(pos, row.blockBefore, null, null,
                 row.type, before, null, null);
-        PREVIEWS.put(actor, new Plan(row.id, level, expected, snapshot, System.currentTimeMillis() + PREVIEW_TTL_MS));
+        long expires = System.currentTimeMillis() + PREVIEW_TTL_MS;
+        PREVIEWS.put(actor, new Plan(row.id, level, expected, snapshot, expires));
+        var player = source.getPlayer();
+        if (player != null && player.connection.hasChannel(S2CRollbackPreviewPayload.TYPE)) {
+            var kind = previous.isAir() ? S2CRollbackPreviewPayload.Kind.REMOVE : S2CRollbackPreviewPayload.Kind.BLOCK;
+            PacketDistributor.sendToPlayer(player, new S2CRollbackPreviewPayload(true, Long.toString(row.id), row.dim,
+                    pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ(), row.ts, expires,
+                    List.of(new S2CRollbackPreviewPayload.Marker(pos, kind, before.getString("Name")))));
+        }
         source.sendSystemMessage(Component.literal(summary + "\nОбъём · 1 блок\nБудет восстановлено · "
                 + after.getString("Name") + " → " + before.getString("Name") + "\n")
                 .append(Component.literal("[Подтвердить откат]").withStyle(style -> style.withColor(ChatFormatting.GREEN)
@@ -180,6 +190,7 @@ public final class EntryRollbackCommand {
         if (!LoggerConfig.isEnabled() || RollbackCoordinator.hasActiveRollback() || CartAuditContext.rollbackActive)
             return fail(source, "Logger отключён или уже выполняется откат.");
         PREVIEWS.remove(player.getUUID());
+        if (player.connection.hasChannel(S2CRollbackPreviewPayload.TYPE)) PacketDistributor.sendToPlayer(player, S2CRollbackPreviewPayload.clear());
         var pos = plan.snapshot().pos();
         if (!plan.level().hasChunkAt(pos) || !plan.level().getBlockState(pos).equals(plan.expected()))
             return fail(source, "Блок изменился после предпросмотра или чанк выгружен.");
