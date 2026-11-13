@@ -63,35 +63,25 @@ public final class LogViewerClientHooks {
                 return metadata.stream().map(mod -> {
                     var file = mod.getOwningFile();
                     var path = file == null || file.getFile() == null ? null : file.getFile().getFilePath();
-                    String hash = path == null ? "" : hashes.computeIfAbsent(path, LogViewerClientHooks::hashModFile);
+                    String hash = path == null ? "" : hashes.computeIfAbsent(path, ResourcePackHashes::hashFile);
                     return new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName(), hash);
                 }).sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
             }, net.minecraft.Util.ioPool());
         }
-        modInventory.whenComplete((mods, failure) -> minecraft.execute(() -> {
-            if (failure != null) {
-                modInventory = null;
-                return;
-            }
-            if (minecraft.getConnection() == connection && connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
-                PacketDistributor.sendToServer(ClientReportPayloads.collect(request.id(), mods, packs));
-            }
-        }));
+        var packDirectory = minecraft.getResourcePackDirectory();
+        var inventory = modInventory;
+        inventory.thenApplyAsync(mods -> ClientReportPayloads.collect(request.id(), mods, packs,
+                ResourcePackHashes.collect(packDirectory, packs)), net.minecraft.Util.ioPool())
+                .whenComplete((report, failure) -> minecraft.execute(() -> {
+                    if (failure != null) {
+                        if (modInventory == inventory && inventory.isCompletedExceptionally()) modInventory = null;
+                    } else if (minecraft.getConnection() == connection && connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
+                        PacketDistributor.sendToServer(report);
+                    }
+                }));
     }
 
     private static java.util.concurrent.CompletableFuture<java.util.List<ClientReportPayloads.Mod>> modInventory;
-
-    private static String hashModFile(java.nio.file.Path file) {
-        if (!java.nio.file.Files.isRegularFile(file)) return "";
-        try (var input = java.nio.file.Files.newInputStream(file)) {
-            var digest = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] buffer = new byte[32 * 1024];
-            for (int read; (read = input.read(buffer)) != -1;) digest.update(buffer, 0, read);
-            return java.util.HexFormat.of().formatHex(digest.digest());
-        } catch (java.io.IOException | java.security.GeneralSecurityException | SecurityException failure) {
-            return "";
-        }
-    }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
         captureHealth = null;

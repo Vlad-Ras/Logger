@@ -9,7 +9,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.*;
 import net.minecraft.server.level.*;
 import net.minecraft.world.level.ChunkPos;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
 import java.util.*;
 import java.util.concurrent.*;
@@ -55,7 +54,7 @@ public final class EntryPositionCommand {
                 var level=dimension==null?null:server.getLevel(ResourceKey.create(net.minecraft.core.registries.Registries.DIMENSION,dimension));
                 if(level==null){REQUESTS.remove(uuid,token);replies.accept(new Feedback(com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,Component.literal("Измерение записи недоступно.")));return;}
                 long x=row.x(),z=row.z();boolean chunk=row.chunk();
-                if(x < -29_999_984L||x>29_999_984L||z < -29_999_984L||z>29_999_984L||!level.getWorldBorder().isWithinBounds(new BlockPos((int)x,0,(int)z))){
+                if(x < -29_999_984L||x>29_999_984L||z < -29_999_984L||z>29_999_984L){
                     REQUESTS.remove(uuid,token);replies.accept(new Feedback(com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,Component.literal("Позиция записи находится за границей мира.")));return;
                 }
                 var pending=new Pending(source,current,level,id,(int)x,row.y(),(int)z,chunk,token,replies);
@@ -82,24 +81,12 @@ public final class EntryPositionCommand {
                 ServerTickScheduler.schedule(server,1,this::poll);return;
             }
             try {
-                int start=surface?level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z):y+1;
-                BlockPos destination=null;
-                for(int offset=0;offset<=32&&destination==null;offset++) {
-                    int candidate=start-offset;
-                    if(candidate<=level.getMinBuildHeight()||candidate+1>=level.getMaxBuildHeight())continue;
-                    var feet=new BlockPos(x,candidate,z);var floor=feet.below();
-                    var ground=level.getBlockState(floor);
-                    if(ground.is(Blocks.MAGMA_BLOCK)||ground.is(Blocks.CACTUS)||ground.is(Blocks.CAMPFIRE)||ground.is(Blocks.SOUL_CAMPFIRE))continue;
-                    if(!ground.isFaceSturdy(level,floor,Direction.UP))continue;
-                    if(level.getBlockState(feet).getCollisionShape(level,feet).isEmpty()&&level.getBlockState(feet.above()).getCollisionShape(level,feet.above()).isEmpty()
-                        &&level.getFluidState(feet).isEmpty()&&level.getFluidState(feet.above()).isEmpty()
-                        &&!level.getBlockState(feet).is(Blocks.FIRE)&&!level.getBlockState(feet).is(Blocks.SOUL_FIRE)&&!level.getBlockState(feet).is(Blocks.POWDER_SNOW))destination=feet;
-                }
-                if(destination==null){replies.accept(new Feedback(com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,Component.literal("В пределах 32 блоков не найдено безопасного места для перехода.")));return;}
-                player.teleportTo(level,x+0.5,destination.getY(),z+0.5,player.getYRot(),player.getXRot());
-                boolean moved=player.serverLevel()==level&&Math.abs(player.getX()-(x+0.5))<0.01&&Math.abs(player.getY()-destination.getY())<0.01&&Math.abs(player.getZ()-(z+0.5))<0.01;
+                int destinationY = surface ? level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z) : y;
+                player.teleportTo(level,x+0.5,destinationY,z+0.5,player.getYRot(),player.getXRot());
+                boolean moved=player.serverLevel()==level&&Math.abs(player.getX()-(x+0.5))<0.01
+                        &&Math.abs(player.getY()-destinationY)<0.01&&Math.abs(player.getZ()-(z+0.5))<0.01;
                 replies.accept(new Feedback(moved?com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.SUCCESS:com.roften.avilixlogger.net.S2CEntryTeleportPayload.State.FAILURE,
-                        Component.literal(moved?"Запись #"+id+": "+level.dimension().location()+" · "+x+" "+destination.getY()+" "+z:"Переход отменён: сервер не подтвердил новое положение игрока.")));
+                        Component.literal(moved?"Запись #"+id+": "+level.dimension().location()+" · "+x+" "+destinationY+" "+z:"Переход отменён: сервер не подтвердил новое положение игрока.")));
             } finally {finish();}
         }
         private void release(){level.getChunkSource().removeRegionTicket(TICKET,chunk,1,token);}

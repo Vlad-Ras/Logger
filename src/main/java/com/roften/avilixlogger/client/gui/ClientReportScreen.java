@@ -49,6 +49,8 @@ final class ClientReportScreen extends LoggerScreen {
     private long reportRequest;
     private long commandsRequest;
     private boolean commandsLoaded;
+    private net.minecraft.client.gui.components.EditBox inventorySearch;
+    private String modSearch = "", packSearch = "";
     private Button freshButton, cachedButton, copyButton, exportButton;
     private boolean exportPending;
     private String exportStatus = "";
@@ -94,6 +96,16 @@ final class ClientReportScreen extends LoggerScreen {
                     () -> openTab(value));
             tabs.add(button);
         }
+        inventorySearch = addRenderableWidget(new LoggerGuiWidgets.ScaledEditBox(font, left, 85, paneWidth, 20,
+                Component.literal("Поиск по имени, ID или SHA-256"), this::scale));
+        inventorySearch.setMaxLength(128);
+        inventorySearch.setHint(Component.literal("Название, ID или SHA-256"));
+        inventorySearch.setValue(tab == Tab.PACKS ? packSearch : modSearch);
+        inventorySearch.setResponder(value -> {
+            if (tab == Tab.MODS) modSearch = value;
+            else if (tab == Tab.PACKS) packSearch = value;
+            rebuild();
+        });
         int footerWidth = (paneWidth - 2 * gap) / 3;
         button("Назад", left, height - 30, footerWidth, this::onClose);
         copyButton = button("Копировать вкладку", left + footerWidth + gap, height - 30, footerWidth, () ->
@@ -116,6 +128,8 @@ final class ClientReportScreen extends LoggerScreen {
         nickname = value;
         reportRequest = commandsRequest = 0;
         snapshot = null;
+        modSearch = packSearch = "";
+        inventorySearch.setValue("");
         exportPending = false;
         exportStatus = "";
         commands = List.of();
@@ -127,6 +141,7 @@ final class ClientReportScreen extends LoggerScreen {
 
     private void openTab(Tab value) {
         tab = value;
+        if (showsInventorySearch()) inventorySearch.setValue(tab == Tab.PACKS ? packSearch : modSearch);
         if (tab == Tab.COMMANDS && !commandsLoaded && commandsRequest == 0 && ClientReportViewPayloads.validName(nickname)) {
             send(Action.COMMANDS);
         }
@@ -202,6 +217,7 @@ final class ClientReportScreen extends LoggerScreen {
                 json.add("mods", gson.toJsonTree(current.report().mods().stream().map(mod ->
                         java.util.Map.of("id", mod.id(), "version", mod.version(), "displayName", mod.displayName(), "sha256", mod.sha256())).toList()));
                 json.add("resourcePacks", gson.toJsonTree(current.report().packs()));
+                json.add("resourcePackHashes", gson.toJsonTree(current.report().packHashes()));
                 json.add("matchedResourcePacks", gson.toJsonTree(current.matches()));
                 json.add("matchedModIds", gson.toJsonTree(current.matchedModIds()));
                 json.add("serverCommands", gson.toJsonTree(currentCommands));
@@ -256,24 +272,39 @@ final class ClientReportScreen extends LoggerScreen {
                     content.add(Component.literal("Данные прислал клиент. Совпадение по имени требует проверки.").withStyle(ChatFormatting.GRAY));
                 }
                 case MODS -> {
-                    content.add(heading("Загруженные моды · " + report.mods().size()));
+                    String query = normalizeQuery(modSearch);
+                    var visible = report.mods().stream()
+                            .filter(mod -> matchesQuery(query, mod.displayName(), mod.id(), mod.sha256())).toList();
+                    content.add(heading("Загруженные моды · " + inventoryCount(visible.size(), report.mods().size(), query)));
+                    if (visible.isEmpty() && !query.isEmpty()) content.add(Component.literal("Ничего не найдено."));
                     var matchedMods = new HashSet<>(snapshot.matchedModIds());
-                    for (var mod : report.mods()) {
+                    for (var mod : visible) {
                         content.add((matchedMods.contains(mod.id()) ? match(mod.label()) : Component.literal(mod.label()))
                                 .append(Component.literal("  ·  " + mod.version()).withStyle(ChatFormatting.GRAY)));
                         if (!mod.sha256().isEmpty()) content.add(Component.literal("SHA-256  " + mod.sha256()).withStyle(ChatFormatting.GRAY));
                     }
                 }
                 case PACKS -> {
-                    content.add(heading("Выбранные ресурс-паки · " + report.packs().size()));
+                    String query = normalizeQuery(packSearch);
+                    var visible = report.packs().stream()
+                            .filter(pack -> matchesQuery(query, pack, report.packHashes().getOrDefault(pack, ""))).toList();
+                    content.add(heading("Выбранные ресурс-паки · " + inventoryCount(visible.size(), report.packs().size(), query)));
+                    if (visible.isEmpty() && !query.isEmpty()) content.add(Component.literal("Ничего не найдено."));
                     var matches = new HashSet<>(snapshot.matches());
-                    report.packs().forEach(pack -> content.add(matches.contains(pack) ? match(pack) : Component.literal(pack)));
+                    for (String pack : visible) {
+                        content.add(matches.contains(pack) ? match(pack) : Component.literal(pack));
+                        String hash = report.packHashes().get(pack);
+                        if (hash != null) content.add(Component.literal("SHA-256  " + hash).withStyle(ChatFormatting.GRAY));
+                    }
                 }
                 case COMMANDS -> throw new IllegalStateException("Commands have their own view");
             }
         }
         lines = List.copyOf(content);
         scroll = 0;
+        inventorySearch.visible = showsInventorySearch();
+        inventorySearch.active = inventorySearch.visible;
+        if (!inventorySearch.visible && getFocused() == inventorySearch) setFocused(null);
         for (int i = 0; i < tabs.size(); i++) {
             tabs.get(i).active = i != tab.ordinal() || tab == Tab.COMMANDS && !commandsLoaded && commandsRequest == 0;
         }
@@ -286,13 +317,29 @@ final class ClientReportScreen extends LoggerScreen {
         }
     }
 
+    private boolean showsInventorySearch() { return tab == Tab.MODS || tab == Tab.PACKS; }
+
+    private int contentTop() { return showsInventorySearch() ? 109 : 85; }
+
+    private static String normalizeQuery(String query) { return query.strip().toLowerCase(java.util.Locale.ROOT); }
+
+    private static boolean matchesQuery(String query, String... fields) {
+        if (query.isEmpty()) return true;
+        for (String field : fields) if (field.toLowerCase(java.util.Locale.ROOT).contains(query)) return true;
+        return false;
+    }
+
+    private static String inventoryCount(int visible, int total, String query) {
+        return query.isEmpty() ? Integer.toString(total) : visible + " / " + total;
+    }
+
     private static Component heading(String text) { return Component.literal(text).withStyle(ChatFormatting.GOLD); }
     private static net.minecraft.network.chat.MutableComponent match(String pack) { return Component.literal("⚠ " + pack).withStyle(ChatFormatting.YELLOW); }
 
     @Override public void render(GuiGraphics g, int x, int y, float dt) {
         LoggerGuiWidgets.beginFrame(g, width, height, false);
         g.drawCenteredString(font, title, width / 2, 13, 0xFFD700);
-        int top = 85;
+        int top = contentTop();
         int bottom = height - 45;
         if (bottom > top) {
             LoggerGuiWidgets.journalBackground(g, left, top, left + paneWidth, bottom);
@@ -318,7 +365,7 @@ final class ClientReportScreen extends LoggerScreen {
     }
 
     @Override public boolean mouseScrolled(double x, double y, double dx, double dy) {
-        if (x < left || x >= left + paneWidth || y < 85 || y >= height - 45) return super.mouseScrolled(x, y, dx, dy);
+        if (x < left || x >= left + paneWidth || y < contentTop() || y >= height - 45) return super.mouseScrolled(x, y, dx, dy);
         scroll = Math.max(0, scroll - 3 * (int) Math.signum(dy));
         return true;
     }

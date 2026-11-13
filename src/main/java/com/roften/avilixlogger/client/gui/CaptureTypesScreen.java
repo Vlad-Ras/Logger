@@ -32,6 +32,7 @@ public final class CaptureTypesScreen extends LoggerScreen {
     private final List<Integer> filtered = new ArrayList<>();
     private final List<HandlerGroup> matchingGroups = new ArrayList<>();
     private HandlerGroup selectedGroup;
+    private String searchText = "";
     private boolean handlers;
     private EditBox search;
     private Button tab;
@@ -54,6 +55,25 @@ public final class CaptureTypesScreen extends LoggerScreen {
         super(Component.literal("AvilixLogger — Запись событий"));
         this.parent = parent;
         this.viewer = viewer;
+    }
+
+    CaptureTypesScreen(Screen parent, LogViewerScreen viewer, String mod) {
+        this(parent, viewer);
+        handlers = true;
+        String origin = mod.isEmpty() ? "minecraft" : mod;
+        selectedGroup = GROUPS.stream().filter(group -> group.presets().stream().anyMatch(preset ->
+                matchesOrigin(CaptureHandlers.fromPreset(preset), origin))).findFirst().orElse(null);
+        if (selectedGroup == null) searchText = mod;
+    }
+
+    private static boolean matchesOrigin(CaptureHandlers handler, String origin) {
+        String key = handler.key();
+        return switch (origin) {
+            case "minecraft" -> key.startsWith("core.") || key.startsWith("mixin.");
+            case "openpartiesandclaims" -> key.startsWith("opac.");
+            case "scguns" -> key.startsWith("compat.scguns.") || key.startsWith("core.WeaponCombatAudit.");
+            default -> key.startsWith(origin + ".") || key.startsWith("compat." + origin + ".");
+        };
     }
 
     private static List<HandlerGroup> handlerGroups() {
@@ -98,7 +118,8 @@ public final class CaptureTypesScreen extends LoggerScreen {
         }
         search = addRenderableWidget(new EditBox(font,x,49,w,18,Component.literal("Поиск обработчика")));
         search.setHint(Component.literal("Поиск по моду или названию"));
-        search.setResponder(value -> { scroll = 0; relayout(); });
+        search.setValue(searchText);
+        search.setResponder(value -> { searchText = value; scroll = 0; relayout(); });
         int headerY = 72;
         int half = Math.max(45,(w - 6)/2);
         enableAll = addRenderableWidget(new LoggerGuiWidgets.ScaledTextButton(x,headerY,half,18,
@@ -124,7 +145,8 @@ public final class CaptureTypesScreen extends LoggerScreen {
         // A fresh server response prevents accidentally using a previous world's state.
         loaded=false;pending=false;
         relayout();
-        if (Minecraft.getInstance().getConnection() != null)
+        var connection = Minecraft.getInstance().getConnection();
+        if (connection != null && connection.hasChannel(C2SCaptureTypesPayload.TYPE))
             PacketDistributor.sendToServer(new C2SCaptureTypesPayload(C2SCaptureTypesPayload.Action.QUERY,0,false,0));
     }
 

@@ -114,7 +114,7 @@ public final class ClickHouseNativeSmoke {
         Instant reportTime = Instant.ofEpochMilli(System.currentTimeMillis());
         var report = ClientReportPayloads.collect(0,
                 List.of(new ClientReportPayloads.Mod("create", "6.0.10", "Create", "a5".repeat(32))),
-                List.of("file/Пак\" v1.zip"));
+                List.of("file/Пак\" v1.zip"), java.util.Map.of("file/Пак\" v1.zip", "f5".repeat(32)));
         ClickHouseLogStorage db = null;
         try {
             db = new ClickHouseLogStorage();

@@ -265,6 +265,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         report.packs().forEach(packs::add);
         payload.add("mods", mods);
         payload.add("packs", packs);
+        if (!report.packHashes().isEmpty()) {
+            var hashes = new JsonObject();
+            report.packHashes().forEach(hashes::addProperty);
+            payload.add("packHashes", hashes);
+        }
         payload.addProperty("truncated", report.truncated());
         return payload.toString();
     }
@@ -286,7 +291,15 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         }
         var packs = new ArrayList<String>(storedPacks.size());
         for (var pack : storedPacks) packs.add(pack.getAsString());
-        return new ClientReportPayloads.Report(0, mods, packs, json.get("truncated").getAsBoolean());
+        var hashes = new java.util.HashMap<String, String>();
+        var storedHashes = json.getAsJsonObject("packHashes");
+        if (storedHashes != null) {
+            for (String pack : packs) {
+                var hash = storedHashes.get(pack);
+                if (hash != null && hash.isJsonPrimitive()) hashes.put(pack, hash.getAsString());
+            }
+        }
+        return ClientReportPayloads.collect(0, mods, packs, hashes).withTruncation(json.get("truncated").getAsBoolean());
     }
 
     private void ensureSchema() {

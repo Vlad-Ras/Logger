@@ -51,6 +51,18 @@ public final class HandlerCaptureSmoke {
             check(restored.disabledHandlers().equals(keys) && restored.captureMask() == (1L << 38), "World settings lost");
             check(!handler.enabled() && CaptureHandlers.at(101).enabled(), "Handler switch affects neighbour");
 
+            var spawn = CaptureHandlers.ENTITY_SPAWN;
+            var leave = CaptureHandlers.ENTITY_LEAVE;
+            var toss = CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMTOSS;
+            settings.setCaptureSettings(0, Set.of(spawn.key(), leave.key(), toss.key()));
+            var events = new com.roften.avilixlogger.core.LoggerEventHandlers();
+            // Disabled callbacks must stop before looking up the world or capturing a snapshot.
+            events.onEntitySpawn(null);
+            events.onEntityLeave(null);
+            events.onItemToss(null);
+            settings.setCaptureSettings(restored.captureMask(), keys);
+            check(spawn.enabled() && leave.enabled() && toss.enabled(), "Callbacks did not resume after re-enabling");
+
             var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), world.registryAccess());
             try {
                 var payload = new S2CCaptureTypesPayload(settings.captureMask(), settings.captureRevision(),

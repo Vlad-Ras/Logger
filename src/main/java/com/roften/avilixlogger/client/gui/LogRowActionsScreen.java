@@ -67,6 +67,11 @@ final class LogRowActionsScreen extends LoggerScreen {
             onClose();
             copyJson.run();
         });
+        var capture = button(mod.isEmpty() ? "Обработчики записи" : "Обработчики записи · " + mod, x, 160, w,
+                () -> minecraft.setScreen(new CaptureTypesScreen(this, viewer, mod)));
+        var connection = minecraft.getConnection();
+        capture.active = connection != null && connection.hasChannel(com.roften.avilixlogger.net.C2SCaptureTypesPayload.TYPE);
+        tooltip(capture, "Выберите обработчик, чтобы отключить будущую запись на сервере.");
         button("Назад к журналу", x, height - 28, w, this::onClose);
     }
 

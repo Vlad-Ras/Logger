@@ -977,8 +977,8 @@ public final class LoggerEventHandlers {
      */
     /** Captures only changes inside this actual click, never the entire time a GUI was open. */
     public static MenuAction beginMenuAction(ServerPlayer player) {
-        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_BEGINMENUACTION.enabled()) return null;
-         return beginMenuAction(player,"player:container_click"); }
+        return beginMenuAction(player,"player:container_click");
+    }
     public static MenuAction beginMenuAction(ServerPlayer player,String actionSource) {
         if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_BEGINMENUACTION.enabled()) return null;
         if (!CaptureTypePolicy.enabled(2) || player==null || !player.server.isSameThread() || !LoggerConfig.isCaptureEnabled() || !LoggerConfig.VALUES.logContainers.get()
@@ -1238,7 +1238,8 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onItemToss(ItemTossEvent event) {
-        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMTOSS.enabled()) return;
+        if (!CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMTOSS.enabled()
+                || !CaptureHandlers.CORE_LOGGEREVENTHANDLERS_RECORDPLAYERDROP.enabled()) return;
         if (CaptureTypePolicy.suppressed()) return;
         if (!CaptureTypePolicy.enabled(4)) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
@@ -1264,6 +1265,7 @@ public final class LoggerEventHandlers {
 
 @SubscribeEvent
     public void onEntitySpawn(EntityJoinLevelEvent event) {
+        if (!CaptureHandlers.ENTITY_SPAWN.enabled()) return;
         if (!(event.getLevel() instanceof ServerLevel level) || CaptureTypePolicy.suppressed()) return;
         Entity ent = event.getEntity();
         // Item drops remain independent when generic entity capture is switched off.
@@ -1286,10 +1288,6 @@ public final class LoggerEventHandlers {
 
         if(CreateSupport.available()&&com.roften.avilixlogger.compat.create.CreateLifecycleAudit.handles(ent))return;
 
-        if (!CaptureHandlers.ENTITY_SPAWN.enabled() && CreateEntityOrigin.context() == null
-                && CartAuditContext.current() == null
-                && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource()) == null) return;
-
         // 1) ItemEntity spawn: player drops and exact construction effects.
         if (ent instanceof ItemEntity itemEnt) {
             if (com.roften.avilixlogger.compat.blockpack.BlockPackJoinGiftAudit.active()) return;
@@ -1302,6 +1300,9 @@ public final class LoggerEventHandlers {
                 var actor=CauseContext.peek();if(actor!=null && actor.actorUuid()!=null){drop.actorUuid=actor.actorUuid();drop.actorName=actor.actorName();}
                 drop.deferSnapshot(LogEntry.SnapshotField.ITEM,NbtSerde.snapshotItemStack(itemEnt.getItem(),level.registryAccess()));drop.deferSnapshot(LogEntry.SnapshotField.ENTITY,NbtSerde.snapshotEntity(level,itemEnt));LogIdGenerator.ensure(drop);LoggerRuntime.storage(level).append(drop);return;
             }
+            if (event.loadedFromDisk() || !CaptureTypePolicy.enabled(4)
+                    || !CaptureHandlers.CORE_LOGGEREVENTHANDLERS_ONITEMTOSS.enabled()
+                    || !CaptureHandlers.CORE_LOGGEREVENTHANDLERS_RECORDPLAYERDROP.enabled()) return;
             java.util.UUID throwerUuid = getItemEntityThrowerUuid(itemEnt);
             if (throwerUuid == null) return;
 
@@ -2190,7 +2191,8 @@ public final class LoggerEventHandlers {
 
     @SubscribeEvent
     public void onEntityLeave(EntityLeaveLevelEvent event) {
-        if (CaptureTypePolicy.suppressed()) return;
+        if (!CaptureHandlers.ENTITY_LEAVE.enabled() || !CaptureTypePolicy.enabled(3)
+                || CaptureTypePolicy.suppressed()) return;
         if (!LoggerConfig.isCaptureEnabled()) return;
         if (!(event.getLevel() instanceof ServerLevel level)) return;
 
@@ -2199,9 +2201,6 @@ public final class LoggerEventHandlers {
         if (com.roften.avilixlogger.compat.corpse.CorpseLifecycleAudit.handles(ent)) return;
         if(CreateSupport.available()&&(com.roften.avilixlogger.compat.create.CartAutomationAudit.worldCovered(ent)||com.roften.avilixlogger.compat.create.CreateLifecycleAudit.handles(ent)))return;
         var origin=CreateEntityOrigin.read(ent);
-        if (!CaptureHandlers.ENTITY_LEAVE.enabled() && origin == null
-                && CartAuditContext.current() == null
-                && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource()) == null) return;
         if(!LoggerConfig.VALUES.logEntities.get() && origin==null
                 && CreateContraptionKind.id(MutationSourceResolver.resolveExternalSource())==null)return;
         if (ent instanceof Player) return;

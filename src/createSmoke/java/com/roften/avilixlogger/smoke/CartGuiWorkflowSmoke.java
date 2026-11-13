@@ -108,7 +108,10 @@ final class CartGuiWorkflowSmoke {
             buffer.clear();
 
             var mod = new ClientReportPayloads.Mod("client_mod", "1.2.3\n", "Пример мода\n", "ab".repeat(32));
-            var report = ClientReportPayloads.collect(request.id(), List.of(mod), List.of("vanilla", "file/pack.zip"));
+            var report = ClientReportPayloads.collect(request.id(), List.of(mod), List.of("vanilla", "file/pack.zip"),
+                    java.util.Map.of("file/pack.zip", "ef".repeat(32)));
+            check(report.packHashes().equals(java.util.Map.of("file/pack.zip", "ef".repeat(32))),
+                    "report did not retain the selected pack hash");
             check(mod.version().equals("1.2.3") && mod.displayName().equals("Пример мода")
                     && mod.label().equals("Пример мода (client_mod)") && !report.truncated(), "valid report lost mod metadata");
             var fallback = new ClientReportPayloads.Mod("fallback", "1", "  \n ");

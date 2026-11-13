@@ -9,6 +9,8 @@ import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public final class ClientReportPayloads {
     private static final int MAX_MODS = 512;
@@ -24,18 +26,26 @@ public final class ClientReportPayloads {
     private ClientReportPayloads() {}
 
     public static Report collect(long id, List<Mod> mods, Iterable<String> packs) {
+        return collect(id, mods, packs, Map.of());
+    }
+
+    public static Report collect(long id, List<Mod> mods, Iterable<String> packs, Map<String, String> packHashes) {
         List<Mod> includedMods = new ArrayList<>();
         List<String> includedPacks = new ArrayList<>();
+        var includedHashes = new LinkedHashMap<String, String>();
         int remaining = MAX_WIRE_BYTES - HEADER_BYTES;
         boolean truncated = false;
         for (String pack : packs) {
             String name = cleanPackId(pack);
-            int size = fieldBytes(name);
+            String hash = packHashes.getOrDefault(pack, "");
+            boolean hashed = SHA256.matcher(hash).matches();
+            int size = fieldBytes(name) + 1 + (hashed ? HASH_BYTES : 0);
             if (includedPacks.size() == MAX_PACKS || size > remaining) {
                 truncated = true;
                 break;
             }
             includedPacks.add(name);
+            if (hashed) includedHashes.put(name, hash);
             remaining -= size;
         }
         for (Mod mod : mods) {
@@ -47,7 +57,7 @@ public final class ClientReportPayloads {
             includedMods.add(mod);
             remaining -= size;
         }
-        return new Report(id, includedMods, includedPacks, truncated);
+        return new Report(id, includedMods, includedPacks, truncated, includedHashes);
     }
 
     private static int fieldBytes(String value) {
@@ -91,17 +101,34 @@ public final class ClientReportPayloads {
         }
     }
 
-    public record Report(long id, List<Mod> mods, List<String> packs, boolean truncated) implements CustomPacketPayload {
+    public record Report(long id, List<Mod> mods, List<String> packs, boolean truncated,
+                         Map<String, String> packHashes) implements CustomPacketPayload {
         public static final Type<Report> TYPE = new Type<>(
-                ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_v3"));
+                ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_v4"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Report> CODEC = StreamCodec.of(
                 Report::encode, Report::decode);
+
+        public Report(long id, List<Mod> mods, List<String> packs, boolean truncated) {
+            this(id, mods, packs, truncated, Map.of());
+        }
 
         public Report {
             checkCount(mods.size(), MAX_MODS);
             checkCount(packs.size(), MAX_PACKS);
             mods = List.copyOf(mods);
             packs = packs.stream().map(ClientReportPayloads::cleanPackId).toList();
+            if (!packHashes.isEmpty()) {
+                var hashes = new LinkedHashMap<String, String>();
+                for (String pack : packs) {
+                    String hash = packHashes.get(pack);
+                    if (hash != null && SHA256.matcher(hash).matches()) hashes.put(pack, hash);
+                }
+                packHashes = Map.copyOf(hashes);
+            } else packHashes = Map.of();
+        }
+
+        public Report withTruncation(boolean wasTruncated) {
+            return wasTruncated && !truncated ? new Report(id, mods, packs, true, packHashes) : this;
         }
 
         @Override
@@ -115,12 +142,12 @@ public final class ClientReportPayloads {
                 buf.writeUtf(mod.id(), MOD_FIELD_LENGTH);
                 buf.writeUtf(mod.version(), MOD_FIELD_LENGTH);
                 buf.writeUtf(mod.nameOnWire(), MOD_FIELD_LENGTH);
-                buf.writeBoolean(!mod.sha256().isEmpty());
-                if (!mod.sha256().isEmpty()) buf.writeBytes(java.util.HexFormat.of().parseHex(mod.sha256()));
+                writeHash(buf, mod.sha256());
             }
             buf.writeVarInt(report.packs().size());
             for (String pack : report.packs()) {
                 buf.writeUtf(pack, PACK_NAME_LENGTH);
+                writeHash(buf, report.packHashes().getOrDefault(pack, ""));
             }
         }
 
@@ -136,21 +163,31 @@ public final class ClientReportPayloads {
                 String modId = buf.readUtf(MOD_FIELD_LENGTH);
                 String version = buf.readUtf(MOD_FIELD_LENGTH);
                 String name = buf.readUtf(MOD_FIELD_LENGTH);
-                String hash = "";
-                if (buf.readBoolean()) {
-                    byte[] bytes = new byte[HASH_BYTES];
-                    buf.readBytes(bytes);
-                    hash = java.util.HexFormat.of().formatHex(bytes);
-                }
-                mods.add(new Mod(modId, version, name, hash));
+                mods.add(new Mod(modId, version, name, readHash(buf)));
             }
             int packCount = checkCount(buf.readVarInt(), MAX_PACKS);
             List<String> packs = new ArrayList<>(packCount);
+            var hashes = new LinkedHashMap<String, String>();
             for (int i = 0; i < packCount; i++) {
-                packs.add(buf.readUtf(PACK_NAME_LENGTH));
+                String pack = cleanPackId(buf.readUtf(PACK_NAME_LENGTH));
+                packs.add(pack);
+                String hash = readHash(buf);
+                if (!hash.isEmpty()) hashes.put(pack, hash);
             }
-            return new Report(id, mods, packs, truncated);
+            return new Report(id, mods, packs, truncated, hashes);
         }
+    }
+
+    private static void writeHash(RegistryFriendlyByteBuf buf, String hash) {
+        buf.writeBoolean(!hash.isEmpty());
+        if (!hash.isEmpty()) buf.writeBytes(java.util.HexFormat.of().parseHex(hash));
+    }
+
+    private static String readHash(RegistryFriendlyByteBuf buf) {
+        if (!buf.readBoolean()) return "";
+        byte[] bytes = new byte[HASH_BYTES];
+        buf.readBytes(bytes);
+        return java.util.HexFormat.of().formatHex(bytes);
     }
 
     private static int checkCount(int count, int max) {
