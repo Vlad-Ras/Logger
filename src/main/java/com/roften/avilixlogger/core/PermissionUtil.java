@@ -45,6 +45,13 @@ public final class PermissionUtil {
         return source.hasPermission(opFallbackLevel);
     }
 
+    public static boolean hasOperatorNode(ServerPlayer player, String node) {
+        if (!isAdministrator(player)) return false;
+        Object permissions = permissionData(player);
+        if (permissions != null) return checkAny(permissions, node);
+        return !net.neoforged.fml.ModList.get().isLoaded("luckperms");
+    }
+
     public static boolean hasAny(CommandSourceStack source, int opFallbackLevel, String... nodes) {
         if (source == null) return false;
 

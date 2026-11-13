@@ -2124,11 +2124,11 @@ public final class LoggerCommands {
         src.sendSystemMessage(Component.literal((plan.replay() ? "Конец периода: " : "Будут отменены действия после цели и до снимка предпросмотра ")
                 + formatRollbackMoment(plan.cutoffTs()) + ".").withStyle(ChatFormatting.GRAY));
 
-        if (plan.scopes().size() == 1) {
-            RollbackPlanManager.Scope scope = plan.scopes().get(0);
-            src.sendSystemMessage(Component.literal("Область: " + scope.dimension() + " ["
-                    + scope.min().getX() + " " + scope.min().getY() + " " + scope.min().getZ() + "] → ["
-                    + scope.max().getX() + " " + scope.max().getY() + " " + scope.max().getZ() + "]")
+        RollbackPlanManager.Scope bounds = plan.previewBounds();
+        if (bounds != null) {
+            src.sendSystemMessage(Component.literal("Область: " + bounds.dimension() + " ["
+                    + bounds.min().getX() + " " + bounds.min().getY() + " " + bounds.min().getZ() + "] → ["
+                    + bounds.max().getX() + " " + bounds.max().getY() + " " + bounds.max().getZ() + "]")
                     .withStyle(ChatFormatting.GRAY));
         } else {
             src.sendSystemMessage(Component.literal("Область: " + plan.scopes().size() + " измерений (глобальный план)")
@@ -2165,13 +2165,13 @@ public final class LoggerCommands {
     private static void showRollbackPreview(CommandSourceStack source, ServerPlayer player, RollbackPlanManager.Plan plan, RollbackReport report) {
         if (player == null || plan == null || !player.connection.hasChannel(com.roften.avilixlogger.net.S2CRollbackPreviewPayload.TYPE)
                 || !com.roften.avilixlogger.net.LoggerNetwork.isClientPresent(player)) return;
-        if (plan.scopes().size() != 1) {
+        RollbackPlanManager.Scope scope = plan.previewBounds();
+        if (scope == null) {
             clearRollbackPreview(player);
             source.sendSystemMessage(Component.literal("Глобальный план нельзя показать одной рамкой; точные измерения сохранены в плане.")
                     .withStyle(ChatFormatting.DARK_GRAY));
             return;
         }
-        RollbackPlanManager.Scope scope = plan.scopes().get(0);
         if (report.previewLimited) {
             source.sendSystemMessage(Component.literal("В мире показана часть плана. Полный объём указан ниже.")
                     .withStyle(ChatFormatting.YELLOW));

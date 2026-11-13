@@ -70,6 +70,24 @@ public final class RollbackPlanManager {
         public String actor() { return actor; }
         public EnumSet<ActionType> types() { return types == null ? null : types.clone(); }
         public boolean replay() { return replay; }
+
+        public Scope previewBounds() {
+            Scope first = scopes.getFirst();
+            if (scopes.size() == 1) return first;
+            int minX = first.min().getX(), minY = first.min().getY(), minZ = first.min().getZ();
+            int maxX = first.max().getX(), maxY = first.max().getY(), maxZ = first.max().getZ();
+            for (int i = 1; i < scopes.size(); i++) {
+                Scope scope = scopes.get(i);
+                if (!first.dimension().equals(scope.dimension())) return null;
+                minX = Math.min(minX, scope.min().getX());
+                minY = Math.min(minY, scope.min().getY());
+                minZ = Math.min(minZ, scope.min().getZ());
+                maxX = Math.max(maxX, scope.max().getX());
+                maxY = Math.max(maxY, scope.max().getY());
+                maxZ = Math.max(maxZ, scope.max().getZ());
+            }
+            return new Scope(first.dimension(), new BlockPos(minX, minY, minZ), new BlockPos(maxX, maxY, maxZ));
+        }
         public List<Scope> scopes() { return scopes; }
     }
 

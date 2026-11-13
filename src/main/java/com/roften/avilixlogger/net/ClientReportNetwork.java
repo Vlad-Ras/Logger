@@ -39,7 +39,8 @@ import java.util.UUID;
 
 public final class ClientReportNetwork {
     private static final String ADMIN_PERMISSION = "avilixlogger.command.admin";
-    private static final int TIMEOUT_TICKS = 200;
+    // The first report may need to hash several gigabytes of mod archives.
+    private static final int TIMEOUT_TICKS = 1200;
     private static final long MANUAL_COOLDOWN_NANOS = Duration.ofSeconds(10).toNanos();
     private static final int CHAT_CHUNK_SIZE = 48;
     private static final int GUI_CHUNK_SIZE = 24;
@@ -116,7 +117,7 @@ public final class ClientReportNetwork {
 
     public static LiteralArgumentBuilder<CommandSourceStack> alertsCommand() {
         return Commands.literal("client-report-alerts")
-                .requires(source -> source.getEntity() instanceof ServerPlayer && PermissionUtil.has(source, ALERT_PERMISSION, 2))
+                .requires(source -> source.getEntity() instanceof ServerPlayer player && canReceiveAlerts(player))
                 .then(Commands.literal("on").executes(ctx -> setAlerts(ctx.getSource(), true)))
                 .then(Commands.literal("off").executes(ctx -> setAlerts(ctx.getSource(), false)))
                 .executes(ctx -> {
@@ -506,11 +507,15 @@ public final class ClientReportNetwork {
         return false;
     }
 
+    private static boolean canReceiveAlerts(ServerPlayer player) {
+        return PermissionUtil.hasOperatorNode(player, ALERT_PERMISSION);
+    }
+
     static void handleAlerts(ClientReportAlertPayloads.Query query, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer admin)
                     || !admin.connection.hasChannel(ClientReportAlertPayloads.View.TYPE)
-                    || !PermissionUtil.has(admin.createCommandSourceStack(), ALERT_PERMISSION, 2)) return;
+                    || !canReceiveAlerts(admin)) return;
             var data = LoggerServerData.get(admin.getServer().overworld());
             switch (query.action()) {
                 case ENABLE -> data.setClientReportAlerts(admin.getUUID(), true);
@@ -523,10 +528,18 @@ public final class ClientReportNetwork {
 
     private static void sendAlerts(ServerPlayer admin, boolean subscribed) {
         if (!admin.connection.hasChannel(ClientReportAlertPayloads.View.TYPE)) return;
-        var since = Instant.now().minus(Duration.ofHours(24));
+        pruneAlerts(Instant.now());
+        PacketDistributor.sendToPlayer(admin, alertView(subscribed));
+    }
+
+    private static void pruneAlerts(Instant now) {
+        var since = now.minus(Duration.ofHours(24));
         while (!ALERTS.isEmpty() && ALERTS.getFirst().time().isBefore(since)) ALERTS.removeFirst();
+    }
+
+    private static ClientReportAlertPayloads.View alertView(boolean subscribed) {
         var history = subscribed ? ALERTS.reversed().stream().map(AuditAlert::text).toList() : List.<String>of();
-        PacketDistributor.sendToPlayer(admin, new ClientReportAlertPayloads.View(subscribed, history));
+        return new ClientReportAlertPayloads.View(subscribed, history);
     }
 
     private static void notifyMatches(MinecraftServer server, String targetName, Matches matches) {
@@ -534,16 +547,20 @@ public final class ClientReportNetwork {
         String summary = targetName + " · совпадений: моды " + matches.mods().size() + ", ресурс-паки " + matches.packs().size();
         String example = matches.mods().isEmpty() ? matches.packs().getFirst() : matches.mods().getFirst();
         String line = REPORT_TIME.format(Instant.now().atZone(ZoneId.systemDefault())) + " · " + summary + " · " + example;
-        ALERTS.addLast(new AuditAlert(Instant.now(), line));
+        var now = Instant.now();
+        pruneAlerts(now);
+        ALERTS.addLast(new AuditAlert(now, line));
         while (ALERTS.size() > ClientReportAlertPayloads.MAX_ALERTS) ALERTS.removeFirst();
         var message = Component.literal("[AvilixLogger] " + summary + ". Подробнее в «Уведомлениях об отчётах».")
                 .withStyle(ChatFormatting.GOLD);
         var data = LoggerServerData.get(server.overworld());
+        ClientReportAlertPayloads.View view = null;
         for (var admin : server.getPlayerList().getPlayers()) {
-            if (data.clientReportAlerts(admin.getUUID())
-                    && PermissionUtil.has(admin.createCommandSourceStack(), ALERT_PERMISSION, 2)) {
-                admin.sendSystemMessage(message);
-                sendAlerts(admin, true);
+            if (!data.clientReportAlerts(admin.getUUID()) || !canReceiveAlerts(admin)) continue;
+            admin.sendSystemMessage(message);
+            if (admin.connection.hasChannel(ClientReportAlertPayloads.View.TYPE)) {
+                if (view == null) view = alertView(true);
+                PacketDistributor.sendToPlayer(admin, view);
             }
         }
     }

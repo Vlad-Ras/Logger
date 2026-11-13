@@ -93,6 +93,7 @@ public final class RollbackCoordinator {
                 try {
                     List<PreparedScope> scopes = new ArrayList<>(plan.scopes().size());
                     RollbackReport preview = new RollbackReport();
+                    boolean collectMarkers = !apply && plan.previewBounds() != null;
                     long totalPreparedBytes = 0L;
                     long maxPreparedBytes = configInt(() -> LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get(),
                             512, 64, 8192) * 1024L * 1024L;
@@ -111,7 +112,7 @@ public final class RollbackCoordinator {
                         }
                         if (!apply) {
                             preview.merge(RollbackEngine.previewPrepared(prepared));
-                            if (plan.scopes().size() == 1) collectPreviewMarkers(prepared, preview);
+                            if (collectMarkers) collectPreviewMarkers(prepared, preview);
                         }
                     }
                     server.execute(() -> {
@@ -147,8 +148,9 @@ public final class RollbackCoordinator {
 
     private static void collectPreviewMarkers(RollbackEngine.PreparedRollback prepared, RollbackReport preview) {
         var markers = new ArrayList<S2CRollbackPreviewPayload.Marker>(S2CRollbackPreviewPayload.MAX_MARKERS);
+        markers.addAll(preview.previewMarkers);
         int limit = S2CRollbackPreviewPayload.MAX_MARKERS;
-        int blockLimit = prepared.deferred().isEmpty() ? limit : limit - 64;
+        int blockLimit = prepared.deferred().isEmpty() ? limit : Math.max(markers.size(), limit - 64);
         for (var block : prepared.blocks()) {
             if (markers.size() == blockLimit) {
                 preview.previewLimited = true;
@@ -164,11 +166,11 @@ public final class RollbackCoordinator {
         for (var row : prepared.deferred()) {
             if (row.type != ActionType.ENTITY_DEATH && row.type != ActionType.PLANE_REMOVE) continue;
             if (row.entityType == null || row.entityType.length() > 256 || row.entityNbt == null) continue;
-            if (NbtSerde.validateEntitySnapshot(row.entityType, row.entityUuid, row.rollbackEntity()) != null) continue;
             if (markers.size() == limit) {
                 preview.previewLimited = true;
                 break;
             }
+            if (NbtSerde.validateEntitySnapshot(row.entityType, row.entityUuid, row.rollbackEntity()) != null) continue;
             markers.add(new S2CRollbackPreviewPayload.Marker(new BlockPos(row.x, row.y, row.z),
                     S2CRollbackPreviewPayload.Kind.ENTITY, row.entityType));
         }

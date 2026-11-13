@@ -97,25 +97,28 @@ public final class CartCommands {
             source.sendFailure(Component.literal("В записи отсутствует ID конструкции."));
             return;
         }
-        var phase = CreateContraptionKind.phase(row.source);
-        if (CreateContraptionKind.fromSource(row.source) == CreateContraptionKind.TRAIN
-                && row.type == ActionType.CART_STATUS && phase.equals("state_checkpoint")) {
-            com.roften.avilixlogger.compat.create.CreateTrainRecovery.preview(source, id, row.id);
-        } else if (CreateContraptionKind.fromSource(row.source) == CreateContraptionKind.TRAIN
-                && (row.type == ActionType.CART_UNLOAD || row.type == ActionType.CART_REMOVE)) {
-            com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.preview(source, id, row.id);
-        } else if (row.type == ActionType.CREATE_DEPLOYER_ACTION
-                || row.type == ActionType.CART_TRANSFER && phase.equals("automation_transfer")) {
-            CreateTransferRollbackCoordinator.preview(source, id, row.id);
-        } else if (row.type == ActionType.CART_DISASSEMBLE && phase.equals("structural_disassemble")) {
-            CreateStructuralRollbackCoordinator.preview(source, id, row.id);
-        } else if (row.type == ActionType.CART_STATUS && phase.equals("coupling")) {
-            CreateCouplingRollbackCoordinator.preview(source, id, row.id);
-        } else if (isCheckpoint(row, id, phase)) {
-            CartRollbackCoordinator.preview(source, id, row.id);
-        } else {
-            source.sendFailure(Component.literal("Для этой записи Create отдельный откат недоступен. Откройте историю конструкции " + id + "."));
+        switch (previewAction(row, id)) {
+            case "recover-train" -> CreateTrainRecovery.preview(source, id, row.id);
+            case "recover-representations" -> CreateTrainRepresentationCoordinator.preview(source, id, row.id);
+            case "undo-transfer" -> CreateTransferRollbackCoordinator.preview(source, id, row.id);
+            case "undo-disassembly" -> CreateStructuralRollbackCoordinator.preview(source, id, row.id);
+            case "undo-coupling" -> CreateCouplingRollbackCoordinator.preview(source, id, row.id);
+            case "rollback" -> CartRollbackCoordinator.preview(source, id, row.id);
+            default -> source.sendFailure(Component.literal("Для этой записи Create отдельный откат недоступен. Откройте историю конструкции " + id + "."));
         }
+    }
+
+    private static String previewAction(LogEntry row, UUID id) {
+        var phase = CreateContraptionKind.phase(row.source);
+        if (CreateContraptionKind.fromSource(row.source) == CreateContraptionKind.TRAIN) {
+            if (row.type == ActionType.CART_STATUS && phase.equals("state_checkpoint")) return "recover-train";
+            if (row.type == ActionType.CART_UNLOAD || row.type == ActionType.CART_REMOVE) return "recover-representations";
+        }
+        if (row.type == ActionType.CREATE_DEPLOYER_ACTION
+                || row.type == ActionType.CART_TRANSFER && phase.equals("automation_transfer")) return "undo-transfer";
+        if (row.type == ActionType.CART_DISASSEMBLE && phase.equals("structural_disassemble")) return "undo-disassembly";
+        if (row.type == ActionType.CART_STATUS && phase.equals("coupling")) return "undo-coupling";
+        return isCheckpoint(row, id, phase) ? "rollback" : "";
     }
 
     private static boolean isCheckpoint(LogEntry row, UUID id, String phase) {
@@ -130,14 +133,20 @@ public final class CartCommands {
         var storage=LoggerRuntime.storage(source.getLevel());
         CartRollbackCoordinator.query(source,()->{try{var rows=storage.queryReverse(q);source.getServer().execute(()->{
             source.sendSystemMessage(Component.literal("История конструкции ").append(copyButton(id.toString(),id.toString())).withStyle(ChatFormatting.GOLD));
-            for(var row:rows){var phase=CreateContraptionKind.phase(row.source);
-                boolean transfer=row.type==ActionType.CART_TRANSFER&&phase.equals("automation_transfer")||row.type==ActionType.CREATE_DEPLOYER_ACTION;
-                boolean structure=row.type==ActionType.CART_DISASSEMBLE&&phase.equals("structural_disassemble");
-                boolean checkpoint=isCheckpoint(row,id,phase);
-                String suffix=checkpoint?" [контрольная точка]":"";
-                var message=Component.literal("entry="+row.id+" · "+java.time.Instant.ofEpochMilli(row.ts)+" · "+LogText.actionLabel(row.type)+" · "+Objects.toString(row.actorName,"SYSTEM")+" · "+row.dim+" "+row.x+" "+row.y+" "+row.z+suffix+" · "+Objects.toString(row.extra,""));
-                if(transfer||structure||checkpoint)message.withStyle(st->st.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,(transfer?"/log cart undo-transfer ":structure?"/log cart undo-disassembly ":"/log cart rollback ")+id+" "+row.id)));
-                source.sendSystemMessage(message);}
+            boolean canRollback = PermissionUtil.has(source, "avilixlogger.command.rollback", 2);
+            for (var row : rows) {
+                String action = previewAction(row, id);
+                boolean checkpoint = action.equals("rollback") || action.equals("recover-train");
+                String suffix = checkpoint ? " [контрольная точка]" : "";
+                var message = Component.literal("entry=" + row.id + " · " + java.time.Instant.ofEpochMilli(row.ts)
+                        + " · " + LogText.actionLabel(row.type) + " · " + Objects.toString(row.actorName, "SYSTEM")
+                        + " · " + row.dim + " " + row.x + " " + row.y + " " + row.z + suffix + " · " + Objects.toString(row.extra, ""));
+                if (canRollback && !action.isEmpty()) {
+                    message.withStyle(st -> st.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,
+                            "/log cart " + action + " " + id + " " + row.id)));
+                }
+                source.sendSystemMessage(message);
+            }
             if(rows.size()==8)source.sendSystemMessage(Component.literal("[Ещё]").withStyle(st->st.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND,"/log cart chat "+id+" "+rows.getLast().id))));
         });}catch(Exception e){error(source,e);}});
     }
