@@ -319,6 +319,7 @@ public final class LoggerNetwork {
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportRequest",
                         new Class<?>[]{ClientReportPayloads.Request.class, IPayloadContext.class}, new Object[]{payload, ctx})));
         audit.playToServer(ClientReportPayloads.Report.TYPE, ClientReportPayloads.Report.CODEC, ClientReportNetwork::receive);
+        audit.playToServer(ClientReportStatusPayloads.Status.TYPE, ClientReportStatusPayloads.Status.CODEC, ClientReportNetwork::receiveStatus);
         audit.playToServer(ClientReportViewPayloads.Query.TYPE, ClientReportViewPayloads.Query.CODEC, ClientReportNetwork::handleView);
         audit.playToClient(ClientReportViewPayloads.View.TYPE, ClientReportViewPayloads.View.CODEC,
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportView",
