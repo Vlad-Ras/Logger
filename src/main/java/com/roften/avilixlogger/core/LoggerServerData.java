@@ -75,7 +75,9 @@ public final class LoggerServerData extends SavedData {
                 if (subscriptions.getBoolean(uuid)) d.reportAlertSubscribers.add(UUID.fromString(uuid));
             } catch (IllegalArgumentException ignored) {}
         }
-        var cooldowns = tag.getList("clientReportCooldowns", Tag.TAG_COMPOUND);
+        // 2.1.33 wrote cooldowns BEFORE receiving a report. Do not import those
+        // unverified reservations: otherwise failed clients remain blocked for 24h.
+        var cooldowns = tag.getList("clientReportSuccessUntil", Tag.TAG_COMPOUND);
         long now = System.currentTimeMillis();
         for (int i = 0; i < Math.min(MAX_REPORT_COOLDOWNS, cooldowns.size()); i++) {
             var entry = cooldowns.getCompound(i);
@@ -101,6 +103,7 @@ public final class LoggerServerData extends SavedData {
         }
         tag.put(KEY_PRESETS, p);
         pruneClientReportCooldowns(System.currentTimeMillis());
+        tag.remove("clientReportCooldowns");
         if (!reportCooldowns.isEmpty()) {
             var cooldowns = new ListTag();
             reportCooldowns.forEach((player, until) -> {
@@ -109,7 +112,7 @@ public final class LoggerServerData extends SavedData {
                 entry.putLong("until", until);
                 cooldowns.add(entry);
             });
-            tag.put("clientReportCooldowns", cooldowns);
+            tag.put("clientReportSuccessUntil", cooldowns);
         }
         var subscriptions = new CompoundTag();
         reportAlertSubscribers.forEach(uuid -> subscriptions.putBoolean(uuid.toString(), true));
@@ -125,17 +128,25 @@ public final class LoggerServerData extends SavedData {
         if (enabled ? reportAlertSubscribers.add(player) : reportAlertSubscribers.remove(player)) setDirty();
     }
 
-    /** Zero reserves a collection, positive is the next allowed timestamp, -1 means capacity reached. */
-    public long reserveClientReport(UUID player, long now) {
+    /** Check eligibility without changing the persisted schedule. Server thread only. */
+    public long nextClientReportAt(UUID player, long now) {
         long until = reportCooldowns.getOrDefault(player, 0L);
-        if (until > now) return until;
-        if (reportCooldowns.size() >= MAX_REPORT_COOLDOWNS) {
+        return until > now ? until : 0L;
+    }
+
+    /** Only a ClickHouse-acknowledged report is allowed to advance the 24h schedule. */
+    public void markClientReportSaved(UUID player, long now) {
+        if (!reportCooldowns.containsKey(player) && reportCooldowns.size() >= MAX_REPORT_COOLDOWNS) {
             pruneClientReportCooldowns(now);
-            if (reportCooldowns.size() >= MAX_REPORT_COOLDOWNS) return -1;
+            if (reportCooldowns.size() >= MAX_REPORT_COOLDOWNS) {
+                // Keep the new success even when more than 4096 distinct users joined today.
+                UUID earliest = reportCooldowns.entrySet().stream()
+                        .min(Map.Entry.comparingByValue()).orElseThrow().getKey();
+                reportCooldowns.remove(earliest);
+            }
         }
         reportCooldowns.put(player, now + REPORT_INTERVAL_MS);
         setDirty();
-        return 0;
     }
 
     private void pruneClientReportCooldowns(long now) {
