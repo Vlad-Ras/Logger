@@ -79,6 +79,12 @@ public final class ClientReportLoadSmoke {
             buffer.clear();
             var alerts = new ClientReportAlertPayloads.View(true, IntStream.range(0, 32)
                     .mapToObj(i -> "Player · совпадений: " + i + " · resourcepack.zip").toList());
+            var status = new ClientReportStatusPayloads.Status(42L, ClientReportStatusPayloads.Stage.COLLECTING);
+            ClientReportStatusPayloads.Status.CODEC.encode(buffer, status);
+            if (!status.equals(ClientReportStatusPayloads.Status.CODEC.decode(buffer)) || buffer.isReadable()) {
+                throw new AssertionError("Client report status changed on wire");
+            }
+            buffer.clear();
             ClientReportAlertPayloads.View.CODEC.encode(buffer, alerts);
             int alertBytes = buffer.readableBytes();
             if (!alerts.equals(ClientReportAlertPayloads.View.CODEC.decode(buffer))) throw new AssertionError("Alerts changed on wire");
@@ -104,9 +110,18 @@ public final class ClientReportLoadSmoke {
         UUID target = UUID.randomUUID();
         if (data.clientReportAlerts(target)) throw new AssertionError("Report alerts must be disabled by default");
         data.setClientReportAlerts(target, true);
-        if (data.reserveClientReport(target, now) != 0
-                || data.reserveClientReport(target, now + 1) != now + day) {
-            throw new AssertionError("Daily report quota failed");
+        if (data.nextClientReportAt(target, now) != 0
+                || data.nextClientReportAt(target, now + 1) != 0) {
+            throw new AssertionError("Unconfirmed collection must not reserve the daily interval");
+        }
+        // An interrupted collection never blocks the next login or retry.
+        var failedRestored = LoggerServerData.load(data.save(new CompoundTag(), server.registryAccess()), server.registryAccess());
+        if (failedRestored.nextClientReportAt(target, now + 1) != 0) {
+            throw new AssertionError("Failed report was persisted as a success");
+        }
+        data.markClientReportSaved(target, now);
+        if (data.nextClientReportAt(target, now + 1) != now + day) {
+            throw new AssertionError("Confirmed collection must advance the daily interval");
         }
         var restored = LoggerServerData.load(data.save(new CompoundTag(), server.registryAccess()), server.registryAccess());
         if (!restored.clientReportAlerts(target)) throw new AssertionError("Report alert subscription lost on reload");
@@ -114,11 +129,23 @@ public final class ClientReportLoadSmoke {
         if (LoggerServerData.load(restored.save(new CompoundTag(), server.registryAccess()), server.registryAccess()).clientReportAlerts(target)) {
             throw new AssertionError("Disabling report alerts was not saved");
         }
-        if (restored.reserveClientReport(target, now + day - 1) != now + day
-                || restored.reserveClientReport(target, now + day) != 0) {
-            throw new AssertionError("Daily report quota did not survive world save and reload");
+        if (restored.nextClientReportAt(target, now + day - 1) != now + day
+                || restored.nextClientReportAt(target, now + day) != 0) {
+            throw new AssertionError("Daily report success interval did not survive world save and reload");
         }
-        System.out.println("CLIENT_REPORT_DAILY_LIMIT_OK: durable daily automatic collection limit");
+        // 2.1.33 persisted request reservations as if the client had responded.
+        // Ignore this legacy field when upgrading, then allow immediate collection.
+        var legacy = new CompoundTag();
+        var legacyEntries = new net.minecraft.nbt.ListTag();
+        var legacyEntry = new CompoundTag();
+        legacyEntry.putUUID("player", target);
+        legacyEntry.putLong("until", now + day);
+        legacyEntries.add(legacyEntry);
+        legacy.put("clientReportCooldowns", legacyEntries);
+        if (LoggerServerData.load(legacy, server.registryAccess()).nextClientReportAt(target, now) != 0) {
+            throw new AssertionError("Old failed-request cooldown should not survive migration");
+        }
+        System.out.println("CLIENT_REPORT_DAILY_LIMIT_OK: acknowledged-only interval, failed request retry and migration");
     }
 
     private static void checkStructuredReport(MinecraftServer server) {
