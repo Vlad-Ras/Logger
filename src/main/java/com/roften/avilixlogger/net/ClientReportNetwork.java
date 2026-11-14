@@ -40,13 +40,16 @@ import java.util.UUID;
 public final class ClientReportNetwork {
     private static final String ADMIN_PERMISSION = "avilixlogger.command.admin";
     // The first report may need to hash several gigabytes of mod archives.
-    private static final int TIMEOUT_TICKS = 1200;
+    private static final int TIMEOUT_TICKS = 2400;
+    private static final int SAVE_TIMEOUT_TICKS = 2400;
+    private static final long AUTO_RETRY_MS = Duration.ofMinutes(2).toMillis();
     private static final long MANUAL_COOLDOWN_NANOS = Duration.ofSeconds(10).toNanos();
     private static final int CHAT_CHUNK_SIZE = 48;
     private static final int GUI_CHUNK_SIZE = 24;
     private static final DateTimeFormatter REPORT_TIME = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss XXX");
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
     private static final Map<UUID, Long> LAST_MANUAL_REQUEST = new HashMap<>();
+    private static final Map<UUID, Long> AUTO_RETRY_AT = new HashMap<>();
     private static final Map<UUID, Object> COMMAND_QUERIES = new HashMap<>();
     public static final String ALERT_PERMISSION = "avilixlogger.clientaudit.alerts";
     private static final java.util.ArrayDeque<AuditAlert> ALERTS = new java.util.ArrayDeque<>();
@@ -70,7 +73,7 @@ public final class ClientReportNetwork {
         boolean empty() { return packs.isEmpty() && mods.isEmpty(); }
     }
 
-    private record Pending(long id, ServerGamePacketListenerImpl connection, Reply reply) {}
+    private record Pending(long id, ServerGamePacketListenerImpl connection, Reply reply, boolean received) {}
 
     private record Reply(CommandSourceStack source, Long requestId) {
         void status(String text, boolean failure) {
@@ -173,6 +176,7 @@ public final class ClientReportNetwork {
         var pending = PENDING.remove(uuid);
         COMMAND_QUERIES.remove(uuid);
         LAST_MANUAL_REQUEST.remove(uuid);
+        AUTO_RETRY_AT.remove(uuid);
         if (pending != null) notifyRequester(pending.reply(), name(player) + " вышел до получения отчёта.");
     }
 
@@ -180,6 +184,7 @@ public final class ClientReportNetwork {
         enabledOverride = null;
         automaticCursor = 0;
         LAST_MANUAL_REQUEST.clear();
+        AUTO_RETRY_AT.clear();
         ALERTS.clear();
         clearReports();
     }
@@ -190,26 +195,55 @@ public final class ClientReportNetwork {
         COMMAND_QUERIES.clear();
     }
 
+    static void receiveStatus(ClientReportStatusPayloads.Status status, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            UUID uuid = player.getUUID();
+            Pending pending = PENDING.get(uuid);
+            if (pending == null || pending.id() != status.id() || pending.connection() != player.connection
+                    || pending.received()) return;
+            if (status.stage() == ClientReportStatusPayloads.Stage.FAILED) {
+                PENDING.remove(uuid);
+                deferAutomaticRetry(uuid);
+                notifyRequester(pending.reply(), name(player) + ": клиент не смог собрать отчёт.");
+            } else if (pending.reply() != null && canDeliver(pending.reply().source())) {
+                pending.reply().status("Клиент " + name(player) + " собирает сведения и SHA-256 в фоновом потоке…", false);
+            }
+        });
+    }
+
+    private static void deferAutomaticRetry(UUID uuid) {
+        AUTO_RETRY_AT.put(uuid, System.currentTimeMillis() + AUTO_RETRY_MS);
+    }
+
     static void receive(ClientReportPayloads.Report report, IPayloadContext context) {
         context.enqueueWork(() -> {
             if (!(context.player() instanceof ServerPlayer player)) return;
             UUID uuid = player.getUUID();
             Pending pending = PENDING.get(uuid);
-            if (pending == null || pending.id() != report.id() || pending.connection() != player.connection) return;
-            PENDING.remove(uuid);
-            if (!enabled() || !LoggerConfig.isEnabled() || !AuthCoreBridge.isAuthorized(player.getServer())) return;
-            saveReport(player, pending.reply(), new ClickHouseLogStorage.ClientReport(name(player), Instant.now(), report));
+            if (pending == null || pending.received() || pending.id() != report.id()
+                    || pending.connection() != player.connection) return;
+            if (!enabled() || !LoggerConfig.isEnabled() || !AuthCoreBridge.isAuthorized(player.getServer())) {
+                PENDING.remove(uuid);
+                return;
+            }
+            // Keep the request in-flight until ClickHouse acknowledges it. Without this,
+            // the once-a-second auto scanner can start duplicate collections during I/O.
+            PENDING.put(uuid, new Pending(pending.id(), pending.connection(), pending.reply(), true));
+            saveReport(player, pending, new ClickHouseLogStorage.ClientReport(name(player), Instant.now(), report));
         });
     }
 
-    private static void saveReport(ServerPlayer player, Reply reply, ClickHouseLogStorage.ClientReport snapshot) {
+    private static void saveReport(ServerPlayer player, Pending request, ClickHouseLogStorage.ClientReport snapshot) {
         var storage = LoggerRuntime.clientReportStorage();
-        if (storage == null) {
-            notifyRequester(reply, "Сохранение отчёта не подтверждено: ClickHouse ещё недоступен.");
-            return;
-        }
         var server = player.getServer();
         var playerId = player.getUUID();
+        if (storage == null) {
+            PENDING.remove(playerId);
+            deferAutomaticRetry(playerId);
+            notifyRequester(request.reply(), "Сохранение отчёта не подтверждено: ClickHouse ещё недоступен.");
+            return;
+        }
 
         long generation = reportGeneration;
         try {
@@ -226,19 +260,36 @@ public final class ClientReportNetwork {
                 boolean acknowledged = saved;
                 Matches matches = acknowledged ? matchReport(snapshot.report(), TriggerRules.configured()) : new Matches(List.of(), List.of());
                 server.execute(() -> {
-                    if (generation != reportGeneration || !enabled() || !LoggerConfig.isEnabled()) return;
+                    if (generation != reportGeneration) return;
+                    Pending current = PENDING.get(playerId);
+                    if (current == null || current.id() != request.id() || current.connection() != request.connection()) return;
+                    PENDING.remove(playerId);
+                    if (!enabled() || !LoggerConfig.isEnabled()) return;
                     if (!acknowledged) {
-                        notifyRequester(reply, "ClickHouse не подтвердил сохранение нового отчёта.");
+                        deferAutomaticRetry(playerId);
+                        notifyRequester(current.reply(), "ClickHouse не подтвердил сохранение нового отчёта.");
                         return;
                     }
-                    if (reply != null && canDeliver(reply.source())) reply.report(snapshot, matches);
+                    AUTO_RETRY_AT.remove(playerId);
+                    LoggerServerData.get(server.overworld()).markClientReportSaved(playerId, System.currentTimeMillis());
+                    if (current.reply() != null && canDeliver(current.reply().source())) current.reply().report(snapshot, matches);
                     notifyMatches(server, snapshot.playerName(), matches);
                 });
             });
         } catch (RejectedExecutionException busy) {
+            PENDING.remove(playerId);
+            deferAutomaticRetry(playerId);
             AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report I/O queue is full; a report was not saved.");
-            notifyRequester(reply, "Очередь сохранения отчётов заполнена. Повторите ручное обновление позже.");
+            notifyRequester(request.reply(), "Очередь сохранения отчётов заполнена. Повторите ручное обновление позже.");
         }
+        ServerTickScheduler.schedule(server, SAVE_TIMEOUT_TICKS, () -> {
+            Pending pending = PENDING.get(playerId);
+            if (pending != null && pending.id() == request.id() && pending.received()) {
+                PENDING.remove(playerId);
+                deferAutomaticRetry(playerId);
+                notifyRequester(pending.reply(), "ClickHouse слишком долго сохраняет отчёт.");
+            }
+        });
     }
 
     private static void storeWithRetry(ClickHouseLogStorage storage, UUID playerId,
@@ -300,8 +351,10 @@ public final class ClientReportNetwork {
         var existing = PENDING.get(uuid);
         if (existing != null) {
             if (reply != null && existing.reply() == null) {
-                PENDING.put(uuid, new Pending(existing.id(), existing.connection(), reply));
-                return feedback(reply, "Отчёт уже запрашивается. Ответ появится здесь.", false);
+                PENDING.put(uuid, new Pending(existing.id(), existing.connection(), reply, existing.received()));
+                return feedback(reply, existing.received()
+                        ? "Отчёт уже получен; ожидаю сохранения в ClickHouse…"
+                        : "Отчёт уже запрашивается. Ответ появится здесь.", false);
             }
             return feedback(reply, "Для " + name(target) + " уже ожидается отчёт.", true);
         }
@@ -315,19 +368,25 @@ public final class ClientReportNetwork {
         }
         var server = target.getServer();
         if (LoggerRuntime.clientReportStorage() == null) return feedback(reply, "ClickHouse ещё недоступен. Повторите запрос позже.", true);
-        long nextAuto = LoggerServerData.get(server.overworld()).reserveClientReport(uuid, System.currentTimeMillis());
-        if (reply == null && nextAuto != 0) return 0;
+        // Manual refresh is independent of the automatic 24h interval.
+        // Never reserve a day BEFORE we have a confirmed report.
+        if (reply == null) {
+            long now = System.currentTimeMillis();
+            if (LoggerServerData.get(server.overworld()).nextClientReportAt(uuid, now) != 0
+                    || AUTO_RETRY_AT.getOrDefault(uuid, 0L) > now) return 0;
+        }
 
         long id = ++lastId;
-        PENDING.put(uuid, new Pending(id, target.connection, reply));
+        PENDING.put(uuid, new Pending(id, target.connection, reply, false));
         if (reply != null) LAST_MANUAL_REQUEST.put(uuid, nowNanos);
         PacketDistributor.sendToPlayer(target, new ClientReportPayloads.Request(id));
         feedback(reply, "Запрос отправлен игроку " + name(target) + ".", false);
         String targetName = name(target);
         ServerTickScheduler.schedule(server, TIMEOUT_TICKS, () -> {
             Pending expired = PENDING.get(uuid);
-            if (expired != null && expired.id() == id) {
+            if (expired != null && expired.id() == id && !expired.received()) {
                 PENDING.remove(uuid);
+                deferAutomaticRetry(uuid);
                 notifyRequester(expired.reply(), targetName + " не прислал отчёт за отведённое время.");
             }
         });
