@@ -47,6 +47,7 @@ final class ClientReportScreen extends LoggerScreen {
     private View snapshot;
     private List<String> commands = List.of();
     private long reportRequest;
+    private long previewRequest;
     private long commandsRequest;
     private boolean commandsLoaded;
     private net.minecraft.client.gui.components.EditBox inventorySearch;
@@ -126,7 +127,7 @@ final class ClientReportScreen extends LoggerScreen {
     private void changeName(String value) {
         if (nickname.equals(value)) return;
         nickname = value;
-        reportRequest = commandsRequest = 0;
+        reportRequest = previewRequest = commandsRequest = 0;
         snapshot = null;
         modSearch = packSearch = "";
         inventorySearch.setValue("");
@@ -156,11 +157,19 @@ final class ClientReportScreen extends LoggerScreen {
             commandStatus = "Загружаю серверный журнал…";
         } else {
             reportRequest = id;
-            snapshot = null;
+            if (action == Action.CACHED) snapshot = null;
             exportPending = false;
             exportStatus = "";
-            status = "Отправляю запрос для " + nickname + "…";
+            status = action == Action.REQUEST
+                    ? "Обновление запрошено. Показываю прежний отчёт, пока клиент отвечает…"
+                    : "Загружаю сохранённый отчёт…";
             tab = Tab.OVERVIEW;
+            // A manual refresh must not blank the report or leave an empty screen for
+            // minutes. Read the cached snapshot in parallel; ignore late stale results.
+            if (action == Action.REQUEST && snapshot == null) {
+                previewRequest = ++sequence;
+                PacketDistributor.sendToServer(new ClientReportViewPayloads.Query(previewRequest, nickname, Action.CACHED));
+            } else previewRequest = 0;
         }
         rebuild();
         PacketDistributor.sendToServer(new ClientReportViewPayloads.Query(id, nickname, action));
@@ -172,6 +181,9 @@ final class ClientReportScreen extends LoggerScreen {
                 snapshot = view;
                 status = "";
             } else status = view.message();
+        } else if (view.id() != 0 && view.id() == previewRequest) {
+            previewRequest = 0;
+            if (snapshot == null && view.report() != null) snapshot = view;
         } else if (view.id() != 0 && view.id() == commandsRequest) {
             commandsRequest = 0;
             commandsLoaded = !view.commands().isEmpty();
@@ -257,6 +269,7 @@ final class ClientReportScreen extends LoggerScreen {
             switch (tab) {
                 case OVERVIEW -> {
                     content.add(heading(snapshot.player()));
+                    if (!status.isEmpty()) content.add(Component.literal(status).withStyle(ChatFormatting.AQUA));
                     content.add(Component.literal("Получен · " + TIME.format(
                             Instant.ofEpochMilli(snapshot.receivedAt()).atZone(ZoneId.systemDefault()))));
                     content.add(Component.literal("Моды · " + report.mods().size() + "    Ресурс-паки · " + report.packs().size()));
