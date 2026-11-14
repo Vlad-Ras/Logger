@@ -4,6 +4,7 @@ import com.roften.avilixlogger.AvilixLoggerMod;
 import com.roften.avilixlogger.net.C2SHelloPayload;
 import com.roften.avilixlogger.net.C2SRequestDetailsPayload;
 import com.roften.avilixlogger.net.ClientReportPayloads;
+import com.roften.avilixlogger.net.ClientReportStatusPayloads;
 import com.roften.avilixlogger.net.ClientReportViewPayloads;
 import com.roften.avilixlogger.net.S2CLogPagePayload;
 import com.roften.avilixlogger.net.S2CLogDetailsPayload;
@@ -49,39 +50,71 @@ public final class LogViewerClientHooks {
         if(connection!=null&&connection.hasChannel(C2SHelloPayload.TYPE))PacketDistributor.sendToServer(new C2SHelloPayload());
     }
 
+    // Hashing gigabytes of archives must never compete with gameplay/FPS on the
+    // shared Minecraft I/O pool. A bounded daemon worker expires when idle.
+    private static final java.util.concurrent.ThreadPoolExecutor REPORT_WORKER =
+            new java.util.concurrent.ThreadPoolExecutor(0, 1, 30L, java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.ArrayBlockingQueue<>(4), task -> {
+                        Thread worker = new Thread(task, "AvilixLogger-client-report-hash");
+                        worker.setDaemon(true);
+                        worker.setPriority(Thread.MIN_PRIORITY);
+                        return worker;
+                    });
+
+    private static java.util.concurrent.CompletableFuture<java.util.List<ClientReportPayloads.Mod>> modInventory;
+
     public static void acceptClientReportRequest(ClientReportPayloads.Request request, IPayloadContext context) {
         Minecraft minecraft = Minecraft.getInstance();
         var connection = minecraft.getConnection();
         if (connection == null || connection.getConnection() != context.connection()
                 || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
 
-        var packs = java.util.List.copyOf(minecraft.getResourcePackRepository().getSelectedIds());
-        if (modInventory == null) {
-            var metadata = java.util.List.copyOf(ModList.get().getMods());
-            modInventory = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                var hashes = new java.util.HashMap<java.nio.file.Path, String>();
-                return metadata.stream().map(mod -> {
-                    var file = mod.getOwningFile();
-                    var path = file == null || file.getFile() == null ? null : file.getFile().getFilePath();
-                    String hash = path == null ? "" : hashes.computeIfAbsent(path, ResourcePackHashes::hashFile);
-                    return new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName(), hash);
-                }).sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
-            }, net.minecraft.Util.ioPool());
+        if (connection.hasChannel(ClientReportStatusPayloads.Status.TYPE)) {
+            PacketDistributor.sendToServer(new ClientReportStatusPayloads.Status(
+                    request.id(), ClientReportStatusPayloads.Stage.COLLECTING));
         }
-        var packDirectory = minecraft.getResourcePackDirectory();
-        var inventory = modInventory;
-        inventory.thenApplyAsync(mods -> ClientReportPayloads.collect(request.id(), mods, packs,
-                ResourcePackHashes.collect(packDirectory, packs)), net.minecraft.Util.ioPool())
-                .whenComplete((report, failure) -> minecraft.execute(() -> {
-                    if (failure != null) {
-                        if (modInventory == inventory && inventory.isCompletedExceptionally()) modInventory = null;
-                    } else if (minecraft.getConnection() == connection && connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
-                        PacketDistributor.sendToServer(report);
-                    }
-                }));
-    }
 
-    private static java.util.concurrent.CompletableFuture<java.util.List<ClientReportPayloads.Mod>> modInventory;
+        var packs = java.util.List.copyOf(minecraft.getResourcePackRepository().getSelectedIds());
+        try {
+            if (modInventory == null) {
+                var metadata = java.util.List.copyOf(ModList.get().getMods());
+                modInventory = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    var hashes = new java.util.HashMap<java.nio.file.Path, String>();
+                    return metadata.stream().map(mod -> {
+                        var file = mod.getOwningFile();
+                        var path = file == null || file.getFile() == null ? null : file.getFile().getFilePath();
+                        String hash = path == null ? "" : hashes.computeIfAbsent(path, ResourcePackHashes::hashFile);
+                        return new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName(), hash);
+                    }).sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
+                }, REPORT_WORKER);
+            }
+            var packDirectory = minecraft.getResourcePackDirectory();
+            var inventory = modInventory;
+            inventory.thenApplyAsync(mods -> ClientReportPayloads.collect(request.id(), mods, packs,
+                    ResourcePackHashes.collect(packDirectory, packs)), REPORT_WORKER)
+                    .whenComplete((report, failure) -> minecraft.execute(() -> {
+                        if (failure != null && modInventory == inventory && inventory.isCompletedExceptionally()) {
+                            modInventory = null;
+                        }
+                        if (minecraft.getConnection() != connection) return;
+                        if (failure != null) {
+                            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report collection failed", failure);
+                            if (connection.hasChannel(ClientReportStatusPayloads.Status.TYPE)) {
+                                PacketDistributor.sendToServer(new ClientReportStatusPayloads.Status(
+                                        request.id(), ClientReportStatusPayloads.Stage.FAILED));
+                            }
+                        } else if (connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
+                            PacketDistributor.sendToServer(report);
+                        }
+                    }));
+        } catch (java.util.concurrent.RejectedExecutionException failure) {
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report hashing queue is full", failure);
+            if (connection.hasChannel(ClientReportStatusPayloads.Status.TYPE)) {
+                PacketDistributor.sendToServer(new ClientReportStatusPayloads.Status(
+                        request.id(), ClientReportStatusPayloads.Stage.FAILED));
+            }
+        }
+    }
 
     public static void onLogout(ClientPlayerNetworkEvent.LoggingOut e) {
         if (Minecraft.getInstance().screen instanceof ServerLogsScreen screen) screen.disconnected();
