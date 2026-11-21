@@ -72,6 +72,7 @@ final class RecoverySceneSmoke {
             drain(scene);check(scene.aborted()&&level.getBlockState(A).isAir(),"backup memory ceiling was checked after mutation");
 
             memoryRelease(level);
+            itemBalance(level);
             reset(level,A,Blocks.AIR.defaultBlockState());
             reset(level,A.above(),Blocks.AIR.defaultBlockState());reset(level,A.below(),Blocks.STONE.defaultBlockState());
             var lower=Blocks.OAK_DOOR.defaultBlockState().setValue(DoorBlock.HALF,DoubleBlockHalf.LOWER);
@@ -98,10 +99,11 @@ final class RecoverySceneSmoke {
         var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
         RecoveryScene scene=null;
         try {
+            scene=scene(level,List.of(target(A,Blocks.STONE.defaultBlockState())));
+            advanceTo(scene,RecoveryScene.Phase.RESOURCE_RECHECK);
             var field=RecoveryJournal.class.getDeclaredField("IO");field.setAccessible(true);
             ((java.util.concurrent.ExecutorService)field.get(null)).execute(()->{entered.countDown();try{release.await();}catch(InterruptedException problem){Thread.currentThread().interrupt();}});
             check(entered.await(5,TimeUnit.SECONDS),"journal fixture could not reserve I/O worker");
-            scene=scene(level,List.of(target(A,Blocks.STONE.defaultBlockState())));
             advanceTo(scene,RecoveryScene.Phase.WRITE_JOURNAL);
             check(level.getBlockState(A).isAir(),"world changed before durable journal");
             scene.cancel("cancel while the journal is still being written");
@@ -171,6 +173,7 @@ final class RecoverySceneSmoke {
     }
     private static void memoryRelease(ServerLevel level) {
         reset(level,A,Blocks.CHEST.defaultBlockState());
+        ((net.minecraft.world.Container)level.getBlockEntity(A)).setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,2));
         var empty=NbtSerde.snapshotBlockEntityAt(level,A);
         var emptySlots=ContainerSlotSnapshot.snapshotTag(level,A);
         var chest=(net.minecraft.world.level.block.entity.ChestBlockEntity)level.getBlockEntity(A);
@@ -193,6 +196,37 @@ final class RecoverySceneSmoke {
         check(reference.get()==null,"completed scene retained detached 8 MiB backup NBT");
         check(!chest.getPersistentData().contains("RecoveryMemoryProbe"),"target NBT retained removed persistent data");
         System.out.println("RECOVERY_SCENE_MEMORY_RELEASE_OK: detached 8 MiB backup becomes collectable after commit; temporary world locks released");
+    }
+    private static void itemBalance(ServerLevel level) {
+        reset(level,A,Blocks.BARREL.defaultBlockState());reset(level,B,Blocks.BARREL.defaultBlockState());
+        var first=(net.minecraft.world.Container)level.getBlockEntity(A);
+        var second=(net.minecraft.world.Container)level.getBlockEntity(B);
+        first.setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,7));
+        var oldA=checkpoint(level,A);var oldB=checkpoint(level,B);
+        first.setItem(0,net.minecraft.world.item.ItemStack.EMPTY);
+        second.setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,7));
+        var newA=checkpoint(level,A);var newB=checkpoint(level,B);
+        first.setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,7));second.setItem(0,net.minecraft.world.item.ItemStack.EMPTY);
+        var scene=scene(level,List.of(historyTarget(A,oldA,newA),historyTarget(B,oldB,newB)));
+        drain(scene);check(scene.ready(),"closed item transfer refused: "+scene.failure());scene.commit();
+        check(first.isEmpty()&&second.getItem(0).getCount()==7,"closed scene duplicated or lost transferred items");
+        first.setItem(0,new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.DIAMOND,7));
+        scene=scene(level,List.of(historyTarget(A,oldA,newA),historyTarget(B,oldB,newB)));
+        drain(scene);check(scene.aborted()&&scene.failure().contains("replay_item_resource_graph_required"),"mixed saved checkpoints silently discarded items without external proof");
+        check(first.getItem(0).getCount()==7&&second.getItem(0).getCount()==7&&!CartAuditContext.rollbackActive,"resource refusal changed the world or leaked locks");
+        first.setItem(0,net.minecraft.world.item.ItemStack.EMPTY);second.setItem(0,net.minecraft.world.item.ItemStack.EMPTY);
+        scene=scene(level,List.of(historyTarget(A,oldA,newA),historyTarget(B,oldB,newB))).preflightOnly();
+        drain(scene);check(scene.aborted()&&scene.failure().contains("replay_item_resource_graph_required"),"preview promised minting missing external resources");
+        check(first.isEmpty()&&second.isEmpty(),"rejected preview mutated inventories");
+        reset(level,A,Blocks.AIR.defaultBlockState());reset(level,B,Blocks.AIR.defaultBlockState());
+        System.out.println("RECOVERY_ITEM_BALANCE_NATIVE_OK: whole-scene transfer preserves exact items; mixed persistence and missing resources refused before WAL/mutation in apply and preview");
+    }
+    private static RollbackEngine.ReplayCheckpoint checkpoint(ServerLevel level,BlockPos pos) {
+        return new RollbackEngine.ReplayCheckpoint(net.minecraft.nbt.NbtUtils.writeBlockState(level.getBlockState(pos)),NbtSerde.snapshotBlockEntityAt(level,pos),ContainerSlotSnapshot.snapshotTag(level,pos));
+    }
+    private static RollbackEngine.PreparedBlockSnapshot historyTarget(BlockPos pos,RollbackEngine.ReplayCheckpoint before,RollbackEngine.ReplayCheckpoint after) {
+        return new RollbackEngine.PreparedBlockSnapshot(pos,after.state().toString(),NbtSerde.toSnbt(after.be()),NbtSerde.toSnbt(after.slots()),ActionType.BLOCK_ENTITY_NBT_CHANGE,
+                after.state(),after.be(),after.slots(),before.state(),List.of(before,after));
     }
     private static java.lang.ref.WeakReference<CompoundTag> backupReference(RecoveryScene scene) {
         try {
@@ -222,7 +256,7 @@ final class RecoverySceneSmoke {
     }
     private static void step(RecoveryScene scene) {
         scene.step(1,System.nanoTime()+TimeUnit.SECONDS.toNanos(1),8);
-        if(scene.phase()==RecoveryScene.Phase.WRITE_JOURNAL)java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+        if(scene.phase()==RecoveryScene.Phase.WRITE_JOURNAL||scene.phase()==RecoveryScene.Phase.RESOURCE_CHECK)java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
     }
     private static void reset(ServerLevel level,BlockPos pos,BlockState state) {level.removeBlockEntity(pos);level.setBlock(pos,Blocks.AIR.defaultBlockState(),2|16|32|64);level.setBlock(pos,state,2|16|32|64);}
     private static void check(boolean value,String message) {if(!value)throw new AssertionError(message);}

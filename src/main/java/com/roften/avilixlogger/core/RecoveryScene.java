@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 
 /** One server-thread transaction across every block batch. Preparation never changes the world. */
 public final class RecoveryScene {
-    public enum Phase { RESERVE, ENTITY_INDEX, WAIT_CHUNKS, CAPTURE, ENTITY_CAPTURE, RECHECK, ENTITY_RECHECK, WRITE_JOURNAL, STATES, DATA, ENTITY_APPLY, VERIFY, ENTITY_VERIFY, READY, UNDO_ENTITIES, UNDO_STATES, UNDO_DATA, ABORTED, CLOSED, QUARANTINED }
+    public enum Phase { RESERVE, ENTITY_INDEX, WAIT_CHUNKS, CAPTURE, ENTITY_CAPTURE, RECHECK, ENTITY_RECHECK, RESOURCE_CHECK, RESOURCE_RECHECK, WRITE_JOURNAL, STATES, DATA, ENTITY_APPLY, VERIFY, ENTITY_VERIFY, READY, UNDO_ENTITIES, UNDO_STATES, UNDO_DATA, ABORTED, CLOSED, QUARANTINED }
     public record Target(ServerLevel level, RollbackEngine.PreparedBlockSnapshot snapshot) {}
     private record Address(ServerLevel level, BlockPos pos) {}
     private record ChunkAddress(ServerLevel level, long chunk) {}
@@ -40,6 +40,9 @@ public final class RecoveryScene {
     private RecoveryJournal.Handle journal;
     private boolean cancelledWhileWriting;
     private boolean preflightOnly;
+    private java.util.concurrent.CompletableFuture<Void> resourceCheck;
+    private volatile boolean resourcesCancelled;
+    private long resourceDeadline;
 
     public RecoveryScene(List<Target> supplied, long memoryLimit, int maxChunks) {this(supplied,List.of(),memoryLimit,maxChunks,ignored->{});}
     public RecoveryScene(List<Target> supplied,List<RecoveryEntityBatch.Target> entityTargets,long memoryLimit,int maxChunks,
@@ -80,7 +83,7 @@ public final class RecoveryScene {
     public String failure() { return failure; }
     public RollbackReport report() { return report; }
     public int progress() { return phase==Phase.ENTITY_INDEX?entities.scanned():phase==Phase.WAIT_CHUNKS?chunksRequested+cursor:cursor; }
-    public int progressTotal() {return phase==Phase.ENTITY_INDEX?entities.scanTotal():entityPhase()?entities.size():phase==Phase.WAIT_CHUNKS?chunks.size()*2:targets.size();}
+    public int progressTotal() {return phase==Phase.ENTITY_INDEX?entities.scanTotal():entityPhase()?entities.size():phase==Phase.RESOURCE_RECHECK?targets.size()+(entities==null?0:entities.size()):phase==Phase.WAIT_CHUNKS?chunks.size()*2:targets.size();}
     private boolean entityPhase(){return phase==Phase.ENTITY_CAPTURE||phase==Phase.ENTITY_RECHECK||phase==Phase.ENTITY_APPLY||phase==Phase.ENTITY_VERIFY||phase==Phase.UNDO_ENTITIES;}
     public int size() { return targets.size()+(entities==null?0:entities.size()); }
     public boolean changedWorld() { return changed > 0||entities!=null&&entities.changed(); }
@@ -88,6 +91,7 @@ public final class RecoveryScene {
     public void cancel(String reason) {
         if (phase == Phase.CLOSED || phase == Phase.ABORTED || phase == Phase.QUARANTINED) return;
         failure = reason;
+        resourcesCancelled=true;
         if(entities!=null)entities.cancel();
         if(journal!=null&&!journal.done()){cancelledWhileWriting=true;return;}
         cursor = 0;
@@ -169,6 +173,16 @@ public final class RecoveryScene {
                 } else if (phase == Phase.ENTITY_RECHECK) {
                     if(cursor==entities.size()){cursor=0;startJournal();continue;}
                     entities.recheck(cursor++);
+                } else if (phase == Phase.RESOURCE_CHECK) {
+                    if(!resourceCheck.isDone()) {
+                        if(System.nanoTime()>=resourceDeadline)throw new IllegalStateException("Проверка ресурсов не завершилась за 30 секунд; мир не изменён");
+                        return;
+                    }
+                    resourceCheck.join();resourceCheck=null;cursor=0;phase=Phase.RESOURCE_RECHECK;
+                } else if (phase == Phase.RESOURCE_RECHECK) {
+                    if(cursor<saved.size()){var value=saved.get(cursor++);verifyCurrent(value,value.before());}
+                    else if(entities!=null&&cursor-saved.size()<entities.size())entities.recheck(cursor++-saved.size());
+                    else {cursor=0;writeJournal();}
                 } else if (phase == Phase.WRITE_JOURNAL) {
                     if(!journal.done()) {
                         if(System.nanoTime()>=journalDeadline){
@@ -229,6 +243,14 @@ public final class RecoveryScene {
 
     private net.minecraft.server.MinecraftServer server(){return targets.isEmpty()?entities.server():targets.getFirst().level().getServer();}
     private void startJournal() {
+        if(saved.isEmpty()){writeJournal();return;}
+        var inputs=saved.stream().map(value->new RecoveryItemBalance.Input(value.target().level().dimension().location().toString(),
+                value.target().snapshot().pos(),value.before(),targetCheckpoint(value))).toList();
+        long remaining=Math.max(0,memoryLimit-memoryBytes-(entities==null?0:entities.backupBytes()));
+        resourceCheck=RecoveryJournal.io(()->{RecoveryItemBalance.verify(inputs,remaining,()->resourcesCancelled);return null;});
+        resourceDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);phase=Phase.RESOURCE_CHECK;
+    }
+    private void writeJournal() {
         if (preflightOnly) { phase=Phase.READY; return; }
         var keys=entities==null?List.<Long>of():entities.newEvents();
         var images=entities==null?List.<RecoveryJournal.EntityImage>of():entities.images();
@@ -376,6 +398,7 @@ public final class RecoveryScene {
         release();
     }
     private void release() {
+        resourcesCancelled=true;resourceCheck=null;
         if(entities!=null)entities.release();
         if (ownsLocks) { CartRestoreLocks.clear(); CartAuditContext.rollbackActive=false; ownsLocks=false; }
         saved.clear(); desired.clear(); targets.clear(); chunks.clear();

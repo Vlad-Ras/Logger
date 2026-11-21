@@ -505,6 +505,8 @@ public final class RollbackCoordinator {
                 case RESERVE -> "Защита области";
                 case ENTITY_INDEX -> "Проверка UUID в сохранённых чанках";
                 case ENTITY_CAPTURE, ENTITY_RECHECK -> "Проверка сущностей и связанных снимков";
+                case RESOURCE_CHECK -> "Проверка предметов между хранилищами";
+                case RESOURCE_RECHECK -> "Повторная проверка мира после проверки предметов";
                 case ENTITY_APPLY -> "Восстановление сущностей";
                 case ENTITY_VERIFY -> "Проверка состояния сущностей";
                 case WAIT_CHUNKS -> "Загрузка чанков";
