@@ -196,6 +196,11 @@ configurations {
 }
 
 dependencies {
+    // Operator-supplied runtime fixtures are local only and never bundled into the mod.
+    if (project.hasProperty('operatorSmokeMods'))
+        localRuntime files(fileTree(dir: project.property('operatorSmokeMods'), include: '*.jar'))
+    if (project.hasProperty('compatGuideMeVersion'))
+        localRuntime "org.appliedenergistics:guideme:${project.property('compatGuideMeVersion')}"
     if (project.hasProperty('storageSmoke')) {
         localRuntime 'maven.modrinth:open-parties-and-claims:yWmXD7GW' // NeoForge 1.21.1, OPAC 0.33.0
         localRuntime 'maven.modrinth:corpse:peeqqFlX' // Official NeoForge 1.21.1-1.1.21, native death/drop regression
