@@ -17,12 +17,9 @@ public abstract class ContainerClickCauseMixin {
     @Shadow public ServerPlayer player;
     @WrapMethod(method="handleContainerClick")
     private void avilixlogger$cause(ServerboundContainerClickPacket packet,Operation<Void> original){
-        if(!player.server.isSameThread() || packet.getContainerId()!=player.containerMenu.containerId || !LoggerConfig.isEnabled()){original.call(packet);return;}
-        if(com.roften.avilixlogger.core.CartRestoreLocks.menuLocked(player.containerMenu)){player.containerMenu.broadcastFullState();return;}
-        if(com.roften.avilixlogger.core.CartAuditContext.rollbackActive)for(var slot:player.containerMenu.slots) {
-            if(slot.container instanceof net.minecraft.world.entity.Entity entity && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID())){player.containerMenu.broadcastFullState();return;}
-            if(slot.container instanceof net.minecraft.world.level.block.entity.BlockEntity be && com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(be.getLevel(),be.getBlockPos())){player.containerMenu.broadcastFullState();return;}
-        }
+        if(!player.server.isSameThread() || packet.getContainerId()!=player.containerMenu.containerId){original.call(packet);return;}
+        if(com.roften.avilixlogger.core.CartRestoreLocks.menuTouchesLocked(player.containerMenu)){player.containerMenu.broadcastFullState();return;}
+        if(!LoggerConfig.isEnabled()){original.call(packet);return;}
         try(var cause=CauseContext.push(player,CauseContext.Kind.OTHER,player.blockPosition(),ItemStack.EMPTY)){
             var corpse=com.roften.avilixlogger.compat.corpse.CorpseAudit.begin(player,"container-click");
             var accessories=com.roften.avilixlogger.compat.accessories.AccessoriesAudit.menu(player,"container-click");
@@ -36,12 +33,9 @@ public abstract class ContainerClickCauseMixin {
     }
     @WrapMethod(method="handleContainerButtonClick")
     private void avilixlogger$buttonCause(ServerboundContainerButtonClickPacket packet,Operation<Void> original){
-        if(!player.server.isSameThread() || packet.containerId()!=player.containerMenu.containerId || !LoggerConfig.isEnabled()){original.call(packet);return;}
-        if(com.roften.avilixlogger.core.CartRestoreLocks.menuLocked(player.containerMenu)){player.containerMenu.broadcastFullState();return;}
-        if(com.roften.avilixlogger.core.CartAuditContext.rollbackActive)for(var slot:player.containerMenu.slots) {
-            if(slot.container instanceof net.minecraft.world.entity.Entity entity && com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID())){player.containerMenu.broadcastFullState();return;}
-            if(slot.container instanceof net.minecraft.world.level.block.entity.BlockEntity be && com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(be.getLevel(),be.getBlockPos())){player.containerMenu.broadcastFullState();return;}
-        }
+        if(!player.server.isSameThread() || packet.containerId()!=player.containerMenu.containerId){original.call(packet);return;}
+        if(com.roften.avilixlogger.core.CartRestoreLocks.menuTouchesLocked(player.containerMenu)){player.containerMenu.broadcastFullState();return;}
+        if(!LoggerConfig.isEnabled()){original.call(packet);return;}
         try(var cause=CauseContext.push(player,CauseContext.Kind.OTHER,player.blockPosition(),ItemStack.EMPTY)){
             var corpse=com.roften.avilixlogger.compat.corpse.CorpseAudit.begin(player,"menu-button");
             var accessories=com.roften.avilixlogger.compat.accessories.AccessoriesAudit.menu(player,"menu-button");

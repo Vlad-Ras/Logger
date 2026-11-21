@@ -42,17 +42,36 @@ public final class RollbackCoordinator {
     // Only one prepared preview is retained across confirmations to keep the global memory bounded.
     private static CachedPreview cachedPreview;
     private record CachedPreview(RollbackPlanManager.Plan plan, List<PreparedScope> scopes) {}
+    public record IssuePage(int total,List<EntityReplayPlan.Issue> issues) {}
+
+    /** Reuses the one bounded preview; no NBT or new history request is retained for paging. */
+    public static IssuePage previewIssues(UUID owner,RollbackPlanManager.Plan plan,int page) {
+        var cached=cachedPreview;
+        if(cached==null||cached.plan()!=plan||!plan.playerId().equals(owner))return null;
+        int total=0;for(var scope:cached.scopes())total+=scope.rollback().preparationIssues().size();
+        long start=(long)(page-1)*12;var rows=new ArrayList<EntityReplayPlan.Issue>();long seen=0;
+        for(var scope:cached.scopes())for(var issue:scope.rollback().preparationIssues()) {
+            if(seen++>=start&&rows.size()<12)rows.add(issue);
+        }
+        return new IssuePage(total,List.copyOf(rows));
+    }
 
     private RollbackCoordinator() {}
 
     public static void preparePreview(MinecraftServer server, UUID playerId, RollbackPlanManager.Plan plan,
                                       Consumer<RollbackReport> onComplete, Consumer<String> onError) {
-        submitPreparation(server, playerId, plan, false, onComplete, null, onError);
+        submitPreparation(server, playerId, plan, false, onComplete, null, onError, null);
     }
 
     public static void startRollback(MinecraftServer server, UUID playerId, RollbackPlanManager.Plan plan,
                                      Runnable onStarted, Consumer<RollbackReport> onComplete,
                                      Consumer<String> onError) {
+        startRollback(server,playerId,plan,onStarted,onComplete,onError,null);
+    }
+
+    public static void startRollback(MinecraftServer server, UUID playerId, RollbackPlanManager.Plan plan,
+                                     Runnable onStarted, Consumer<RollbackReport> onComplete,
+                                     Consumer<String> onError, Consumer<String> onProgress) {
         if (!LoggerConfig.isEnabled()) {
             onError.accept("Logger отключён. Откат недоступен.");
             return;
@@ -64,16 +83,16 @@ public final class RollbackCoordinator {
         CachedPreview cached = cachedPreview;
         if (cached != null && cached.plan() == plan) {
             cachedPreview = null;
-            active = new ActiveJob(playerId, plan, cached.scopes(), onComplete, onError);
+            active = new ActiveJob(playerId, plan, cached.scopes(), onComplete, onError).progress(onProgress);
             if (onStarted != null) onStarted.run();
             return;
         }
-        submitPreparation(server, playerId, plan, true, onComplete, onStarted, onError);
+        submitPreparation(server, playerId, plan, true, onComplete, onStarted, onError, onProgress);
     }
 
     private static void submitPreparation(MinecraftServer server, UUID playerId, RollbackPlanManager.Plan plan,
                                           boolean apply, Consumer<RollbackReport> onComplete,
-                                          Runnable onStarted, Consumer<String> onError) {
+                                          Runnable onStarted, Consumer<String> onError, Consumer<String> onProgress) {
         if (!LoggerConfig.isEnabled()) {
             onError.accept("AvilixAuthCore не разрешил запуск Logger. Откат отключён.");
             return;
@@ -91,6 +110,8 @@ public final class RollbackCoordinator {
         try {
             executor().execute(() -> {
                 try {
+                    if (!storage.awaitVisible(System.nanoTime() + TimeUnit.SECONDS.toNanos(30)))
+                        throw new IllegalStateException("Журнал ещё не сохранён полностью. Повторите предпросмотр после записи очереди.");
                     List<PreparedScope> scopes = new ArrayList<>(plan.scopes().size());
                     RollbackReport preview = new RollbackReport();
                     boolean collectMarkers = !apply && plan.previewBounds() != null;
@@ -128,7 +149,7 @@ public final class RollbackCoordinator {
                             onError.accept("Другой откат уже изменяет мир. Подготовленный план не применён.");
                             return;
                         }
-                        active = new ActiveJob(playerId, plan, scopes, onComplete, onError);
+                        active = new ActiveJob(playerId, plan, scopes, onComplete, onError).progress(onProgress);
                         if (onStarted != null) onStarted.run();
                     });
                 } catch (Throwable t) {
@@ -187,8 +208,13 @@ public final class RollbackCoordinator {
         }
         ActiveJob job = active;
         if (job != null && playerId.equals(job.playerId)) {
+            if (job.plan.replay() && job.scene != null) {
+                job.scene.cancel("Восстановление отменено администратором; применённые изменения возвращаются.");
+                return CancelResult.ACTIVE;
+            }
             job.releaseChunk();
             active = null;
+            job.finishCheckpoint();
             return CancelResult.ACTIVE;
         }
         return CancelResult.NONE;
@@ -216,18 +242,25 @@ public final class RollbackCoordinator {
             return;
         }
         if (job == null) return;
-        if (!event.hasTime()) {
-            job.reportDelay(event.getServer());
-            return;
-        }
+        // hasTime() can stay false indefinitely on a busy server. World changes remain
+        // bounded by our own operation/time budgets and must make progress every tick.
         try {
             if (job.tick(event.getServer())) {
                 job.releaseChunk();
                 active = null;
             } else job.reportDelay(event.getServer());
         } catch (Throwable t) {
+            if (job.plan.replay() && job.scene != null) {
+                if (job.scene.quarantined()) {
+                    if (!job.sceneFailureReported) { job.sceneFailureReported=true; job.onError.accept(job.scene.failure()); }
+                } else job.scene.cancel("Ошибка восстановления: " + concise(t));
+                AvilixLoggerMod.LOGGER.error("[AvilixLogger] Recovery scene failed; compensating or retaining locks",t);
+                return;
+            }
             job.releaseChunk();
             active = null;
+            try { job.finishCheckpoint(); }
+            catch (Throwable saveFailure) { t.addSuppressed(saveFailure); }
             AvilixLoggerMod.LOGGER.error("[AvilixLogger] Tick-budgeted rollback failed", t);
             job.onError.accept("Откат остановлен из-за ошибки: " + concise(t));
         }
@@ -238,7 +271,11 @@ public final class RollbackCoordinator {
         cachedPreview = null;
         for (Preparation preparation : PREPARATIONS.values()) preparation.cancelled = true;
         PREPARATIONS.clear();
-        if (active != null) active.releaseChunk();
+        if (active != null) {
+            if (active.plan.replay() && active.scene != null) active.compensateBeforeStop();
+            else try {active.finishCheckpoint();}catch(Throwable failure){AvilixLoggerMod.LOGGER.error("[AvilixLogger] Rollback shutdown checkpoint failed",failure);}
+            active.releaseChunk();
+        }
         active = null;
         ThreadPoolExecutor ex = executor;
         executor = null;
@@ -316,6 +353,75 @@ public final class RollbackCoordinator {
         int timedOutX, timedOutZ;
         int lastProgressTick = Integer.MIN_VALUE;
         int lastReportedProcessed;
+        MinecraftServer checkpointServer;
+        boolean checkpointStarted;
+        boolean checkpointFinished;
+        RecoveryScene scene;
+        boolean sceneFailureReported;
+        Consumer<String> progressSink;
+        RecoveryScene.Phase lastReportedPhase;
+
+        ActiveJob progress(Consumer<String> sink) { progressSink=sink; return this; }
+
+        void compensateBeforeStop() {
+            try {scene.cancel("Сервер завершает работу; незавершённая сцена возвращается к исходному состоянию.");}
+            catch(Throwable failure){AvilixLoggerMod.LOGGER.error("[AvilixLogger] Recovery cancellation during shutdown failed; journal retained",failure);}
+            long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+            while (!scene.aborted() && !scene.quarantined() && scene.phase()!=RecoveryScene.Phase.CLOSED && System.nanoTime()<deadline) {
+                try { scene.step(10000,System.nanoTime()+TimeUnit.SECONDS.toNanos(1),64); }
+                catch (Throwable failure) { AvilixLoggerMod.LOGGER.error("[AvilixLogger] Recovery compensation during shutdown failed",failure); break; }
+                if(scene.phase()==RecoveryScene.Phase.WRITE_JOURNAL)java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+            }
+            if(!scene.aborted()&&scene.phase()!=RecoveryScene.Phase.CLOSED)
+                AvilixLoggerMod.LOGGER.error("[AvilixLogger] Recovery could not finish compensation during shutdown; durable journal retained for next startup. phase={}",scene.phase());
+            try { finishCheckpoint(); }
+            catch (Throwable failure) { AvilixLoggerMod.LOGGER.error("[AvilixLogger] Recovery checkpoint during shutdown failed",failure); }
+        }
+
+        boolean tickRecovery(MinecraftServer server) {
+            if (scene == null) {
+                var targets=new ArrayList<RecoveryScene.Target>();
+                var entityTargets=new ArrayList<RecoveryEntityBatch.Target>();
+                long preparedBytes=0;
+                for (var scope:scopes) {
+                    if (!scope.rollback().preparationSkips().isEmpty()) throw new IllegalStateException(
+                            "Полное восстановление не начато: история содержит пропуски " + scope.rollback().preparationSkips());
+                    var level=resolveLevel(server,scope.dimension());
+                    if (level==null) throw new IllegalStateException("Измерение недоступно: "+scope.dimension());
+                    for (var block:scope.rollback().blocks()) targets.add(new RecoveryScene.Target(level,block));
+                    for(var entity:scope.rollback().entityReplays())entityTargets.add(new RecoveryEntityBatch.Target(level,entity));
+                    preparedBytes+=scope.rollback().estimatedBytes();
+                }
+                long limit=configInt(() -> LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get(),512,64,8192)*1024L*1024L;
+                var storage=entityTargets.isEmpty()?null:LoggerRuntime.storage(server.overworld());
+                scene=new RecoveryScene(targets,entityTargets,Math.max(0,limit-preparedBytes),
+                        configInt(() -> LoggerConfig.VALUES.recoveryMaxLoadedChunks.get(),128,1,4096),entities->EntityReplayPlan.verifyHistory(storage,entities));
+            }
+            if (scene.quarantined()) return false;
+            int operations=configInt(() -> LoggerConfig.VALUES.recoveryOperationsPerTick.get(),2048,1,10000);
+            int millis=configInt(() -> LoggerConfig.VALUES.recoveryMaxMillisPerTick.get(),20,1,100);
+            int loads=configInt(() -> LoggerConfig.VALUES.recoveryChunkLoadsPerTick.get(),8,0,64);
+            scene.step(operations,System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(millis),loads);
+            if (scene.ready()) {
+                scene.commit();
+                checkpointFinished=true;
+                report.merge(scene.report());
+                onComplete.accept(report);
+                return true;
+            }
+            if (scene.aborted()) {
+                checkpointFinished=true; // Scene flushed its whole compensation before retiring the undo journal.
+                onError.accept(scene.failure()+" Постройка возвращена к исходному состоянию; частичный результат не оставлен.");
+                return true;
+            }
+            return false;
+        }
+
+        void finishCheckpoint() {
+            if (!checkpointStarted || checkpointFinished) return;
+            RecoveryCheckpoint.flush(checkpointServer);
+            checkpointFinished = true;
+        }
 
         void releaseChunk() {
             if (ticketLevel != null) ticketLevel.getChunkSource().removeRegionTicket(ROLLBACK_CHUNK, ticketChunk, 1, ticketChunk.toLong());
@@ -349,16 +455,42 @@ public final class RollbackCoordinator {
                 lastProgressTick = tick;
                 return;
             }
-            if (tick - lastProgressTick < 200) return;
+            boolean phaseChanged=scene!=null && scene.phase()!=lastReportedPhase;
+            if (tick - lastProgressTick < (phaseChanged ? 5 : 20)) return;
             lastProgressTick = tick;
+            if (scene!=null) lastReportedPhase=scene.phase();
             var player = server.getPlayerList().getPlayer(playerId);
             if (player == null || !PermissionUtil.has(player.createCommandSourceStack(), "avilixlogger.command.admin", 2)) return;
-            String state = report.processed != lastReportedProcessed ? "Выполняется"
-                    : ticketChunk == null ? "Ожидание свободного времени тика" : "Ожидание чанка " + ticketChunk;
+            String state = scene != null ? recoveryPhase(scene.phase()) + " · " + scene.progress() + "/" + scene.progressTotal()
+                    : report.processed != lastReportedProcessed ? "Выполняется"
+                    : ticketChunk == null ? "Подготовка следующей порции" : "Загрузка чанка " + ticketChunk;
             lastReportedProcessed = report.processed;
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(state + " · обработано " + report.processed));
+            String message=state+(scene==null?" · обработано "+report.processed:"");
+            if (progressSink!=null) progressSink.accept(message);
+            else player.sendSystemMessage(net.minecraft.network.chat.Component.literal(message));
         }
 
+
+        private static String recoveryPhase(RecoveryScene.Phase phase) {
+            return switch (phase) {
+                case RESERVE -> "Защита области";
+                case ENTITY_INDEX -> "Проверка UUID в сохранённых чанках";
+                case ENTITY_CAPTURE, ENTITY_RECHECK -> "Проверка сущностей и связанных снимков";
+                case ENTITY_APPLY -> "Восстановление сущностей";
+                case ENTITY_VERIFY -> "Проверка состояния сущностей";
+                case WAIT_CHUNKS -> "Загрузка чанков";
+                case CAPTURE -> "Резервные снимки всей постройки";
+                case RECHECK -> "Проверка связанных блоков";
+                case WRITE_JOURNAL -> "Сохранение аварийного журнала операции";
+                case STATES -> "Установка всех состояний блоков";
+                case DATA -> "Восстановление NBT и хранилищ";
+                case VERIFY, READY -> "Проверка результата перед сохранением";
+                case UNDO_STATES, UNDO_DATA, UNDO_ENTITIES -> "Компенсация: возврат всей постройки";
+                case QUARANTINED -> "Операция остановлена: область защищена";
+                case ABORTED -> "Восстановление отменено";
+                case CLOSED -> "Готово";
+            };
+        }
 
         ActiveJob(UUID playerId, RollbackPlanManager.Plan plan, List<PreparedScope> scopes,
                   Consumer<RollbackReport> onComplete, Consumer<String> onError) {
@@ -367,10 +499,23 @@ public final class RollbackCoordinator {
             this.scopes = List.copyOf(scopes);
             this.onComplete = onComplete;
             this.onError = onError;
+            for (var scope : scopes) scope.rollback().preparationSkips().forEach((reason, count) -> {
+                report.skippedReasons.merge(reason, count, Integer::sum);
+                report.skipped += count;
+                report.processed += count;
+            });
         }
 
         /** @return true when the job has finished and can be removed. */
         boolean tick(MinecraftServer server) {
+            if (!checkpointStarted) {
+                checkpointServer = server;
+                RecoveryCheckpoint.flush(server);
+                checkpointStarted = true;
+                // Saving may consume a tick; start applying with a fresh budget next tick.
+                return false;
+            }
+            if (plan.replay()) return tickRecovery(server);
             int operationBudget = configInt(() -> LoggerConfig.VALUES.rollbackOperationsPerTick.get(), 100, 1, 10_000);
             int blockBatchSize = configInt(() -> LoggerConfig.VALUES.rollbackBlockBatchSize.get(), 32, 1, 1_000);
             int chunkLoadBudget = configInt(() -> LoggerConfig.VALUES.rollbackChunkLoadsPerTick.get(), 1, 0, 64);
@@ -382,14 +527,16 @@ public final class RollbackCoordinator {
                 PreparedScope scope = scopes.get(scopeIndex);
                 ServerLevel level = resolveLevel(server, scope.dimension());
                 if (level == null) {
+                    finishCheckpoint();
                     onError.accept("Измерение из плана больше недоступно: " + scope.dimension());
                     return true;
                 }
                 RollbackEngine.PreparedRollback prepared = scope.rollback();
 
-                if (blockIndex < prepared.blocks().size()) {
+                // Remove spawned contraptions/entities before restoring the stationary blocks.
+                if (removalIndex >= prepared.entityRemovals().size() && blockIndex < prepared.blocks().size()) {
                     RollbackEngine.PreparedBlockSnapshot first = prepared.blocks().get(blockIndex);
-                    if (!level.hasChunkAt(first.pos())) {
+                    if (level.getChunkSource().getChunkNow(first.pos().getX() >> 4, first.pos().getZ() >> 4) == null) {
                         if (chunkLoadBudget > 0 && waitForChunk(level, first.pos())) return false;
                         report.onSkipped(chunkLoadBudget == 0 ? "chunk_unloaded" : "chunk_timeout");
                         blockIndex++;
@@ -415,7 +562,7 @@ public final class RollbackCoordinator {
                 if (removalIndex < prepared.entityRemovals().size()) {
                     LogEntry entry = prepared.entityRemovals().get(removalIndex);
                     BlockPos pos = new BlockPos(entry.x, entry.y, entry.z);
-                    if (!level.hasChunkAt(pos)) {
+                    if (level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4) == null) {
                         if (chunkLoadBudget > 0 && waitForChunk(level, pos)) return false;
                         report.onSkipped(chunkLoadBudget == 0 ? "chunk_unloaded" : "chunk_timeout");
                         removalIndex++;
@@ -431,7 +578,7 @@ public final class RollbackCoordinator {
                 if (deferredIndex < prepared.deferred().size()) {
                     LogEntry entry = prepared.deferred().get(deferredIndex);
                     BlockPos pos = new BlockPos(entry.x, entry.y, entry.z);
-                    if (!level.hasChunkAt(pos)) {
+                    if (level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4) == null) {
                         if (chunkLoadBudget > 0 && waitForChunk(level, pos)) return false;
                         report.onSkipped(chunkLoadBudget == 0 ? "chunk_unloaded" : "chunk_timeout");
                         deferredIndex++;
@@ -451,6 +598,7 @@ public final class RollbackCoordinator {
             }
 
             if (scopeIndex >= scopes.size()) {
+                finishCheckpoint();
                 onComplete.accept(report);
                 return true;
             }

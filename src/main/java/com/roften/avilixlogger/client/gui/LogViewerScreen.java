@@ -573,6 +573,8 @@ public final class LogViewerScreen extends LoggerScreen {
                 sections.add(Map.entry(Component.literal("Логи сервера"),
                         menu -> minecraft.setScreen(new ServerLogsScreen(menu))));
             }
+            if (RecoveryScreen.available()) sections.add(Map.entry(Component.literal("Восстановление построек"),
+                    menu -> minecraft.setScreen(new RecoveryScreen(menu))));
             sections.add(Map.entry(Component.literal("Действия"),
                     menu -> minecraft.setScreen(new LoggerActionsScreen(menu))));
             sections.add(Map.entry(Component.literal("Запись событий"),
@@ -672,6 +674,7 @@ public final class LogViewerScreen extends LoggerScreen {
         return compactControlLabels() ? Component.literal(compact) : Component.translatable(translationKey);
     }
 
+    static java.time.ZoneId logTimeZone() { return logTimeZone; }
     private static java.time.ZoneId logTimeZone = java.time.ZoneId.of("UTC");
     public static void setLogTimeZone(String value) {
         try { logTimeZone = java.time.ZoneId.of(value); } catch (RuntimeException ignored) { logTimeZone = java.time.ZoneId.of("UTC"); }

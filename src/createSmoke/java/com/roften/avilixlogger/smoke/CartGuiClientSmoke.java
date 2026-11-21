@@ -42,7 +42,7 @@ public final class CartGuiClientSmoke {
                 java.lang.management.ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed() / 1048576.0);
     }
     private static final String ID="51000000-0000-0000-0000-000000000001";
-    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png","logger-sections.png","logger-server-logs.png");
+    private static final List<String> FILES=List.of("cart-gui-history.png","cart-gui-actions.png","cart-gui-confirm.png","cart-gui-results.png","logger-actions.png","logger-action-results.png","logger-guide.png","logger-main.png","logger-capture-types.png","logger-time-range.png","logger-modules.png","logger-opac.png","logger-performance-results.png","logger-capture-paused.png","logger-capture-handlers.png","logger-row-actions.png","logger-client-report.png","logger-sections.png","logger-server-logs.png","logger-recovery-period.png","logger-recovery-moment.png");
     @SubscribeEvent public static void tick(ClientTickEvent.Post event){
         if(!Boolean.getBoolean("avilixlogger.guiSmoke")||finished)return;
         var mc=Minecraft.getInstance();
@@ -368,6 +368,26 @@ public final class CartGuiClientSmoke {
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptServerLog(
                             new com.roften.avilixlogger.net.ServerLogPayloads.View(82,
                                     com.roften.avilixlogger.net.ServerLogPayloads.Result.DATA, name, 0, file.length, file, List.of(), ""));
+                }
+                else if (stage == 19) {
+                    com.roften.avilixlogger.client.gui.LogViewerScreen.setLogTimeZone("Europe/Moscow");
+                    var screen=new com.roften.avilixlogger.client.gui.RecoveryScreen(root);mc.setScreen(screen);
+                    for(String label:List.of("5 минут","30 минут","Час","Сутки"))clickLabel(screen,label);
+                    check(screen.children().stream().filter(net.minecraft.client.gui.components.EditBox.class::isInstance).count()==6,
+                            "recovery form did not expose separate date/time/area/actor inputs");
+                    check(screen.children().stream().filter(net.minecraft.client.gui.components.EditBox.class::isInstance)
+                            .allMatch(w->w.getClass().getName().equals("com.roften.avilixlogger.client.gui.LoggerGuiWidgets$ScaledEditBox")),
+                            "recovery form stopped using shared journal controls");
+                    clickLabel(screen,"Состояние на момент");
+                    check(screen.children().stream().filter(net.minecraft.client.gui.components.EditBox.class::isInstance)
+                            .filter(w->!((net.minecraft.client.gui.components.EditBox)w).active).count()==2,"moment mode left period end editable");
+                    clickLabel(screen,"Изменения за период");
+                    clickLabel(screen,"30 минут");
+                    System.out.println("RECOVERY_GUI_NATIVE_OK: two modes, six shared inputs, 5/30/60/1440-minute presets, fixed zone, disabled end in state-at mode");
+                }
+                else if (stage == 20) {
+                    var screen=new com.roften.avilixlogger.client.gui.RecoveryScreen(root);mc.setScreen(screen);
+                    clickLabel(screen,"Состояние на момент");
                 }
                 if(stage<FILES.size())layout(mc.screen,mc);
                 if(stage==14){

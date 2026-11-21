@@ -57,6 +57,10 @@ public final class LoggerConfig {
         public final ModConfigSpec.IntValue captureQueueCeilingMiB;
         public final ModConfigSpec.IntValue journalQueueCeilingMiB;
 
+        public final ModConfigSpec.IntValue recoveryMaxLoadedChunks;
+        public final ModConfigSpec.IntValue recoveryChunkLoadsPerTick;
+        public final ModConfigSpec.IntValue recoveryOperationsPerTick;
+        public final ModConfigSpec.IntValue recoveryMaxMillisPerTick;
         public final ModConfigSpec.IntValue rollbackOperationsPerTick;
         public final ModConfigSpec.IntValue rollbackBlockBatchSize;
         public final ModConfigSpec.IntValue rollbackChunkLoadsPerTick;
@@ -196,12 +200,23 @@ public final class LoggerConfig {
                     .defineInRange("journalQueueCeilingMiB",32,16,8192);
             b.pop();
 
+            b.push("crashRecovery");
+            recoveryChunkLoadsPerTick = b.comment("Maximum new chunk tickets requested per recovery tick (0 refuses unloaded areas). Independent of ordinary rollback.")
+                    .defineInRange("chunkLoadsPerTick", 8, 0, 64);
+            recoveryMaxLoadedChunks = b.comment("Maximum distinct chunks retained by a recovery scene before any world mutation; raise deliberately for larger builds.")
+                    .defineInRange("maxLoadedChunks", 128, 1, 4096);
+            recoveryOperationsPerTick = b.comment("Maximum recovery operations per tick; independent of ordinary rollback. World changes stay on the server thread.")
+                    .defineInRange("operationsPerTick", 2048, 1, 10000);
+            recoveryMaxMillisPerTick = b.comment("Soft recovery budget in milliseconds; one mod operation/save may exceed it. Recovery never waits for an idle tick.")
+                    .defineInRange("maxMillisPerTick", 20, 1, 100);
+            b.pop();
+
             b.push("rollbackPerformance");
             rollbackOperationsPerTick = b.comment("Maximum ordinary rollback operations applied per server tick.")
                     .defineInRange("operationsPerTick", 100, 1, 10000);
             rollbackBlockBatchSize = b.comment("Maximum same-chunk block snapshots restored as one atomic batch.")
                     .defineInRange("blockBatchSize", 32, 1, 1000);
-            rollbackChunkLoadsPerTick = b.comment("Maximum synchronous chunk loads requested by rollback per tick. Set to 0 to wait for already loaded chunks only.")
+            rollbackChunkLoadsPerTick = b.comment("Enable temporary chunk tickets during rollback (0 disables loading and reports unloaded chunks). Only one chunk ticket is held at a time.")
                     .defineInRange("chunkLoadsPerTick", 1, 0, 64);
             rollbackMaxMillisPerTick = b.comment("Soft wall-clock budget for rollback work during one server tick.")
                     .defineInRange("maxMillisPerTick", 2, 1, 25);

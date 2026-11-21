@@ -199,6 +199,10 @@ public final class LoggerCommands {
 
             .then(literal("replay")
                     .requires(source -> PermissionUtil.has(source, "avilixlogger.command.admin", 2))
+                    .then(literal("details")
+                            .executes(ctx -> recoveryDetails(ctx.getSource(),1))
+                            .then(argument("page",IntegerArgumentType.integer(1,100000))
+                                    .executes(ctx -> recoveryDetails(ctx.getSource(),IntegerArgumentType.getInteger(ctx,"page")))))
                     .then(argument("args", StringArgumentType.greedyString())
                             .executes(ctx -> rollbackFromFlags(ctx, StringArgumentType.getString(ctx, "args"), true))))
 
@@ -345,19 +349,7 @@ public final class LoggerCommands {
 
     /** Parses an absolute rollback target moment in the server timezone. */
     private static Long parseTargetMomentMillis(String value) {
-        if (value == null || value.isBlank()) return null;
-        String normalized = value.trim().replace('_', 'T').replace('@', 'T');
-        ZoneId zone = ZoneId.systemDefault();
-        try {
-            if (!normalized.contains("T")) {
-                return LocalDate.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE)
-                        .atStartOfDay(zone).toInstant().toEpochMilli();
-            }
-            return java.time.LocalDateTime.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                    .atZone(zone).toInstant().toEpochMilli();
-        } catch (DateTimeParseException ignored) {
-            return null;
-        }
+        return com.roften.avilixlogger.core.RecoveryTimeInput.absolute(value,ZoneId.systemDefault());
     }
 
     private static String formatDuration(int seconds) {
@@ -1929,7 +1921,8 @@ public final class LoggerCommands {
                 return 0;
             }
             if (cancelled == RollbackCoordinator.CancelResult.ACTIVE) {
-                ctx.getSource().sendSuccess(() -> Component.literal("Активный откат остановлен. Уже применённые порции не отменены.")
+                ctx.getSource().sendSuccess(() -> Component.literal(replay ? "Запрошена отмена восстановления. Дождитесь возврата всей постройки к исходному состоянию."
+                        : "Активный откат остановлен. Уже применённые порции не отменены.")
                         .withStyle(ChatFormatting.YELLOW), false);
             } else if (cancelled == RollbackCoordinator.CancelResult.PREPARATION) {
                 ctx.getSource().sendSuccess(() -> Component.literal("Подготовка отката отменена.").withStyle(ChatFormatting.YELLOW), false);
@@ -1957,17 +1950,18 @@ public final class LoggerCommands {
             src.sendSystemMessage(Component.literal("План #" + plan.id() + " принят. Подготавливаю выполнение…")
                     .withStyle(ChatFormatting.YELLOW));
             RollbackCoordinator.startRollback(src.getServer(), sp.getUUID(), plan,
-                    () -> src.sendSystemMessage(Component.literal(plan.replay() ? "Воспроизведение блоков началось и выполняется порциями."
-                            : "План подготовлен. Откат выполняется небольшими порциями.")
+                    () -> src.sendSystemMessage(Component.literal(plan.replay() ? "Операция восстановления началась: сохранение мира, проверка всей постройки, затем применение без ожидания свободного тика."
+                            : "План подготовлен. Сохраняю мир, затем выполняю откат небольшими порциями.")
                             .withStyle(ChatFormatting.AQUA)),
                     total -> {
-                        src.sendSystemMessage(Component.literal("План #" + plan.id() + ", состояние на "
-                                + formatRollbackMoment(plan.targetTs())).withStyle(ChatFormatting.DARK_GRAY));
-                        if (plan.replay()) src.sendSystemMessage(Component.literal("Воспроизведение: применено " + total.applied
-                                + ", пропущено " + total.skipped + " · " + total.skippedReasons));
-                        else sendRollbackSummary(src, true, total);
+                        src.sendSystemMessage(Component.literal("План #" + plan.id() + (plan.replay() ? ", восстановлен период " : ", состояние на ")
+                                + formatRollbackMoment(plan.targetTs()) + (plan.replay() ? " → " + formatRollbackMoment(plan.cutoffTs()) : ""))
+                                .withStyle(ChatFormatting.DARK_GRAY));
+                        src.sendSystemMessage(Component.literal((plan.replay()?"Восстановление завершено":"Откат завершён")+". Итог сохранён на диск."));
+                        sendRollbackSummary(src, true, total);
                     },
-                    message -> src.sendFailure(Component.literal(message)));
+                    message -> src.sendFailure(Component.literal(message)),
+                    progress -> src.sendSystemMessage(Component.literal(progress).withStyle(ChatFormatting.GRAY)));
             return 1;
         }
 
@@ -1994,9 +1988,9 @@ public final class LoggerCommands {
         final long targetTs = f.targetMoment != null
                 ? f.targetMoment
                 : (f.dayRange != null ? f.dayRange[0] : cutoffTs - (f.seconds * 1000L));
-        if (replay && (f.actor == null || !f.actor.matches("[A-Za-z0-9_]{1,16}(,[A-Za-z0-9_]{1,16}){0,15}")
+        if (replay && (f.actor != null && !f.actor.matches("[A-Za-z0-9_]{1,16}(,[A-Za-z0-9_]{1,16}){0,15}")
                 || f.world || f.allDims || Integer.valueOf(0).equals(f.radius))) {
-            ctx.getSource().sendFailure(Component.literal("Для воспроизведения укажите --p Ник или --p Ник1,Ник2 (до 16) и ограниченную область."));
+            ctx.getSource().sendFailure(Component.literal("Для восстановления нужна ограниченная область (--r, --we, --block). --p Ник или --p Ник1,Ник2 — необязательный фильтр."));
             return 0;
         }
         if (targetTs <= 0L || targetTs >= cutoffTs) {
@@ -2118,13 +2112,36 @@ public final class LoggerCommands {
         return scopes;
     }
 
+    private static int recoveryDetails(CommandSourceStack source,int page) {
+        if(!(source.getEntity() instanceof ServerPlayer player))return 0;
+        var plan=RollbackPlanManager.getValid(player.getUUID());
+        var details=plan==null?null:RollbackCoordinator.previewIssues(player.getUUID(),plan,page);
+        if(details==null||!plan.replay()){source.sendFailure(Component.literal("Нет готового предпросмотра восстановления. Создайте его заново."));return 0;}
+        int pages=Math.max(1,(details.total()+11)/12);
+        if(page>pages){source.sendFailure(Component.literal("Всего страниц: "+pages));return 0;}
+        source.sendSystemMessage(Component.literal("План #"+plan.id()+": диагностика "+page+"/"+pages+", объектов: "+details.total()).withStyle(ChatFormatting.AQUA));
+        for(var issue:details.issues()) {
+            String position=issue.pos().getX()+" "+issue.pos().getY()+" "+issue.pos().getZ();
+            source.sendSystemMessage(Component.literal("#"+issue.recordId()+" · "+issue.dimension()+" · "+position+(issue.uuid()==null?"":" · UUID="+issue.uuid()))
+                    .withStyle(ChatFormatting.GRAY));
+            source.sendSystemMessage(Component.literal((issue.conditional()?"Проверка перед изменением: ":"Отказ: ")+translateSkipReason(issue.reason())+" ["+issue.reason()+"]").withStyle(ChatFormatting.YELLOW));
+        }
+        if(details.total()==0)source.sendSystemMessage(Component.literal("В истории не найдено причин отказа. Состояние мира, чанки и UUID будут проверены перед изменением."));
+        if(page<pages)source.sendSystemMessage(Component.literal("[СЛЕДУЮЩИЕ 12]").withStyle(style->style.withColor(ChatFormatting.AQUA)
+                .withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND,"/log replay details "+(page+1)))));
+        return 1;
+    }
+
     private static void sendRollbackPlanSummary(CommandSourceStack src, RollbackPlanManager.Plan plan, RollbackReport report) {
         src.sendSystemMessage(Component.literal("Предпросмотр плана #" + plan.id()).withStyle(ChatFormatting.AQUA));
-        src.sendSystemMessage(Component.literal((plan.replay() ? "Воспроизведение простых блоков с " : "Цель: вернуть состояние на ")
+        src.sendSystemMessage(Component.literal((plan.replay() ? "Восстановление после краша: повторить изменения с " : "Цель: вернуть состояние на ")
                 + formatRollbackMoment(plan.targetTs())).withStyle(ChatFormatting.YELLOW));
         src.sendSystemMessage(Component.literal((plan.replay() ? "Конец периода: " : "Будут отменены действия после цели и до снимка предпросмотра ")
                 + formatRollbackMoment(plan.cutoffTs()) + ".").withStyle(ChatFormatting.GRAY));
 
+        if (plan.replay()) src.sendSystemMessage(Component.literal(
+                "Это период повторного применения журнала после старта сервера. --at/--t — начало, --until — конец. "
+                        + "Для отмены действий и возврата к прошлому моменту используйте /log rollback.").withStyle(ChatFormatting.GRAY));
         RollbackPlanManager.Scope bounds = plan.previewBounds();
         if (bounds != null) {
             src.sendSystemMessage(Component.literal("Область: " + bounds.dimension() + " ["
@@ -2137,6 +2154,16 @@ public final class LoggerCommands {
         }
 
         sendRollbackSummary(src, false, report);
+        if(plan.replay()) {
+            src.sendSystemMessage(Component.literal("Числа выше — верхняя оценка по журналу. Текущий мир, сохранённые UUID и завершённые операции ещё не проверены.").withStyle(ChatFormatting.GRAY));
+            long conditional=report.preparationIssues.stream().filter(EntityReplayPlan.Issue::conditional).count();
+            if(conditional>0)src.sendSystemMessage(Component.literal("Объектов с условием безопасного восстановления: "+conditional+". Если для изменения не хватает доказательств, вся сцена будет остановлена до мутаций.").withStyle(ChatFormatting.YELLOW));
+            src.sendSystemMessage(Component.literal("[ПРИЧИНЫ ПО ОБЪЕКТАМ: "+report.preparationIssues.size()+"]").withStyle(style->style.withColor(ChatFormatting.AQUA)
+                    .withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND,"/log replay details"))));
+        }
+        if (plan.replay() && report.skipped>0) src.sendSystemMessage(Component.literal(
+                "В истории есть неподдержанные/неполные данные. План не будет применён частично: уточните область, период или восстановите связанные объекты отдельно.")
+                .withStyle(ChatFormatting.YELLOW));
         long ttlSeconds = Math.max(1L, (plan.expiresAt() - System.currentTimeMillis()) / 1000L);
         src.sendSystemMessage(Component.literal("План действует " + ttlSeconds + " сек. Параметры и позиция уже зафиксированы.")
                 .withStyle(ChatFormatting.DARK_GRAY));
@@ -2242,6 +2269,17 @@ public final class LoggerCommands {
         return switch (key) {
             case "chunk_unloaded" -> "чанк не загружен";
             case "chunk_timeout" -> "чанк не загрузился за 200 тиков";
+            case "replay_incomplete_snapshot" -> "неполный или повреждённый снимок восстановления";
+            case "replay_filtered_chain" -> "история позиции содержит действия вне выбранных игроков/типов";
+            case "replay_unpaired_container_delta" -> "операция со слотами не имеет связанного полного снимка";
+            case "replay_history_gap" -> "разрыв последовательности снимков";
+            case "replay_linked_create" -> "связанная конструкция Create требует отдельного восстановления";
+            case "replay_incomplete_or_unknown_block" -> "неизвестный блок или отсутствует полный NBT";
+            case "replay_already_current" -> "позиция уже восстановлена";
+            case "replay_world_conflict" -> "мир не совпадает ни с одной контрольной точкой";
+            case "block_entity_verification_failed" -> "загруженный NBT отличается от полного снимка";
+            case "live_backup_failed" -> "не удалось сохранить текущее состояние для компенсации";
+            case "missing_block_entity_snapshot" -> "в журнале отсутствует полный NBT блока";
             case "replay_conflict_or_unsupported" -> "текущее состояние отличается или блок не поддерживается";
             case "no_snapshot" -> "нет снимка";
             case "no_entity_snapshot" -> "нет снимка сущности";
@@ -2253,6 +2291,23 @@ public final class LoggerCommands {
             case "entity_missing_uuid" -> "в снимке нет UUID";
             case "entity_uuid_mismatch" -> "UUID снимка не совпал";
             case "entity_uuid_collision" -> "UUID уже существует в мире";
+            case "entity_duplicate_uuid_in_tree" -> "UUID повторяется в дереве пассажиров";
+            case "player_entity_snapshot_forbidden" -> "игрок не восстанавливается как обычная сущность";
+            case "entity_invalid_passengers", "entity_tree_limit" -> "повреждённое или слишком большое дерево пассажиров";
+            case "entity_resource_proof_required" -> "нет подтверждения создания без расхода ресурсов игрока";
+            case "entity_resource_graph_required" -> "не сохранена связь сущности с ресурсами её удаления";
+            case "entity_codec_not_supported" -> "для типа сущности ещё нет проверенного обработчика аварийного восстановления";
+            case "entity_attachments_graph_required" -> "модовые данные сущности требуют связанного обработчика восстановления";
+            case "entity_persistent_data_graph_required" -> "постоянные данные мода требуют связанного обработчика восстановления";
+            case "entity_team_graph_required", "entity_scoreboard_graph_required" -> "состояние команды или счёта хранится вне снимка сущности";
+            case "entity_leash_graph_required" -> "не сохранена полная связь поводка";
+            case "entity_passenger_receipt_required", "entity_passenger_removal_graph_required" -> "нет полного подтверждения общей операции с пассажирами";
+            case "replay_linked_create_entity" -> "сущность или контроллер Create требует связанного восстановления конструкции";
+            case "replay_filtered_entity_chain" -> "фильтр исключает часть истории одной сущности";
+            case "entity_lifecycle_gap" -> "разрыв последовательности появления и удаления сущности";
+            case "entity_recovery_receipt_completed" -> "событие уже обработано завершённым восстановлением";
+            case "entity_already_present" -> "сущность уже есть; её текущее состояние сохранено";
+            case "entity_already_absent" -> "сущность уже отсутствует";
             case "entity_missing_position" -> "в снимке нет точной позиции";
             case "entity_missing_rotation" -> "в снимке нет поворота";
             case "entity_nbt_load_failed" -> "NBT сущности не загрузился";

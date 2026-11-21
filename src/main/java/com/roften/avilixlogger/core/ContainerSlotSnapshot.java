@@ -138,6 +138,9 @@ public final class ContainerSlotSnapshot {
 
     private static boolean isStructurallyValid(CompoundTag tag) {
         if (tag == null || !tag.contains("Size", Tag.TAG_INT) || !tag.contains("Items", Tag.TAG_LIST)) return false;
+        // getList(..., COMPOUND) silently returns an empty list for a different element type.
+        // A malformed nonempty inventory must never be interpreted as a valid empty one.
+        if(tag.get("Items") instanceof ListTag raw&&!raw.isEmpty()&&raw.getElementType()!=Tag.TAG_COMPOUND)return false;
         int size = tag.getInt("Size");
         if (size < 0) return false;
         HashSet<Integer> seen = new HashSet<>();

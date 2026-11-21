@@ -26,15 +26,25 @@ public final class RollbackEngine {
 
     private static final int PAGE = 2000;
 
+    private static void setActors(LogQuery query,String names) {
+        if (names!=null && names.contains(",")) {
+            var actors=java.util.Arrays.stream(names.split(",",-1)).map(String::trim).toList();
+            if (actors.size()>16 || actors.stream().anyMatch(String::isEmpty))
+                throw new IllegalArgumentException("Укажите до 16 непустых имён игроков через запятую");
+            query.actorNames=actors;
+        } else query.actorName=names;
+    }
+
+
     private RollbackEngine() {}
 
     public static int rollbackExact(ServerLevel level, BlockPos pos, long sinceTs, String actorName) {
         LogQuery q = new LogQuery();
         q.dim = level.dimension().location().toString();
-        q.sinceTs = sinceTs;
+        q.sinceTs = sinceTs == Long.MAX_VALUE ? Long.MAX_VALUE : sinceTs + 1;
         q.untilTs = System.currentTimeMillis();
         q.exactPos = pos;
-        q.actorName = actorName;
+        setActors(q, actorName);
         q.limit = PAGE;
         return rollbackByQueryPaged(level, q, true).applied;
     }
@@ -42,10 +52,10 @@ public final class RollbackEngine {
     public static int rollbackExactRange(ServerLevel level, BlockPos pos, long fromTs, long untilTs, String actorName) {
         LogQuery q = new LogQuery();
         q.dim = level.dimension().location().toString();
-        q.sinceTs = fromTs;
+        q.sinceTs = fromTs == Long.MAX_VALUE ? Long.MAX_VALUE : fromTs + 1;
         q.untilTs = untilTs;
         q.exactPos = pos;
-        q.actorName = actorName;
+        setActors(q, actorName);
         q.limit = PAGE;
         return rollbackByQueryPaged(level, q, true).applied;
     }
@@ -53,11 +63,11 @@ public final class RollbackEngine {
     public static int rollbackBox(ServerLevel level, BlockPos min, BlockPos max, long sinceTs, String actorName) {
         LogQuery q = new LogQuery();
         q.dim = level.dimension().location().toString();
-        q.sinceTs = sinceTs;
+        q.sinceTs = sinceTs == Long.MAX_VALUE ? Long.MAX_VALUE : sinceTs + 1;
         q.untilTs = System.currentTimeMillis();
         q.minPos = new BlockPos(Math.min(min.getX(), max.getX()), Math.min(min.getY(), max.getY()), Math.min(min.getZ(), max.getZ()));
         q.maxPos = new BlockPos(Math.max(min.getX(), max.getX()), Math.max(min.getY(), max.getY()), Math.max(min.getZ(), max.getZ()));
-        q.actorName = actorName;
+        setActors(q, actorName);
         q.limit = PAGE;
         return rollbackByQueryPaged(level, q, true).applied;
     }
@@ -65,11 +75,11 @@ public final class RollbackEngine {
     public static int rollbackBoxRange(ServerLevel level, BlockPos min, BlockPos max, long fromTs, long untilTs, String actorName) {
         LogQuery q = new LogQuery();
         q.dim = level.dimension().location().toString();
-        q.sinceTs = fromTs;
+        q.sinceTs = fromTs == Long.MAX_VALUE ? Long.MAX_VALUE : fromTs + 1;
         q.untilTs = untilTs;
         q.minPos = new BlockPos(Math.min(min.getX(), max.getX()), Math.min(min.getY(), max.getY()), Math.min(min.getZ(), max.getZ()));
         q.maxPos = new BlockPos(Math.max(min.getX(), max.getX()), Math.max(min.getY(), max.getY()), Math.max(min.getZ(), max.getZ()));
-        q.actorName = actorName;
+        setActors(q, actorName);
         q.limit = PAGE;
         return rollbackByQueryPaged(level, q, true).applied;
     }
@@ -80,11 +90,11 @@ public final class RollbackEngine {
     public static RollbackReport rollbackBoxRangeReport(ServerLevel level, BlockPos min, BlockPos max, long fromTs, long untilTs, String actorName, java.util.EnumSet<ActionType> types) {
         LogQuery q = new LogQuery();
         q.dim = level.dimension().location().toString();
-        q.sinceTs = fromTs;
+        q.sinceTs = fromTs == Long.MAX_VALUE ? Long.MAX_VALUE : fromTs + 1;
         q.untilTs = untilTs;
         q.minPos = new BlockPos(Math.min(min.getX(), max.getX()), Math.min(min.getY(), max.getY()), Math.min(min.getZ(), max.getZ()));
         q.maxPos = new BlockPos(Math.max(min.getX(), max.getX()), Math.max(min.getY(), max.getY()), Math.max(min.getZ(), max.getZ()));
-        q.actorName = actorName;
+        setActors(q, actorName);
         q.types = types;
         q.limit = PAGE;
         return rollbackByQueryPaged(level, q, true);
@@ -103,11 +113,11 @@ public final class RollbackEngine {
     public static RollbackReport previewBoxRangeReport(ServerLevel level, BlockPos min, BlockPos max, long fromTs, long untilTs, String actorName, java.util.EnumSet<ActionType> types) {
         LogQuery q = new LogQuery();
         q.dim = level.dimension().location().toString();
-        q.sinceTs = fromTs;
+        q.sinceTs = fromTs == Long.MAX_VALUE ? Long.MAX_VALUE : fromTs + 1;
         q.untilTs = untilTs;
         q.minPos = new BlockPos(Math.min(min.getX(), max.getX()), Math.min(min.getY(), max.getY()), Math.min(min.getZ(), max.getZ()));
         q.maxPos = new BlockPos(Math.max(min.getX(), max.getX()), Math.max(min.getY(), max.getY()), Math.max(min.getZ(), max.getZ()));
-        q.actorName = actorName;
+        setActors(q, actorName);
         q.types = types;
         q.limit = PAGE;
         return rollbackByQueryPaged(level, q, false);
@@ -126,7 +136,12 @@ public final class RollbackEngine {
      */
     public record PreparedBlockSnapshot(BlockPos pos, String blockBeforeSnbt, String beBeforeSnbt,
                                         String containerSlotsBeforeSnbt, ActionType type,
-                                        CompoundTag stateTag, CompoundTag beTag, CompoundTag slotsTag, CompoundTag expectedState) {
+                                        CompoundTag stateTag, CompoundTag beTag, CompoundTag slotsTag, CompoundTag expectedState,
+                                        List<ReplayCheckpoint> checkpoints) {
+        public PreparedBlockSnapshot(BlockPos pos, String state, String be, String slots, ActionType type,
+                                     CompoundTag stateTag, CompoundTag beTag, CompoundTag slotsTag, CompoundTag expectedState) {
+            this(pos, state, be, slots, type, stateTag, beTag, slotsTag, expectedState, List.of());
+        }
         public PreparedBlockSnapshot(BlockPos pos, String state, String be, String slots, ActionType type) {
             this(pos, state, be, slots, type, NbtSerde.fromSnbt(state), NbtSerde.fromSnbt(be), NbtSerde.fromSnbt(slots), null);
         }
@@ -136,21 +151,35 @@ public final class RollbackEngine {
         }
         public PreparedBlockSnapshot {
             pos = pos == null ? BlockPos.ZERO : pos.immutable();
+            checkpoints = checkpoints == null ? List.of() : List.copyOf(checkpoints);
         }
     }
+
+    /** A detached full block checkpoint; null BE/slots means absent, not a partial patch. */
+    public record ReplayCheckpoint(CompoundTag state, CompoundTag be, CompoundTag slots) {}
 
     public record PreparedRollback(List<PreparedBlockSnapshot> blocks,
                                    List<LogEntry> entityRemovals,
                                    List<LogEntry> deferred,
-                                   long estimatedBytes) {
+                                   long estimatedBytes, java.util.Map<String, Integer> preparationSkips,
+                                   List<EntityReplayPlan.Prepared> entityReplays,List<EntityReplayPlan.Issue> preparationIssues) {
+        public PreparedRollback(List<PreparedBlockSnapshot> blocks,List<LogEntry> removals,List<LogEntry> deferred,long bytes,java.util.Map<String,Integer> skips) {
+            this(blocks,removals,deferred,bytes,skips,List.of(),List.of());
+        }
+        public PreparedRollback(List<PreparedBlockSnapshot> blocks, List<LogEntry> removals, List<LogEntry> deferred, long bytes) {
+            this(blocks, removals, deferred, bytes, java.util.Map.of());
+        }
         public PreparedRollback {
+            entityReplays=entityReplays==null?List.of():List.copyOf(entityReplays);
+            preparationIssues=preparationIssues==null?List.of():List.copyOf(preparationIssues);
+            preparationSkips = preparationSkips == null ? java.util.Map.of() : java.util.Map.copyOf(preparationSkips);
             blocks = blocks == null ? List.of() : List.copyOf(blocks);
             entityRemovals = entityRemovals == null ? List.of() : List.copyOf(entityRemovals);
             deferred = deferred == null ? List.of() : List.copyOf(deferred);
         }
 
         public int operationCount() {
-            return blocks.size() + entityRemovals.size() + deferred.size();
+            return blocks.size() + entityRemovals.size() + deferred.size()+entityReplays.size();
         }
     }
 
@@ -167,18 +196,23 @@ public final class RollbackEngine {
         if (storage == null) throw new IllegalArgumentException("storage");
         LogQuery q = new LogQuery();
         q.dim = dimension;
-        q.sinceTs = fromTs;
+        q.sinceTs = fromTs == Long.MAX_VALUE ? Long.MAX_VALUE : fromTs + 1;
         q.untilTs = untilTs;
         q.minPos = new BlockPos(Math.min(min.getX(), max.getX()), Math.min(min.getY(), max.getY()), Math.min(min.getZ(), max.getZ()));
         q.maxPos = new BlockPos(Math.max(min.getX(), max.getX()), Math.max(min.getY(), max.getY()), Math.max(min.getZ(), max.getZ()));
-        q.actorName = actorName;
+        setActors(q, actorName);
         q.types = types == null ? null : types.clone();
         q.limit = PAGE;
         q.debugSource = "rollback_prepare";
         return prepareByQueryPaged(storage, q, cancelled);
     }
 
-    private record ReplayChain(CompoundTag first, CompoundTag last, ActionType type) {}
+    private record ReplayReceiptKey(BlockPos pos, long ts, String source, UUID actor) {}
+
+    private record ReplayChain(java.util.ArrayList<ReplayCheckpoint> checkpoints, ActionType type) {
+        ReplayCheckpoint first() { return checkpoints.getFirst(); }
+        ReplayCheckpoint last() { return checkpoints.getLast(); }
+    }
 
     public static PreparedRollback prepareBlockReplay(LogStorage storage, RollbackPlanManager.Plan plan,
                                                       RollbackPlanManager.Scope scope, java.util.function.BooleanSupplier cancelled) {
@@ -188,74 +222,151 @@ public final class RollbackEngine {
         query.maxPos = scope.max();
         query.sinceTs = plan.targetTs();
         query.untilTs = plan.cutoffTs();
-        query.actorNames = java.util.List.of(plan.actor().split(","));
-        query.types = java.util.EnumSet.of(ActionType.BLOCK_PLACE, ActionType.BLOCK_BREAK);
-        if (plan.types() != null) query.types.retainAll(plan.types());
-        if (query.types.isEmpty()) return new PreparedRollback(List.of(), List.of(), List.of(), 0);
+        // Read all actors: otherwise another player's change can disappear from the chain.
+        query.types = java.util.EnumSet.of(ActionType.BLOCK_PLACE, ActionType.BLOCK_BREAK,
+                ActionType.BLOCK_ENTITY_NBT_CHANGE, ActionType.CONTAINER_PUT, ActionType.CONTAINER_TAKE,
+                ActionType.ENTITY_SPAWN,ActionType.ENTITY_DEATH,ActionType.PLANE_PLACE,ActionType.PLANE_REMOVE);
         query.requireDetails = true;
         query.chronological = true;
         query.limit = PAGE;
         query.debugSource = "block_replay_prepare";
+        var actors = plan.actor() == null || plan.actor().isBlank() ? java.util.Set.<String>of()
+                : new java.util.HashSet<>(java.util.Arrays.asList(plan.actor().toLowerCase(java.util.Locale.ROOT).split(",")));
+        var entityBuilder=new EntityReplayPlan();
         var chains = new java.util.LinkedHashMap<BlockPos, ReplayChain>();
-        var rejected = new java.util.HashSet<BlockPos>();
+        var rejected = new java.util.HashMap<BlockPos, String>();
+        var evidenceRecords=new java.util.HashMap<BlockPos,Long>();
+        var selected = new java.util.HashSet<BlockPos>();
+        var receipts = new java.util.HashSet<ReplayReceiptKey>();
+        var fullContainerSnapshots = new java.util.HashSet<ReplayReceiptKey>();
+        var skips = new java.util.HashMap<String, Integer>();
+        var seenIds = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         int examined = 0;
         long retained = 0;
         long limit;
-        try {
-            limit = LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get() * 1024L * 1024L;
-        } catch (IllegalStateException unloadedConfig) {
-            limit = 512L * 1024L * 1024L;
-        }
+        try { limit = LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get() * 1024L * 1024L; }
+        catch (IllegalStateException unloadedConfig) { limit = 512L * 1024L * 1024L; }
+        var types = plan.types();
         while (!cancelled.getAsBoolean()) {
             var rows = storage.query(query);
             if (rows.isEmpty()) break;
             for (var row : rows) {
-                if (++examined > 100_000) throw new IllegalStateException("Слишком много записей для воспроизведения. Сузьте период или область.");
+                if (cancelled.getAsBoolean()) throw new java.util.concurrent.CancellationException();
+                if (++examined > 100_000) throw new IllegalStateException("Слишком много записей для восстановления. Сузьте период или область.");
+                if (row.id > 0 && !seenIds.add(row.id)) continue;
+                retained += 24;
                 var pos = new BlockPos(row.x, row.y, row.z);
-                if (rejected.contains(pos)) continue;
-                CompoundTag before = replayState(row.blockBefore);
-                CompoundTag after = replayState(row.blockAfter);
-                var existing = chains.get(pos);
-                if (before == null || after == null || row.beBefore != null || row.beAfter != null
-                        || row.containerSlotsBefore != null || row.containerSlotsAfter != null
-                        || row.actorUuid == null || CreateContraptionKind.fromSource(row.source) != CreateContraptionKind.UNKNOWN
-                        || existing != null && !existing.last().equals(before)) {
-                    rejected.add(pos);
-                    if (chains.remove(pos) != null) retained -= 128 + PayloadSizeEstimator.estimateTags(existing.first(), existing.last());
+                boolean matches = (actors.isEmpty() || row.actorName != null && actors.contains(row.actorName.toLowerCase(java.util.Locale.ROOT)))
+                        && (types == null || types.contains(row.type));
+                if(EntityReplayPlan.handles(row.type)) {
+                    entityBuilder.accept(row,matches);
+                    if(retained+entityBuilder.estimatedBytes()>limit)throw new IllegalStateException("План сущностей превышает лимит памяти");
                     continue;
                 }
-                var chain = new ReplayChain(existing == null ? before : existing.first(), after, row.type);
-                chains.put(pos, chain);
-                retained += PayloadSizeEstimator.estimateTags(after)
-                        + (existing == null ? 128 + PayloadSizeEstimator.estimateTags(before) : -PayloadSizeEstimator.estimateTags(existing.last()));
-                if (retained > limit) throw new IllegalStateException("План воспроизведения превышает лимит памяти.");
+                if (matches) selected.add(pos);
+                if (rejected.containsKey(pos)) continue;
+                evidenceRecords.put(pos,row.id);
+                var receiptKey = new ReplayReceiptKey(pos, row.ts, row.source, row.actorUuid);
+                if ((row.type == ActionType.CONTAINER_PUT || row.type == ActionType.CONTAINER_TAKE)
+                        && row.beBefore == null && row.containerSlotsBefore == null) {
+                    // Slot receipts from a menu action are emitted before its full NBT checkpoint.
+                    // Pair by exact action identity after paging, never treat the delta as full NBT.
+                    if (receipts.add(receiptKey)) retained += 160;
+                    if (retained > limit) throw new IllegalStateException("Доказательства контейнеров превышают лимит памяти.");
+                    continue;
+                }
+                var existing = chains.get(pos);
+                String beforeState = row.blockBefore != null ? row.blockBefore
+                        : row.type == ActionType.BLOCK_ENTITY_NBT_CHANGE ? row.blockAfter : null;
+                ReplayCheckpoint before = replayCheckpoint(beforeState, row.beBefore, row.containerSlotsBefore,
+                        existing == null ? null : existing.last());
+                ReplayCheckpoint after = replayCheckpoint(row.blockAfter, row.beAfter, row.containerSlotsAfter, before);
+                String reason = !matches ? "replay_filtered_chain" : before == null || after == null ? "replay_incomplete_snapshot"
+                        : CreateContraptionKind.fromSource(row.source) != CreateContraptionKind.UNKNOWN ? "replay_linked_create"
+                        : existing != null && !sameHistoryCheckpoint(existing.last(), before) ? "replay_history_gap" : null;
+                if (reason != null) {
+                    rejected.put(pos, reason);
+                    if (chains.remove(pos) != null) retained -= replayWeight(existing);
+                    retained += 160; // Keep rejected coordinates bounded as well.
+                } else {
+                    if (row.type == ActionType.BLOCK_ENTITY_NBT_CHANGE && before.slots() != null && after.slots() != null
+                            && fullContainerSnapshots.add(receiptKey)) retained += 160;
+                    if (existing == null) {
+                        var checkpoints = new java.util.ArrayList<ReplayCheckpoint>();
+                        checkpoints.add(before);
+                        existing = new ReplayChain(checkpoints, row.type);
+                        chains.put(pos, existing);
+                        retained += 160 + checkpointWeight(before);
+                    }
+                    if (existing.type() != row.type) chains.put(pos, new ReplayChain(existing.checkpoints(), row.type));
+                    if (!existing.last().equals(after)) {
+                        existing.checkpoints().add(after);
+                        retained += checkpointWeight(after);
+                    }
+                }
+                if (retained+entityBuilder.estimatedBytes() > limit) throw new IllegalStateException("План восстановления превышает лимит памяти.");
             }
             var last = rows.getLast();
             if (rows.size() < PAGE) break;
-            if (last.ts < query.cursorTs || last.ts == query.cursorTs && last.id <= query.afterId) {
-                throw new IllegalStateException("Хранилище не продвинуло курсор воспроизведения");
-            }
+            if (last.ts < query.cursorTs || last.ts == query.cursorTs && last.id <= query.afterId)
+                throw new IllegalStateException("Хранилище не продвинуло курсор восстановления");
             query.afterId = last.id;
             query.cursorTs = last.ts;
         }
         if (cancelled.getAsBoolean()) throw new java.util.concurrent.CancellationException();
+        for (var receipt : receipts) {
+            if (!fullContainerSnapshots.contains(receipt)) {
+                rejected.put(receipt.pos(), "replay_unpaired_container_delta");
+                chains.remove(receipt.pos());
+            }
+        }
         var blocks = new java.util.ArrayList<PreparedBlockSnapshot>();
-        long bytes = 0;
         for (var entry : chains.entrySet()) {
             var chain = entry.getValue();
             if (chain.first().equals(chain.last())) continue;
-            blocks.add(new PreparedBlockSnapshot(entry.getKey(), chain.last().toString(), null, null,
-                    chain.type(), chain.last(), null, null, chain.first()));
-            bytes += 128 + PayloadSizeEstimator.estimateTags(chain.first(), chain.last());
+            var target = chain.last();
+            blocks.add(new PreparedBlockSnapshot(entry.getKey(), NbtSerde.toSnbt(target.state()), NbtSerde.toSnbt(target.be()),
+                    NbtSerde.toSnbt(target.slots()), chain.type(), target.state(), target.be(), target.slots(),
+                    chain.first().state(), chain.checkpoints()));
+            retained += PayloadSizeEstimator.estimateStrings(blocks.getLast().blockBeforeSnbt(),
+                    blocks.getLast().beBeforeSnbt(), blocks.getLast().containerSlotsBeforeSnbt());
+            if (retained > limit) throw new IllegalStateException("Разобранный план восстановления превышает лимит памяти.");
         }
+        rejected.forEach((pos, reason) -> { if (selected.contains(pos)) skips.merge(reason, 1, Integer::sum); });
         blocks.sort(java.util.Comparator.comparingInt((PreparedBlockSnapshot block) -> block.pos().getX() >> 4)
-                .thenComparingInt(block -> block.pos().getZ() >> 4));
-        return new PreparedRollback(blocks, List.of(), List.of(), bytes);
+                .thenComparingInt(block -> block.pos().getZ() >> 4).thenComparingInt(block -> block.pos().getY()));
+        var entities=entityBuilder.finish();
+        var issues=new java.util.ArrayList<>(entityBuilder.issues());
+        for(var issue:issues)if(!issue.conditional())skips.merge(issue.reason(),1,Integer::sum);
+        rejected.forEach((pos,reason)->{if(selected.contains(pos))issues.add(new EntityReplayPlan.Issue(scope.dimension(),pos,null,evidenceRecords.getOrDefault(pos,0L),reason));});
+        retained+=issues.size()*192L+evidenceRecords.size()*64L;
+        if(retained+entityBuilder.estimatedBytes()>limit)throw new IllegalStateException("План с диагностикой превышает лимит памяти");
+        return new PreparedRollback(blocks, List.of(), List.of(), Math.max(0, retained)+entityBuilder.estimatedBytes(), skips,entities,issues);
     }
 
-    private static CompoundTag replayState(String state) {
-        if (state == null || state.length() > 512) return null;
-        return NbtSerde.fromSnbt(state);
+    private static ReplayCheckpoint replayCheckpoint(String state, String be, String slots, ReplayCheckpoint fallback) {
+        CompoundTag stateTag = state == null ? fallback == null ? null : fallback.state() : NbtSerde.fromSnbt(state);
+        CompoundTag beTag = NbtSerde.fromSnbt(be), slotsTag = NbtSerde.fromSnbt(slots);
+        if (stateTag == null || !stateTag.contains("Name", net.minecraft.nbt.Tag.TAG_STRING)
+                || be != null && beTag == null || slots != null && !ContainerSlotSnapshot.isValid(slotsTag)) return null;
+        // A delta envelope is audit evidence, never a full block-entity checkpoint.
+        if (beTag != null && !beTag.contains("id", net.minecraft.nbt.Tag.TAG_STRING)) return null;
+        return new ReplayCheckpoint(stateTag, beTag, slotsTag);
+    }
+
+    private static boolean sameHistoryCheckpoint(ReplayCheckpoint a, ReplayCheckpoint b) {
+        return a.state().equals(b.state()) && java.util.Objects.equals(a.be(), b.be())
+                && (a.slots() == null || b.slots() == null || a.slots().equals(b.slots()));
+    }
+
+    private static long checkpointWeight(ReplayCheckpoint checkpoint) {
+        return 80L + PayloadSizeEstimator.estimateTags(checkpoint.state(), checkpoint.be(), checkpoint.slots());
+    }
+
+    private static long replayWeight(ReplayChain chain) {
+        long bytes = 160;
+        for (var checkpoint : chain.checkpoints()) bytes += checkpointWeight(checkpoint);
+        return bytes;
     }
 
     /** Counts a prepared plan without reading chunks, registries or any other live world state. */
@@ -266,6 +377,11 @@ public final class RollbackEngine {
     static RollbackReport previewPrepared(PreparedRollback prepared, java.util.function.Consumer<LogEntry> entityMarkers) {
         RollbackReport report = new RollbackReport();
         if (prepared == null) return report;
+        prepared.preparationSkips().forEach((reason, count) -> {
+            report.skippedReasons.merge(reason, count, Integer::sum);
+            report.processed += count;
+            report.skipped += count;
+        });
         for (PreparedBlockSnapshot block : prepared.blocks()) {
             boolean any = block.blockBeforeSnbt() != null || block.beBeforeSnbt() != null
                     || block.containerSlotsBeforeSnbt() != null;
@@ -277,6 +393,11 @@ public final class RollbackEngine {
             if (block.beBeforeSnbt() != null) report.blockEntitiesRestored++;
             if (block.containerSlotsBeforeSnbt() != null) report.containersRestored++;
             report.onApplied(block.type());
+        }
+        report.preparationIssues=prepared.preparationIssues();
+        for(var entity:prepared.entityReplays()) {
+            report.onApplied(entity.action());
+            if(entity.after()==null)report.entitiesRemoved+=entity.tree().nodes().size();else report.entitiesRespawned+=entity.tree().nodes().size();
         }
         for (LogEntry entry : prepared.entityRemovals()) countPreparedEntry(entry, report, entityMarkers);
         for (LogEntry entry : prepared.deferred()) countPreparedEntry(entry, report, entityMarkers);
@@ -291,16 +412,10 @@ public final class RollbackEngine {
         java.util.LinkedHashMap<BlockPos, BlockSnapshot> snapshots = new java.util.LinkedHashMap<>();
         for (PreparedBlockSnapshot block : blocks) {
             if (block == null) continue;
-            if (block.expectedState() != null) {
-                var expected = NbtSerde.readBlockState(level, block.expectedState());
-                var target = NbtSerde.readBlockState(level, block.stateTag());
-                if (!level.hasChunkAt(block.pos()) || !safeReplayBlock(expected) || !safeReplayBlock(target)
-                        || !net.minecraft.nbt.NbtUtils.writeBlockState(expected).equals(block.expectedState())
-                        || !net.minecraft.nbt.NbtUtils.writeBlockState(target).equals(block.stateTag())
-                        || !level.getBlockState(block.pos()).equals(expected)) {
-                    report.onSkipped("replay_conflict_or_unsupported");
-                    continue;
-                }
+            String invalid = validatePreparedBlock(level, block);
+            if (invalid != null) {
+                report.onSkipped(invalid);
+                continue;
             }
             snapshots.put(block.pos(), new BlockSnapshot(block));
         }
@@ -310,9 +425,43 @@ public final class RollbackEngine {
         return report;
     }
 
-    private static boolean safeReplayBlock(BlockState state) {
-        return state != null && (state.isAir() || state.getBlock().getClass() == net.minecraft.world.level.block.Block.class)
-                && !state.hasBlockEntity() && state.getFluidState().isEmpty();
+    static String validatePreparedBlock(ServerLevel level, PreparedBlockSnapshot block) {
+        if (!WorldSnapshotAccess.readable(level, block.pos())) return "chunk_unloaded";
+        var target = block.stateTag() == null ? level.getBlockState(block.pos()) : strictReplayState(level, block.stateTag());
+        if (target == null) return "invalid_block_snapshot";
+        if (block.stateTag() != null && target.hasBlockEntity() && block.beTag() == null) return "missing_block_entity_snapshot";
+        if (block.beBeforeSnbt() != null && block.beTag() == null) return "invalid_block_entity_nbt";
+        if (block.beTag() != null) {
+            var id = net.minecraft.resources.ResourceLocation.tryParse(block.beTag().getString("id"));
+            var type = id == null ? null : net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getOptional(id).orElse(null);
+            if (!target.hasBlockEntity() || type == null || !type.isValid(target)) return "block_entity_type_mismatch";
+        }
+        if (block.containerSlotsBeforeSnbt() != null && !ContainerSlotSnapshot.isValid(block.slotsTag())) return "invalid_container_snapshot";
+        if (block.expectedState() == null) return null;
+        if (block.checkpoints().isEmpty()) {
+            var expected = strictReplayState(level, block.expectedState());
+            return expected != null && level.getBlockState(block.pos()).equals(expected) ? null : "replay_conflict_or_unsupported";
+        }
+        var current = currentCheckpoint(level, block.pos());
+        if (sameCheckpoint(current, block.checkpoints().getLast())) return "replay_already_current";
+        return block.checkpoints().stream().anyMatch(checkpoint -> sameCheckpoint(current, checkpoint)) ? null : "replay_world_conflict";
+    }
+
+    static ReplayCheckpoint currentCheckpoint(ServerLevel level, BlockPos pos) {
+        var state = level.getBlockState(pos);
+        var be = NbtSerde.snapshotBlockEntityAt(level, pos);
+        if (state.hasBlockEntity() && be == null) throw new IllegalStateException("Текущий NBT блока не сохранён: " + level.dimension().location() + " " + pos);
+        return new ReplayCheckpoint(net.minecraft.nbt.NbtUtils.writeBlockState(state), be, ContainerSlotSnapshot.snapshotTag(level, pos));
+    }
+
+    static BlockState strictReplayState(ServerLevel level, CompoundTag tag) {
+        var state = NbtSerde.readBlockState(level, tag);
+        return state != null && net.minecraft.nbt.NbtUtils.writeBlockState(state).equals(tag) ? state : null;
+    }
+
+    static boolean sameCheckpoint(ReplayCheckpoint a, ReplayCheckpoint b) {
+        return a.state().equals(b.state()) && java.util.Objects.equals(a.be(), b.be())
+                && (b.slots() == null || java.util.Objects.equals(a.slots(), b.slots()));
     }
 
     /** Applies a single non-block rollback operation on the server thread. */
@@ -330,8 +479,8 @@ public final class RollbackEngine {
         PreparedRollback prepared = prepareByQueryPaged(LoggerRuntime.storage(level), q, () -> false);
         if (!apply) return previewPrepared(prepared);
         RollbackReport report = new RollbackReport();
-        report.merge(applyPreparedBlockBatch(level, prepared.blocks()));
         for (LogEntry entry : prepared.entityRemovals()) report.merge(applyPreparedEntry(level, entry));
+        report.merge(applyPreparedBlockBatch(level, prepared.blocks()));
         for (LogEntry entry : prepared.deferred()) report.merge(applyPreparedEntry(level, entry));
         return report;
     }
@@ -405,6 +554,7 @@ public final class RollbackEngine {
             maxPreparedBytes = 512L * 1024L * 1024L;
         }
 
+        var seenIds = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
         long beforeId = Long.MAX_VALUE;
         while (true) {
             if (cancelled.getAsBoolean()) throw new java.util.concurrent.CancellationException();
@@ -415,6 +565,8 @@ public final class RollbackEngine {
             if (batch.isEmpty()) break;
 
             for (LogEntry e : batch) {
+                if (e.id > 0 && !seenIds.add(e.id)) continue;
+                retainedBytes += 24;
                 if (CartAuditContext.id(e.source) != null) throw new IllegalStateException("В области есть вагонеточная конструкция Create. Используйте /log cart rollback <ID> <контрольная точка>, чтобы одновременно откатить конструкцию, груз и блоки");
                 // A slot receipt describes a delta; without a before snapshot it must not
                 // overwrite an actual checkpoint collected for the same block.
@@ -493,7 +645,12 @@ public final class RollbackEngine {
             BlockState state = null;
             if (snap.blockBeforeSnbt != null) {
                 state = NbtSerde.readBlockState(level, snap.stateTag);
-                if (state == null) { report.onSkipped("invalid_block_snapshot"); continue; }
+                if (state == null || !net.minecraft.nbt.NbtUtils.writeBlockState(state).equals(snap.stateTag)) {
+                    report.onSkipped("invalid_block_snapshot"); continue;
+                }
+                if (state.hasBlockEntity() && snap.beTag == null) {
+                    report.onSkipped("missing_block_entity_snapshot"); continue;
+                }
             }
             if (snap.beBeforeSnbt != null && snap.beTag == null) {
                 report.onSkipped("invalid_block_entity_nbt");
@@ -528,9 +685,13 @@ public final class RollbackEngine {
 
         java.util.ArrayList<BlockBackup> backups = new java.util.ArrayList<>(prepared.size());
         for (PreparedBlock block : prepared) {
-            backups.add(new BlockBackup(block.pos, level.getBlockState(block.pos),
-                    NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(block.pos)),
-                    ContainerSlotSnapshot.snapshotTag(level, block.pos)));
+            var current = level.getBlockState(block.pos);
+            var be = NbtSerde.snapshotBlockEntity(level, level.getBlockEntity(block.pos));
+            if (current.hasBlockEntity() && be == null) {
+                for (int i = 0; i < prepared.size(); i++) report.onSkipped("live_backup_failed");
+                return;
+            }
+            backups.add(new BlockBackup(block.pos, current, be, ContainerSlotSnapshot.snapshotTag(level, block.pos)));
         }
 
         String failure = null;
@@ -538,7 +699,10 @@ public final class RollbackEngine {
         for (PreparedBlock block : prepared) {
             if (block.state == null) continue;
             try {
-                level.setBlock(block.pos, block.state, rollbackSetBlockFlags(block.state));
+                // Native container onRemove may drop its inventory. The detached backup owns
+                // the old contents until commit/compensation; remove the old BE before replacement.
+                if (!level.getBlockState(block.pos).equals(block.state)) level.removeBlockEntity(block.pos);
+                level.setBlock(block.pos, block.state, 2 | 16);
                 if (!level.getBlockState(block.pos).equals(block.state)) { failure = "block_state_verification_failed"; break; }
                 if (isCreateState(block.state) || looksLikeCreateStateSnbt(block.snapshot.blockBeforeSnbt)) createTouched.add(block.pos);
             } catch (Throwable ignored) {
@@ -554,6 +718,13 @@ public final class RollbackEngine {
                         failure = "block_entity_restore_failed";
                         break;
                     }
+                    var restoredNbt = NbtSerde.snapshotBlockEntityAt(level, block.pos);
+                    var expectedNbt = block.snapshot.beTag.copy();
+                    expectedNbt.putInt("x", block.pos.getX()); expectedNbt.putInt("y", block.pos.getY()); expectedNbt.putInt("z", block.pos.getZ());
+                    if (!expectedNbt.equals(restoredNbt)) {
+                        failure = "block_entity_verification_failed";
+                        break;
+                    }
                     if (looksLikeCreatePayload(block.snapshot.beBeforeSnbt)) createTouched.add(block.pos);
                 }
                 if (block.snapshot.containerSlotsBeforeSnbt != null) {
@@ -567,7 +738,8 @@ public final class RollbackEngine {
         }
 
         if (failure != null) {
-            restoreBlockBackups(level, backups);
+            if (!restoreBlockBackups(level, backups))
+                throw new IllegalStateException("Не удалось полностью компенсировать порцию восстановления: " + failure);
             for (int i = 0; i < prepared.size(); i++) report.onSkipped(failure);
             return;
         }
@@ -590,16 +762,29 @@ public final class RollbackEngine {
         report.onApplied(block.snapshot.type);
     }
 
-    private static void restoreBlockBackups(ServerLevel level, java.util.List<BlockBackup> backups) {
+    private static boolean restoreBlockBackups(ServerLevel level, java.util.List<BlockBackup> backups) {
+        boolean restored = true;
         for (BlockBackup backup : backups) {
-            try { level.setBlock(backup.pos, backup.state, 2); } catch (Throwable ignored) {}
+            try {
+                if (!level.getBlockState(backup.pos).equals(backup.state)) level.removeBlockEntity(backup.pos);
+                level.setBlock(backup.pos, backup.state, 2 | 16);
+                if (!level.getBlockState(backup.pos).equals(backup.state)) restored = false;
+            } catch (Throwable failure) {
+                restored = false;
+                com.roften.avilixlogger.AvilixLoggerMod.LOGGER.error("[AvilixLogger] Block compensation failed at {}", backup.pos, failure);
+            }
         }
         for (BlockBackup backup : backups) {
             try {
-                if (backup.beSnbt != null) NbtSerde.readBlockEntity(level, backup.pos, backup.beSnbt);
-                if (backup.containerSnbt != null) ContainerSlotSnapshot.apply(level, backup.pos, backup.containerSnbt);
-            } catch (Throwable ignored) {}
+                if (backup.beSnbt != null && !NbtSerde.readBlockEntity(level, backup.pos, backup.beSnbt)) restored = false;
+                if (backup.containerSnbt != null && !ContainerSlotSnapshot.apply(level, backup.pos, backup.containerSnbt)) restored = false;
+                if (backup.beSnbt != null && !backup.beSnbt.equals(NbtSerde.snapshotBlockEntityAt(level, backup.pos))) restored = false;
+            } catch (Throwable failure) {
+                restored = false;
+                com.roften.avilixlogger.AvilixLoggerMod.LOGGER.error("[AvilixLogger] NBT compensation failed at {}", backup.pos, failure);
+            }
         }
+        return restored;
     }
 
     private static boolean isEntityRemovalType(ActionType type) {

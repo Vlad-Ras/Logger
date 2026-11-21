@@ -58,6 +58,9 @@ public final class AsyncPipelineTest {
         ServerLogFilesTest.run();
         StorageUiEvidenceTest.run();
         StorageRollbackEvidenceTest.run();
+        RecoveryTimeInputTest.run();
+        RecoveryJournalTest.run();
+        EntityRecoveryTest.run();
         ClickHouseDeliveryTest.run();
         System.out.println("Async pipeline checks passed: lossless saturation, ordering, snapshots, shutdown, drops, tick deadlines, journal replay.");
     }

@@ -30,7 +30,10 @@ public final class CartRestoreLocks {
     public static void block(Level level,BlockPos pos){BLOCKS.computeIfAbsent(level.dimension(),ignored->new LongOpenHashSet()).add(pos.asLong());}
     public static boolean blockLocked(Level level,BlockPos pos){if(!CartAuditContext.rollbackActive || CartAuditContext.restoring() || level==null || pos==null)return false;var positions=BLOCKS.get(level.dimension());return positions!=null&&positions.contains(pos.asLong());}
     public static void handler(Object handler){if(handler!=null)HANDLERS.add(handler);}
-    public static boolean handlerLocked(Object handler){return CartAuditContext.rollbackActive&&!CartAuditContext.restoring()&&HANDLERS.contains(handler);}
+    public static boolean handlerLocked(Object handler){
+        if(!CartAuditContext.rollbackActive||CartAuditContext.restoring())return false;
+        return HANDLERS.contains(handler)||handler instanceof net.neoforged.neoforge.items.wrapper.InvWrapper wrapper&&containerLocked(wrapper.getInv());
+    }
     public static void container(net.minecraft.world.Container container){CONTAINERS.add(container);}
     public static boolean containerLocked(net.minecraft.world.Container container){
         if(!CartAuditContext.rollbackActive||CartAuditContext.restoring())return false;
@@ -41,6 +44,16 @@ public final class CartRestoreLocks {
     }
     public static void menu(AbstractContainerMenu menu){MENUS.add(menu);}
     public static boolean menuLocked(AbstractContainerMenu menu){return CartAuditContext.rollbackActive&&MENUS.contains(menu);}
+    public static boolean menuTouchesLocked(AbstractContainerMenu menu){
+        if(!CartAuditContext.rollbackActive||CartAuditContext.restoring())return false;
+        if(menuLocked(menu))return true;
+        for(var slot:menu.slots){
+            if(containerLocked(slot.container))return true;
+            if(slot.container instanceof net.minecraft.world.entity.Entity entity&&CartAuditContext.LOCKED_ENTITIES.contains(entity.getUUID()))return true;
+            if(slot.container instanceof net.minecraft.world.level.block.entity.BlockEntity be&&blockLocked(be.getLevel(),be.getBlockPos()))return true;
+        }
+        return false;
+    }
     public static void player(net.minecraft.world.entity.player.Player player){PLAYERS.add(player);menu(player.containerMenu);}
     public static boolean playerLocked(net.minecraft.world.entity.player.Player player){return CartAuditContext.rollbackActive&&!CartAuditContext.restoring()&&PLAYERS.contains(player);}
     public static boolean scoreHolderLocked(String name){if(!CartAuditContext.rollbackActive||CartAuditContext.restoring())return false;for(var p:PLAYERS)if(p.getScoreboardName().equals(name))return true;return false;}

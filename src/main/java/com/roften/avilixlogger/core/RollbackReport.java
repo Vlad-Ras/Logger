@@ -11,6 +11,7 @@ public final class RollbackReport {
 
     public java.util.List<com.roften.avilixlogger.net.S2CRollbackPreviewPayload.Marker> previewMarkers = java.util.List.of();
     public boolean previewLimited;
+    public java.util.List<EntityReplayPlan.Issue> preparationIssues=java.util.List.of();
 
     public int processed;
     public int applied;
@@ -48,6 +49,7 @@ public final class RollbackReport {
 
     public void merge(RollbackReport other) {
         if (other == null || other == this) return;
+        if(!other.preparationIssues.isEmpty()){var issues=new java.util.ArrayList<>(preparationIssues);issues.addAll(other.preparationIssues);preparationIssues=java.util.List.copyOf(issues);}
         processed += other.processed;
         applied += other.applied;
         skipped += other.skipped;

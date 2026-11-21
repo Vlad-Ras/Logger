@@ -50,6 +50,8 @@ public final class NbtSerde {
     private static final com.google.common.cache.Cache<BlockState, String> BLOCK_STATES =
             com.google.common.cache.CacheBuilder.newBuilder().maximumSize(8192).build();
 
+    private static final java.util.concurrent.atomic.AtomicLong NEXT_BLOCK_SAVE_WARNING = new java.util.concurrent.atomic.AtomicLong();
+
     private NbtSerde() {}
 
     public static CompoundTag fromSnbt(String snbt) {
@@ -110,6 +112,12 @@ public final class NbtSerde {
             return tag == null ? null : tag.copy();
         } catch (Throwable failure) {
             AdaptiveLogDiagnostics.adapterFailure("block-entity-save");
+            long now = System.nanoTime(), next = NEXT_BLOCK_SAVE_WARNING.get();
+            if (now >= next && NEXT_BLOCK_SAVE_WARNING.compareAndSet(next, now + java.util.concurrent.TimeUnit.SECONDS.toNanos(30)))
+                com.roften.avilixlogger.AvilixLoggerMod.LOGGER.warn(
+                        "[AvilixLogger] Full block-entity snapshot failed: dim={} pos={} block={} reason={}",
+                        level.dimension().location(), be.getBlockPos(), BuiltInRegistries.BLOCK.getKey(be.getBlockState().getBlock()),
+                        failure.toString());
             return null; // Never retry the same mod through alternate reflective entry points.
         }
     }
@@ -201,6 +209,8 @@ public final class NbtSerde {
     }
 
     public static String validateEntitySnapshot(String entityTypeId, UUID expectedUuid, CompoundTag tag) {
+        String structure=EntityRecoverySnapshot.validate(tag,entityTypeId,expectedUuid);
+        if(structure!=null)return structure;
         ResourceLocation key = ResourceLocation.tryParse(entityTypeId);
         if (key == null || BuiltInRegistries.ENTITY_TYPE.getOptional(key).isEmpty()) return "unknown_entity_type";
         if (tag == null || tag.isEmpty()) return "invalid_entity_nbt";
@@ -235,7 +245,8 @@ public final class NbtSerde {
         Set<UUID> snapshotUuids = new HashSet<>();
         collectEntityUuids(tag, snapshotUuids);
         for (UUID uuid : snapshotUuids) {
-            if (uuid != null && level.getEntity(uuid) != null) return EntityRestoreResult.fail("entity_uuid_collision");
+            if(uuid!=null)for(var dimension:level.getServer().getAllLevels())
+                if(dimension.getEntity(uuid)!=null || dimension instanceof com.roften.avilixlogger.mixin.RecoveryEntityLevelAccessor access && access.avilixlogger$entityManager().isLoaded(uuid))return EntityRestoreResult.fail("entity_uuid_collision");
         }
 
         Entity root;
@@ -251,7 +262,7 @@ public final class NbtSerde {
         try {
             if (!level.tryAddFreshEntityWithPassengers(root)) return EntityRestoreResult.fail("entity_add_rejected");
             for (Entity entity : tree) {
-                if (level.getEntity(entity.getUUID()) != entity) {
+                if (!entityRegistered(level,entity)) {
                     removeRestoredEntityTree(level, tree);
                     return EntityRestoreResult.fail("entity_add_incomplete");
                 }
@@ -559,11 +570,21 @@ public final class NbtSerde {
         for (int i = 0; i < passengers.size(); i++) collectEntityUuids(passengers.getCompound(i), out);
     }
 
+    @SuppressWarnings("unchecked")
+    private static boolean entityRegistered(ServerLevel level,Entity entity) {
+        if(level.getEntity(entity.getUUID())==entity)return true;
+        if(!(level instanceof com.roften.avilixlogger.mixin.RecoveryEntityLevelAccessor access))return false;
+        var manager=access.avilixlogger$entityManager();
+        var sections=((com.roften.avilixlogger.mixin.RecoveryEntityManagerAccessor<Entity>)manager).avilixlogger$entitySections();
+        var section=sections.getSection(net.minecraft.core.SectionPos.asLong(entity.blockPosition()));
+        return entity.isAddedToLevel()&&!entity.isRemoved()&&manager.isLoaded(entity.getUUID())&&section!=null&&section.getEntities().anyMatch(candidate->candidate==entity);
+    }
+
     private static void removeRestoredEntityTree(ServerLevel level, List<Entity> tree) {
         if (level == null || tree == null) return;
         for (Entity entity : tree) {
             try {
-                if (entity != null && level.getEntity(entity.getUUID()) == entity) entity.discard();
+                if (entity != null && entityRegistered(level,entity)) entity.discard();
             } catch (Throwable ignored) {}
         }
     }

@@ -12,6 +12,9 @@ final class StorageRollbackEvidenceTest {
         check(plan.blocks().size()==1&&checkpoint.beBefore.equals(plan.blocks().getFirst().beBeforeSnbt()),"audit-only delta erased restorable checkpoint");
         check(plan.deferred().size()==1&&plan.deferred().getFirst().id==receipt.id,"receipt turned into a fabricated block snapshot");
         plan=prepare(List.of(receipt));check(plan.blocks().isEmpty()&&plan.deferred().size()==1,"slot evidence was treated as a full restore snapshot");
+        var spawn=AsyncPipelineTest.row("one spawned entity");spawn.id=22;spawn.type=ActionType.ENTITY_SPAWN;spawn.entityUuid=UUID.randomUUID();
+        var duplicateEntities=prepare(List.of(spawn,spawn));
+        check(duplicateEntities.entityRemovals().size()==1,"duplicate event ID repeated entity rollback");
         verifyReplay();
         System.out.println("STORAGE_ROLLBACK_EVIDENCE_OK: slot receipts preserve full checkpoints; absent restoration proof stays non-restorable");
     }
@@ -39,8 +42,39 @@ final class StorageRollbackEvidenceTest {
             var block = replay.blocks().getFirst();
             check(block.expectedState().getString("Name").equals("minecraft:air")
                     && block.stateTag().getString("Name").equals("minecraft:dirt"), "replay reversed or reordered snapshots");
+            var repeated = RollbackEngine.prepareBlockReplay(fixture(List.of(first, first, second, second)), plan, scope, () -> false);
+            check(repeated.blocks().size()==1 && repeated.preparationSkips().isEmpty()
+                    && repeated.blocks().getFirst().checkpoints().size()==3, "duplicate event ID broke or repeated the recovery chain");
             var rejected = RollbackEngine.prepareBlockReplay(fixture(List.of(first, gap)), plan, scope, () -> false);
-            check(rejected.blocks().isEmpty(), "replay accepted a broken chain");
+            check(rejected.blocks().isEmpty() && rejected.preparationSkips().get("replay_history_gap") == 1,
+                    "replay accepted a broken chain or hid its reason");
+            var outsider = second.copyForQueue(); outsider.actorName = "Other";
+            var filtered = RollbackEngine.prepareBlockReplay(fixture(List.of(first, outsider)), plan, scope, () -> false);
+            check(filtered.blocks().isEmpty() && filtered.preparationSkips().containsKey("replay_filtered_chain"),
+                    "replay hid another actor's mutation");
+            var chest = first.copyForQueue(); chest.blockAfter = "{Name:'minecraft:chest'}";
+            chest.beAfter = "{id:'minecraft:chest',x:0,y:0,z:0,Items:[]}";
+            var full = RollbackEngine.prepareBlockReplay(fixture(List.of(chest)), plan, scope, () -> false);
+            check(full.blocks().size() == 1 && full.blocks().getFirst().beTag().contains("Items")
+                    && full.blocks().getFirst().checkpoints().size() == 2, "replay lost block entity checkpoints");
+            var nbt = chest.copyForQueue(); nbt.id = 3; nbt.type = ActionType.BLOCK_ENTITY_NBT_CHANGE;
+            nbt.blockBefore = null; nbt.beBefore = chest.beAfter; nbt.beAfter = chest.beAfter;
+            nbt.containerSlotsBefore = "{Size:27,Items:[]}"; nbt.containerSlotsAfter = nbt.containerSlotsBefore;
+            var receipt = chest.copyForQueue(); receipt.id = 2; receipt.type = ActionType.CONTAINER_PUT;
+            receipt.blockBefore = null; receipt.beBefore = null; receipt.beAfter = "{StorageSlot:{Slot:1}}";
+            var paired = RollbackEngine.prepareBlockReplay(fixture(List.of(chest, receipt, nbt)), plan, scope, () -> false);
+            check(paired.blocks().size() == 1 && paired.preparationSkips().isEmpty(), "paired menu receipt erased full NBT recovery");
+            var unpaired = RollbackEngine.prepareBlockReplay(fixture(List.of(chest, receipt)), plan, scope, () -> false);
+            check(unpaired.blocks().isEmpty() && unpaired.preparationSkips().containsKey("replay_unpaired_container_delta"),
+                    "unpaired slot receipt allowed stale inventory recovery");
+            chest.beAfter = "{StorageSlot:{Slot:1}}";
+            var delta = RollbackEngine.prepareBlockReplay(fixture(List.of(chest)), plan, scope, () -> false);
+            check(delta.blocks().isEmpty() && delta.preparationSkips().containsKey("replay_incomplete_snapshot"),
+                    "replay used a delta envelope as full NBT");
+            try {
+                RollbackEngine.prepareBlockReplay(fixture(List.of(first)), plan, scope, () -> true);
+                throw new AssertionError("cancelled replay continued");
+            } catch (java.util.concurrent.CancellationException expected) {}
         } finally {
             RollbackPlanManager.clear(owner);
         }
@@ -54,7 +88,7 @@ final class StorageRollbackEvidenceTest {
         return new LogStorage(){
             public void append(LogEntry row){throw new UnsupportedOperationException();}
             public List<LogEntry> query(LogQuery q) {
-                check(q.actorNames.equals(List.of("Steve", "Alex")) && q.chronological, "replay lost player or time filter");
+                check(q.actorNames.isEmpty() && q.actorName == null && q.chronological, "replay must inspect all actors in chronological order");
                 return rows.stream().filter(e -> e.id > q.afterId).limit(q.limit).toList();
             }
             public List<LogEntry> queryReverse(LogQuery q){return rows.stream().filter(e->q.beforeId<=0||e.id<q.beforeId).limit(q.limit).toList();}

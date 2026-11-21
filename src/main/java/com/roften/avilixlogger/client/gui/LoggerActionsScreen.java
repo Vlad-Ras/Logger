@@ -83,6 +83,9 @@ public final class LoggerActionsScreen extends LoggerScreen {
             var input=new LoggerGuiWidgets.ScaledEditBox(font,x,y+11,w,20,Component.literal(action.fields().get(i).label()),this::scale);
             input.setMaxLength(512);input.setValue(i<values.size()?values.get(i):"");addRenderableWidget(input);inputs.add(input);y+=37;
         }
+        if (action.id().equals("replay") || action.id().equals("rollback")) {
+            button("Выбрать дату и область",x,height-52,w,()->minecraft.setScreen(new RecoveryScreen(this)));
+        }
         execute=button("Выполнить",x,height-28,w,this::execute);
     }
     private void execute(){
@@ -156,7 +159,7 @@ public final class LoggerActionsScreen extends LoggerScreen {
             for(int i=0;i<Math.min(2,heading.size());i++)g.drawString(font,heading.get(i),x,62+i*10,0xFFAA00);
             for(int i=0;i<action.fields().size();i++)g.drawString(font,font.plainSubstrByWidth(action.fields().get(i).label(),width-x-10),x,85+i*37,0xAAAAAA);
             int top=90+action.fields().size()*37;
-            text(g,action.hint(),hintLayout,x,top,width-x-10,Math.max(0,height-38-top));
+            text(g,action.hint(),hintLayout,x,top,width-x-10,Math.max(0,height-(action.id().equals("replay")||action.id().equals("rollback")?58:38)-top));
         }else g.drawString(font,"Доступных действий нет: проверьте права на сервере.",10,65,0xAAAAAA);
         for(var widget:renderables)widget.render(g,mx,my,dt);
         if(!results&&mx>=10&&mx<divider()&&my>=60&&my<height-36){int index=listScroll+(my-60)/ACTION_ROW_H;if(index<actionLabels.size())g.renderTooltip(font,actionLabels.get(index),mx,my);}

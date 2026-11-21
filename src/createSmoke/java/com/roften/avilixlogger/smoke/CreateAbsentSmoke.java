@@ -16,8 +16,32 @@ public final class CreateAbsentSmoke {
         if (CreateContraptionKind.fromType("othermod:bearing") != CreateContraptionKind.UNKNOWN)
             throw new AssertionError("Absent integration guessed a foreign type");
         exerciseHopper(event.getServer());
+        exerciseRecovery(event.getServer());
         System.out.println("CREATE_ABSENT_NATIVE_OK: Logger starts without Create, Ponder or Flywheel");
         event.getServer().halt(false);
+    }
+    private static void exerciseRecovery(net.minecraft.server.MinecraftServer server) {
+        var world=server.overworld();var pos=world.getSharedSpawnPos().above(24);
+        world.getChunk(pos);for(var side:net.minecraft.core.Direction.values())world.getChunk(pos.relative(side));
+        var previous=world.getBlockState(pos);
+        boolean restoring=com.roften.avilixlogger.core.CartAuditContext.restoring(true);
+        try {
+            world.removeBlockEntity(pos);world.setBlock(pos,net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(),2|16);
+            var air=net.minecraft.nbt.NbtUtils.writeBlockState(net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+            var stone=net.minecraft.nbt.NbtUtils.writeBlockState(net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+            var block=new com.roften.avilixlogger.core.RollbackEngine.PreparedBlockSnapshot(pos,stone.toString(),null,null,
+                    com.roften.avilixlogger.core.ActionType.BLOCK_PLACE,stone,null,null,air,
+                    java.util.List.of(new com.roften.avilixlogger.core.RollbackEngine.ReplayCheckpoint(air,null,null),new com.roften.avilixlogger.core.RollbackEngine.ReplayCheckpoint(stone,null,null)));
+            var scene=new com.roften.avilixlogger.core.RecoveryScene(java.util.List.of(new com.roften.avilixlogger.core.RecoveryScene.Target(world,block)),1024*1024,16);
+            for(int i=0;i<5000&&!scene.ready()&&!scene.aborted();i++) {
+                scene.step(32,System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(1),8);
+                if(!scene.ready())java.util.concurrent.locks.LockSupport.parkNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(1));
+            }
+            if(!scene.ready())throw new AssertionError("Vanilla scene without Create failed: "+scene.failure());scene.commit();
+            if(!world.getBlockState(pos).is(net.minecraft.world.level.block.Blocks.STONE)||com.roften.avilixlogger.core.CartAuditContext.rollbackActive)
+                throw new AssertionError("Vanilla scene did not commit/release locks without Create");
+            System.out.println("RECOVERY_CREATE_ABSENT_NATIVE_OK: core recovery/handler guards load and commit without optional Create classes");
+        } finally {world.removeBlockEntity(pos);world.setBlock(pos,previous,2|16);com.roften.avilixlogger.core.CartAuditContext.restoring(restoring);}
     }
     private static void exerciseHopper(net.minecraft.server.MinecraftServer server){
         var world=server.overworld();var pos=world.getSharedSpawnPos().above(16);

@@ -78,6 +78,7 @@ public final class AvilixLoggerMod {
         NeoForge.EVENT_BUS.addListener(this::onPlayerLoggedIn);
         NeoForge.EVENT_BUS.addListener(LoggerNetworkHooks::onLogout);
         NeoForge.EVENT_BUS.addListener(RollbackCoordinator::onServerTick);
+        NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.HIGHEST,com.roften.avilixlogger.core.RecoveryEntityReservations::joined);
         NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.core.PreviewMaintenance::onTick);
         if (com.roften.avilixlogger.core.CreateSupport.available()) {
             com.roften.avilixlogger.core.CartAutomationHooks.install(new com.roften.avilixlogger.compat.create.CartAutomationAudit());
@@ -117,6 +118,8 @@ public final class AvilixLoggerMod {
 
     private void onServerStarting(ServerStartingEvent event) {
         HotPathMetrics.serverThread(Thread.currentThread());
+        // Complete/undo a previously authorised transaction before players or normal world ticks.
+        com.roften.avilixlogger.core.RecoveryJournal.recoverOnStartup(event.getServer());
         com.roften.avilixlogger.core.PlayerDeathAudit.reset();
         com.roften.avilixlogger.core.ServerCaptureGuard.start(Thread.currentThread(),gap->{
             LOGGER.error("[AvilixLogger] ЗАХВАТ ОСТАНОВЛЕН ДЛЯ ЗАЩИТЫ TPS. since={}, queue={}, reason={}. Принятые записи сохраняются; новые события могут отсутствовать. Возобновление: /log perf resume или GUI.",java.time.Instant.ofEpochMilli(gap.since()),gap.queue(),gap.reason());
@@ -174,6 +177,10 @@ public final class AvilixLoggerMod {
             com.roften.avilixlogger.compat.backpacked.BackpackIndex.stop();
         }
         com.roften.avilixlogger.core.CaptureTypePolicy.install(0);
+        com.roften.avilixlogger.core.CartRestoreLocks.clear();
+        com.roften.avilixlogger.core.RecoveryEntityReservations.release();
+        com.roften.avilixlogger.core.CartAuditContext.LOCKED_ENTITIES.clear();
+        com.roften.avilixlogger.core.CartAuditContext.rollbackActive=false;
         com.roften.avilixlogger.core.CaptureHandlers.install(java.util.Set.of());
         AuthCoreBridge.clear(event.getServer());
         com.roften.avilixlogger.core.CauseContext.clearCurrentThread();

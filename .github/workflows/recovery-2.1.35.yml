@@ -1,0 +1,94 @@
+name: Verify 2.1.35 crash recovery candidate
+on:
+  push:
+    branches: [work/2.1.35-crash-recovery]
+permissions:
+  contents: read
+concurrency:
+  group: recovery-2.1.35
+  cancel-in-progress: true
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ORG_GRADLE_PROJECT_compatCreateReleaseDirectory: build/compat-create-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '21'}
+      - uses: gradle/actions/setup-gradle@v4
+      - run: python3 tools/ci/prepare-create-release.py
+      - name: Compile, detached regressions and obfuscated candidate
+        run: ./gradlew compileCreateSmokeJava testAsyncPipeline testCreatePreflight verifyMixinSafety verifyObfuscatedJar --no-daemon --console=plain
+      - name: Native recovery, network, tick and allocation profile
+        run: |
+          mkdir -p run
+          printf 'eula=true\n' > run/eula.txt
+          printf 'max-tick-time=-1\n' > run/server.properties
+          timeout --signal=INT --kill-after=15s 420s ./gradlew runServer -PcreateSmoke -PacceptanceJfr --no-daemon --console=plain > recovery-server.log 2>&1 || status=$?
+          tail -n 100 recovery-server.log
+          if [ "${status:-0}" -ne 0 ]; then exit "$status"; fi
+          grep -q CRASH_RECOVERY_NATIVE_OK recovery-server.log
+          grep -q RECOVERY_SCENE_NATIVE_OK recovery-server.log
+          grep -q RECOVERY_SCENE_MEMORY_RELEASE_OK recovery-server.log
+          grep -q RECOVERY_SIMULATION_LOCK_NATIVE_OK recovery-server.log
+          grep -q RECOVERY_JOURNAL_WAIT_NATIVE_OK recovery-server.log
+          grep -q RECOVERY_STORAGE_LOCK_NATIVE_OK recovery-server.log
+          grep -q AVILIX_CREATE_SMOKE_OK recovery-server.log
+          grep -q LOGGER_PAYLOAD_PROFILE recovery-server.log
+          grep -q 'LOGGER_TICK_PROFILE phase=candidate' recovery-server.log
+          if grep -qE 'AVILIX_CREATE_SMOKE_FAILED|MixinApplyError|MixinTransformerError' recovery-server.log; then exit 1; fi
+      - name: Real process crashes and startup compensation
+        run: python3 tools/ci/verify-recovery-restarts.py
+      - name: Recovery on actual ticks, small and medium scenes
+        run: |
+          cp run/avilixlogger-server-ci.jfr build/recovery-full-server.jfr
+          timeout --signal=INT --kill-after=15s 420s ./gradlew runServer -PrecoveryCrash=benchmark -PacceptanceJfr --no-daemon --console=plain > recovery-benchmark.log 2>&1
+          grep -q RECOVERY_BENCHMARK_NATIVE_OK recovery-benchmark.log
+          grep RECOVERY_SCENE_PROFILE recovery-benchmark.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recovery-2.1.35-server-evidence
+          path: |
+            recovery-server.log
+            recovery-benchmark.log
+            build/recovery-full-server.jfr
+            build/recovery-restarts/*.log
+            run/avilixlogger-server-ci.jfr
+            build/libs/avilixlogger-2.1.35.jar
+  client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ORG_GRADLE_PROJECT_compatCreateReleaseDirectory: build/compat-create-release
+      LIBGL_ALWAYS_SOFTWARE: 'true'
+      MESA_GL_VERSION_OVERRIDE: '4.5'
+      ALSOFT_DRIVERS: 'null'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '21'}
+      - uses: gradle/actions/setup-gradle@v4
+      - run: python3 tools/ci/prepare-create-release.py
+      - run: sudo apt-get update && sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0
+      - name: Actual client GUI and frame profile
+        run: |
+          mkdir -p run
+          printf 'onboardAccessibility:false\nlang:ru_ru\n' > run/options.txt
+          timeout --signal=INT --kill-after=15s 600s xvfb-run -a ./gradlew runClient -PguiSmoke -PacceptanceJfr --no-daemon --console=plain > recovery-client.log 2>&1 || status=$?
+          tail -n 100 recovery-client.log
+          if [ "${status:-0}" -ne 0 ]; then exit "$status"; fi
+          grep -q CART_GUI_CLIENT_OK recovery-client.log
+          grep -q RECOVERY_GUI_NATIVE_OK recovery-client.log
+          grep -q LOGGER_GUI_FRAME_PROFILE recovery-client.log
+          if grep -qE 'CART_GUI_CLIENT_FAILED|MixinApplyError|MixinTransformerError' recovery-client.log; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: recovery-2.1.35-client-evidence
+          path: |
+            recovery-client.log
+            run/avilixlogger-client-ci.jfr
+            run/screenshots/*.png

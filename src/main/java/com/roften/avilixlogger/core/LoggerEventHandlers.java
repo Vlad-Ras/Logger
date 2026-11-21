@@ -1350,6 +1350,7 @@ public final class LoggerEventHandlers {
 
         // 3) Generic entities. Natural living spawns stay quiet, while any entity created inside
         // a player action or an arbitrary external mod call is captured automatically.
+        if(event.loadedFromDisk())return; // Loading an existing UUID is not another birth.
         if (ent instanceof ExperienceOrb) return;
         CauseContext.Cause cause = CauseContext.peek();
         String mutationSource = MutationSourceResolver.resolveExternalSource();
@@ -1357,7 +1358,7 @@ public final class LoggerEventHandlers {
         if (MutationSourceResolver.VANILLA_SIMULATION.equals(mutationSource)) mutationSource = null;
         if (mutationSource == null && cause == null) mutationSource = MutationSourceResolver.sourceFor(ent);
         boolean miscEntity = ent.getType().getCategory() == MobCategory.MISC;
-        if (!miscEntity && cause == null && mutationSource == null) return;
+        if (!miscEntity && cause == null && mutationSource == null && !EntityRecoveryEvidence.summoning()) return;
 
         boolean isPlane = false;
         try { isPlane = AirplanesCompatHooks.isPlaneEntity(ent); } catch (Throwable ignored) {}
@@ -1374,6 +1375,7 @@ public final class LoggerEventHandlers {
         e.z = ent.blockPosition().getZ();
         EntityLogIdentity.capture(e, ent);
         CompoundTag entityTag = NbtSerde.snapshotEntity(level, ent);
+        EntityRecoveryEvidence.capture(entityTag,ent,level,cause);
         e.deferSnapshot(LogEntry.SnapshotField.ENTITY, entityTag);
         e.source = mutationSource != null ? mutationSource
                 : (cause != null ? "player:" + cause.kind().name().toLowerCase(java.util.Locale.ROOT) : null);

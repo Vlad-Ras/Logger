@@ -84,6 +84,12 @@ neoForge {
 
         server {
             server()
+            if(project.hasProperty('recoveryCrash')) {
+                systemProperty 'avilixlogger.recoveryCrash',project.property('recoveryCrash')
+                gameDirectory=project.file('run-recovery-crash')
+                jvmArgument '-Xmx4G'
+                jvmArgument '-XX:+ExitOnOutOfMemoryError'
+            }
             if(project.hasProperty('storageSmoke')) {
                 systemProperty 'avilixlogger.storageSmoke','true'
                 gameDirectory = project.file('run-storage')
@@ -171,7 +177,7 @@ neoForge {
         // multi mod projects should define one per mod
         "${mod_id}" {
             sourceSet(sourceSets.main)
-            if (project.hasProperty('storageSmoke') || project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke') || project.hasProperty('blockpackSmoke') || project.hasProperty('supplementariesSmoke') || project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) sourceSet(sourceSets.createSmoke)
+            if (project.hasProperty('recoveryCrash') || project.hasProperty('storageSmoke') || project.hasProperty('createSmoke') || project.hasProperty('createAbsent') || project.hasProperty('backpackSmoke') || project.hasProperty('actorSmoke') || project.hasProperty('guiSmoke') || project.hasProperty('chippedSmoke') || project.hasProperty('scgunsSmoke') || project.hasProperty('blockpackSmoke') || project.hasProperty('supplementariesSmoke') || project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) sourceSet(sourceSets.createSmoke)
         }
     }
 }

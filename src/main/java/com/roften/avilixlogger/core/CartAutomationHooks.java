@@ -38,6 +38,10 @@ public final class CartAutomationHooks {
     public static boolean baseLocked(Object inventory){return observer!=null&&observer.baseLocked(inventory);}
     /** Reused on ordinary calls; a nested native ejection gets its own frame. */
     public static final class HopperCall { public Capture capture; public boolean active; }
-    public static void exposed(Level level,BlockPos pos,Object side,Object handler){CreateDeployerHooks.before(level,pos);if(observer!=null&&handler!=null)observer.exposed(level,pos,side,handler);}
+    public static void exposed(Level level,BlockPos pos,Object side,Object handler){
+        if(CartRestoreLocks.blockLocked(level,pos)&&(handler instanceof net.neoforged.neoforge.items.IItemHandler||handler instanceof net.neoforged.neoforge.fluids.capability.IFluidHandler))
+            CartRestoreLocks.handler(handler);
+        CreateDeployerHooks.before(level,pos);if(observer!=null&&handler!=null)observer.exposed(level,pos,side,handler);
+    }
     public static boolean locked(Object handler){return CartAuditContext.rollbackActive&&observer!=null&&observer.locked(handler);}
 }

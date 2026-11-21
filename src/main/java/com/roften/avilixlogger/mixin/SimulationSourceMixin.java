@@ -37,6 +37,7 @@ public abstract class SimulationSourceMixin {
             target = "Lnet/minecraft/world/level/block/state/BlockState;randomTick(Lnet/minecraft/server/level/ServerLevel;Lnet/minecraft/core/BlockPos;Lnet/minecraft/util/RandomSource;)V"))
     private void avilixlogger$random(BlockState state, ServerLevel level, BlockPos pos, RandomSource random,
                                      Operation<Void> original) {
+        if(com.roften.avilixlogger.core.CartRestoreLocks.blockLocked(level,pos))return;
         if (!LoggerConfig.isTickCaptureEnabled()) { original.call(state, level, pos, random); return; }
         String source = MutationSourceResolver.sourceFor(state.getBlock());
         String previous = MutationSourceResolver.enter(source == null ? MutationSourceResolver.VANILLA_SIMULATION : source);

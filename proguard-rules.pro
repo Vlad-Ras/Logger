@@ -83,4 +83,5 @@
 # Accessor interfaces are casts into classes woven after release obfuscation.
 -keep interface com.roften.avilixlogger.compat.create.mixin.** { *; }
 -keep interface com.roften.avilixlogger.mixin.CartCombinedInventoryAccessor { *; }
+-keep interface com.roften.avilixlogger.mixin.RecoveryEntity*Accessor { *; }
 -keep interface com.roften.avilixlogger.compat.backpacked.mixin.** { *; }
