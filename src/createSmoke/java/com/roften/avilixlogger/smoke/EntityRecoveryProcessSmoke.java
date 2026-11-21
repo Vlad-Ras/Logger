@@ -64,10 +64,11 @@ public final class EntityRecoveryProcessSmoke {
             }
             if(mode.equals("entity-commit-verify")) {
                 var image=NbtSerde.fromSnbt(Files.readString(root.resolve("entity-commit-fixture.snbt")));
-                EntityRecoveryNativeSmoke.check(level.getEntity(COMMIT)!=null&&image.equals(NbtSerde.snapshotEntity(level,level.getEntity(COMMIT)))
+                var committed=loadForCheck(level,COMMIT);
+                EntityRecoveryNativeSmoke.check(committed!=null&&image.equals(NbtSerde.snapshotEntity(level,committed))
                         &&level.getBlockState(EntityRecoveryNativeSmoke.POS).is(Blocks.STONE),"startup undid a published committed result");
                 EntityRecoveryNativeSmoke.check(count(folder,".committed")==0&&count(folder,".scene")==0,"startup did not compact committed record");
-                level.getEntity(COMMIT).discard();
+                committed.discard();
                 var row=row(image,COMMIT,7313500000002L,ActionType.ENTITY_SPAWN);
                 var scene=EntityRecoveryNativeSmoke.scene(level,EntityRecoveryNativeSmoke.prepare(List.of(row)),false,List.of(row));
                 EntityRecoveryNativeSmoke.drain(scene);EntityRecoveryNativeSmoke.check(scene.ready(),scene.failure());scene.commit();
@@ -78,6 +79,24 @@ public final class EntityRecoveryProcessSmoke {
             }
             throw new AssertionError("Unknown entity crash mode: "+mode);
         } finally {CartAuditContext.restoring(previous);}
+    }
+    private static net.minecraft.world.entity.Entity loadForCheck(ServerLevel level,UUID id) {
+        // A FULL block chunk at ServerStartedEvent does not imply that its entity
+        // deserializer has run. Use the same queued loading path as production.
+        var manager=((com.roften.avilixlogger.mixin.RecoveryEntityLevelAccessor)level).avilixlogger$entityManager();
+        var chunk=new net.minecraft.world.level.ChunkPos(EntityRecoveryNativeSmoke.POS);
+        long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        RecoveryEntityReservations.begin(level.getServer(),Set.of(id));
+        try {
+            RecoveryEntityReservations.hold(level,chunk);
+            level.getServer().managedBlock(()->{
+                manager.tick();
+                if(System.nanoTime()>deadline)throw new AssertionError("commit entity loading timed out");
+                return manager.areEntitiesLoaded(chunk.toLong());
+            });
+            RecoveryEntityReservations.verify();
+            return RecoveryEntityReservations.live(id);
+        } finally {RecoveryEntityReservations.release();CartRestoreLocks.clear();}
     }
     private static LogEntry row(CompoundTag image,UUID id,long event,ActionType action) {
         var row=new LogEntry();row.id=event;row.ts=1;row.type=action;row.entityUuid=id;row.entityType="minecraft:marker";row.entityNbt=image.toString();row.dim="minecraft:overworld";

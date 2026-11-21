@@ -117,7 +117,7 @@ public final class ServerLogNetwork {
     }
 
     private static void read(ServerPlayer player, Transfer transfer, ServerLogFiles.Snapshot file, long offset) {
-        submit(player, transfer, () -> new Reply(file, View.data(transfer.request, file.path().getFileName().toString(),
+        submit(player, transfer, () -> new Reply(file, View.data(transfer.request, file.name(),
                 offset, file.size(), ServerLogFiles.read(file, offset))));
     }
 
@@ -135,8 +135,12 @@ public final class ServerLogNetwork {
                 try {
                     reply = read.run();
                 } catch (IOException | RuntimeException failure) {
-                    reply = new Reply(null, View.error(transfer.request,
-                            "Файл недоступен, изменился, либо превышает 128 МиБ. Обновите список."));
+                    String message = failure instanceof java.nio.file.NoSuchFileException
+                            ? "Файл не найден на сервере. Обновите список."
+                            : failure instanceof java.nio.file.AccessDeniedException
+                            ? "Серверу отказано в чтении файла."
+                            : "Файл недоступен, изменился, либо превышает 128 МиБ. Обновите список.";
+                    reply = new Reply(null, View.error(transfer.request, message));
                 }
                 var result = reply;
                 server.execute(() -> {

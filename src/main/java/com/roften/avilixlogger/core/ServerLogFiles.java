@@ -20,9 +20,10 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.regex.Pattern;
 
-/** Exposes only standard Minecraft server diagnostics beneath the game directory. */
+/** Exposes selected server diagnostics beneath the game directory. */
 public final class ServerLogFiles {
     private static final String LATEST = "latest.log";
+    public static final String COLLISION_DIAGNOSTICS = "collision-forensics/diagnostics.log";
     private static final Pattern ARCHIVE = Pattern.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]+\\.log\\.gz");
     private static final Pattern CRASH = Pattern.compile("crash-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}\\.[0-9]{2}\\.[0-9]{2}-server\\.txt");
     private static final LinkOption NO_LINKS = LinkOption.NOFOLLOW_LINKS;
@@ -30,30 +31,34 @@ public final class ServerLogFiles {
 
     private ServerLogFiles() {}
 
-    public record Snapshot(Path path, long size, Object fileKey, FileTime created) {}
+    public record Snapshot(Path root, Path path, String name, long size, Object fileKey, FileTime created) {}
 
     public static boolean allowedName(String name) {
-        return LATEST.equals(name) || ARCHIVE.matcher(name).matches() || CRASH.matcher(name).matches();
+        return name != null && (LATEST.equals(name) || COLLISION_DIAGNOSTICS.equals(name)
+                || ARCHIVE.matcher(name).matches() || CRASH.matcher(name).matches());
     }
 
     public static List<FileInfo> list(Path root) throws IOException {
-        var files = new ArrayList<FileInfo>(65);
+        root = root.toRealPath();
+        var files = new ArrayList<FileInfo>(66);
         Path logs = root.resolve("logs");
         if (Files.isDirectory(logs, NO_LINKS)) {
-            FileInfo latest = info(logs.resolve(LATEST));
+            FileInfo latest = info(root, logs.resolve(LATEST), LATEST);
             if (latest != null) files.add(latest);
-            files.addAll(recent(logs, ARCHIVE));
+            FileInfo collisions = info(root, logs.resolve(COLLISION_DIAGNOSTICS), COLLISION_DIAGNOSTICS);
+            if (collisions != null) files.add(collisions);
+            files.addAll(recent(root, logs, ARCHIVE));
         }
         Path crashes = root.resolve("crash-reports");
-        if (Files.isDirectory(crashes, NO_LINKS)) files.addAll(recent(crashes, CRASH));
+        if (Files.isDirectory(crashes, NO_LINKS)) files.addAll(recent(root, crashes, CRASH));
         return List.copyOf(files);
     }
 
-    private static List<FileInfo> recent(Path directory, Pattern names) throws IOException {
+    private static List<FileInfo> recent(Path root, Path directory, Pattern names) throws IOException {
         var newest = new PriorityQueue<>(32, BY_TIME);
         try (var paths = Files.newDirectoryStream(directory, p -> names.matcher(p.getFileName().toString()).matches())) {
             for (Path path : paths) {
-                FileInfo file = info(path);
+                FileInfo file = info(root, path, path.getFileName().toString());
                 if (file == null) continue;
                 if (newest.size() < 32 || BY_TIME.compare(file, newest.peek()) > 0) {
                     if (newest.size() == 32) newest.remove();
@@ -64,10 +69,10 @@ public final class ServerLogFiles {
         return newest.stream().sorted(BY_TIME.reversed()).toList();
     }
 
-    private static FileInfo info(Path path) {
+    private static FileInfo info(Path root, Path path, String name) {
         try {
-            var attrs = attributes(path);
-            return new FileInfo(path.getFileName().toString(), attrs.size(), attrs.lastModifiedTime().toMillis());
+            var attrs = attributes(root, path);
+            return new FileInfo(name, attrs.size(), attrs.lastModifiedTime().toMillis());
         } catch (IOException ignored) {
             return null;
         }
@@ -75,10 +80,11 @@ public final class ServerLogFiles {
 
     public static Snapshot open(Path root, String name) throws IOException {
         if (!allowedName(name)) throw new IOException("Invalid log file name");
+        root = root.toRealPath();
         Path path = root.resolve(CRASH.matcher(name).matches() ? "crash-reports" : "logs").resolve(name);
-        var attrs = attributes(path);
+        var attrs = attributes(root, path);
         if (attrs.size() > ServerLogPayloads.MAX_FILE_BYTES) throw new IOException("Log file exceeds the download limit");
-        return new Snapshot(path, attrs.size(), attrs.fileKey(), attrs.creationTime());
+        return new Snapshot(root, path, name, attrs.size(), attrs.fileKey(), attrs.creationTime());
     }
 
     public static byte[] read(Snapshot file, long offset) throws IOException {
@@ -96,13 +102,19 @@ public final class ServerLogFiles {
     }
 
     private static void verify(Snapshot file) throws IOException {
-        var attrs = attributes(file.path());
+        var attrs = attributes(file.root(), file.path());
         if (attrs.size() < file.size() || !Objects.equals(attrs.fileKey(), file.fileKey())
                 || !attrs.creationTime().equals(file.created())) throw new IOException("Log file was rotated");
     }
 
-    private static BasicFileAttributes attributes(Path path) throws IOException {
-        if (!Files.isDirectory(path.getParent(), NO_LINKS)) throw new IOException("Log directory is unavailable");
+    private static BasicFileAttributes attributes(Path root, Path path) throws IOException {
+        if (!path.startsWith(root)) throw new IOException("Invalid log directory");
+        Path directory = root;
+        for (Path part : root.relativize(path.getParent())) {
+            directory = directory.resolve(part);
+            if (!Files.readAttributes(directory, BasicFileAttributes.class, NO_LINKS).isDirectory())
+                throw new IOException("Log directory is unavailable");
+        }
         var attrs = Files.readAttributes(path, BasicFileAttributes.class, NO_LINKS);
         if (!attrs.isRegularFile()) throw new IOException("Expected a regular log file");
         return attrs;

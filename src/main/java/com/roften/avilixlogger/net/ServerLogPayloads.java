@@ -11,7 +11,7 @@ import java.util.List;
 public final class ServerLogPayloads {
     public static final int CHUNK_BYTES = 128 * 1024;
     public static final long MAX_FILE_BYTES = 128L * 1024 * 1024;
-    static final int MAX_ENTRIES = 65;
+    static final int MAX_ENTRIES = 66;
     private static final int MAX_NAME = 96;
 
     private ServerLogPayloads() {}

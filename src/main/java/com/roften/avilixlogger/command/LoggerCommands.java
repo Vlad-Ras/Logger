@@ -2155,7 +2155,9 @@ public final class LoggerCommands {
 
         sendRollbackSummary(src, false, report);
         if(plan.replay()) {
-            src.sendSystemMessage(Component.literal("Числа выше — верхняя оценка по журналу. Текущий мир, сохранённые UUID и завершённые операции ещё не проверены.").withStyle(ChatFormatting.GRAY));
+            src.sendSystemMessage(Component.literal(report.livePreviewVerified
+                    ? "Проверены текущее состояние блоков/NBT, чанки, UUID и завершённые операции. Уже восстановленные объекты учтены отдельно; после подтверждения проверки выполнятся повторно."
+                    : "Числа выше — верхняя оценка по журналу. Текущий мир, сохранённые UUID и завершённые операции ещё не проверены.").withStyle(ChatFormatting.GRAY));
             long conditional=report.preparationIssues.stream().filter(EntityReplayPlan.Issue::conditional).count();
             if(conditional>0)src.sendSystemMessage(Component.literal("Объектов с условием безопасного восстановления: "+conditional+". Если для изменения не хватает доказательств, вся сцена будет остановлена до мутаций.").withStyle(ChatFormatting.YELLOW));
             src.sendSystemMessage(Component.literal("[ПРИЧИНЫ ПО ОБЪЕКТАМ: "+report.preparationIssues.size()+"]").withStyle(style->style.withColor(ChatFormatting.AQUA)

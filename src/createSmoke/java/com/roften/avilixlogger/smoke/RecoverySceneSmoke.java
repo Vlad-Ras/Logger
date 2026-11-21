@@ -30,6 +30,14 @@ final class RecoverySceneSmoke {
             check(level.getBlockState(A).isAir()&&level.getBlockState(B).is(Blocks.GOLD_BLOCK),"preflight left partial world changes");
 
             reset(level,B,Blocks.AIR.defaultBlockState());
+            scene=scene(level,List.of(target(A,Blocks.STONE.defaultBlockState()),target(B,Blocks.DIRT.defaultBlockState()))).preflightOnly();
+            drain(scene);check(scene.ready()&&!scene.changedWorld(),"live preview failed or changed the world: "+scene.failure());
+            try {scene.commit();throw new AssertionError("preview accepted a world-changing commit");}
+            catch(IllegalStateException expected) {}
+            var preview=scene.completePreflight();
+            check(preview.livePreviewVerified&&preview.applied==2&&level.getBlockState(A).isAir()&&level.getBlockState(B).isAir()
+                    &&!CartAuditContext.rollbackActive,"live preview mutated blocks or retained locks");
+            System.out.println("RECOVERY_LIVE_PREFLIGHT_NATIVE_OK: exact world validation and counts, no writes or commit, reservations released before confirmation");
             scene=scene(level,List.of(target(A,Blocks.STONE.defaultBlockState()),target(B,Blocks.DIRT.defaultBlockState())));
             advanceTo(scene,RecoveryScene.Phase.DATA);
             check(level.getBlockState(A).is(Blocks.STONE)&&level.getBlockState(B).is(Blocks.DIRT),"scene did not stage both chunk states");

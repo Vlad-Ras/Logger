@@ -41,6 +41,7 @@ final class ServerLogsScreen extends LoggerScreen {
     private Download download;
     private String status = "Запрашиваю список файлов…";
     private boolean initial = true;
+    private boolean openingFolder;
 
     ServerLogsScreen(Screen parent) {
         super(Component.literal("Логи сервера"));
@@ -76,11 +77,14 @@ final class ServerLogsScreen extends LoggerScreen {
                     Instant.ofEpochMilli(file.modified()).atZone(ZoneId.systemDefault()))
                     + (file.size() > ServerLogPayloads.MAX_FILE_BYTES ? "\nФайл превышает 128 МиБ." : "\nНажмите, чтобы сохранить файл."))));
         }
-        int half = (w - 6) / 2;
-        var update = button(download == null ? "Обновить" : "Отменить загрузку", x, height - 30, half,
+        int third = (w - 12) / 3;
+        var update = button(download == null ? "Обновить" : "Отменить загрузку", x, height - 30, third,
                 () -> { if (download == null) refresh(); else abort("Загрузка отменена."); });
         update.active = listing == 0;
-        button("Назад", x + half + 6, height - 30, w - half - 6, this::onClose);
+        var folder = button("Открыть папку", x + third + 6, height - 30, third, this::openDirectory);
+        folder.active = !openingFolder;
+        folder.setTooltip(Tooltip.create(Component.literal(downloadDirectory().toString())));
+        button("Назад", x + 2 * (third + 6), height - 30, w - 2 * (third + 6), this::onClose);
     }
 
     private Button button(String text, int x, int y, int w, Runnable action) {
@@ -101,11 +105,38 @@ final class ServerLogsScreen extends LoggerScreen {
 
     private void start(FileInfo file) {
         if (listing != 0 || download != null || !available() || minecraft.getConnection() != connection) return;
-        Path dir = minecraft.gameDirectory.toPath().resolve("avilixlogger-server-logs");
-        download = new Download(++sequence, file.name(), dir);
+        download = new Download(++sequence, file.name(), downloadDirectory());
         status = "Начинаю выгрузку " + file.name() + "…";
         request(download.id, Action.START, file.name(), 0);
         rebuild();
+    }
+
+    private Path downloadDirectory() {
+        return minecraft.gameDirectory.toPath().resolve("avilixlogger-server-logs").toAbsolutePath().normalize();
+    }
+
+    private void openDirectory() {
+        if (openingFolder) return;
+        openingFolder = true;
+        rebuild();
+        var client = minecraft;
+        Path directory = downloadDirectory();
+        Util.ioPool().execute(() -> {
+            String message;
+            try {
+                Files.createDirectories(directory);
+                Util.getPlatform().openPath(directory);
+                message = "Папка загрузок: " + directory;
+            } catch (IOException | RuntimeException failure) {
+                message = "Не удалось открыть папку: " + directory;
+            }
+            String result = message;
+            client.execute(() -> {
+                openingFolder = false;
+                if (download == null && listing == 0) status = result;
+                if (client.screen == this) rebuild();
+            });
+        });
     }
 
     private void request(long id, Action action, String name, long offset) {
@@ -196,10 +227,11 @@ final class ServerLogsScreen extends LoggerScreen {
             Files.write(partial, data, StandardOpenOption.APPEND);
             if (!complete || cancelled) return null;
             Path target = directory.resolve(name);
+            Files.createDirectories(target.getParent());
             try {
                 Files.move(partial, target);
             } catch (FileAlreadyExistsException alreadySaved) {
-                target = directory.resolve(UUID.randomUUID() + "-" + name);
+                target = target.resolveSibling(UUID.randomUUID() + "-" + target.getFileName());
                 Files.move(partial, target);
             }
             partial = null;

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run actual JVM crashes in the dedicated, ignored run-recovery-crash world."""
+"""Run actual JVM crashes in a fresh isolated world beneath the ignored build directory."""
 import argparse
 import pathlib
 import subprocess
 import os
 import signal
+import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--gradle-command", nargs="+", default=["./gradlew"])
@@ -14,8 +15,8 @@ args = parser.parse_args()
 root = pathlib.Path(__file__).resolve().parents[2]
 output = root / args.output_dir
 output.mkdir(parents=True, exist_ok=True)
-game = root / "run-recovery-crash"
-game.mkdir(exist_ok=True)
+game = pathlib.Path(tempfile.mkdtemp(prefix="world-", dir=output))
+print(f"RECOVERY_PROCESS_WORLD path={game}", flush=True)
 (game / "eula.txt").write_text("eula=true\n")
 (game / "server.properties").write_text("max-tick-time=-1\n")
 entity_modes=("entities","entity-delete-crash","entity-undo-crash","entity-undo-verify","entity-commit-crash","entity-commit-verify")
@@ -24,7 +25,7 @@ for mode in (() if args.entities_only else ("states", "data", "verify"))+entity_
     with log.open("w") as stream:
         environment=os.environ.copy()
         environment["LOGGER_BUILD_LOG"]=str(log.with_suffix(".gradle.log"))
-        with subprocess.Popen(args.gradle_command + ["runServer", f"-PrecoveryCrash={mode}", "--no-daemon", "--console=plain"],
+        with subprocess.Popen(args.gradle_command + ["runServer", f"-PrecoveryCrash={mode}", f"-PrecoveryCrashDirectory={game}", "--no-daemon", "--console=plain"],
                               cwd=root, env=environment, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True) as process:
             try:
                 code = process.wait(timeout=420)

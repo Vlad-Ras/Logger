@@ -11,6 +11,7 @@ public final class RollbackReport {
 
     public java.util.List<com.roften.avilixlogger.net.S2CRollbackPreviewPayload.Marker> previewMarkers = java.util.List.of();
     public boolean previewLimited;
+    public boolean livePreviewVerified;
     public java.util.List<EntityReplayPlan.Issue> preparationIssues=java.util.List.of();
 
     public int processed;

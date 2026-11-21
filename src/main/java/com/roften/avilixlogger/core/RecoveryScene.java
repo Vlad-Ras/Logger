@@ -39,6 +39,7 @@ public final class RecoveryScene {
     private boolean ownsLocks;
     private RecoveryJournal.Handle journal;
     private boolean cancelledWhileWriting;
+    private boolean preflightOnly;
 
     public RecoveryScene(List<Target> supplied, long memoryLimit, int maxChunks) {this(supplied,List.of(),memoryLimit,maxChunks,ignored->{});}
     public RecoveryScene(List<Target> supplied,List<RecoveryEntityBatch.Target> entityTargets,long memoryLimit,int maxChunks,
@@ -67,6 +68,12 @@ public final class RecoveryScene {
     }
 
     public Phase phase() { return phase; }
+    /** Runs the normal world/UUID checks but stops before creating a journal or mutating objects. */
+    public RecoveryScene preflightOnly() {
+        if (phase != Phase.RESERVE || ownsLocks) throw new IllegalStateException("Проверка уже началась");
+        preflightOnly = true;
+        return this;
+    }
     public boolean ready() { return phase == Phase.READY; }
     public boolean aborted() { return phase == Phase.ABORTED; }
     public boolean quarantined() { return phase == Phase.QUARANTINED; }
@@ -222,6 +229,7 @@ public final class RecoveryScene {
 
     private net.minecraft.server.MinecraftServer server(){return targets.isEmpty()?entities.server():targets.getFirst().level().getServer();}
     private void startJournal() {
+        if (preflightOnly) { phase=Phase.READY; return; }
         var keys=entities==null?List.<Long>of():entities.newEvents();
         var images=entities==null?List.<RecoveryJournal.EntityImage>of():entities.images();
         if(saved.isEmpty()&&keys.isEmpty()&&images.isEmpty()){phase=Phase.STATES;return;}
@@ -310,6 +318,7 @@ public final class RecoveryScene {
     /** Flushes the verified scene and retires its durable undo record before releasing locks. */
     public void commit() {
         if (!ready()) throw new IllegalStateException("Сцена ещё не проверена целиком");
+        if (preflightOnly) throw new IllegalStateException("Предпросмотр не может изменять мир");
         if(journal!=null) {
             RecoveryCheckpoint.flush(server());
             try {journal.commit(entities==null?List.of():entities.newEvents());journal=null;}
@@ -321,15 +330,7 @@ public final class RecoveryScene {
                 throw new IllegalStateException(failure,problem);
             }
         }
-        for (var value:saved) {
-            if (value.already()) report.onSkipped("replay_already_current");
-            else {
-                report.onApplied(value.target().snapshot().type()); report.blocksRestored++;
-                if (value.target().snapshot().beTag()!=null) report.blockEntitiesRestored++;
-                if (value.target().snapshot().slotsTag()!=null) report.containersRestored++;
-            }
-        }
-        if(entities!=null)entities.report(report);
+        collectReport();
         var notifications=new ArrayList<Target>();
         for(var value:saved)if(!value.already())notifications.add(value.target());
         phase=Phase.CLOSED;
@@ -344,6 +345,28 @@ public final class RecoveryScene {
                 com.roften.avilixlogger.AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Committed recovery neighbour update failed at {} {}",target.level().dimension().location(),target.snapshot().pos(),problem);
             }
         }
+    }
+
+    public RollbackReport completePreflight() {
+        if (!preflightOnly || !ready() || changedWorld() || journal != null)
+            throw new IllegalStateException("Предпросмотр ещё не проверен");
+        collectReport();
+        report.livePreviewVerified = true;
+        phase = Phase.CLOSED;
+        release();
+        return report;
+    }
+
+    private void collectReport() {
+        for (var value:saved) {
+            if (value.already()) report.onSkipped("replay_already_current");
+            else {
+                report.onApplied(value.target().snapshot().type()); report.blocksRestored++;
+                if (value.target().snapshot().beTag()!=null) report.blockEntitiesRestored++;
+                if (value.target().snapshot().slotsTag()!=null) report.containersRestored++;
+            }
+        }
+        if(entities!=null)entities.report(report);
     }
     private void finishAbort() {
         if(journal!=null) {

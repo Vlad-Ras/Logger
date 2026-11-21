@@ -26,6 +26,11 @@ final class EntityRecoveryNativeSmoke {
             level.removeBlockEntity(POS);level.setBlock(POS,Blocks.AIR.defaultBlockState(),2|16);
             var row=birth(level,EntityType.MARKER,false);cleanup.add(row.entityUuid);
             var prepared=prepare(List.of(row)).getFirst();
+            var preview=scene(level,List.of(prepared),true,List.of(row)).preflightOnly();
+            drain(preview);check(preview.ready()&&!preview.changedWorld(),"joint preview failed: "+preview.failure());
+            var previewReport=preview.completePreflight();
+            check(previewReport.livePreviewVerified&&previewReport.entitiesRespawned==1&&level.getEntity(row.entityUuid)==null
+                    &&level.getBlockState(POS).isAir()&&!RecoveryEntityReservations.active(),"entity preview published a birth or retained its reservation");
             var scene=scene(level,List.of(prepared),true,List.of(row));
             advance(scene,RecoveryScene.Phase.ENTITY_VERIFY);
             check(level.getEntity(row.entityUuid)!=null&&level.getBlockState(POS).is(Blocks.STONE),"joint scene did not stage both blocks and entities");
@@ -143,9 +148,14 @@ final class EntityRecoveryNativeSmoke {
     }
     static void drain(RecoveryScene scene){for(int n=0;n<20000&&!scene.ready()&&!scene.aborted()&&!scene.quarantined();n++)step(scene);check(scene.ready()||scene.aborted(),"entity scene stalled: "+scene.phase()+" "+scene.failure());}
     private static void drainWithInbox(RecoveryScene scene,ServerLevel level){
-        var manager=((RecoveryEntityLevelAccessor)level).avilixlogger$entityManager();
-        for(int n=0;n<20000&&!scene.ready()&&!scene.aborted()&&!scene.quarantined();n++)step(scene);
-        if(!scene.ready()&&!scene.aborted())for(var chunk:List.of(new ChunkPos(POS),new ChunkPos(128,128)))System.out.println("ENTITY_INBOX_STALL chunk="+chunk+" loaded="+manager.areEntitiesLoaded(chunk.toLong())+" held="+RecoveryEntityReservations.heldChunk(manager,chunk.toLong())+" stats="+manager.gatherStats());
+        // The whole wait must remain managed, so callbacks queued outside the small
+        // step() interval can run before the first server tick grants a time budget.
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(45);
+        level.getServer().managedBlock(()->{
+            step(scene);
+            if(System.nanoTime()>deadline)throw new AssertionError("saved UUID loading timeout: "+scene.phase()+" "+scene.failure());
+            return scene.ready()||scene.aborted()||scene.quarantined();
+        });
         check(scene.ready()||scene.aborted(),"saved UUID loading stalled: "+scene.phase()+" "+scene.failure());
     }
     static void advance(RecoveryScene scene,RecoveryScene.Phase phase){for(int n=0;n<20000&&scene.phase()!=phase&&!scene.aborted()&&!scene.quarantined();n++)step(scene);check(scene.phase()==phase,"entity scene did not reach "+phase+": "+scene.phase()+" "+scene.failure());}

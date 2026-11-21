@@ -347,19 +347,25 @@ public final class CartGuiClientSmoke {
                     var listing = type.getDeclaredField("listing");
                     listing.setAccessible(true);
                     listing.setLong(screen, 81);
-                    var name = "2026-11-13-7.log.gz";
+                    var name = com.roften.avilixlogger.core.ServerLogFiles.COLLISION_DIAGNOSTICS;
                     byte[] file = {31, (byte) 139, 8, 0, 4};
                     var result = com.roften.avilixlogger.net.ServerLogPayloads.Result.LIST;
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptServerLog(
                             new com.roften.avilixlogger.net.ServerLogPayloads.View(81, result, "", 0, 0, new byte[0],
-                                    List.of(new com.roften.avilixlogger.net.ServerLogPayloads.FileInfo(name, file.length, 1794600000000L)), ""));
+                                    List.of(new com.roften.avilixlogger.net.ServerLogPayloads.FileInfo("2026-11-13-7.log.gz", 5, 1794600000000L),
+                                            new com.roften.avilixlogger.net.ServerLogPayloads.FileInfo(name, file.length, 1794600000000L)), ""));
                     check(screen.children().stream().anyMatch(widget -> widget instanceof AbstractWidget row
                             && row.getMessage().getString().contains(name)), "server archive missing from export screen");
+                    check(screen.children().stream().anyMatch(widget -> widget instanceof AbstractWidget row
+                            && row.getMessage().getString().equals("Открыть папку")
+                            && row.getClass().getName().endsWith("LoggerGuiWidgets$ScaledTextButton")), "shared folder button missing");
+                    if (System.getenv("LOGGER_FOLDER_OPEN_PROBE") != null) clickLabel(screen,"Открыть папку");
                     var download = type.getDeclaredField("download");
                     download.setAccessible(true);
                     var transfer = download.getType().getDeclaredConstructor(long.class, String.class, java.nio.file.Path.class);
                     transfer.setAccessible(true);
                     var directory = mc.gameDirectory.toPath().resolve("avilixlogger-server-logs");
+                    java.nio.file.Files.createDirectories(directory.resolve(name).getParent());
                     java.nio.file.Files.deleteIfExists(directory.resolve(name));
                     download.set(screen, transfer.newInstance(82L, name, directory));
                     var deadline = type.getDeclaredField("deadline");
@@ -370,6 +376,18 @@ public final class CartGuiClientSmoke {
                                     com.roften.avilixlogger.net.ServerLogPayloads.Result.DATA, name, 0, file.length, file, List.of(), ""));
                 }
                 else if (stage == 19) {
+                    if (System.getenv("LOGGER_FOLDER_OPEN_PROBE") != null) {
+                        String uri=java.nio.file.Files.readString(java.nio.file.Path.of(System.getenv("LOGGER_FOLDER_OPEN_PROBE"))).trim();
+                        var opened=java.nio.file.Path.of(java.net.URI.create(uri)).toAbsolutePath().normalize();
+                        check(opened.equals(mc.gameDirectory.toPath().resolve("avilixlogger-server-logs").toAbsolutePath().normalize()),
+                                "native folder opener received a different download directory");
+                        System.out.println("SERVER_LOG_FOLDER_OPEN_NATIVE_OK: menu button invoked native platform opener with exact client download folder");
+                    }
+                    var diagnostics = mc.gameDirectory.toPath().resolve("avilixlogger-server-logs")
+                            .resolve(com.roften.avilixlogger.core.ServerLogFiles.COLLISION_DIAGNOSTICS);
+                    check(java.util.Arrays.equals(java.nio.file.Files.readAllBytes(diagnostics), new byte[]{31,(byte)139,8,0,4}),
+                            "nested diagnostics download did not preserve bytes");
+                    System.out.println("SERVER_LOG_GUI_NATIVE_OK: shared folder button, diagnostics listing and exact client file bytes");
                     com.roften.avilixlogger.client.gui.LogViewerScreen.setLogTimeZone("Europe/Moscow");
                     var screen=new com.roften.avilixlogger.client.gui.RecoveryScreen(root);mc.setScreen(screen);
                     for(String label:List.of("5 минут","30 минут","Час","Сутки"))clickLabel(screen,label);
@@ -422,7 +440,8 @@ public final class CartGuiClientSmoke {
                     capture.apply(new com.roften.avilixlogger.net.S2CCaptureTypesPayload(1<<10,7,true,true,"Подшипники отключены без перезагрузки"));
                 }
             }else{
-                var exportedLog = mc.gameDirectory.toPath().resolve("avilixlogger-server-logs/2026-11-13-7.log.gz");
+                var exportedLog = mc.gameDirectory.toPath().resolve("avilixlogger-server-logs")
+                        .resolve(com.roften.avilixlogger.core.ServerLogFiles.COLLISION_DIAGNOSTICS);
                 check(java.util.Arrays.equals(java.nio.file.Files.readAllBytes(exportedLog),
                         new byte[]{31, (byte) 139, 8, 0, 4}), "server log bytes changed while saving to disk");
                 java.nio.file.Files.delete(exportedLog);

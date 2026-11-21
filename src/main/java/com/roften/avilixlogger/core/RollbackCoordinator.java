@@ -141,6 +141,25 @@ public final class RollbackCoordinator {
                         if (next.cancelled || !PREPARATIONS.remove(playerId, next)) return;
                         if (!apply) {
                             if (RollbackPlanManager.getValid(playerId) != plan) return;
+                            if (plan.replay() && preview.skipped == 0) {
+                                if (active != null || CartAuditContext.rollbackActive) {
+                                    onError.accept("Другая операция проверяет или изменяет мир. Повторите предпросмотр после её завершения.");
+                                    return;
+                                }
+                                active = new ActiveJob(playerId, plan, scopes, checked -> {
+                                    if (RollbackPlanManager.getValid(playerId) != plan) {
+                                        onError.accept("Параметры предпросмотра изменились или срок плана истёк. Создайте его заново.");
+                                        return;
+                                    }
+                                    cachedPreview = new CachedPreview(plan, scopes);
+                                    checked.previewMarkers = preview.previewMarkers;
+                                    checked.previewLimited = preview.previewLimited;
+                                    checked.preparationIssues = preview.preparationIssues;
+                                    onComplete.accept(checked);
+                                }, onError);
+                                active.preflightOnly = true;
+                                return;
+                            }
                             cachedPreview = new CachedPreview(plan, scopes);
                             onComplete.accept(preview);
                             return;
@@ -360,6 +379,7 @@ public final class RollbackCoordinator {
         boolean sceneFailureReported;
         Consumer<String> progressSink;
         RecoveryScene.Phase lastReportedPhase;
+        boolean preflightOnly;
 
         ActiveJob progress(Consumer<String> sink) { progressSink=sink; return this; }
 
@@ -396,6 +416,7 @@ public final class RollbackCoordinator {
                 var storage=entityTargets.isEmpty()?null:LoggerRuntime.storage(server.overworld());
                 scene=new RecoveryScene(targets,entityTargets,Math.max(0,limit-preparedBytes),
                         configInt(() -> LoggerConfig.VALUES.recoveryMaxLoadedChunks.get(),128,1,4096),entities->EntityReplayPlan.verifyHistory(storage,entities));
+                if (preflightOnly) scene.preflightOnly();
             }
             if (scene.quarantined()) return false;
             int operations=configInt(() -> LoggerConfig.VALUES.recoveryOperationsPerTick.get(),2048,1,10000);
@@ -403,6 +424,13 @@ public final class RollbackCoordinator {
             int loads=configInt(() -> LoggerConfig.VALUES.recoveryChunkLoadsPerTick.get(),8,0,64);
             scene.step(operations,System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(millis),loads);
             if (scene.ready()) {
+                if (preflightOnly) {
+                    report.merge(scene.completePreflight());
+                    report.livePreviewVerified = true;
+                    checkpointFinished = true;
+                    onComplete.accept(report);
+                    return true;
+                }
                 scene.commit();
                 checkpointFinished=true;
                 report.merge(scene.report());
@@ -411,7 +439,8 @@ public final class RollbackCoordinator {
             }
             if (scene.aborted()) {
                 checkpointFinished=true; // Scene flushed its whole compensation before retiring the undo journal.
-                onError.accept(scene.failure()+" Постройка возвращена к исходному состоянию; частичный результат не оставлен.");
+                onError.accept(scene.failure() + (preflightOnly ? " Предпросмотр остановлен; мир не изменён."
+                        : " Постройка возвращена к исходному состоянию; частичный результат не оставлен."));
                 return true;
             }
             return false;
@@ -510,7 +539,7 @@ public final class RollbackCoordinator {
         boolean tick(MinecraftServer server) {
             if (!checkpointStarted) {
                 checkpointServer = server;
-                RecoveryCheckpoint.flush(server);
+                if (!preflightOnly) RecoveryCheckpoint.flush(server);
                 checkpointStarted = true;
                 // Saving may consume a tick; start applying with a fresh budget next tick.
                 return false;

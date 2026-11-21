@@ -86,7 +86,7 @@ neoForge {
             server()
             if(project.hasProperty('recoveryCrash')) {
                 systemProperty 'avilixlogger.recoveryCrash',project.property('recoveryCrash')
-                gameDirectory=project.file('run-recovery-crash')
+                gameDirectory=project.file(project.findProperty('recoveryCrashDirectory') ?: 'run-recovery-crash')
                 jvmArgument '-Xmx4G'
                 jvmArgument '-XX:+ExitOnOutOfMemoryError'
             }

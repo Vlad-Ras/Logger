@@ -90,9 +90,16 @@ public final class ClientReportLoadSmoke {
             if (!alerts.equals(ClientReportAlertPayloads.View.CODEC.decode(buffer))) throw new AssertionError("Alerts changed on wire");
             buffer.clear();
             var chunk = new byte[ServerLogPayloads.CHUNK_BYTES];
-            ServerLogPayloads.View.CODEC.encode(buffer, ServerLogPayloads.View.data(2, "latest.log", 0, chunk.length, chunk));
+            String diagnostics = com.roften.avilixlogger.core.ServerLogFiles.COLLISION_DIAGNOSTICS;
+            ServerLogPayloads.View.CODEC.encode(buffer, ServerLogPayloads.View.data(2, diagnostics, 0, chunk.length, chunk));
             int exportBytes = buffer.readableBytes();
-            if (!Arrays.equals(chunk, ServerLogPayloads.View.CODEC.decode(buffer).data())) throw new AssertionError("Log data changed on wire");
+            var decodedLog = ServerLogPayloads.View.CODEC.decode(buffer);
+            if (!Arrays.equals(chunk, decodedLog.data()) || !diagnostics.equals(decodedLog.name())) throw new AssertionError("Diagnostics name or data changed on wire");
+            buffer.clear();
+            var files = IntStream.range(0, ServerLogPayloads.MAX_ENTRIES)
+                    .mapToObj(i -> new ServerLogPayloads.FileInfo(i == 0 ? diagnostics : "2026-11-21-"+i+".log.gz", i, 1L)).toList();
+            ServerLogPayloads.View.CODEC.encode(buffer, ServerLogPayloads.View.list(3, files));
+            if (!files.equals(ServerLogPayloads.View.CODEC.decode(buffer).files())) throw new AssertionError("Full log listing lost diagnostics entry");
             buffer.clear();
             C2SEntryTeleportPayload.STREAM_CODEC.encode(buffer, new C2SEntryTeleportPayload(2, 81));
             int teleportBytes = buffer.readableBytes();

@@ -28,12 +28,34 @@ final class ServerLogFilesTest {
             Files.createSymbolicLink(reports.resolve("crash-2026-11-14_00.00.00-server.txt"), logs.resolve("debug.log"));
             check(ServerLogFiles.list(root).stream().map(f -> f.name()).toList()
                     .equals(java.util.List.of("latest.log", archive, crash)), "wrong file list");
+            String diagnosticsName = ServerLogFiles.COLLISION_DIAGNOSTICS;
+            Path diagnostics = logs.resolve(diagnosticsName);
+            Files.createDirectories(diagnostics.getParent());
+            Files.write(diagnostics, contents);
+            check(ServerLogFiles.list(root).stream().map(f -> f.name()).toList()
+                    .equals(java.util.List.of("latest.log", diagnosticsName, archive, crash)), "nested diagnostics missing or renamed");
+            var diagnosticsSnapshot = ServerLogFiles.open(root, diagnosticsName);
+            check(diagnosticsSnapshot.name().equals(diagnosticsName), "nested transfer lost its logical name");
+            int split = ServerLogPayloads.CHUNK_BYTES;
+            check(Arrays.equals(ServerLogFiles.read(diagnosticsSnapshot, 0), Arrays.copyOfRange(contents, 0, split))
+                    && Arrays.equals(ServerLogFiles.read(diagnosticsSnapshot, split), Arrays.copyOfRange(contents, split, contents.length)),
+                    "diagnostics chunks changed");
+            rejects(() -> ServerLogFiles.open(root, "collision-forensics/../latest.log"));
+            rejects(() -> ServerLogFiles.open(root, "collision-forensics/other.log"));
+            rejects(() -> ServerLogFiles.open(root, "/srv/minecraft/server/logs/collision-forensics/diagnostics.log"));
+            Path realDiagnostics = root.resolve("diagnostics-real");
+            Files.move(diagnostics.getParent(), realDiagnostics);
+            Files.createSymbolicLink(diagnostics.getParent(), realDiagnostics);
+            rejects(() -> ServerLogFiles.open(root, diagnosticsName));
+            rejects(() -> ServerLogFiles.read(diagnosticsSnapshot, 0));
+            check(ServerLogFiles.list(root).stream().noneMatch(f -> f.name().equals(diagnosticsName)), "symlink diagnostics exposed");
+            Files.delete(diagnostics.getParent());
+            Files.move(realDiagnostics, diagnostics.getParent());
             rejects(() -> ServerLogFiles.open(root, "../latest.log"));
             rejects(() -> ServerLogFiles.open(root, "debug.log"));
             rejects(() -> ServerLogFiles.open(root, "crash-2026-11-14_00.00.00-server.txt"));
             var snapshot = ServerLogFiles.open(root, "latest.log");
             Files.write(latest, new byte[]{42}, StandardOpenOption.APPEND);
-            int split = ServerLogPayloads.CHUNK_BYTES;
             check(Arrays.equals(ServerLogFiles.read(snapshot, 0), Arrays.copyOfRange(contents, 0, split))
                     && Arrays.equals(ServerLogFiles.read(snapshot, split), Arrays.copyOfRange(contents, split, contents.length)),
                     "chunk bytes changed when latest.log grew");
@@ -43,12 +65,16 @@ final class ServerLogFilesTest {
             Files.move(reports, root.resolve("real-reports"));
             Files.createSymbolicLink(reports, root.resolve("real-reports"));
             rejects(() -> ServerLogFiles.open(root, crash));
+            Files.move(logs, root.resolve("real-logs"));
+            Files.createSymbolicLink(logs, root.resolve("real-logs"));
+            rejects(() -> ServerLogFiles.open(root, diagnosticsName));
+            rejects(() -> ServerLogFiles.read(diagnosticsSnapshot, 0));
         } finally {
             try (var paths = Files.walk(root)) {
                 for (var file : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(file);
             }
         }
-        System.out.println("SERVER_LOG_FILES_OK: allowed names, file and directory links, exact chunk bytes, growing logs and rotation");
+        System.out.println("SERVER_LOG_FILES_OK: standard and collision diagnostics, logical transfer name, nested directory links, exact multi-chunk bytes, growing logs and rotation");
     }
 
     @FunctionalInterface private interface Read { Object run() throws IOException; }
