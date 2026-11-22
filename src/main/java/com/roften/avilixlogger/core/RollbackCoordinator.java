@@ -419,7 +419,7 @@ public final class RollbackCoordinator {
                 var coverageFile=CaptureCoverage.path(server);
                 scene=new RecoveryScene(targets,entityTargets,Math.max(0,limit-preparedBytes),
                         configInt(() -> LoggerConfig.VALUES.recoveryMaxLoadedChunks.get(),128,1,4096),entities->EntityReplayPlan.verifyHistory(storage,entities),playerTransfers,
-                        proofs->{CaptureCoverage.verify(coverageFile,proofs);PlayerBlockTransfer.verifyHistory(storage,proofs);});
+                        proofs->{CaptureCoverage.verify(coverageFile,proofs);PlayerBlockTransfer.verifyHistory(storage,proofs);}).includeFluidDependencies(plan.scopes());
                 if (preflightOnly) scene.preflightOnly();
             }
             if (scene.quarantined()) return false;

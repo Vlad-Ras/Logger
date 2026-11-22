@@ -61,6 +61,7 @@ public final class AsyncPipelineTest {
         RecoveryTimeInputTest.run();
         RecoveryJournalTest.run();
         RecoveryItemBalanceTest.run();
+        RecoveryFluidBalanceTest.run();
         PlayerBlockTransferTest.run();
         CaptureCoverageTest.run();
         CaptureMutationTest.run();

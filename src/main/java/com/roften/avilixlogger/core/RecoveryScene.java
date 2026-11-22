@@ -22,11 +22,13 @@ public final class RecoveryScene {
     public record Target(ServerLevel level, RollbackEngine.PreparedBlockSnapshot snapshot) {}
     private record Address(ServerLevel level, BlockPos pos) {}
     private record ChunkAddress(ServerLevel level, long chunk) {}
+    private record FluidShape(Address root,int width,int height) {}
     private record Saved(Target target, RollbackEngine.ReplayCheckpoint before, BlockState desired, boolean already) {}
 
     private final ArrayList<Target> targets;
     private final ArrayList<Saved> saved = new ArrayList<>();
     private final Map<Address, BlockState> desired = new HashMap<>();
+    private final Set<Address> fluidDependencies=new HashSet<>();
     private final ArrayList<ChunkAddress> chunks;
     private final long memoryLimit;
     private final int maxChunks;
@@ -67,6 +69,7 @@ public final class RecoveryScene {
                 continue;
             }
             targets.add(target);
+            desired.put(address,null); // Complete membership is known before resolving shared capabilities.
             uniqueChunks.add(new ChunkAddress(target.level(), new ChunkPos(target.snapshot().pos()).toLong()));
             // Neighbours are locked too; retain boundary chunks used by shape/storage checks.
             for (Direction side : Direction.values()) uniqueChunks.add(new ChunkAddress(target.level(), new ChunkPos(target.snapshot().pos().relative(side)).toLong()));
@@ -78,6 +81,41 @@ public final class RecoveryScene {
     }
 
     public Phase phase() { return phase; }
+    /** Include unchanged multiblock parts within the administrator's selected scopes, without inventing historical NBT. */
+    public RecoveryScene includeFluidDependencies(List<RollbackPlanManager.Scope> scopes) {
+        if(phase!=Phase.RESERVE||ownsLocks)throw new IllegalStateException("Зависимости нужно подготовить до запуска сцены");
+        if(!CreateSupport.available())return this;
+        var limits=com.roften.avilixlogger.compat.create.CreateFluidRecovery.limits();
+        var shapes=new HashSet<FluidShape>();var allChunks=new LinkedHashSet<>(chunks);
+        for(var target:List.copyOf(targets)) {
+            var checkpoints=new ArrayList<>(target.snapshot().checkpoints());
+            checkpoints.add(new RollbackEngine.ReplayCheckpoint(target.snapshot().stateTag(),target.snapshot().beTag(),target.snapshot().slotsTag()));
+            for(var checkpoint:checkpoints) {
+                var be=checkpoint.be();if(be==null||!be.getString("id").equals("create:fluid_tank")||be.contains("Controller"))continue;
+                int width=be.getInt("Size"),height=be.getInt("Height");
+                if(!be.contains("Size",net.minecraft.nbt.Tag.TAG_INT)||!be.contains("Height",net.minecraft.nbt.Tag.TAG_INT)
+                        ||width<1||width>3||height<1||height>limits.maxHeight())throw new IllegalStateException("replay_fluid_invalid_dimensions: "+target.snapshot().pos());
+                if((long)target.snapshot().pos().getX()+width-1>Integer.MAX_VALUE||(long)target.snapshot().pos().getZ()+width-1>Integer.MAX_VALUE
+                        ||(long)target.snapshot().pos().getY()+height-1>Integer.MAX_VALUE)throw new IllegalStateException("replay_fluid_invalid_dimensions: "+target.snapshot().pos());
+                var shape=new FluidShape(new Address(target.level(),target.snapshot().pos()),width,height);if(!shapes.add(shape))continue;
+                for(int x=0;x<width;x++)for(int z=0;z<width;z++)for(int y=0;y<height;y++) {
+                    var pos=target.snapshot().pos().offset(x,y,z);var address=new Address(target.level(),pos);if(desired.containsKey(address))continue;
+                    String dimension=target.level().dimension().location().toString();
+                    boolean selected=scopes.stream().anyMatch(scope->scope.dimension().equals(dimension)
+                            &&pos.getX()>=scope.min().getX()&&pos.getY()>=scope.min().getY()&&pos.getZ()>=scope.min().getZ()
+                            &&pos.getX()<=scope.max().getX()&&pos.getY()<=scope.max().getY()&&pos.getZ()<=scope.max().getZ());
+                    if(!selected||target.level().isOutsideBuildHeight(pos))throw new IllegalStateException("replay_fluid_multiblock_outside_scope: "+dimension+" "+pos+"; выберите всю ёмкость");
+                    if((long)(targets.size()+1)*320>memoryLimit)throw new IllegalStateException("Зависимости баков превышают оставшийся лимит памяти");
+                    desired.put(address,null);fluidDependencies.add(address);
+                    targets.add(new Target(target.level(),new RollbackEngine.PreparedBlockSnapshot(pos,null,null,null,ActionType.BLOCK_ENTITY_NBT_CHANGE)));
+                    allChunks.add(new ChunkAddress(target.level(),new ChunkPos(pos).toLong()));
+                    for(var side:Direction.values())allChunks.add(new ChunkAddress(target.level(),new ChunkPos(pos.relative(side)).toLong()));
+                    if(allChunks.size()>maxChunks)throw new IllegalStateException("Полные ёмкости превышают crashRecovery.maxLoadedChunks="+maxChunks);
+                }
+            }
+        }
+        chunks.clear();chunks.addAll(allChunks);return this;
+    }
     /** Runs the normal world/UUID checks but stops before creating a journal or mutating objects. */
     public RecoveryScene preflightOnly() {
         if (phase != Phase.RESERVE || ownsLocks) throw new IllegalStateException("Проверка уже началась");
@@ -273,11 +311,13 @@ public final class RecoveryScene {
             players.begin(frontiers);dependencies=players.check(true);
         }
         var capturedDependencies=dependencies;var cancellation=resourcesCancelled;
+        var fluidLimits=CreateSupport.available()?com.roften.avilixlogger.compat.create.CreateFluidRecovery.limits():RecoveryFluidBalance.Limits.NONE;
         resourceCheck=RecoveryJournal.io(()->{
             var changes=List.<RecoveryItemBalance.Change>of();
             if(capturedDependencies!=null){capturedDependencies.verify(remaining,cancellation::get);changes=capturedDependencies.changes(remaining);}
             long extra=0;for(var change:changes)extra+=128+PayloadSizeEstimator.estimateTags(change.before(),change.after());
-            RecoveryItemBalance.verify(inputs,changes,Math.max(0,remaining-extra),cancellation::get);return null;
+            RecoveryItemBalance.verify(inputs,changes,Math.max(0,remaining-extra),cancellation::get);
+            RecoveryFluidBalance.verify(inputs,fluidLimits,Math.max(0,remaining-extra),cancellation::get);return null;
         });
         resourceDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);phase=Phase.RESOURCE_CHECK;
     }
@@ -298,13 +338,22 @@ public final class RecoveryScene {
     }
 
     private void capture(Target target) {
+        if(fluidDependencies.contains(new Address(target.level(),target.snapshot().pos()))) {
+            reserveStorage(target);var current=RollbackEngine.currentCheckpoint(target.level(),target.snapshot().pos());
+            var block=new RollbackEngine.PreparedBlockSnapshot(target.snapshot().pos(),NbtSerde.toSnbt(current.state()),null,null,ActionType.BLOCK_ENTITY_NBT_CHANGE,
+                    current.state(),current.be(),current.slots(),current.state(),List.of(current));
+            memoryBytes+=320+PayloadSizeEstimator.estimateTags(current.state(),current.be(),current.slots());
+            if(memoryBytes>memoryLimit)throw new IllegalStateException("Неизменяемые части ёмкости превышают оставшийся лимит памяти");
+            saved.add(new Saved(new Target(target.level(),block),current,target.level().getBlockState(block.pos()),true));
+            desired.put(new Address(target.level(),block.pos()),target.level().getBlockState(block.pos()));return;
+        }
         var block=target.snapshot();
         String invalid=RollbackEngine.validatePreparedBlock(target.level(),block);
         boolean already="replay_already_current".equals(invalid);
         if (invalid!=null && !already) throw new IllegalStateException(invalid+": "+target.level().dimension().location()+" "+block.pos());
         var state=RollbackEngine.strictReplayState(target.level(),block.stateTag());
         if (state==null) throw new IllegalStateException("invalid_block_snapshot: "+block.pos());
-        StorageRestoreGuard.reserve(target.level(),block.pos());
+        reserveStorage(target);
         var be=target.level().getBlockEntity(block.pos());
         if (be instanceof net.minecraft.world.Container container) CartRestoreLocks.container(container);
         var before=RollbackEngine.currentCheckpoint(target.level(),block.pos());
@@ -312,6 +361,15 @@ public final class RecoveryScene {
         if (memoryBytes>memoryLimit) throw new IllegalStateException("Резервные снимки всей постройки превышают лимит памяти; мир не изменён");
         saved.add(new Saved(target,before,state,already));
         desired.put(new Address(target.level(),block.pos()),state);
+    }
+    private void reserveStorage(Target target) {
+        var block=target.snapshot();
+        if(CreateSupport.available()) {
+            var owner=com.roften.avilixlogger.compat.create.CreateFluidRecovery.controller(target.level().getBlockEntity(block.pos()));
+            if(owner!=null&&!desired.containsKey(new Address(target.level(),owner)))
+                throw new IllegalStateException("replay_fluid_controller_outside_scene: "+target.level().dimension().location()+" "+block.pos()+" → "+owner+"; мир не изменён");
+        }
+        StorageRestoreGuard.reserve(target.level(),block.pos());
     }
 
     private static RollbackEngine.ReplayCheckpoint targetCheckpoint(Saved value) {
@@ -449,6 +507,6 @@ public final class RecoveryScene {
         if(players!=null)players.release();
         if(entities!=null)entities.release();
         if (ownsLocks) { CartRestoreLocks.clear(); CartAuditContext.rollbackActive=false; ownsLocks=false; }
-        saved.clear(); desired.clear(); targets.clear(); chunks.clear();
+        saved.clear(); desired.clear();fluidDependencies.clear();targets.clear(); chunks.clear();
     }
 }
