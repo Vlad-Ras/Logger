@@ -9,13 +9,17 @@ final class PlayerBlockTransferTest {
         var row=row();var player=row.actorUuid;
         var first=state(7,false);var last=state(0,false);
         PlayerBlockTransfer.attach(row,new PlayerBlockTransfer.Capture(UUID.randomUUID(),player,row.dim,BlockPos.ZERO,
-                "net.minecraft.world.inventory.ChestMenu",first,last,true),slots(0,27),slots(7,27));
+                "net.minecraft.world.inventory.ChestMenu",first,last,true,UUID.randomUUID()),slots(0,27),slots(7,27));
         var before=new RollbackEngine.ReplayCheckpoint(NbtSerde.fromSnbt(row.blockAfter),NbtSerde.fromSnbt(row.beBefore),NbtSerde.fromSnbt(row.containerSlotsBefore));
         var after=new RollbackEngine.ReplayCheckpoint(before.state(),NbtSerde.fromSnbt(row.beAfter),NbtSerde.fromSnbt(row.containerSlotsAfter));
         var proof=PlayerBlockTransfer.parse(row,1,before,after);
         check(proof!=null&&proof.player().equals(player)&&proof.before().equals(first)&&proof.after().equals(last),"exact player proof lost");
         PlayerBlockTransfer.verifyHistory(new History(List.of(row)),List.of(proof));
         PlayerBlockTransfer.verifyHistory(new History(List.of(row,row)),List.of(proof));
+        var legacy=row.copyForQueue();legacy.playerInvBefore=legacy.playerInvBefore.replace("Format:2","Format:1");
+        refused("incomplete",()->PlayerBlockTransfer.parse(legacy,1,before,after));
+        var missingCoverage=row.copyForQueue();var envelope=NbtSerde.fromSnbt(missingCoverage.playerInvAfter);envelope.remove("Coverage");missingCoverage.playerInvAfter=envelope.toString();
+        refused("incomplete",()->PlayerBlockTransfer.parse(missingCoverage,1,before,after));
         var changed=row.copyForQueue();changed.playerInvAfter=changed.playerInvAfter.replace("ChestMenu","HopperMenu");
         refused("receipt_changed",()->PlayerBlockTransfer.verifyHistory(new History(List.of(changed)),List.of(proof)));
         refused("receipt_missing",()->PlayerBlockTransfer.verifyHistory(new History(List.of()),List.of(proof)));
@@ -24,14 +28,14 @@ final class PlayerBlockTransferTest {
         var gap=row.copyForQueue();gap.id+=2;gap.type=ActionType.CAPTURE_GAP;gap.dim="another:dimension";
         refused("capture_gap",()->PlayerBlockTransfer.verifyHistory(new History(List.of(row,gap)),List.of(proof)));
         var failed=row();PlayerBlockTransfer.attach(failed,new PlayerBlockTransfer.Capture(UUID.randomUUID(),failed.actorUuid,failed.dim,BlockPos.ZERO,
-                "net.minecraft.world.inventory.ChestMenu",first,last,false),slots(0,27),slots(7,27));
+                "net.minecraft.world.inventory.ChestMenu",first,last,false,UUID.randomUUID()),slots(0,27),slots(7,27));
         refused("incomplete",()->PlayerBlockTransfer.parse(failed,1,before,after));
         var imbalance=row();PlayerBlockTransfer.attach(imbalance,new PlayerBlockTransfer.Capture(UUID.randomUUID(),imbalance.actorUuid,imbalance.dim,BlockPos.ZERO,
-                "net.minecraft.world.inventory.ChestMenu",first,last,true),slots(0,27),slots(8,27));
+                "net.minecraft.world.inventory.ChestMenu",first,last,true,UUID.randomUUID()),slots(0,27),slots(8,27));
         refused("incomplete",()->PlayerBlockTransfer.parse(imbalance,1,before,after));
         var cursor=state(0,true);check(PlayerBlockTransfer.counted(cursor).getList("Items",10).getCompound(0).getInt("Slot")==41,"cursor omitted from count");
         PlayerBlockTransfer.attach(row,new PlayerBlockTransfer.Capture(UUID.randomUUID(),player,row.dim,BlockPos.ZERO,
-                "net.minecraft.world.inventory.ChestMenu",cursor,last,true),slots(0,27),slots(7,27));
+                "net.minecraft.world.inventory.ChestMenu",cursor,last,true,UUID.randomUUID()),slots(0,27),slots(7,27));
         check(PlayerBlockTransfer.parse(row,1,before,after)!=null,"proven cursor transfer rejected");
         offlineSlots(player);
         System.out.println("PLAYER_BLOCK_TRANSFER_OK: exact inventory/cursor proof, balanced native transfer, exception/imbalance refusal, receipt hash, later history/gap refusal and offline main/armor/offhand conversion");

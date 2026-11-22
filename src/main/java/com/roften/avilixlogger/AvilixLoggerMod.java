@@ -129,7 +129,9 @@ public final class AvilixLoggerMod {
         var captureSettings = com.roften.avilixlogger.core.LoggerServerData.get(event.getServer().overworld());
         com.roften.avilixlogger.core.CaptureTypePolicy.install(captureSettings.captureMask());
         com.roften.avilixlogger.core.CaptureHandlers.install(captureSettings.disabledHandlers());
-        if (AuthCoreBridge.attach(event.getServer())) {
+        boolean authorized=AuthCoreBridge.attach(event.getServer());
+        com.roften.avilixlogger.core.CaptureCoverage.start(event.getServer(),authorized);
+        if (authorized) {
             if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available())
                 com.roften.avilixlogger.compat.backpacked.BackpackIndex.start(event.getServer());
             LOGGER.info("[AvilixLogger] AvilixAuthCore accepted this server. Logger mechanisms are enabled.");
@@ -171,6 +173,7 @@ public final class AvilixLoggerMod {
         if (com.roften.avilixlogger.core.CreateSupport.available()) {com.roften.avilixlogger.compat.create.CreateTrainRepresentationCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTrainRecovery.stop();com.roften.avilixlogger.compat.create.CreateTrainLifecycleAudit.clear();com.roften.avilixlogger.compat.create.CreateCouplingRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateStructuralRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CreateTransferRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartRollbackCoordinator.stop();com.roften.avilixlogger.compat.create.CartItemRecovery.stop();com.roften.avilixlogger.compat.create.CreateDeployerTransaction.clearRetained();}
         LoggerRuntime.shutdown();
         com.roften.avilixlogger.core.ServerCaptureGuard.stop();
+        com.roften.avilixlogger.core.CaptureCoverage.stop();
         if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available()) {
             com.roften.avilixlogger.compat.backpacked.BackpackRecovery.stop();
             com.roften.avilixlogger.compat.backpacked.BackpackAudit.stop();

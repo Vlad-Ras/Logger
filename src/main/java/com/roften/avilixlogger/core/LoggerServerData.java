@@ -165,10 +165,10 @@ public final class LoggerServerData extends SavedData {
     public void setCaptureSettings(long mask, java.util.Set<String> handlers) {
         long next = mask & CaptureTypePolicy.ALL_DISABLED;
         boolean changed = guiCaptureDisabledMask != next || !disabledHandlers.equals(handlers);
+        CaptureTypePolicy.install(next);
+        CaptureHandlers.install(handlers);
         guiCaptureDisabledMask = next;
         disabledHandlers = java.util.Set.copyOf(handlers);
-        CaptureTypePolicy.install(next);
-        CaptureHandlers.install(disabledHandlers);
         if (changed) {
             guiCaptureRevision++;
             setDirty();

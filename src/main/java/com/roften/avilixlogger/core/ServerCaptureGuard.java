@@ -39,6 +39,7 @@ public final class ServerCaptureGuard {
         if(Thread.currentThread()!=serverThread || !CaptureTypePolicy.enabled(30) && fault==null){queue.put(value,bytes);return true;}
         var current=fault;if(current!=null){current.rejected.increment();return false;}
         var offered=queue.offer(value,bytes);if(offered==WeightedQueue.Offer.ACCEPTED)return true;
+        CaptureCoverage.invalidate("capture queue overflow");
         current=new Fault(queue.name(),offered.name());generation++;fault=current;
         var notice=current.snapshot(0);var callback=listener;
         try{CompletableFuture.runAsync(()->callback.accept(notice)).exceptionally(failure->null);}catch(RuntimeException ignored){}
@@ -48,7 +49,7 @@ public final class ServerCaptureGuard {
     public static Gap last(){return last;}
     static Gap prepareResume(){var current=fault;return current==null?null:current.snapshot(System.currentTimeMillis());}
     /** Used only after the caller has accepted the gap receipt and checked drained queues. */
-    static void resume(Gap gap){last=gap;generation++;fault=null;}
+    static void resume(Gap gap){last=gap;generation++;fault=null;CaptureCoverage.changed();}
     public static String report(){
         if (!com.roften.avilixlogger.LoggerConfig.isEnabled()) return "Запись отключена в конфигурации.";
         var gap=active();if(gap==null)gap=last;

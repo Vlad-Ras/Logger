@@ -1002,6 +1002,7 @@ public final class LoggerEventHandlers {
         private final String actionSource;
         private final CompoundTag playerBefore;
         private final UUID transferId;
+        private final UUID coverage=CaptureCoverage.token();
         private boolean finished;
         private MenuAction(ServerPlayer player,String actionSource) {
             this.actionSource=actionSource;
@@ -1069,7 +1070,7 @@ public final class LoggerEventHandlers {
             final boolean blockContainer=block!=null;
             final BlockPos actionPos=pos;
             final var transfer=direct&&transferId!=null?new PlayerBlockTransfer.Capture(transferId,player.getUUID(),dim,actionPos,
-                    menu.getClass().getName(),playerBefore,playerAfter,nativeSucceeded):null;
+                    menu.getClass().getName(),playerBefore,playerAfter,nativeSucceeded&&coverage!=null&&coverage.equals(CaptureCoverage.token()),coverage):null;
             AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after, beforeBe, afterBe,
                     transfer==null?null:transfer.before(),transfer==null?null:transfer.after()), () -> {
                 if (java.util.Objects.equals(before, after) && java.util.Objects.equals(beforeBe, afterBe)) return;

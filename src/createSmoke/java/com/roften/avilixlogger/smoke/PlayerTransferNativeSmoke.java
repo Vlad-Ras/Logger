@@ -80,6 +80,21 @@ final class PlayerTransferNativeSmoke {
             check(scene.aborted()&&scene.failure().contains("later_history")&&!scene.changedWorld(),"later block use did not invalidate old player proof");
 
             exchange=put(level,player);restore(level,exchange.before());history=new History(List.of(exchange.row()));prepared=prepare(level,history,exchange.row());
+            scene=scene(level,prepared,history);advance(scene,RecoveryScene.Phase.RESOURCE_RECHECK);
+            long captureMask=CaptureTypePolicy.mask();
+            try {CaptureTypePolicy.install(CaptureTypePolicy.changed(captureMask,2,false));CaptureTypePolicy.install(captureMask);}
+            finally {CaptureTypePolicy.install(captureMask);}
+            drain(scene);check(scene.aborted()&&scene.failure().contains("coverage_changed")&&!scene.changedWorld(),"type off/on during preflight escaped fence");
+
+            exchange=put(level,player);restore(level,exchange.before());history=new History(List.of(exchange.row()));prepared=prepare(level,history,exchange.row());
+            scene=scene(level,prepared,history);advance(scene,RecoveryScene.Phase.DATA);
+            var handlers=CaptureHandlers.disabled();
+            try {CaptureHandlers.install(Set.of(CaptureHandlers.at(0).key()));CaptureHandlers.install(handlers);}
+            finally {CaptureHandlers.install(handlers);}
+            drain(scene);check(scene.aborted()&&scene.failure().contains("coverage_changed")&&((Container)level.getBlockEntity(POS)).isEmpty(),"handler off/on after WAL did not compensate");
+            System.out.println("PLAYER_COVERAGE_NATIVE_OK: type off/on before mutations refused; handler off/on after WAL compensates block and releases reservations");
+
+            exchange=put(level,player);restore(level,exchange.before());history=new History(List.of(exchange.row()));prepared=prepare(level,history,exchange.row());
             player.getInventory().setItem(0,new ItemStack(Items.EMERALD,1));
             scene=scene(level,prepared,history);drain(scene);
             check(scene.aborted()&&scene.failure().contains("inventory_conflict")&&player.getInventory().getItem(0).is(Items.EMERALD),"conflicting inventory was overwritten");
@@ -191,7 +206,7 @@ final class PlayerTransferNativeSmoke {
         row.dim=level.dimension().location().toString();row.x=POS.getX();row.y=POS.getY();row.z=POS.getZ();
         row.blockBefore=before.state().toString();row.blockAfter=after.state().toString();row.beBefore=NbtSerde.toSnbt(before.be());row.beAfter=NbtSerde.toSnbt(after.be());
         row.containerSlotsBefore=NbtSerde.toSnbt(before.slots());row.containerSlotsAfter=NbtSerde.toSnbt(after.slots());
-        PlayerBlockTransfer.attach(row,new PlayerBlockTransfer.Capture(UUID.randomUUID(),player.getUUID(),row.dim,POS,menu.getClass().getName(),playerBefore,playerAfter,true),before.slots(),after.slots());
+        PlayerBlockTransfer.attach(row,new PlayerBlockTransfer.Capture(UUID.randomUUID(),player.getUUID(),row.dim,POS,menu.getClass().getName(),playerBefore,playerAfter,true,UUID.randomUUID()),before.slots(),after.slots());
         return new Exchange(row,before,after);
     }
     private static RollbackEngine.PreparedRollback prepare(ServerLevel level,History history,LogEntry row) {

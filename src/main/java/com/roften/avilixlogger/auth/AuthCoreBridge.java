@@ -47,6 +47,7 @@ public final class AuthCoreBridge {
     public static boolean isAuthorized(MinecraftServer server) {
         boolean allowed = checkAuthorization(server);
         if (!allowed) INVALIDATION.incrementAndGet();
+        com.roften.avilixlogger.core.CaptureCoverage.authorization(allowed);
         return allowed;
     }
 

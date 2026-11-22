@@ -338,6 +338,7 @@ public final class LoggerConfig {
     static void refreshCreateCartHistoryLimit(ModConfigEvent event) {
         if (event.getConfig().getSpec() == SPEC) {
             createCartHistoryLimitMiB = VALUES.rollbackCreateCartHistoryLimitMiB.get();
+            com.roften.avilixlogger.core.CaptureCoverage.changed();
         }
     }
 

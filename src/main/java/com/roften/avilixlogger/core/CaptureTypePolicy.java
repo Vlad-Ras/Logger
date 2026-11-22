@@ -25,7 +25,10 @@ public final class CaptureTypePolicy {
     public static long mask() { return disabledMask; }
     public static void install(long mask) {
         long next = mask & ALL_DISABLED;
-        if (disabledMask != next) { disabledMask = next; generation++; }
+        if (disabledMask != next) {
+            if(((disabledMask^next)&~(1L<<29))!=0)CaptureCoverage.invalidate("capture types");
+            disabledMask = next; generation++;CaptureCoverage.changed();
+        }
     }
     static void handlersChanged() { generation++; }
     public static long generation() { return generation; }

@@ -397,9 +397,11 @@ public enum CaptureHandlers {
     public static void install(Collection<String> keys) {
         var disabled = Set.copyOf(keys);
         if (state.disabled().equals(disabled)) return;
+        CaptureCoverage.invalidate("capture handlers");
         var muted = new boolean[ALL.length];
         for (var handler : ALL) muted[handler.ordinal()] = disabled.contains(handler.key);
         state = new State(disabled, muted);
         CaptureTypePolicy.handlersChanged();
+        CaptureCoverage.changed();
     }
 }

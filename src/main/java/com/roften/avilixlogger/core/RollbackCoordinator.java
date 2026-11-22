@@ -416,9 +416,10 @@ public final class RollbackCoordinator {
                 }
                 long limit=configInt(() -> LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get(),512,64,8192)*1024L*1024L;
                 var storage=entityTargets.isEmpty()&&playerTransfers.isEmpty()?null:LoggerRuntime.storage(server.overworld());
+                var coverageFile=CaptureCoverage.path(server);
                 scene=new RecoveryScene(targets,entityTargets,Math.max(0,limit-preparedBytes),
                         configInt(() -> LoggerConfig.VALUES.recoveryMaxLoadedChunks.get(),128,1,4096),entities->EntityReplayPlan.verifyHistory(storage,entities),playerTransfers,
-                        proofs->PlayerBlockTransfer.verifyHistory(storage,proofs));
+                        proofs->{CaptureCoverage.verify(coverageFile,proofs);PlayerBlockTransfer.verifyHistory(storage,proofs);});
                 if (preflightOnly) scene.preflightOnly();
             }
             if (scene.quarantined()) return false;

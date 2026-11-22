@@ -13,10 +13,10 @@ import java.util.*;
 public final class PlayerBlockTransfer {
     public static final String KIND="player_block_transfer";
     public record Capture(UUID transfer,UUID player,String dimension,BlockPos pos,String menu,
-                          CompoundTag before,CompoundTag after,boolean success) {}
+                          CompoundTag before,CompoundTag after,boolean success,UUID coverage) {}
     public record Proof(long event,long timestamp,UUID transfer,UUID player,String dimension,BlockPos pos,int afterIndex,
-                        CompoundTag before,CompoundTag after,long cutoffId,String fingerprint) {
-        Proof cutoff(long id){return new Proof(event,timestamp,transfer,player,dimension,pos,afterIndex,before,after,id,fingerprint);}
+                        CompoundTag before,CompoundTag after,long cutoffId,String fingerprint,UUID coverage) {
+        Proof cutoff(long id){return new Proof(event,timestamp,transfer,player,dimension,pos,afterIndex,before,after,id,fingerprint,coverage);}
     }
     private static final Set<Class<?>> MENUS=Set.of(ChestMenu.class,HopperMenu.class,DispenserMenu.class,ShulkerBoxMenu.class);
     private static final Set<Class<?>> BLOCKS=Set.of(ChestBlockEntity.class,TrappedChestBlockEntity.class,BarrelBlockEntity.class,
@@ -38,7 +38,7 @@ public final class PlayerBlockTransfer {
     /** No world/player/menu references enter this worker method. Failed evidence is retained as incomplete. */
     public static void attach(LogEntry row,Capture capture,CompoundTag blockBefore,CompoundTag blockAfter) {
         if(capture==null)return;
-        boolean complete=capture.success()&&Objects.equals(row.actorUuid,capture.player())
+        boolean complete=capture.success()&&capture.coverage()!=null&&Objects.equals(row.actorUuid,capture.player())
                 &&capture.before()!=null&&capture.after()!=null&&singleStorage(blockBefore,capture)&&singleStorage(blockAfter,capture);
         if(complete)try {
             RecoveryItemBalance.verify(List.of(new RecoveryItemBalance.Input(capture.dimension(),capture.pos(),
@@ -61,7 +61,8 @@ public final class PlayerBlockTransfer {
                 &&new BlockPos(source.getInt("X"),source.getInt("Y"),source.getInt("Z")).equals(capture.pos());
     }
     private static CompoundTag envelope(Capture capture,CompoundTag state,boolean complete) {
-        var tag=new CompoundTag();tag.putInt("Format",1);tag.putString("Kind",KIND);tag.putUUID("Transfer",capture.transfer());
+        var tag=new CompoundTag();tag.putInt("Format",2);tag.putString("Kind",KIND);tag.putUUID("Transfer",capture.transfer());
+        if(capture.coverage()!=null)tag.putUUID("Coverage",capture.coverage());
         tag.putUUID("Player",capture.player());tag.putString("Dimension",capture.dimension());tag.putLong("Pos",capture.pos().asLong());
         tag.putString("Menu",capture.menu());tag.putBoolean("Complete",complete);if(state!=null)tag.put("State",state);return tag;
     }
@@ -75,7 +76,7 @@ public final class PlayerBlockTransfer {
             var before=NbtSerde.fromSnbt(row.playerInvBefore);var after=NbtSerde.fromSnbt(row.playerInvAfter);
             if(row.id<=0||before==null||after==null||afterIndex<=0)throw new IllegalStateException("replay_player_transfer_invalid");
             for(var tag:List.of(before,after)) {
-                if(tag.getInt("Format")!=1||!tag.getString("Kind").equals(KIND)||!tag.hasUUID("Transfer")||!tag.hasUUID("Player")
+                if(tag.getInt("Format")!=2||!tag.getString("Kind").equals(KIND)||!tag.hasUUID("Transfer")||!tag.hasUUID("Player")||!tag.hasUUID("Coverage")
                         ||!tag.getBoolean("Complete")||!tag.contains("Pos",Tag.TAG_LONG)||!tag.contains("State",Tag.TAG_COMPOUND)
                         ||!Objects.equals(row.actorUuid,tag.getUUID("Player"))||!Objects.equals(row.dim,tag.getString("Dimension"))
                         ||!BlockPos.of(tag.getLong("Pos")).equals(new BlockPos(row.x,row.y,row.z)))
@@ -83,15 +84,16 @@ public final class PlayerBlockTransfer {
                 counted(tag.getCompound("State"));
             }
             if(!before.getUUID("Transfer").equals(after.getUUID("Transfer")))throw new IllegalStateException("replay_player_transfer_invalid");
+            if(!before.getUUID("Coverage").equals(after.getUUID("Coverage")))throw new IllegalStateException("replay_player_transfer_invalid");
             if(!before.getString("Menu").equals(after.getString("Menu"))||MENUS.stream().noneMatch(type->type.getName().equals(after.getString("Menu"))))throw new IllegalStateException("replay_player_transfer_unsupported_menu");
             if(!Set.of("player:container_click","player:menu_button").contains(row.source))throw new IllegalStateException("replay_player_transfer_invalid");
             var capture=new Capture(after.getUUID("Transfer"),after.getUUID("Player"),row.dim,new BlockPos(row.x,row.y,row.z),after.getString("Menu"),
-                    before.getCompound("State"),after.getCompound("State"),true);
+                    before.getCompound("State"),after.getCompound("State"),true,after.getUUID("Coverage"));
             if(!singleStorage(blockBefore.slots(),capture)||!singleStorage(blockAfter.slots(),capture))throw new IllegalStateException("replay_player_transfer_incomplete");
             RecoveryItemBalance.verify(List.of(new RecoveryItemBalance.Input(row.dim,capture.pos(),blockBefore,blockAfter)),
                     List.of(new RecoveryItemBalance.Change(counted(capture.before()),counted(capture.after()))),
                     Math.max(1,PayloadSizeEstimator.estimateTags(blockBefore.slots(),blockAfter.slots(),capture.before(),capture.after()))*8L+65536,()->false);
-            return new Proof(row.id,row.ts,capture.transfer(),capture.player(),row.dim,capture.pos(),afterIndex,capture.before(),capture.after(),row.id,fingerprint(row));
+            return new Proof(row.id,row.ts,capture.transfer(),capture.player(),row.dim,capture.pos(),afterIndex,capture.before(),capture.after(),row.id,fingerprint(row),capture.coverage());
         } catch(RuntimeException invalid) {
             throw new IllegalStateException(invalid.getMessage()+"; запись #"+row.id+"; "+row.dim+" "+new BlockPos(row.x,row.y,row.z),invalid);
         }

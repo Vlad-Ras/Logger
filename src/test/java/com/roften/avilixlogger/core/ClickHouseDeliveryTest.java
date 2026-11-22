@@ -76,7 +76,7 @@ final class ClickHouseDeliveryTest {
             check(first.count == 2 && second.count == 3, "coalescing mutated original item counts");
             {var transfer=PlayerBlockTransferTest.row();transfer.extra="player transfer exact receipt";
             PlayerBlockTransfer.attach(transfer,new PlayerBlockTransfer.Capture(UUID.randomUUID(),transfer.actorUuid,transfer.dim,net.minecraft.core.BlockPos.ZERO,
-                    "net.minecraft.world.inventory.ChestMenu",PlayerBlockTransferTest.state(7,false),PlayerBlockTransferTest.state(0,false),true),
+                    "net.minecraft.world.inventory.ChestMenu",PlayerBlockTransferTest.state(7,false),PlayerBlockTransferTest.state(0,false),true,UUID.randomUUID()),
                     PlayerBlockTransferTest.slots(0,27),PlayerBlockTransferTest.slots(7,27));
             var rollbackFlag=ClickHouseLogStorage.class.getDeclaredField("storeRollbackDetails");rollbackFlag.setAccessible(true);
             boolean previousRollback=rollbackFlag.getBoolean(database);

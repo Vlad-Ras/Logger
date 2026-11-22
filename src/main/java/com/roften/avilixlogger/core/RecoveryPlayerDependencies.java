@@ -24,8 +24,8 @@ final class RecoveryPlayerDependencies {
                 var committed=RecoveryJournal.readCommitted(receipts);
                 for(var proof:pending)if(committed.contains(proof.event()))throw new IllegalStateException("replay_player_transfer_already_committed: #"+proof.event());
                 events.set(all.stream().map(PlayerBlockTransfer.Proof::event).distinct().filter(id->!committed.contains(id)).toList());
-                if(!pending.isEmpty())verifier.accept(all);
             } catch(IOException problem){throw problem;}catch(RuntimeException problem){throw problem;}catch(Exception problem){throw new IOException(problem);}
+            if(!pending.isEmpty()||!initial)verifier.accept(all);
             var previous=new HashMap<UUID,CompoundTag>();var transfers=new HashSet<UUID>();
             for(var proof:history) {
                 if(cancelled.getAsBoolean())throw new java.util.concurrent.CancellationException();
@@ -55,6 +55,7 @@ final class RecoveryPlayerDependencies {
     private List<PlayerBlockTransfer.Proof> history=List.of();
     private List<PlayerBlockTransfer.Proof> pending=List.of();
     private boolean began;
+    private final long coverageGeneration=CaptureCoverage.generation();
     private final java.util.function.Consumer<List<PlayerBlockTransfer.Proof>> verifier;
     private final java.util.concurrent.atomic.AtomicReference<List<Long>> events=new java.util.concurrent.atomic.AtomicReference<>(List.of());
     RecoveryPlayerDependencies(MinecraftServer server,List<PlayerBlockTransfer.Proof> supplied,java.util.function.Consumer<List<PlayerBlockTransfer.Proof>> verifier) {
@@ -102,6 +103,8 @@ final class RecoveryPlayerDependencies {
     }
     List<Long> newEvents(){return events.get();}
     void recheckLive() {
+        CaptureCoverage.checkHealthy();
+        if(coverageGeneration!=CaptureCoverage.generation())throw new IllegalStateException("replay_player_capture_coverage_changed: запись переключалась во время проверки");
         for(var value:bound) {
             var player=server.getPlayerList().getPlayer(value.id());
             if(player!=value.online())throw new IllegalStateException("replay_player_connection_changed: "+value.id()+"; повторите после входа/выхода игрока");
