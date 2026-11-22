@@ -10,6 +10,8 @@ public final class PlayerRecoveryEntrySmoke {
     @SubscribeEvent public static void started(ServerStartedEvent event) throws Exception {
         if(!Boolean.getBoolean("avilixlogger.playerRecoverySmoke"))return;
         var mode=System.getProperty("avilixlogger.recoveryCrash","players");
+        if(mode.startsWith("mutation-")){com.roften.avilixlogger.core.CaptureMutationNativeSmoke.process(event.getServer().overworld(),mode);return;}
+        if(mode.equals("mutations")){com.roften.avilixlogger.core.CaptureMutationNativeSmoke.run(event.getServer().overworld());PlayerTransferNativeSmoke.run(event.getServer().overworld());event.getServer().halt(false);return;}
         if(mode.equals("players")){PlayerTransferNativeSmoke.run(event.getServer().overworld());event.getServer().halt(false);}
         else PlayerTransferNativeSmoke.process(event.getServer().overworld(),mode);
     }

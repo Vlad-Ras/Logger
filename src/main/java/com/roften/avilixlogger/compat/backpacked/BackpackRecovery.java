@@ -170,12 +170,14 @@ public final class BackpackRecovery {
     private static void closeMenus(CommandSourceStack source,Container c){if(c==null)return;for(ServerPlayer p:source.getServer().getPlayerList().getPlayers())if(p.containerMenu.slots.stream().anyMatch(s->s.container==c))p.closeContainer();}
     private static void relocate(CommandSourceStack source,Preview p,BackpackIndex.Record r,ServerPlayer target){
         Located located=find(source,p.id,r);if(located==null||located.stack.getCount()!=1)throw new IllegalStateException("Исходный рюкзак изменился");
+        com.roften.avilixlogger.core.CaptureCoverage.unrecordedMutation();
         boolean old=BackpackAudit.restoring;BackpackAudit.restoring=true;
         try{located.remove.run();try{deliver(source,r,target,located.stack.copy(),ActionType.BACKPACK_RETURN,"admin_return");}catch(Exception e){located.restore.run();throw e;}}
         finally{BackpackAudit.restoring=old;}
     }
     private static void deliver(CommandSourceStack source,BackpackIndex.Record r,ServerPlayer target,ItemStack stack,ActionType type,String reason){
         if(target.getInventory().getFreeSlot()<0)throw new IllegalStateException("У получателя нет свободного слота; резерв сохранён, выдача не состоялась");
+        com.roften.avilixlogger.core.CaptureCoverage.unrecordedMutation();
         target.closeContainer();int slot=target.getInventory().getFreeSlot();if(slot<0)throw new IllegalStateException("Нет свободного слота");
         target.getInventory().setItem(slot,stack);
         // Once granted, audit/broadcast failure must not restore the source alongside the new bag.

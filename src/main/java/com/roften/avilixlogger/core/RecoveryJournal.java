@@ -248,7 +248,7 @@ public final class RecoveryJournal {
         if(pending.isEmpty())return;
         if(CartAuditContext.rollbackActive)throw new IllegalStateException("Мир уже зарезервирован другой операцией");
         CartAuditContext.rollbackActive=true;
-        boolean success=false,previous=CartAuditContext.restoring(true);
+        boolean success=false,previous=CartAuditContext.restoringJournal(true);
         try {
             for(var scene:pending) {
                 for(var entity:scene.scene().entities()) {
@@ -299,7 +299,7 @@ public final class RecoveryJournal {
         } catch(Throwable failure) {
             throw new IllegalStateException("Не удалось надёжно завершить обработку незавершённого восстановления. Каталог журнала: "+dir+". Запуск остановлен до выяснения причины.",failure);
         } finally {
-            CartAuditContext.restoring(previous);
+            CartAuditContext.restoringJournal(previous);
             if(success){RecoveryEntityReservations.release();CartRestoreLocks.clear();CartAuditContext.rollbackActive=false;}
         }
     }

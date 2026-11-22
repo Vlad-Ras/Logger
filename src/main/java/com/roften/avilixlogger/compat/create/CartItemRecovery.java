@@ -67,6 +67,7 @@ public final class CartItemRecovery {
                 if(request!=generation||!authorized(actor))throw new IllegalStateException("Сессия завершена; резерв сохранён, выдача не выполнена");
                 absent(source,p.plan.id());int slot=actor.getInventory().getFreeSlot();if(slot<0)throw new IllegalStateException("Нет места; резерв сохранён");
                 // One server-thread slot write. Never drop the recovered item on the ground.
+                CaptureCoverage.unrecordedMutation();
                 actor.getInventory().setItem(slot,p.stack);actor.getInventory().setChanged();actor.containerMenu.broadcastChanges();
                 try{var row=new LogEntry();row.ts=System.currentTimeMillis();row.type=ActionType.CART_ROLLBACK;row.actorUuid=actor.getUUID();row.actorName=actor.getGameProfile().getName();
                 row.source=CartAuditContext.prefix(p.plan.id())+"recover_item:"+p.plan.entry();row.dim=actor.level().dimension().location().toString();row.x=actor.blockPosition().getX();row.y=actor.blockPosition().getY();row.z=actor.blockPosition().getZ();

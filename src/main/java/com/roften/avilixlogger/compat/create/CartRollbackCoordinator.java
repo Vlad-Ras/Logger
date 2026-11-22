@@ -132,7 +132,8 @@ public final class CartRollbackCoordinator {
     }
     public static void stop() {
         generation++;
-        boolean previous=CartAuditContext.restoring(true);
+        boolean previous=CartAuditContext.restoring();
+        if(active!=null)CartAuditContext.restoring(true);
         try {
             // Shutdown occurs before level saving; never persist half of an interrupted undo.
             if(active!=null) {

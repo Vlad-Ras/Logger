@@ -100,6 +100,7 @@ public final class AvilixLoggerMod {
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.create.CartItemTracker::leave);
         }
         NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.core.ServerTickScheduler::onServerTick);
+        NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST,com.roften.avilixlogger.core.CaptureCoverage::onTick);
         if (com.roften.avilixlogger.compat.backpacked.BackpackSupport.available()) {
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::crafted);
             NeoForge.EVENT_BUS.addListener(com.roften.avilixlogger.compat.backpacked.BackpackEvents::join);

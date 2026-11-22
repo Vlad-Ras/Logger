@@ -220,14 +220,14 @@ public final class RecoveryEntityBatch {
             for(var passenger:entity.getPassengers())if(!nodes.containsKey(passenger.getUUID()))throw new IllegalStateException("entity_compensation_foreign_passenger: "+id);
             actual.add(entity);
         }
-        boolean restoring=CartAuditContext.restoring(true);
+        boolean restoring=CartAuditContext.restoringJournal(true);
         try {
             for(int i=actual.size()-1;i>=0;i--)actual.get(i).discard();
             if(desired!=null) {
                 var result=NbtSerde.restoreEntityFromSnapshot(level,type,root,desired);
                 if(!result.success())throw new IllegalStateException(result.reason()+": "+root);
             }
-        } finally {CartAuditContext.restoring(restoring);}
+        } finally {CartAuditContext.restoringJournal(restoring);}
     }
     /** Bootstrap undo is exclusive; vanilla's entity inbox is pumped without running game ticks. */
     static void undoOnStartup(MinecraftServer server,List<RecoveryJournal.EntityImage> images) throws Exception {

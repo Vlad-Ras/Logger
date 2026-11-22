@@ -15,6 +15,7 @@ import java.util.*;
 public final class CaptureCoverage {
     private static volatile Ledger active;
     private static volatile boolean authorized;
+    private static boolean settlementFailureReported;
     private static final java.util.concurrent.atomic.AtomicLong GENERATION=new java.util.concurrent.atomic.AtomicLong();
     private static final java.util.concurrent.ThreadPoolExecutor IO=new java.util.concurrent.ThreadPoolExecutor(0,1,30,java.util.concurrent.TimeUnit.SECONDS,
             new java.util.concurrent.ArrayBlockingQueue<>(8),task->{var thread=new Thread(task,"avilixlogger-capture-coverage");thread.setDaemon(true);return thread;});
@@ -24,13 +25,39 @@ public final class CaptureCoverage {
     public static Path path(MinecraftServer server){return server.getWorldPath(LevelResource.ROOT).resolve("data/avilixlogger-capture.coverage");}
     public static synchronized void start(MinecraftServer server,boolean allowed) {
         authorized=allowed;
+        settlementFailureReported=false;
         try {active=new Ledger(path(server),settings(),allowed);GENERATION.incrementAndGet();}
         catch(IOException problem){throw new IllegalStateException("Не удалось открыть проверку непрерывности записи Logger",problem);}
     }
-    public static synchronized void stop(){active=null;authorized=false;GENERATION.incrementAndGet();}
+    public static synchronized void stop(){active=null;authorized=false;settlementFailureReported=false;GENERATION.incrementAndGet();}
     public static long generation(){return GENERATION.get();}
     static void checkHealthy(){var current=active;if(current!=null&&current.failed)throw new IllegalStateException("replay_player_capture_coverage_unavailable: метка записи не сохранена");}
     public static UUID token(){var current=active;return current==null?null:current.token();}
+    /** Before an admin mutation whose ordinary event capture is suppressed. One fence for the whole job. */
+    public static void unrecordedMutation() {
+        var current=active;if(current==null)return;
+        // A later metadata/configuration failure must not prevent compensation of an already
+        // durably fenced job. A failed initial revocation still blocks its first world mutation.
+        if(current.unrecorded&&current.unrecordedDurable)return;
+        checkHealthy();
+        synchronized(CaptureCoverage.class) {
+            if(active!=current||current.unrecorded&&current.unrecordedDurable)return;
+            checkHealthy();
+            GENERATION.incrementAndGet();
+            try {current.beginUnrecorded();}
+            catch(IOException problem){throw new IllegalStateException("Не удалось отозвать доказательства перед восстановлением",problem);}
+        }
+    }
+    public static void onTick(net.neoforged.neoforge.event.tick.ServerTickEvent.Post event) {
+        settleMutations(CartAuditContext.rollbackActive||RollbackCoordinator.hasActiveRollback()||CartAuditContext.restoring());
+    }
+    static synchronized void settleMutations(boolean busy) {
+        var current=active;if(current==null||!current.unrecorded||busy||current.failed)return;
+        try {current.settleUnrecorded(settings(),authorized);GENERATION.incrementAndGet();settlementFailureReported=false;}
+        catch(IOException problem) {
+            if(!settlementFailureReported){settlementFailureReported=true;com.roften.avilixlogger.AvilixLoggerMod.LOGGER.error("[AvilixLogger] Новые доказательства восстановления заблокированы: метка записи не сохранена",problem);}
+        }
+    }
     public static synchronized void invalidate(String reason) {
         GENERATION.incrementAndGet();var current=active;if(current==null)return;
         try {current.invalidate();}
@@ -72,7 +99,7 @@ public final class CaptureCoverage {
             parts.put("mask",Long.toString(mask));complete&=mask==0;
             parts.put("handlers",String.join("\n",new TreeSet<>(CaptureHandlers.disabled())));complete&=CaptureHandlers.disabled().isEmpty();
             for(var mod:net.neoforged.fml.ModList.get().getMods())parts.put("mod:"+mod.getModId(),mod.getVersion().toString());
-            parts.put("proof-schema","player-block-coverage-1");
+            parts.put("proof-schema","player-block-coverage-2");
         } catch(Exception problem){parts.put("unavailable",problem.getClass().getName());complete=false;}
         var encoded=new StringBuilder();parts.forEach((key,value)->encoded.append(key.length()).append(':').append(key).append(value.length()).append(':').append(value));
         return new Settings(hash(encoded.toString()),complete&&!ServerCaptureGuard.paused());
@@ -90,6 +117,8 @@ public final class CaptureCoverage {
         private final Path file;
         private volatile Document document;
         private volatile boolean failed;
+        private volatile boolean unrecorded;
+        private volatile boolean unrecordedDurable;
         Ledger(Path file,Settings settings,boolean allowed) throws IOException {
             this.file=file;
             // A pending replacement is evidence of an interrupted boundary, even if the old file is intact.
@@ -101,7 +130,15 @@ public final class CaptureCoverage {
             if(Files.exists(file,LinkOption.NOFOLLOW_LINKS))document=read(file);
             configure(settings,allowed);
         }
-        UUID token(){var value=document;return failed||value==null||!value.complete()?null:value.epoch();}
+        UUID token(){var value=document;return failed||unrecorded||value==null||!value.complete()?null:value.epoch();}
+        synchronized void beginUnrecorded() throws IOException {
+            if(unrecorded)return;
+            unrecorded=true;invalidate();unrecordedDurable=true;
+        }
+        synchronized void settleUnrecorded(Settings settings,boolean allowed) throws IOException {
+            if(!unrecorded)return;
+            unrecorded=false;unrecordedDurable=false;configure(settings,allowed);
+        }
         synchronized void invalidate() throws IOException {
             if(failed)throw new IOException("Предыдущая запись метки покрытия не завершилась");
             if(document!=null&&!document.complete())return;
@@ -109,7 +146,7 @@ public final class CaptureCoverage {
         }
         synchronized void configure(Settings settings,boolean allowed) throws IOException {
             if(failed)throw new IOException("Предыдущая запись метки покрытия не завершилась");
-            boolean complete=settings.complete()&&allowed;
+            boolean complete=settings.complete()&&allowed&&!unrecorded;
             var old=document;
             if(old!=null&&old.complete()==complete&&old.signature().equals(settings.signature()))return;
             publish(new Document(UUID.randomUUID(),settings.signature(),complete));

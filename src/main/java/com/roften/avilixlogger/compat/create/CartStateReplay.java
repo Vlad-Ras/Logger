@@ -48,8 +48,8 @@ public final class CartStateReplay {
         block.remove("UpdateTag");
     }
     private void cargo(CompoundTag before,CompoundTag after){
-        boolean old=CartAuditContext.restoring(true);
-        try{cargoDetached(before,after);}finally{CartAuditContext.restoring(old);}
+        boolean old=CartAuditContext.restoringDetached(true);
+        try{cargoDetached(before,after);}finally{CartAuditContext.restoringDetached(old);}
     }
     private void cargoDetached(CompoundTag before,CompoundTag after){
         require(registries!=null,"Для содержимого необходимы реестры сервера");

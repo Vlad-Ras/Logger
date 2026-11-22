@@ -29,7 +29,15 @@ public final class CartAuditContext {
     public static Stamp enter(Stamp stamp) { Stamp old = CURRENT.get(); CURRENT.set(stamp); return old; }
     public static void restore(Stamp old) { CURRENT.set(old); REMOVED.remove();PLACED.remove(); }
     public static boolean restoring() { return RESTORING.get(); }
-    public static boolean restoring(boolean value) { boolean old = RESTORING.get(); RESTORING.set(value); return old; }
+    public static boolean restoring(boolean value) {
+        boolean old=RESTORING.get();
+        if(value&&!old)CaptureCoverage.unrecordedMutation();
+        RESTORING.set(value);return old;
+    }
+    /** Only a scene/startup undo protected by its durable WAL may preserve proof coverage while applying. */
+    static boolean restoringJournal(boolean value){boolean old=RESTORING.get();RESTORING.set(value);return old;}
+    /** Detached Create codecs have no world/player references and must not revoke history during preview. */
+    public static boolean restoringDetached(boolean value){return restoringJournal(value);}
     public static UUID id(String source) {
         if (source == null || !source.startsWith("create:cart:") || source.length() < 49 || source.charAt(48) != ':') return null;
         try { return UUID.fromString(source.substring(12, 48)); } catch (IllegalArgumentException ignored) { return null; }

@@ -26,8 +26,8 @@ public final class CartRecoveryContents {
         if(result.isEmpty())throw new IllegalStateException("Сохранённая жидкость прочитана как пустая");return result;
     }
     public static Summary validate(CompoundTag item,HolderLookup.Provider registries){
-        boolean old=com.roften.avilixlogger.core.CartAuditContext.restoring(true);
-        try{return validateDetached(item,registries);}finally{com.roften.avilixlogger.core.CartAuditContext.restoring(old);}
+        boolean old=com.roften.avilixlogger.core.CartAuditContext.restoringDetached(true);
+        try{return validateDetached(item,registries);}finally{com.roften.avilixlogger.core.CartAuditContext.restoringDetached(old);}
     }
     private static Summary validateDetached(CompoundTag item,HolderLookup.Provider registries){
         var ops=registries.createSerializationContext(NbtOps.INSTANCE);var data=item.getCompound("components").getCompound("create:minecart_contraption_data");

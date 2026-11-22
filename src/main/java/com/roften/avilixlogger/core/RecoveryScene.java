@@ -356,23 +356,23 @@ public final class RecoveryScene {
     }
     private static void writeState(Target target,BlockState state) {
         if (state==null) throw new IllegalStateException("Состояние резервного снимка не прочитано");
-        boolean restoring=CartAuditContext.restoring(true);
+        boolean restoring=CartAuditContext.restoringJournal(true);
         try {
             var level=target.level(); var pos=target.snapshot().pos();
             if (!level.getBlockState(pos).equals(state)) level.removeBlockEntity(pos);
             level.setBlock(pos,state,2|16|32|64);
             if (!level.getBlockState(pos).equals(state)) throw new IllegalStateException("Блок отклонил состояние: "+pos);
-        } finally { CartAuditContext.restoring(restoring); }
+        } finally { CartAuditContext.restoringJournal(restoring); }
     }
     private static void writeData(Target target,RollbackEngine.ReplayCheckpoint data) {
-        boolean restoring=CartAuditContext.restoring(true);
+        boolean restoring=CartAuditContext.restoringJournal(true);
         try {
             var level=target.level(); var pos=target.snapshot().pos();
             if (data.be()!=null && !NbtSerde.readBlockEntity(level,pos,data.be())) throw new IllegalStateException("NBT блока не загружен: "+pos);
             if (data.slots()!=null && !ContainerSlotSnapshot.apply(level,pos,data.slots())) throw new IllegalStateException("Слоты блока не восстановлены: "+pos);
             StorageRestoreGuard.reserve(level,pos);
             if (level.getBlockEntity(pos) instanceof net.minecraft.world.Container container) CartRestoreLocks.container(container);
-        } finally { CartAuditContext.restoring(restoring); }
+        } finally { CartAuditContext.restoringJournal(restoring); }
     }
 
     /** Flushes the verified scene and retires its durable undo record before releasing locks. */
@@ -382,6 +382,9 @@ public final class RecoveryScene {
         if(players!=null)players.recheckLive();
         if(journal!=null) {
             RecoveryCheckpoint.flush(server());
+            // An uncommitted scene can still be undone exactly by WAL. Before committing its
+            // unlogged world changes, revoke other historical player/block proofs durably.
+            if(changedWorld())CaptureCoverage.unrecordedMutation();
             try {journal.commit(completionEvents());journal=null;}
             catch(Throwable problem) {
                 // Deletion may have reached disk even if its directory fsync failed. Never begin

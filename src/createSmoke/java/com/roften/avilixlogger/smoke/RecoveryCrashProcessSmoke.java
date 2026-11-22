@@ -22,6 +22,8 @@ public final class RecoveryCrashProcessSmoke {
     @SubscribeEvent public static void started(ServerStartedEvent event) throws Exception {
         String mode=System.getProperty("avilixlogger.recoveryCrash");if(mode==null)return;
         var server=event.getServer();var level=server.overworld();
+        if(mode.startsWith("mutation-")){CaptureMutationNativeSmoke.process(level,mode);return;}
+        if(mode.equals("mutations")){CaptureMutationNativeSmoke.run(level);PlayerTransferNativeSmoke.run(level);server.halt(false);return;}
         if(mode.equals("auth-api")){AuthCoreNativeSmoke.run(server);server.halt(false);return;}
         if(mode.equals("players")){PlayerTransferNativeSmoke.run(level);server.halt(false);return;}
         if(mode.startsWith("player-")){PlayerTransferNativeSmoke.process(level,mode);return;}
