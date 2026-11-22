@@ -52,7 +52,7 @@ final class ClientReportScreen extends LoggerScreen {
     private boolean commandsLoaded;
     private net.minecraft.client.gui.components.EditBox inventorySearch;
     private String modSearch = "", packSearch = "";
-    private Button freshButton, cachedButton, copyButton, exportButton;
+    private Button acquireButton, freshButton, cachedButton, copyButton, exportButton;
     private boolean exportPending;
     private String exportStatus = "";
     private int left, paneWidth, scroll;
@@ -75,7 +75,7 @@ final class ClientReportScreen extends LoggerScreen {
         left = (width - paneWidth) / 2;
         int gap = 5;
         int part = (paneWidth - 2 * gap) / 3;
-        var input = addRenderableWidget(new LoggerGuiWidgets.ScaledEditBox(font, left, 32, part, 20,
+        var input = addRenderableWidget(new LoggerGuiWidgets.ScaledEditBox(font, left, 32, paneWidth, 20,
                 Component.literal("Ник игрока"), this::scale));
         input.setHint(Component.literal("Ник Minecraft"));
         input.setMaxLength(16);
@@ -83,21 +83,22 @@ final class ClientReportScreen extends LoggerScreen {
         input.setResponder(this::changeName);
         setInitialFocus(input);
 
-        freshButton = button("Обновить отчёт", left + part + gap, 32, part, () -> send(Action.REQUEST));
-        freshButton.setTooltip(Tooltip.create(Component.literal("Запросить новый отчёт у игрока онлайн.")));
-        cachedButton = button("Открыть сохранённый", left + 2 * (part + gap), 32, paneWidth - 2 * (part + gap),
-                () -> send(Action.CACHED));
-        cachedButton.setTooltip(Tooltip.create(Component.literal("Последний отчёт за 24 часа, в том числе для офлайн-игрока.")));
+        acquireButton = button("Запрос отчёта", left, 59, part, () -> send(Action.ACQUIRE));
+        acquireButton.setTooltip(Tooltip.create(Component.literal("Создать первый отчёт у игрока онлайн; если отчёт уже сохранён за последние сутки — открыть его.")));
+        cachedButton = button("Открыть сохранённый", left + part + gap, 59, part, () -> send(Action.CACHED));
+        cachedButton.setTooltip(Tooltip.create(Component.literal("Прочитать последний сохранённый отчёт за 24 часа, включая офлайн-игрока. Новый сбор не запускается.")));
+        freshButton = button("Обновить (онлайн)", left + 2 * (part + gap), 59, paneWidth - 2 * (part + gap), () -> send(Action.REQUEST));
+        freshButton.setTooltip(Tooltip.create(Component.literal("Заново собрать отчёт, если игрок сейчас в сети. Ранее сохранённый отчёт остаётся на экране.")));
 
         tabs.clear();
         int tabWidth = (paneWidth - 3 * gap) / 4;
         for (Tab value : Tab.values()) {
             int x = left + value.ordinal() * (tabWidth + gap);
-            var button = button(value.label, x, 59, value == Tab.COMMANDS ? left + paneWidth - x : tabWidth,
+            var button = button(value.label, x, 86, value == Tab.COMMANDS ? left + paneWidth - x : tabWidth,
                     () -> openTab(value));
             tabs.add(button);
         }
-        inventorySearch = addRenderableWidget(new LoggerGuiWidgets.ScaledEditBox(font, left, 85, paneWidth, 20,
+        inventorySearch = addRenderableWidget(new LoggerGuiWidgets.ScaledEditBox(font, left, 112, paneWidth, 20,
                 Component.literal("Поиск по имени, ID или SHA-256"), this::scale));
         inventorySearch.setMaxLength(128);
         inventorySearch.setHint(Component.literal("Название, ID или SHA-256"));
@@ -162,7 +163,7 @@ final class ClientReportScreen extends LoggerScreen {
             exportStatus = "";
             status = action == Action.REQUEST
                     ? "Обновление запрошено. Показываю прежний отчёт, пока клиент отвечает…"
-                    : "Загружаю сохранённый отчёт…";
+                    : action == Action.ACQUIRE ? "Запрашиваю отчёт…" : "Загружаю сохранённый отчёт…";
             tab = Tab.OVERVIEW;
             // A manual refresh must not blank the report or leave an empty screen for
             // minutes. Read the cached snapshot in parallel; ignore late stale results.
@@ -172,14 +173,17 @@ final class ClientReportScreen extends LoggerScreen {
             } else previewRequest = 0;
         }
         rebuild();
-        PacketDistributor.sendToServer(new ClientReportViewPayloads.Query(id, nickname, action));
+        // Old servers do not know the appended ACQUIRE enum value.
+        Action wireAction = action == Action.ACQUIRE && !Minecraft.getInstance().getConnection().hasChannel(ClientReportViewPayloads.FullView.TYPE)
+                ? Action.REQUEST : action;
+        PacketDistributor.sendToServer(new ClientReportViewPayloads.Query(id, nickname, wireAction));
     }
 
     void accept(View view) {
         if (view.id() != 0 && view.id() == reportRequest) {
             if (view.report() != null) {
                 snapshot = view;
-                status = "";
+                status = view.message();
             } else status = view.message();
         } else if (view.id() != 0 && view.id() == previewRequest) {
             previewRequest = 0;
@@ -323,6 +327,7 @@ final class ClientReportScreen extends LoggerScreen {
         }
         if (freshButton != null) {
             boolean valid = ClientReportViewPayloads.validName(nickname);
+            acquireButton.active = valid;
             freshButton.active = valid;
             cachedButton.active = valid;
             exportButton.active = snapshot != null && !exportPending;
@@ -332,7 +337,7 @@ final class ClientReportScreen extends LoggerScreen {
 
     private boolean showsInventorySearch() { return tab == Tab.MODS || tab == Tab.PACKS; }
 
-    private int contentTop() { return showsInventorySearch() ? 109 : 85; }
+    private int contentTop() { return showsInventorySearch() ? 136 : 112; }
 
     private static String normalizeQuery(String query) { return query.strip().toLowerCase(java.util.Locale.ROOT); }
 

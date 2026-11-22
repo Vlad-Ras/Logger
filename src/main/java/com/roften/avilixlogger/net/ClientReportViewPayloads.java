@@ -21,7 +21,7 @@ public final class ClientReportViewPayloads {
         return NICKNAME.matcher(value).matches();
     }
 
-    public enum Action { REQUEST, CACHED, COMMANDS }
+    public enum Action { REQUEST, CACHED, COMMANDS, ACQUIRE }
 
     public record Query(long id, String name, Action action) implements CustomPacketPayload {
         public static final Type<Query> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_view_query"));
@@ -57,7 +57,8 @@ public final class ClientReportViewPayloads {
             return new View(id, message, "", 0, List.of(), List.of(), null);
         }
 
-        private static void encode(RegistryFriendlyByteBuf buf, View view) {
+        private static void encode(RegistryFriendlyByteBuf buf, View view) { encode(buf, view, false); }
+        private static void encode(RegistryFriendlyByteBuf buf, View view, boolean full) {
             buf.writeLong(view.id());
             buf.writeUtf(view.message(), 512);
             buf.writeUtf(view.player(), 16);
@@ -69,10 +70,11 @@ public final class ClientReportViewPayloads {
             buf.writeVarInt(view.matchedModIds().size());
             for (String mod : view.matchedModIds()) buf.writeUtf(mod, 96);
             buf.writeBoolean(view.report() != null);
-            if (view.report() != null) ClientReportPayloads.Report.CODEC.encode(buf, view.report());
+            if (view.report() != null) (full ? ClientReportPayloads.Report.VIEW_CODEC : ClientReportPayloads.Report.CODEC).encode(buf, view.report());
         }
 
-        private static View decode(RegistryFriendlyByteBuf buf) {
+        private static View decode(RegistryFriendlyByteBuf buf) { return decode(buf, false); }
+        private static View decode(RegistryFriendlyByteBuf buf, boolean full) {
             long id = buf.readLong();
             String message = buf.readUtf(512);
             String player = buf.readUtf(16);
@@ -89,10 +91,17 @@ public final class ClientReportViewPayloads {
             if (modCount < 0 || modCount > 512) throw new IllegalArgumentException("Invalid mod match count");
             var modMatches = new ArrayList<String>(modCount);
             for (int i = 0; i < modCount; i++) modMatches.add(buf.readUtf(96));
-            var report = buf.readBoolean() ? ClientReportPayloads.Report.CODEC.decode(buf) : null;
+            var report = buf.readBoolean() ? (full ? ClientReportPayloads.Report.VIEW_CODEC : ClientReportPayloads.Report.CODEC).decode(buf) : null;
             return new View(id, message, player, receivedAt, commands, matches, report, modMatches);
         }
 
         @Override public Type<View> type() { return TYPE; }
     }
+    public record FullView(View view) implements CustomPacketPayload {
+        public static final Type<FullView> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_view_v5"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, FullView> CODEC = StreamCodec.of(
+                (buf, value) -> View.encode(buf, value.view(), true), buf -> new FullView(View.decode(buf, true)));
+        @Override public Type<FullView> type() { return TYPE; }
+    }
+
 }

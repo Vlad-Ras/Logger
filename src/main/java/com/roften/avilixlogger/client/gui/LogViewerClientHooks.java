@@ -65,20 +65,38 @@ public final class LogViewerClientHooks {
 
     public static void acceptClientReportRequest(ClientReportPayloads.Request request, IPayloadContext context) {
         Minecraft minecraft = Minecraft.getInstance();
-        var connection = minecraft.getConnection();
-        if (connection == null || connection.getConnection() != context.connection()
-                || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
+        // A play payload can arrive before Minecraft.player is assigned. Reply through
+        // its own connection; the global player singleton must not drop this request.
+        if (!(context.connection().getPacketListener() instanceof net.minecraft.client.multiplayer.ClientPacketListener connection)
+                || !context.connection().isConnected() || !connection.hasChannel(ClientReportPayloads.Report.TYPE)) return;
 
         if (connection.hasChannel(ClientReportStatusPayloads.Status.TYPE)) {
-            PacketDistributor.sendToServer(new ClientReportStatusPayloads.Status(
+            context.reply(new ClientReportStatusPayloads.Status(
                     request.id(), ClientReportStatusPayloads.Stage.COLLECTING));
         }
 
         var packs = java.util.List.copyOf(minecraft.getResourcePackRepository().getSelectedIds());
+        boolean incremental = connection.hasChannel(com.roften.avilixlogger.net.ClientReportHashesPayload.TYPE);
+        var metadata = java.util.List.copyOf(ModList.get().getMods());
+        var base = ClientReportPayloads.collect(request.id(), metadata.stream().map(mod ->
+                new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName()))
+                .sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList(), packs);
+        var packDirectory = minecraft.getResourcePackDirectory();
+        java.util.function.Consumer<com.roften.avilixlogger.net.ClientReportHashesPayload> sendHashes = payload -> minecraft.execute(() -> {
+            if (context.connection().isConnected() && context.connection().getPacketListener() == connection && connection.hasChannel(payload.type())) context.reply(payload);
+        });
+        java.util.function.Consumer<Throwable> failed = failure -> minecraft.execute(() -> {
+            if (modInventory != null && modInventory.isCompletedExceptionally()) modInventory = null;
+            if (!context.connection().isConnected() || context.connection().getPacketListener() != connection) return;
+            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report hashes unavailable", failure);
+            if (incremental) sendHashes.accept(new com.roften.avilixlogger.net.ClientReportHashesPayload(
+                    request.id(), 0, 1, true, java.util.Map.of(), java.util.Map.of()));
+            else if (connection.hasChannel(ClientReportStatusPayloads.Status.TYPE)) context.reply(
+                    new ClientReportStatusPayloads.Status(request.id(), ClientReportStatusPayloads.Stage.FAILED));
+        });
         try {
-            if (modInventory == null) {
-                var metadata = java.util.List.copyOf(ModList.get().getMods());
-                modInventory = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            ClientReportCollection.start(base, incremental, () -> {
+                if (modInventory == null) modInventory = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
                     var hashes = new java.util.HashMap<java.nio.file.Path, String>();
                     return metadata.stream().map(mod -> {
                         var file = mod.getOwningFile();
@@ -87,32 +105,14 @@ public final class LogViewerClientHooks {
                         return new ClientReportPayloads.Mod(mod.getModId(), mod.getVersion().toString(), mod.getDisplayName(), hash);
                     }).sorted(java.util.Comparator.comparing(ClientReportPayloads.Mod::id)).toList();
                 }, REPORT_WORKER);
-            }
-            var packDirectory = minecraft.getResourcePackDirectory();
-            var inventory = modInventory;
-            inventory.thenApplyAsync(mods -> ClientReportPayloads.collect(request.id(), mods, packs,
-                    ResourcePackHashes.collect(packDirectory, packs)), REPORT_WORKER)
-                    .whenComplete((report, failure) -> minecraft.execute(() -> {
-                        if (failure != null && modInventory == inventory && inventory.isCompletedExceptionally()) {
-                            modInventory = null;
-                        }
-                        if (minecraft.getConnection() != connection) return;
-                        if (failure != null) {
-                            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report collection failed", failure);
-                            if (connection.hasChannel(ClientReportStatusPayloads.Status.TYPE)) {
-                                PacketDistributor.sendToServer(new ClientReportStatusPayloads.Status(
-                                        request.id(), ClientReportStatusPayloads.Stage.FAILED));
-                            }
-                        } else if (connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
-                            PacketDistributor.sendToServer(report);
-                        }
-                    }));
+                return modInventory;
+            }, () -> ResourcePackHashes.collect(packDirectory, packs), REPORT_WORKER,
+                    report -> minecraft.execute(() -> {
+                        if (context.connection().isConnected() && context.connection().getPacketListener() == connection && connection.hasChannel(ClientReportPayloads.Report.TYPE))
+                            context.reply(report);
+                    }), sendHashes).whenComplete((ignored, failure) -> { if (failure != null) failed.accept(failure); });
         } catch (java.util.concurrent.RejectedExecutionException failure) {
-            AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report hashing queue is full", failure);
-            if (connection.hasChannel(ClientReportStatusPayloads.Status.TYPE)) {
-                PacketDistributor.sendToServer(new ClientReportStatusPayloads.Status(
-                        request.id(), ClientReportStatusPayloads.Stage.FAILED));
-            }
+            failed.accept(failure);
         }
     }
 

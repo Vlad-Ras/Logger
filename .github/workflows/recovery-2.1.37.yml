@@ -1,11 +1,11 @@
-name: Verify 2.1.36 crash recovery candidate
+name: Verify 2.1.37 crash recovery candidate
 on:
   push:
-    branches: [work/2.1.36]
+    branches: [work/2.1.37-client-reports]
 permissions:
   contents: read
 concurrency:
-  group: recovery-2.1.36
+  group: recovery-2.1.37
   cancel-in-progress: true
 jobs:
   server:
@@ -37,6 +37,10 @@ jobs:
           grep -q RECOVERY_JOURNAL_WAIT_NATIVE_OK recovery-server.log
           grep -q RECOVERY_STORAGE_LOCK_NATIVE_OK recovery-server.log
           grep -q AVILIX_CREATE_SMOKE_OK recovery-server.log
+          grep -q CLIENT_REPORT_HASH_WIRE_OK recovery-server.log
+          grep -q CLIENT_REPORT_HASH_STORAGE_CODEC_OK recovery-server.log
+          grep -q CLIENT_REPORT_IO_ISOLATION_OK recovery-server.log
+          grep -q CLIENT_REPORT_REPLY_REPLACEMENT_OK recovery-server.log
           grep -q LOGGER_PAYLOAD_PROFILE recovery-server.log
           grep -q 'LOGGER_TICK_PROFILE phase=candidate' recovery-server.log
           if grep -qE 'AVILIX_CREATE_SMOKE_FAILED|MixinApplyError|MixinTransformerError' recovery-server.log; then exit 1; fi
@@ -51,14 +55,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: recovery-2.1.36-server-evidence
+          name: recovery-2.1.37-server-evidence
           path: |
             recovery-server.log
             recovery-benchmark.log
             build/recovery-full-server.jfr
             build/recovery-restarts/*.log
             run/avilixlogger-server-ci.jfr
-            build/libs/avilixlogger-2.1.36.jar
+            build/libs/avilixlogger-2.1.37.jar
   client:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -81,6 +85,7 @@ jobs:
           timeout --signal=INT --kill-after=15s 600s xvfb-run -a ./gradlew runClient -PguiSmoke -PacceptanceJfr --no-daemon --console=plain > recovery-client.log 2>&1 || status=$?
           tail -n 100 recovery-client.log
           if [ "${status:-0}" -ne 0 ]; then exit "$status"; fi
+          grep -q CLIENT_REPORT_EARLY_CONNECTION_OK recovery-client.log
           grep -q CART_GUI_CLIENT_OK recovery-client.log
           grep -q RECOVERY_GUI_NATIVE_OK recovery-client.log
           grep -q SERVER_LOG_GUI_NATIVE_OK recovery-client.log
@@ -89,7 +94,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: recovery-2.1.36-client-evidence
+          name: recovery-2.1.37-client-evidence
           path: |
             recovery-client.log
             run/avilixlogger-client-ci.jfr

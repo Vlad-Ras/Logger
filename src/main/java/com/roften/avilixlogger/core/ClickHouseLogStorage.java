@@ -299,7 +299,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                 if (hash != null && hash.isJsonPrimitive()) hashes.put(pack, hash.getAsString());
             }
         }
-        return ClientReportPayloads.collect(0, mods, packs, hashes).withTruncation(json.get("truncated").getAsBoolean());
+        // Stored/enriched reports are not serverbound packets. Preserve their complete inventory;
+        // legacy viewers are limited only when sending the negotiated v4 response.
+        return new ClientReportPayloads.Report(0, mods, packs, json.get("truncated").getAsBoolean(), hashes);
     }
 
     private void ensureSchema() {

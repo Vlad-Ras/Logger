@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
@@ -32,6 +33,9 @@ public final class ClientReportLoadSmoke {
         var packs = IntStream.range(0, 24).mapToObj(i -> "file/fixture-pack-" + i + ".zip").toList();
         var report = ClientReportPayloads.collect(1, mods, packs);
         checkNetworkSizes(server);
+        checkHashPackets(server);
+        checkReportIoIsolation();
+        checkReplyReplacement(server);
         checkDailyLimit(server);
         checkStructuredReport(server);
         checkConsoleStatus(server, report);
@@ -63,6 +67,87 @@ public final class ClientReportLoadSmoke {
         } finally {
             inbound.release();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void checkReplyReplacement(MinecraftServer server) {
+        try {
+            var replyType=Class.forName(ClientReportNetwork.class.getName()+"$Reply");
+            var replyConstructor=replyType.getDeclaredConstructor(net.minecraft.commands.CommandSourceStack.class,Long.class);replyConstructor.setAccessible(true);
+            var oldReply=replyConstructor.newInstance(server.createCommandSourceStack(),Long.valueOf(100));
+            var newReply=replyConstructor.newInstance(server.createCommandSourceStack(),Long.valueOf(101));
+            var pendingType=Class.forName(ClientReportNetwork.class.getName()+"$Pending");
+            var pendingConstructor=pendingType.getDeclaredConstructor(long.class,net.minecraft.server.network.ServerGamePacketListenerImpl.class,replyType,boolean.class);pendingConstructor.setAccessible(true);
+            var target=net.neoforged.neoforge.common.util.FakePlayerFactory.get(server.overworld(),new com.mojang.authlib.GameProfile(UUID.randomUUID(),"ReportRoute"));
+            var pending=pendingConstructor.newInstance(42L,target.connection,oldReply,false);
+            var field=ClientReportNetwork.class.getDeclaredField("PENDING");field.setAccessible(true);
+            var map=(java.util.Map<UUID,Object>)field.get(null);Object previous=map.put(target.getUUID(),pending);
+            try {
+                var join=ClientReportNetwork.class.getDeclaredMethod("joinPending",net.minecraft.server.level.ServerPlayer.class,pendingType,replyType);join.setAccessible(true);
+                join.invoke(null,target,pending,newReply);
+                var reply=pendingType.getDeclaredMethod("reply");reply.setAccessible(true);
+                if(reply.invoke(map.get(target.getUUID()))!=newReply)throw new AssertionError("repeated GUI refresh kept stale reply ID");
+            }finally{if(previous==null)map.remove(target.getUUID());else map.put(target.getUUID(),previous);}
+            System.out.println("CLIENT_REPORT_REPLY_REPLACEMENT_OK: second GUI request from same administrator replaces stale request ID while collection continues");
+        }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
+    }
+
+    private static void checkReportIoIsolation() {
+        var blocked = new java.util.concurrent.CountDownLatch(2);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var written = new java.util.concurrent.CountDownLatch(1);
+        try {
+            for (int i=0;i<2;i++) LoggerNetwork.executeClientReportRead(() -> {
+                blocked.countDown();
+                try { release.await(5, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            });
+            if (!blocked.await(2, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("report read pool did not start");
+            LoggerNetwork.executeClientReportIo(written::countDown);
+            if (!written.await(1, java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("slow cached reads blocked report writes");
+        } catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new AssertionError(e); }
+        finally { release.countDown(); }
+        System.out.println("CLIENT_REPORT_IO_ISOLATION_OK: two blocked cached reads do not delay a new write");
+    }
+    private static void checkHashPackets(MinecraftServer server) {
+        var mods = new ArrayList<ClientReportPayloads.Mod>(); var packs = new ArrayList<String>();
+        var hashes = new java.util.LinkedHashMap<String,String>();
+        for(int i=0;i<512;i++) mods.add(new ClientReportPayloads.Mod("m"+i,"1","", "ab".repeat(32)));
+        for(int i=0;i<128;i++){String pack="file/"+i+"x".repeat(100);packs.add(pack);hashes.put(pack,"cd".repeat(32));}
+        var base=ClientReportPayloads.collect(42,mods.stream().map(m->new ClientReportPayloads.Mod(m.id(),m.version())).toList(),packs);
+        var parts=ClientReportHashesPayload.split(base,mods,hashes);
+        var assembly=new ClientReportHashesPayload.Assembly(base);
+        int total=0,maximum=0;
+        var buf=new RegistryFriendlyByteBuf(Unpooled.buffer(),server.registryAccess());
+        try {
+            for(var part:parts){
+                buf.clear();ClientReportHashesPayload.CODEC.encode(buf,part);
+                int bytes=buf.readableBytes();maximum=Math.max(maximum,bytes);total+=bytes;
+                if(bytes>30*1024)throw new AssertionError("hash packet exceeds serverbound limit");
+                var decoded=ClientReportHashesPayload.CODEC.decode(buf);
+                if(!part.equals(decoded)||buf.isReadable())throw new AssertionError("hash packet roundtrip failed");
+                assembly.accept(decoded);
+            }
+            buf.clear();
+            var view=new ClientReportViewPayloads.View(71,"Отчёт сохранён","Fixture",123,List.of(),List.of(),assembly.report());
+            ClientReportViewPayloads.FullView.CODEC.encode(buf,new ClientReportViewPayloads.FullView(view));
+            if(!view.equals(ClientReportViewPayloads.FullView.CODEC.decode(buf).view()))throw new AssertionError("enriched view lost inventory beyond 30 KiB");
+            try {
+                var encode=com.roften.avilixlogger.core.ClickHouseLogStorage.class.getDeclaredMethod("encodeClientReport",ClientReportPayloads.Report.class);encode.setAccessible(true);
+                var decode=com.roften.avilixlogger.core.ClickHouseLogStorage.class.getDeclaredMethod("decodeClientReport",String.class);decode.setAccessible(true);
+                String json=(String)encode.invoke(null,assembly.report());
+                var restored=(ClientReportPayloads.Report)decode.invoke(null,json);
+                if(!restored.mods().equals(assembly.report().mods()) || !restored.packs().equals(assembly.report().packs())
+                        || !restored.packHashes().equals(assembly.report().packHashes()))throw new AssertionError("stored enriched report lost data");
+                System.out.println("CLIENT_REPORT_HASH_STORAGE_CODEC_OK bytes="+json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+            }catch(ReflectiveOperationException failure){throw new AssertionError(failure);}
+            final int wireBytes=total;
+            measure("hash-merge",wireBytes,base.mods().size(),()->{
+                var next=new ClientReportHashesPayload.Assembly(base);parts.forEach(next::accept);
+                if(next.report().mods().size()!=512)throw new AssertionError("hash merge lost inventory");
+            });
+            System.out.printf(Locale.ROOT,"CLIENT_REPORT_HASH_WIRE_OK parts=%d maximum_bytes=%d total_hash_bytes=%d view_bytes=%d mods=%d packs=%d%n",parts.size(),maximum,total,buf.writerIndex(),assembly.report().mods().size(),assembly.report().packs().size());
+        }finally{buf.release();}
     }
 
     private static void checkNetworkSizes(MinecraftServer server) {

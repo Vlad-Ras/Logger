@@ -107,6 +107,13 @@ public final class ClientReportPayloads {
                 ResourceLocation.fromNamespaceAndPath(AvilixLoggerMod.MOD_ID, "client_report_v4"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Report> CODEC = StreamCodec.of(
                 Report::encode, Report::decode);
+        // Only the negotiated server-to-client v5 view may carry the enriched inventory.
+        // The original serverbound report still has its strict 30 KiB cap.
+        public static final StreamCodec<RegistryFriendlyByteBuf, Report> VIEW_CODEC = StreamCodec.of(
+                (buf, report) -> {
+                    int start = buf.writerIndex(); encode(buf, report);
+                    if (buf.writerIndex() - start > 128 * 1024) throw new IllegalArgumentException("Report view exceeds limit");
+                }, buf -> decode(buf, 128 * 1024));
 
         public Report(long id, List<Mod> mods, List<String> packs, boolean truncated) {
             this(id, mods, packs, truncated, Map.of());
@@ -151,8 +158,9 @@ public final class ClientReportPayloads {
             }
         }
 
-        private static Report decode(RegistryFriendlyByteBuf buf) {
-            if (buf.readableBytes() > MAX_WIRE_BYTES) {
+        private static Report decode(RegistryFriendlyByteBuf buf) { return decode(buf, MAX_WIRE_BYTES); }
+        private static Report decode(RegistryFriendlyByteBuf buf, int maximum) {
+            if (buf.readableBytes() > maximum) {
                 throw new IllegalArgumentException("Client report exceeds the wire limit");
             }
             long id = buf.readLong();
@@ -197,7 +205,7 @@ public final class ClientReportPayloads {
         return count;
     }
 
-    private static String cleanPackId(String id) {
+    static String cleanPackId(String id) {
         int lastSlash = Math.max(id.lastIndexOf('/'), id.lastIndexOf('\\'));
         if (lastSlash > 4 && id.startsWith("file/")) id = "file/" + id.substring(lastSlash + 1);
         return clean(id, PACK_NAME_LENGTH);

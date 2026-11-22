@@ -54,6 +54,7 @@ public final class CartGuiClientSmoke {
                 }
                 if(++waitingTicks%200==0)System.out.println("GUI_SMOKE_WAIT: screen="+(mc.screen==null?"null":mc.screen.getClass().getName())+" overlay="+(mc.getOverlay()==null?"none":mc.getOverlay().getClass().getName()));
                 if(!(mc.screen instanceof net.minecraft.client.gui.screens.TitleScreen)||mc.getOverlay()!=null||++readyTicks<40)return;
+                ClientReportConnectionSmoke.start(mc);
                 root=new CartHistoryScreen(mc.screen,"");mc.setScreen(root);
                 var rows=new ArrayList<S2CCartHistoryPayload.Row>();for(int i=0;i<12;i++)rows.add(new S2CCartHistoryPayload.Row(ID,100-i,"18.10.2026 23:50:00","Штуковина: упаковка","MaxKuz","minecraft:overworld · -1775 38 -2726","Полный снимок: 125 блоков. Хранилища предметов и жидкости сохранены.",true,true));
                 root.apply(new S2CCartHistoryPayload(S2CCartHistoryPayload.PAGE,0,"",88,true,"Все операции доступны через GUI","",rows));
@@ -71,7 +72,7 @@ public final class CartGuiClientSmoke {
             if(stage<FILES.size()){
                 Screenshot.grab(mc.gameDirectory,FILES.get(stage),mc.getMainRenderTarget(),message->System.out.println("CART_GUI_SCREENSHOT: "+message.getString()));
                 stage++;
-                if(stage==1)mc.setScreen(panel("Actions"));
+                if(stage==1){ ClientReportConnectionSmoke.verify(); mc.setScreen(panel("Actions")); }
                 else if(stage==2)root.confirmation("Вернуть саму штуковину в предмет: "+ID+". entry=100; блоков: 125. Основа: снимок entry=80, применено изменений состояния: 12. Хранилищ предметов: 4, предметов: 128; баков: 2, жидкости: 3000 mB. Мир и действия штуковины не откатываются. Подтверждение действует две минуты.","log cart confirm-recovery "+ID+" 100");
                 else if(stage==3)mc.setScreen(panel("Journal"));
                 else if(stage==4){
@@ -281,6 +282,9 @@ public final class CartGuiClientSmoke {
                     var input = screen.children().stream().filter(net.minecraft.client.gui.components.EditBox.class::isInstance)
                             .map(net.minecraft.client.gui.components.EditBox.class::cast).findFirst().orElseThrow();
                     input.setValue("AuditTarget");
+                    for (String label : List.of("Запрос отчёта", "Открыть сохранённый", "Обновить (онлайн)"))
+                        check(screen.children().stream().anyMatch(widget -> widget instanceof net.minecraft.client.gui.components.Button button
+                                && button.getMessage().getString().equals(label)), "missing report action: " + label);
                     check(input.getValue().equals("AuditTarget"), "report nickname input missing");
                     var request = type.getDeclaredField("reportRequest");
                     request.setAccessible(true);
@@ -297,7 +301,12 @@ public final class CartGuiClientSmoke {
                     searchField.setAccessible(true);
                     var search = (net.minecraft.client.gui.components.EditBox) searchField.get(screen);
                     com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
-                            new com.roften.avilixlogger.net.ClientReportViewPayloads.View(41, "", "AuditTarget", 123, List.of(), List.of(pack), report));
+                            new com.roften.avilixlogger.net.ClientReportViewPayloads.View(41, "Список получен; SHA-256 вычисляются отдельно", "AuditTarget", 123, List.of(), List.of(pack), report));
+                    var reportStatus = type.getDeclaredField("status"); reportStatus.setAccessible(true);
+                    check(reportStatus.get(screen).toString().contains("SHA-256"), "report-bearing progress status was discarded");
+                    com.roften.avilixlogger.client.gui.LogViewerClientHooks.acceptClientReportView(
+                            new com.roften.avilixlogger.net.ClientReportViewPayloads.View(40, "старый запрос", "OtherTarget", 122, List.of(), List.of(), report));
+                    check(reportStatus.get(screen).toString().contains("SHA-256"), "stale request replaced current report status");
                     clickLabel(screen, "Моды");
                     clickLabel(screen, "Копировать вкладку");
                     check(mc.keyboardHandler.getClipboard().contains("Create (create)"), "mods tab did not show the display name and ID");

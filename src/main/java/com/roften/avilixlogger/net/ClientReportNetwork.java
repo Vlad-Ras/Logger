@@ -48,6 +48,24 @@ public final class ClientReportNetwork {
     private static final int GUI_CHUNK_SIZE = 24;
     private static final DateTimeFormatter REPORT_TIME = DateTimeFormatter.ofPattern("dd.MM.uuuu HH:mm:ss XXX");
     private static final Map<UUID, Pending> PENDING = new HashMap<>();
+    private static final java.util.LinkedHashMap<UUID, HashCollection> HASH_COLLECTIONS = new java.util.LinkedHashMap<>();
+    private static final long HASH_LIFETIME_NANOS = Duration.ofMinutes(8).toNanos();
+    private static final int MAX_HASH_COLLECTIONS = 256;
+    private static final class HashCollection {
+        final Pending request;
+        final ClickHouseLogStorage.ClientReport base;
+        final ClientReportHashesPayload.Assembly assembly;
+        final long started = System.nanoTime();
+        Reply reply;
+        Matches matches = new Matches(List.of(), List.of());
+        ClickHouseLogStorage.ClientReport enriched;
+        boolean baseFinished, baseAcknowledged, saving;
+        HashCollection(Pending request, ClickHouseLogStorage.ClientReport base) {
+            this.request = request; this.base = base; this.reply = request.reply();
+            this.assembly = new ClientReportHashesPayload.Assembly(base.report());
+        }
+        ClickHouseLogStorage.ClientReport visible() { return enriched == null ? base : enriched; }
+    }
     private static final Map<UUID, Long> LAST_MANUAL_REQUEST = new HashMap<>();
     private static final Map<UUID, Long> AUTO_RETRY_AT = new HashMap<>();
     private static final Map<UUID, Object> COMMAND_QUERIES = new HashMap<>();
@@ -82,12 +100,14 @@ public final class ClientReportNetwork {
             else source.sendSystemMessage(Component.literal("[AvilixLogger] " + text));
         }
 
-        void report(ClickHouseLogStorage.ClientReport snapshot, Matches matches) {
+        void report(ClickHouseLogStorage.ClientReport snapshot, Matches matches) { report(snapshot, matches, ""); }
+        void report(ClickHouseLogStorage.ClientReport snapshot, Matches matches, String status) {
             if (requestId == null) {
                 writeReport(source, snapshot.playerName(), snapshot.receivedAt(), snapshot.report());
+                if (!status.isBlank()) status(status, false);
                 return;
             }
-            sendView(source, new ClientReportViewPayloads.View(requestId, "", snapshot.playerName(),
+            sendView(source, new ClientReportViewPayloads.View(requestId, status, snapshot.playerName(),
                     snapshot.receivedAt().toEpochMilli(), List.of(), matches.packs(), snapshot.report(), matches.mods()));
         }
     }
@@ -161,11 +181,25 @@ public final class ClientReportNetwork {
         if (enabled() && LoggerConfig.isEnabled()) requestOnline(player, null);
     }
 
-    /** Check one connected client each second to spread daily refreshes across server ticks. */
+    /** Retry a bounded batch each second; do not make a join wait one second per connected client. */
     public static void checkConnectedPlayer(MinecraftServer server) {
-        if (!enabled() || !LoggerConfig.isEnabled()) return;
+        if (!enabled() || !LoggerConfig.isEnabled() || !AuthCoreBridge.isAuthorized(server)) {
+            if (!PENDING.isEmpty() || !HASH_COLLECTIONS.isEmpty()) clearReports();
+            return;
+        }
+        long now = System.nanoTime();
+        var expired = HASH_COLLECTIONS.entrySet().iterator();
+        while (expired.hasNext()) {
+            var entry = expired.next(); var collection = entry.getValue();
+            if (now - collection.started > HASH_LIFETIME_NANOS) {
+                if (collection.reply != null && canDeliver(collection.reply.source())) collection.reply.report(
+                        collection.visible(), collection.matches, "Список получен; вычисление SHA-256 не завершилось вовремя.");
+                expired.remove();
+            }
+        }
         var players = server.getPlayerList().getPlayers();
-        if (!players.isEmpty()) {
+        // Retry joins whose channel/storage handshake was not ready without waiting one second per online player.
+        for (int i = 0; i < Math.min(8, players.size()); i++) {
             var player = players.get(Math.floorMod(automaticCursor++, players.size()));
             requestOnline(player, null);
         }
@@ -174,6 +208,7 @@ public final class ClientReportNetwork {
     static void onLogout(ServerPlayer player) {
         UUID uuid = player.getUUID();
         var pending = PENDING.remove(uuid);
+        HASH_COLLECTIONS.remove(uuid);
         COMMAND_QUERIES.remove(uuid);
         LAST_MANUAL_REQUEST.remove(uuid);
         AUTO_RETRY_AT.remove(uuid);
@@ -192,6 +227,7 @@ public final class ClientReportNetwork {
     private static void clearReports() {
         reportGeneration++;
         PENDING.clear();
+        HASH_COLLECTIONS.clear();
         COMMAND_QUERIES.clear();
     }
 
@@ -230,7 +266,16 @@ public final class ClientReportNetwork {
             // Keep the request in-flight until ClickHouse acknowledges it. Without this,
             // the once-a-second auto scanner can start duplicate collections during I/O.
             PENDING.put(uuid, new Pending(pending.id(), pending.connection(), pending.reply(), true));
-            saveReport(player, pending, new ClickHouseLogStorage.ClientReport(name(player), Instant.now(), report));
+            var snapshot = new ClickHouseLogStorage.ClientReport(name(player), Instant.now(), report);
+            if (player.connection.hasChannel(ClientReportHashesPayload.TYPE)) {
+                if (!HASH_COLLECTIONS.containsKey(uuid) && HASH_COLLECTIONS.size() >= MAX_HASH_COLLECTIONS)
+                    HASH_COLLECTIONS.remove(HASH_COLLECTIONS.keySet().iterator().next());
+                HASH_COLLECTIONS.put(uuid, new HashCollection(pending, snapshot));
+            }
+            if (pending.reply() != null && canDeliver(pending.reply().source())) pending.reply().report(snapshot,
+                    new Matches(List.of(), List.of()), HASH_COLLECTIONS.containsKey(uuid)
+                            ? "Список получен. Сохраняю отчёт; SHA-256 вычисляются отдельно…" : "Отчёт получен. Сохраняю в ClickHouse…");
+            saveReport(player, pending, snapshot);
         });
     }
 
@@ -241,7 +286,8 @@ public final class ClientReportNetwork {
         if (storage == null) {
             PENDING.remove(playerId);
             deferAutomaticRetry(playerId);
-            notifyRequester(request.reply(), "Сохранение отчёта не подтверждено: ClickHouse ещё недоступен.");
+            notifyRequester(request.reply(), "Список получен, но сохранение не подтверждено: ClickHouse ещё недоступен.");
+            finishBase(player, request, false, null);
             return;
         }
 
@@ -267,29 +313,120 @@ public final class ClientReportNetwork {
                     if (!enabled() || !LoggerConfig.isEnabled()) return;
                     if (!acknowledged) {
                         deferAutomaticRetry(playerId);
-                        notifyRequester(current.reply(), "ClickHouse не подтвердил сохранение нового отчёта.");
+                        notifyRequester(current.reply(), "Список получен, но ClickHouse не подтвердил сохранение нового отчёта.");
+                        finishBase(player, request, false, matches);
                         return;
                     }
                     AUTO_RETRY_AT.remove(playerId);
                     LoggerServerData.get(server.overworld()).markClientReportSaved(playerId, System.currentTimeMillis());
-                    if (current.reply() != null && canDeliver(current.reply().source())) current.reply().report(snapshot, matches);
+                    var hashes = HASH_COLLECTIONS.get(playerId);
+                    if (current.reply() != null && canDeliver(current.reply().source())) current.reply().report(
+                            hashes == null ? snapshot : hashes.visible(), matches,
+                            hashes == null ? "Отчёт сохранён." : "Список сохранён. SHA-256 дополняются отдельно…");
                     notifyMatches(server, snapshot.playerName(), matches);
+                    finishBase(player, request, true, matches);
                 });
             });
         } catch (RejectedExecutionException busy) {
             PENDING.remove(playerId);
             deferAutomaticRetry(playerId);
             AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report I/O queue is full; a report was not saved.");
-            notifyRequester(request.reply(), "Очередь сохранения отчётов заполнена. Повторите ручное обновление позже.");
+            notifyRequester(request.reply(), "Список получен, но очередь сохранения заполнена. Повторите обновление позже.");
+            finishBase(player, request, false, null);
         }
         ServerTickScheduler.schedule(server, SAVE_TIMEOUT_TICKS, () -> {
             Pending pending = PENDING.get(playerId);
             if (pending != null && pending.id() == request.id() && pending.received()) {
                 PENDING.remove(playerId);
                 deferAutomaticRetry(playerId);
-                notifyRequester(pending.reply(), "ClickHouse слишком долго сохраняет отчёт.");
+                notifyRequester(pending.reply(), "Список получен, но ClickHouse слишком долго сохраняет отчёт.");
+                finishBase(player, request, false, null);
             }
         });
+    }
+
+    private static void finishBase(ServerPlayer player, Pending request, boolean acknowledged, Matches matches) {
+        var collection = HASH_COLLECTIONS.get(player.getUUID());
+        if (collection == null || collection.request.id() != request.id() || collection.request.connection() != request.connection()) return;
+        collection.baseFinished = true; collection.baseAcknowledged = acknowledged;
+        if (matches != null) collection.matches = matches;
+        if (collection.assembly.complete()) saveHashes(player, collection);
+    }
+
+    static void receiveHashes(ClientReportHashesPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            if (!(context.player() instanceof ServerPlayer player)) return;
+            var collection = HASH_COLLECTIONS.get(player.getUUID());
+            if (collection == null || collection.request.id() != payload.id() || collection.request.connection() != player.connection
+                    || !enabled() || !LoggerConfig.isEnabled() || !AuthCoreBridge.isAuthorized(player.getServer())) return;
+            try {
+                if (!collection.assembly.accept(payload)) return;
+            } catch (IllegalArgumentException invalid) {
+                HASH_COLLECTIONS.remove(player.getUUID());
+                notifyRequester(collection.reply, "Список получен; дополнение SHA-256 не соответствует этому запросу.");
+                return;
+            }
+            Instant time = Instant.now();
+            if (!time.isAfter(collection.base.receivedAt())) time = collection.base.receivedAt().plusMillis(1);
+            // ClickHouse stores millisecond timestamps; ensure the enriched version sorts AFTER the base without FINAL.
+            if (time.toEpochMilli() <= collection.base.receivedAt().toEpochMilli()) time = collection.base.receivedAt().plusMillis(1);
+            collection.enriched = new ClickHouseLogStorage.ClientReport(collection.base.playerName(), time, collection.assembly.report());
+            if (collection.reply != null && canDeliver(collection.reply.source())) collection.reply.report(collection.enriched, collection.matches,
+                    collection.assembly.failed() ? "Список получен; SHA-256 сейчас недоступны."
+                            : "Список и доступные SHA-256 получены. Сохраняю…");
+            if (collection.baseFinished) saveHashes(player, collection);
+        });
+    }
+
+    private static void saveHashes(ServerPlayer player, HashCollection collection) {
+        if (collection.saving) return;
+        UUID id = player.getUUID();
+        if (collection.baseAcknowledged && (collection.assembly.failed()
+                || collection.enriched.report().equals(collection.base.report()))) {
+            HASH_COLLECTIONS.remove(id);
+            if (collection.reply != null && canDeliver(collection.reply.source())) collection.reply.report(
+                    collection.visible(), collection.matches, collection.assembly.failed()
+                            ? "Список сохранён; SHA-256 сейчас недоступны." : "Отчёт сохранён.");
+            return;
+        }
+        var storage = LoggerRuntime.clientReportStorage();
+        if (storage == null) {
+            HASH_COLLECTIONS.remove(id);
+            notifyRequester(collection.reply, "Отчёт получен, но ClickHouse ещё недоступен для сохранения SHA-256."); return;
+        }
+        collection.saving = true;
+        var server = player.getServer(); long generation = reportGeneration;
+        try {
+            LoggerNetwork.executeClientReportIo(() -> {
+                boolean saved;
+                try { storeWithRetry(storage, id, collection.enriched); saved = true; }
+                catch (IOException | RuntimeException failure) {
+                    saved = false;
+                    AvilixLoggerMod.LOGGER.warn("[AvilixLogger] Client report hash write not confirmed ({})", failure.getClass().getSimpleName());
+                }
+                boolean acknowledged = saved;
+                Matches matches = acknowledged ? matchReport(collection.enriched.report(), TriggerRules.configured()) : collection.matches;
+                server.execute(() -> {
+                    if (generation != reportGeneration || HASH_COLLECTIONS.get(id) != collection) return;
+                    collection.matches = matches;
+                    HASH_COLLECTIONS.remove(id);
+                    if (!enabled() || !LoggerConfig.isEnabled()) return;
+                    if (acknowledged) {
+                        if (!collection.baseAcknowledged) {
+                            AUTO_RETRY_AT.remove(id);
+                            LoggerServerData.get(server.overworld()).markClientReportSaved(id, System.currentTimeMillis());
+                            notifyMatches(server, collection.enriched.playerName(), collection.matches);
+                        }
+                        if (collection.reply != null && canDeliver(collection.reply.source())) collection.reply.report(
+                                collection.enriched, collection.matches, collection.assembly.failed()
+                                        ? "Список сохранён; SHA-256 сейчас недоступны." : "Отчёт с доступными SHA-256 сохранён.");
+                    } else notifyRequester(collection.reply, "Список получен; сохранение SHA-256 в ClickHouse не подтверждено.");
+                });
+            });
+        } catch (RejectedExecutionException busy) {
+            HASH_COLLECTIONS.remove(id);
+            notifyRequester(collection.reply, "Список получен; очередь сохранения SHA-256 занята.");
+        }
     }
 
     private static void storeWithRetry(ClickHouseLogStorage storage, UUID playerId,
@@ -325,6 +462,7 @@ public final class ClientReportNetwork {
             var reply = new Reply(source, query.id());
             switch (query.action()) {
                 case REQUEST -> request(query.name(), reply);
+                case ACQUIRE -> acquire(query.name(), reply);
                 case CACHED -> cached(query.name(), reply);
                 case COMMANDS -> commands(player, query.name(), reply);
             }
@@ -332,7 +470,28 @@ public final class ClientReportNetwork {
     }
 
     private static void sendView(CommandSourceStack source, ClientReportViewPayloads.View view) {
-        if (source.getEntity() instanceof ServerPlayer player) PacketDistributor.sendToPlayer(player, view);
+        if (source.getEntity() instanceof ServerPlayer player) {
+            if (player.connection.hasChannel(ClientReportViewPayloads.FullView.TYPE)) {
+                PacketDistributor.sendToPlayer(player, new ClientReportViewPayloads.FullView(view));
+            } else {
+                // Old admin clients retain their original v4 wire budget and explicit truncation.
+                var report = view.report();
+                if (report != null) report = ClientReportPayloads.collect(report.id(), report.mods(), report.packs(), report.packHashes())
+                        .withTruncation(report.truncated());
+                PacketDistributor.sendToPlayer(player, new ClientReportViewPayloads.View(view.id(), view.message(), view.player(),
+                        view.receivedAt(), view.commands(), view.matches(), report, view.matchedModIds()));
+            }
+        }
+    }
+
+    private static int acquire(String playerName, Reply reply) {
+        if (!ready(playerName, reply)) return 0;
+        var server = reply.source().getServer();
+        var target = server.getPlayerList().getPlayerByName(playerName);
+        if (target == null) return cached(playerName, reply);
+        if (PENDING.containsKey(target.getUUID()) || LoggerServerData.get(server.overworld())
+                .nextClientReportAt(target.getUUID(), System.currentTimeMillis()) == 0) return requestOnline(target, reply);
+        return cached(playerName, reply);
     }
 
     private static int request(String playerName, Reply reply) {
@@ -342,6 +501,27 @@ public final class ClientReportNetwork {
         return requestOnline(target, reply);
     }
 
+    private static boolean sameRequester(Reply first, Reply second) {
+        return first.source().getEntity() == second.source().getEntity();
+    }
+
+    private static int joinPending(ServerPlayer target, Pending existing, Reply reply) {
+        UUID uuid = target.getUUID();
+        if (reply != null && (existing.reply() == null || sameRequester(existing.reply(), reply) || !canDeliver(existing.reply().source()))) {
+            PENDING.put(uuid, new Pending(existing.id(), existing.connection(), reply, existing.received()));
+            var hashes = HASH_COLLECTIONS.get(uuid);
+            if (hashes != null) {
+                hashes.reply = reply;
+                reply.report(hashes.visible(), hashes.matches, "Список уже получен. Сохраняю отчёт…");
+                return 1;
+            }
+            return feedback(reply, existing.received()
+                    ? "Отчёт уже получен; ожидаю сохранения в ClickHouse…"
+                    : "Отчёт уже запрашивается. Ответ появится здесь.", false);
+        }
+        return feedback(reply, "Для " + name(target) + " уже ожидается отчёт.", true);
+    }
+
     private static int requestOnline(ServerPlayer target, Reply reply) {
         if (!target.connection.hasChannel(ClientReportPayloads.Request.TYPE)
                 || !target.connection.hasChannel(ClientReportPayloads.Report.TYPE)) {
@@ -349,15 +529,7 @@ public final class ClientReportNetwork {
         }
         UUID uuid = target.getUUID();
         var existing = PENDING.get(uuid);
-        if (existing != null) {
-            if (reply != null && existing.reply() == null) {
-                PENDING.put(uuid, new Pending(existing.id(), existing.connection(), reply, existing.received()));
-                return feedback(reply, existing.received()
-                        ? "Отчёт уже получен; ожидаю сохранения в ClickHouse…"
-                        : "Отчёт уже запрашивается. Ответ появится здесь.", false);
-            }
-            return feedback(reply, "Для " + name(target) + " уже ожидается отчёт.", true);
-        }
+        if (existing != null) return joinPending(target, existing, reply);
 
         long nowNanos = System.nanoTime();
         if (reply != null) {
@@ -367,7 +539,9 @@ public final class ClientReportNetwork {
             }
         }
         var server = target.getServer();
-        if (LoggerRuntime.clientReportStorage() == null) return feedback(reply, "ClickHouse ещё недоступен. Повторите запрос позже.", true);
+        // Automatic joins retry in the bounded scanner after storage warmup, without rehashing clients while DB is down.
+        // An explicit manual request still delivers inventory independently of persistence.
+        if (reply == null && LoggerRuntime.clientReportStorage() == null) return 0;
         // Manual refresh is independent of the automatic 24h interval.
         // Never reserve a day BEFORE we have a confirmed report.
         if (reply == null) {
@@ -377,6 +551,7 @@ public final class ClientReportNetwork {
         }
 
         long id = ++lastId;
+        HASH_COLLECTIONS.remove(uuid);
         PENDING.put(uuid, new Pending(id, target.connection, reply, false));
         if (reply != null) LAST_MANUAL_REQUEST.put(uuid, nowNanos);
         PacketDistributor.sendToPlayer(target, new ClientReportPayloads.Request(id));
@@ -402,7 +577,7 @@ public final class ClientReportNetwork {
         UUID playerId = online == null ? null : online.getUUID();
         long generation = reportGeneration;
         try {
-            LoggerNetwork.executeClientReportIo(() -> {
+            LoggerNetwork.executeClientReportRead(() -> {
                 try {
                     var snapshot = storage.findClientReport(playerId, playerName);
                     Matches matches = snapshot == null || reply.requestId() == null

@@ -79,13 +79,22 @@ public final class LoggerNetwork {
     private static final java.util.concurrent.ScheduledThreadPoolExecutor GUI_WATCHDOG_EXECUTOR = createWatchdog();
 
     private static ThreadPoolExecutor clientReportIo;
+    private static ThreadPoolExecutor clientReportReadIo;
 
     static synchronized void executeClientReportIo(Runnable operation) {
-        if (clientReportIo == null) clientReportIo = createGuiExecutor("AvilixLogger-CLIENT-REPORT-", 1, 128);
+        if (clientReportIo == null) clientReportIo = createGuiExecutor("AvilixLogger-CLIENT-REPORT-WRITE-", 2, 128);
         clientReportIo.execute(operation);
     }
 
+    static synchronized void executeClientReportRead(Runnable operation) {
+        if (clientReportReadIo == null) clientReportReadIo = createGuiExecutor("AvilixLogger-CLIENT-REPORT-READ-", 2, 64);
+        clientReportReadIo.execute(operation);
+    }
+
     private static void stopClientReportIo() {
+        ThreadPoolExecutor reads;
+        synchronized (LoggerNetwork.class) { reads = clientReportReadIo; clientReportReadIo = null; }
+        if (reads != null) reads.shutdownNow();
         ThreadPoolExecutor executor;
         synchronized (LoggerNetwork.class) {
             executor = clientReportIo;
@@ -319,8 +328,12 @@ public final class LoggerNetwork {
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportRequest",
                         new Class<?>[]{ClientReportPayloads.Request.class, IPayloadContext.class}, new Object[]{payload, ctx})));
         audit.playToServer(ClientReportPayloads.Report.TYPE, ClientReportPayloads.Report.CODEC, ClientReportNetwork::receive);
+        audit.playToServer(ClientReportHashesPayload.TYPE, ClientReportHashesPayload.CODEC, ClientReportNetwork::receiveHashes);
         audit.playToServer(ClientReportStatusPayloads.Status.TYPE, ClientReportStatusPayloads.Status.CODEC, ClientReportNetwork::receiveStatus);
         audit.playToServer(ClientReportViewPayloads.Query.TYPE, ClientReportViewPayloads.Query.CODEC, ClientReportNetwork::handleView);
+        audit.playToClient(ClientReportViewPayloads.FullView.TYPE, ClientReportViewPayloads.FullView.CODEC,
+                (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportView",
+                        new Class<?>[]{ClientReportViewPayloads.View.class}, new Object[]{payload.view()})));
         audit.playToClient(ClientReportViewPayloads.View.TYPE, ClientReportViewPayloads.View.CODEC,
                 (payload, ctx) -> ctx.enqueueWork(() -> invokeClientHook("acceptClientReportView",
                         new Class<?>[]{ClientReportViewPayloads.View.class}, new Object[]{payload})));
