@@ -304,6 +304,7 @@ var generateModMetadata = tasks.register("generateModMetadata", ProcessResources
             minecraft_version      : minecraft_version,
             minecraft_version_range: minecraft_version_range,
             neo_version            : neo_version,
+            neo_version_range      : neo_version_range,
             loader_version_range   : loader_version_range,
             mod_id                 : mod_id,
             mod_name               : mod_name,
@@ -386,6 +387,18 @@ tasks.register('verifyObfuscatedJar') {
     dependsOn tasks.named('obfuscateJar')
 
     doLast {
+        // A CI/build-version override must not silently raise the runtime requirement.
+        def releaseZip = new java.util.zip.ZipFile(releaseJar.get().asFile)
+        try {
+            def metadataEntry = releaseZip.getEntry('META-INF/neoforge.mods.toml')
+            if (metadataEntry == null) throw new GradleException('Release JAR lacks mod metadata')
+            def metadata = releaseZip.getInputStream(metadataEntry).getText('UTF-8')
+            def neoDependency = metadata =~ /(?s)modId\s*=\s*"neoforge".*?versionRange\s*=\s*"([^"]+)"/
+            if (!neoDependency.find() || neoDependency.group(1) != project.neo_version_range)
+                throw new GradleException('Release NeoForge dependency differs from the declared runtime range')
+        } finally {
+            releaseZip.close()
+        }
         def mappingText = proguardMapping.get().asFile.getText('UTF-8')
         def actionTypeMapping = mappingText =~ /(?m)^com\.roften\.avilixlogger\.core\.ActionType -> ([\w.$]+):$/
         if (!actionTypeMapping.find()) {
