@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 
 /** One server-thread transaction across every block batch. Preparation never changes the world. */
 public final class RecoveryScene {
-    public enum Phase { RESERVE, ENTITY_INDEX, WAIT_CHUNKS, CAPTURE, ENTITY_CAPTURE, RECHECK, ENTITY_RECHECK, RESOURCE_CHECK, RESOURCE_RECHECK, WRITE_JOURNAL, STATES, DATA, ENTITY_APPLY, VERIFY, ENTITY_VERIFY, READY, UNDO_ENTITIES, UNDO_STATES, UNDO_DATA, ABORTED, CLOSED, QUARANTINED }
+    public enum Phase { RESERVE, ENTITY_INDEX, WAIT_CHUNKS, CAPTURE, ENTITY_CAPTURE, RECHECK, ENTITY_RECHECK, RESOURCE_CHECK, RESOURCE_RECHECK, WRITE_JOURNAL, STATES, DATA, ENTITY_APPLY, VERIFY, ENTITY_VERIFY, PLAYER_VERIFY, READY, UNDO_ENTITIES, UNDO_STATES, UNDO_DATA, ABORTED, CLOSED, QUARANTINED }
     public record Target(ServerLevel level, RollbackEngine.PreparedBlockSnapshot snapshot) {}
     private record Address(ServerLevel level, BlockPos pos) {}
     private record ChunkAddress(ServerLevel level, long chunk) {}
@@ -31,6 +31,7 @@ public final class RecoveryScene {
     private final long memoryLimit;
     private final int maxChunks;
     private final RecoveryEntityBatch entities;
+    private final RecoveryPlayerDependencies players;
     private final RollbackReport report = new RollbackReport();
     private Phase phase = Phase.RESERVE;
     private int cursor, changed, chunksRequested;
@@ -41,13 +42,19 @@ public final class RecoveryScene {
     private boolean cancelledWhileWriting;
     private boolean preflightOnly;
     private java.util.concurrent.CompletableFuture<Void> resourceCheck;
-    private volatile boolean resourcesCancelled;
+    private final java.util.concurrent.atomic.AtomicBoolean resourcesCancelled=new java.util.concurrent.atomic.AtomicBoolean();
     private long resourceDeadline;
 
     public RecoveryScene(List<Target> supplied, long memoryLimit, int maxChunks) {this(supplied,List.of(),memoryLimit,maxChunks,ignored->{});}
     public RecoveryScene(List<Target> supplied,List<RecoveryEntityBatch.Target> entityTargets,long memoryLimit,int maxChunks,
                          java.util.function.Consumer<List<EntityReplayPlan.Prepared>> history) {
+        this(supplied,entityTargets,memoryLimit,maxChunks,history,List.of(),ignored->{});
+    }
+    public RecoveryScene(List<Target> supplied,List<RecoveryEntityBatch.Target> entityTargets,long memoryLimit,int maxChunks,
+                         java.util.function.Consumer<List<EntityReplayPlan.Prepared>> history,List<PlayerBlockTransfer.Proof> playerTransfers,
+                         java.util.function.Consumer<List<PlayerBlockTransfer.Proof>> playerHistory) {
         this.entities=entityTargets.isEmpty()?null:new RecoveryEntityBatch(entityTargets,history);
+        this.players=playerTransfers.isEmpty()?null:new RecoveryPlayerDependencies(supplied.getFirst().level().getServer(),playerTransfers,playerHistory);
         this.maxChunks=maxChunks;
         targets = new ArrayList<>(supplied.size());
         var unique = new HashMap<Address, RollbackEngine.PreparedBlockSnapshot>();
@@ -91,7 +98,7 @@ public final class RecoveryScene {
     public void cancel(String reason) {
         if (phase == Phase.CLOSED || phase == Phase.ABORTED || phase == Phase.QUARANTINED) return;
         failure = reason;
-        resourcesCancelled=true;
+        resourcesCancelled.set(true);
         if(entities!=null)entities.cancel();
         if(journal!=null&&!journal.done()){cancelledWhileWriting=true;return;}
         cursor = 0;
@@ -182,7 +189,7 @@ public final class RecoveryScene {
                 } else if (phase == Phase.RESOURCE_RECHECK) {
                     if(cursor<saved.size()){var value=saved.get(cursor++);verifyCurrent(value,value.before());}
                     else if(entities!=null&&cursor-saved.size()<entities.size())entities.recheck(cursor++-saved.size());
-                    else {cursor=0;writeJournal();}
+                    else {if(players!=null)players.recheckLive();cursor=0;writeJournal();}
                 } else if (phase == Phase.WRITE_JOURNAL) {
                     if(!journal.done()) {
                         if(System.nanoTime()>=journalDeadline){
@@ -194,6 +201,7 @@ public final class RecoveryScene {
                     }
                     journal.await();
                     if(cancelledWhileWriting){cancel(failure);return;}
+                    if(players!=null)players.recheckLive();
                     phase=Phase.STATES;
                 } else if (phase == Phase.STATES) {
                     if (cursor == saved.size()) { cursor=0; phase=Phase.DATA; continue; }
@@ -207,14 +215,20 @@ public final class RecoveryScene {
                     if(cursor==entities.size()){cursor=0;phase=Phase.VERIFY;continue;}
                     entities.apply(cursor++);
                 } else if (phase == Phase.VERIFY) {
-                    if (cursor == saved.size()) {cursor=0;if(entities!=null){phase=Phase.ENTITY_VERIFY;continue;}phase=Phase.READY;return;}
+                    if (cursor == saved.size()) {cursor=0;if(entities!=null){phase=Phase.ENTITY_VERIFY;continue;}finishVerification();return;}
                     var value=saved.get(cursor++);
                     verifyCurrent(value, targetCheckpoint(value));
                     if(!value.desired().canSurvive(value.target().level(),value.target().snapshot().pos()))
                         throw new IllegalStateException("Восстановленному блоку не хватает опоры/связанных блоков: "+value.target().level().dimension().location()+" "+value.target().snapshot().pos());
                 } else if (phase == Phase.ENTITY_VERIFY) {
-                    if(cursor==entities.size()){cursor=0;phase=Phase.READY;return;}
+                    if(cursor==entities.size()){cursor=0;finishVerification();return;}
                     entities.verify(cursor++);
+                } else if(phase==Phase.PLAYER_VERIFY) {
+                    if(!resourceCheck.isDone()) {
+                        if(System.nanoTime()>=resourceDeadline)throw new IllegalStateException("Повторная проверка сохранённых инвентарей не завершилась за 30 секунд");
+                        return;
+                    }
+                    resourceCheck.join();resourceCheck=null;players.recheckLive();phase=Phase.READY;return;
                 } else if (phase == Phase.UNDO_ENTITIES) {
                     if(cursor==entities.size()){cursor=0;phase=Phase.UNDO_STATES;continue;}
                     entities.undo(cursor++);
@@ -247,12 +261,36 @@ public final class RecoveryScene {
         var inputs=saved.stream().map(value->new RecoveryItemBalance.Input(value.target().level().dimension().location().toString(),
                 value.target().snapshot().pos(),value.before(),targetCheckpoint(value))).toList();
         long remaining=Math.max(0,memoryLimit-memoryBytes-(entities==null?0:entities.backupBytes()));
-        resourceCheck=RecoveryJournal.io(()->{RecoveryItemBalance.verify(inputs,remaining,()->resourcesCancelled);return null;});
+        RecoveryPlayerDependencies.Check dependencies=null;
+        if(players!=null) {
+            var frontiers=new ArrayList<RecoveryPlayerDependencies.Frontier>();
+            for(var value:saved) {
+                var checkpoints=value.target().snapshot().checkpoints();int found=-1;
+                for(int i=0;i<checkpoints.size();i++)if(RollbackEngine.sameCheckpoint(value.before(),checkpoints.get(i)))found=i;
+                frontiers.add(new RecoveryPlayerDependencies.Frontier(value.target().level().dimension().location().toString(),
+                        value.target().snapshot().pos(),found,checkpoints.size()-1));
+            }
+            players.begin(frontiers);dependencies=players.check(true);
+        }
+        var capturedDependencies=dependencies;var cancellation=resourcesCancelled;
+        resourceCheck=RecoveryJournal.io(()->{
+            var changes=List.<RecoveryItemBalance.Change>of();
+            if(capturedDependencies!=null){capturedDependencies.verify(remaining,cancellation::get);changes=capturedDependencies.changes(remaining);}
+            long extra=0;for(var change:changes)extra+=128+PayloadSizeEstimator.estimateTags(change.before(),change.after());
+            RecoveryItemBalance.verify(inputs,changes,Math.max(0,remaining-extra),cancellation::get);return null;
+        });
         resourceDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);phase=Phase.RESOURCE_CHECK;
+    }
+    private void finishVerification() {
+        if(players==null||!players.active()){phase=Phase.READY;return;}
+        var check=players.check(false);long remaining=Math.max(0,memoryLimit-memoryBytes-(entities==null?0:entities.backupBytes()));
+        var cancellation=resourcesCancelled;
+        resourceCheck=RecoveryJournal.io(()->{check.verify(remaining,cancellation::get);return null;});
+        resourceDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);phase=Phase.PLAYER_VERIFY;
     }
     private void writeJournal() {
         if (preflightOnly) { phase=Phase.READY; return; }
-        var keys=entities==null?List.<Long>of():entities.newEvents();
+        var keys=completionEvents();
         var images=entities==null?List.<RecoveryJournal.EntityImage>of():entities.images();
         if(saved.isEmpty()&&keys.isEmpty()&&images.isEmpty()){phase=Phase.STATES;return;}
         var blocks=saved.stream().map(value->new RecoveryJournal.Block(value.target().level().dimension().location().toString(),value.target().snapshot().pos(),value.before(),targetCheckpoint(value))).toList();
@@ -341,9 +379,10 @@ public final class RecoveryScene {
     public void commit() {
         if (!ready()) throw new IllegalStateException("Сцена ещё не проверена целиком");
         if (preflightOnly) throw new IllegalStateException("Предпросмотр не может изменять мир");
+        if(players!=null)players.recheckLive();
         if(journal!=null) {
             RecoveryCheckpoint.flush(server());
-            try {journal.commit(entities==null?List.of():entities.newEvents());journal=null;}
+            try {journal.commit(completionEvents());journal=null;}
             catch(Throwable problem) {
                 // Deletion may have reached disk even if its directory fsync failed. Never begin
                 // another mutation/undo without a guaranteed undo record after this boundary.
@@ -368,10 +407,15 @@ public final class RecoveryScene {
             }
         }
     }
+    private List<Long> completionEvents() {
+        var events=new LinkedHashSet<Long>();if(entities!=null)events.addAll(entities.newEvents());if(players!=null)events.addAll(players.newEvents());
+        if(events.size()>100_000)throw new IllegalStateException("Слишком много связанных квитанций в одной сцене");return List.copyOf(events);
+    }
 
     public RollbackReport completePreflight() {
         if (!preflightOnly || !ready() || changedWorld() || journal != null)
             throw new IllegalStateException("Предпросмотр ещё не проверен");
+        if(players!=null)players.recheckLive();
         collectReport();
         report.livePreviewVerified = true;
         phase = Phase.CLOSED;
@@ -398,7 +442,8 @@ public final class RecoveryScene {
         release();
     }
     private void release() {
-        resourcesCancelled=true;resourceCheck=null;
+        resourcesCancelled.set(true);resourceCheck=null;
+        if(players!=null)players.release();
         if(entities!=null)entities.release();
         if (ownsLocks) { CartRestoreLocks.clear(); CartAuditContext.rollbackActive=false; ownsLocks=false; }
         saved.clear(); desired.clear(); targets.clear(); chunks.clear();

@@ -53,7 +53,8 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 sourceSets.create("createSmoke")
 if (project.hasProperty('ae2Smoke')) sourceSets.createSmoke.java.include('**/DetachedPipelineSmoke.java', '**/Ae2NativeSmoke.java', '**/Ae2TransferNativeSmoke.java', '**/Ae2DeviceSettingsNativeSmoke.java', '**/Ae2PatternNativeSmoke.java', '**/Ae2RemoteNativeSmoke.java', '**/Ae2GridNativeSmoke.java', '**/Ae2CraftingNativeSmoke.java', '**/Ae2AssemblyNativeSmoke.java', '**/Ae2LifecycleNativeSmoke.java', '**/Ae2ProcessingNativeSmoke.java', '**/Ae2RequesterCancelNativeSmoke.java', '**/Ae2TerminalCostNativeSmoke.java')
 if (project.hasProperty('ae2Absent')) sourceSets.createSmoke.java.include('**/Ae2AbsentSmoke.java')
-if (project.hasProperty('createAbsent')) sourceSets.createSmoke.java.include('**/CreateAbsentSmoke.java')
+if (project.hasProperty('createAbsent') && !project.hasProperty('playerRecoverySmoke')) sourceSets.createSmoke.java.include('**/CreateAbsentSmoke.java')
+if (project.hasProperty('playerRecoverySmoke')) sourceSets.createSmoke.java.include('**/PlayerRecoveryEntrySmoke.java', '**/PlayerTransferNativeSmoke.java')
 if (project.hasProperty('supplementariesCreateAbsent')) sourceSets.createSmoke.java.include('**/SupplementariesTextSmoke.java', '**/AuditDetailsSmoke.java', '**/SnapshotDeltaNativeSmoke.java')
 sourceSets.createSmoke.compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
 sourceSets.createSmoke.runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
@@ -109,6 +110,11 @@ neoForge {
             if (project.hasProperty('createAbsent')) {
                 systemProperty 'avilixlogger.createAbsentSmoke', 'true'
                 gameDirectory = project.file('run-create-absent')
+            }
+            if (project.hasProperty('playerRecoverySmoke')) {
+                systemProperty 'avilixlogger.createAbsentSmoke','false'
+                systemProperty 'avilixlogger.playerRecoverySmoke','true'
+                gameDirectory=project.file(project.findProperty('recoveryCrashDirectory') ?: 'build/player-resource-world')
             }
             if (project.hasProperty('backpackSmoke')) systemProperty 'avilixlogger.backpackSmoke', 'true'
             if (project.hasProperty('ae2Smoke') || project.hasProperty('ae2Absent')) {

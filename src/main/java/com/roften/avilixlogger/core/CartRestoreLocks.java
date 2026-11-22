@@ -20,6 +20,7 @@ public final class CartRestoreLocks {
     private static final Set<net.minecraft.world.Container> CONTAINERS=Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<AbstractContainerMenu> MENUS=Collections.newSetFromMap(new IdentityHashMap<>());
     private static final Set<net.minecraft.world.entity.player.Player> PLAYERS=Collections.newSetFromMap(new IdentityHashMap<>());
+    private static final Set<UUID> PLAYER_IDS=new HashSet<>();
     private static final Set<UUID> CONSTRUCTIONS=new HashSet<>();
     private static final Set<String> RESOURCES=new HashSet<>();
     public static void resource(String key){RESOURCES.add(key);}
@@ -55,9 +56,14 @@ public final class CartRestoreLocks {
         return false;
     }
     public static void player(net.minecraft.world.entity.player.Player player){PLAYERS.add(player);menu(player.containerMenu);}
-    public static boolean playerLocked(net.minecraft.world.entity.player.Player player){return CartAuditContext.rollbackActive&&!CartAuditContext.restoring()&&PLAYERS.contains(player);}
+    public static void playerId(UUID id){PLAYER_IDS.add(id);}
+    public static boolean playerLocked(net.minecraft.world.entity.player.Player player){
+        return CartAuditContext.rollbackActive&&!CartAuditContext.restoring()&&(PLAYERS.contains(player)
+                ||PLAYER_IDS.contains(player.getUUID())&&player instanceof net.minecraft.server.level.ServerPlayer serverPlayer
+                &&serverPlayer.server.getPlayerList().getPlayer(player.getUUID())==serverPlayer);
+    }
     public static boolean scoreHolderLocked(String name){if(!CartAuditContext.rollbackActive||CartAuditContext.restoring())return false;for(var p:PLAYERS)if(p.getScoreboardName().equals(name))return true;return false;}
     public static void clear(){
         CHUNKS.forEach((level,positions)->{for(long key:positions)level.getChunkSource().removeRegionTicket(TICKET,new net.minecraft.world.level.ChunkPos(key),0,key);});CHUNKS.clear();
-        RESOURCES.clear();CONSTRUCTIONS.clear();BLOCKS.clear();HANDLERS.clear();CONTAINERS.clear();MENUS.clear();PLAYERS.clear();}
+        RESOURCES.clear();CONSTRUCTIONS.clear();BLOCKS.clear();HANDLERS.clear();CONTAINERS.clear();MENUS.clear();PLAYERS.clear();PLAYER_IDS.clear();}
 }

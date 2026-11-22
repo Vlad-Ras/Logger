@@ -387,7 +387,11 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
                     ", block_before String" + largeCodec() +
                     ", be_before String" + largeCodec() +
                     ", block_after String" + largeCodec() +
-                    ", be_after String" + largeCodec();
+                    ", be_after String" + largeCodec() +
+                    ", container_slots_before String" + largeCodec() +
+                    ", container_slots_after String" + largeCodec() +
+                    ", player_inv_before String" + largeCodec() +
+                    ", player_inv_after String" + largeCodec();
             case CONTAINERS -> commonColumns() +
                     ", block_before String" + largeCodec() +
                     ", be_before String" + largeCodec() +
@@ -486,7 +490,9 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             if(kind==TableKind.ENTITIES || kind==TableKind.ITEMS || kind==TableKind.PLAYERS)
                 addBlockCompatColumns(table);
             switch (kind) {
-                case BLOCKS -> addBlockCompatColumns(table);
+                case BLOCKS -> {
+                    addBlockCompatColumns(table);addContainerCompatColumns(table);addPlayerInventoryCompatColumns(table);
+                }
                 case CONTAINERS -> {
                     addBlockCompatColumns(table);
                     addEntityCompatColumns(table, false);
@@ -780,6 +786,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
         if (e == null) return false;
         if(e.type==ActionType.PLAYER_DEATH||e.type==ActionType.PLAYER_KILL)return true;
         if(e.type==ActionType.CAPTURE_GAP||e.type==ActionType.LOGGER_DIAGNOSTIC)return true;
+        if(PlayerBlockTransfer.encoded(e))return true;
         if((e.type==ActionType.CONTAINER_PUT||e.type==ActionType.CONTAINER_TAKE)&&e.extra!=null&&e.extra.startsWith("container slot ")&&e.beAfter!=null)return true;
         if (e.source != null && (e.source.startsWith("mod:corpse:") || e.source.startsWith("mod:accessories:"))) return true;
         if (e.source != null && (e.source.startsWith("mod:ftbteams:") || e.source.startsWith("mod:openpartiesandclaims:"))) return true;
@@ -841,7 +848,7 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             LogIdGenerator.ensure(e);
             JsonObject o = baseJson(e);
             switch (kind) {
-                case BLOCKS -> addBlock(o, e);
+                case BLOCKS -> {addBlock(o, e);addContainer(o, e);addPlayerInventory(o, e);}
                 case CONTAINERS -> { addBlock(o, e); addEntity(o, e, false); addItem(o, e); addContainer(o, e); }
                 case ENTITIES -> { addBlock(o,e); addEntity(o, e, true); addItem(o, e); }
                 case ITEMS -> { addBlock(o,e); addItem(o, e); addPlayerInventory(o, e); }
@@ -1198,8 +1205,8 @@ public final class ClickHouseLogStorage implements HealthAwareLogStorage, BatchL
             case "entity_uuid" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
             case "entity_nbt" -> kind == TableKind.ENTITIES || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
             case "item_stack", "count" -> kind == TableKind.CONTAINERS || kind == TableKind.ENTITIES || kind == TableKind.ITEMS || kind == TableKind.COMPAT;
-            case "player_inv_before", "player_inv_after" -> kind == TableKind.ITEMS || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
-            case "container_slots_before", "container_slots_after" -> kind == TableKind.CONTAINERS || kind == TableKind.COMPAT;
+            case "player_inv_before", "player_inv_after" -> kind == TableKind.BLOCKS || kind == TableKind.ITEMS || kind == TableKind.PLAYERS || kind == TableKind.COMPAT;
+            case "container_slots_before", "container_slots_after" -> kind == TableKind.BLOCKS || kind == TableKind.CONTAINERS || kind == TableKind.COMPAT;
             default -> false;
         };
         if (!has) return "count".equals(column) ? "0" : "''";

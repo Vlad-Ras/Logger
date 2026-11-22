@@ -16,6 +16,7 @@ import java.util.function.BooleanSupplier;
 public final class RecoveryItemBalance {
     public record Input(String dimension, BlockPos pos, RollbackEngine.ReplayCheckpoint before,
                         RollbackEngine.ReplayCheckpoint after) {}
+    public record Change(CompoundTag before,CompoundTag after) {}
     private record Address(String dimension, BlockPos pos) {}
     private record Stack(CompoundTag identity, long count) {}
     private record Inventory(int size, Map<Integer, Stack> items) {}
@@ -39,16 +40,30 @@ public final class RecoveryItemBalance {
         charge(inputs.size()*80L);
     }
     public static void verify(List<Input> inputs,long limit,BooleanSupplier cancelled) {
+        verify(inputs,List.of(),limit,cancelled);
+    }
+    public static void verify(List<Input> inputs,List<Change> provenExternalChanges,long limit,BooleanSupplier cancelled) {
         var check=new RecoveryItemBalance(inputs,limit,cancelled);
         for(var input:inputs) {
             check.checkCancelled();
             check.add(input,input.before(),check.before,-1);
             check.add(input,input.after(),check.after,1);
         }
+        // These are complete, producer-owned transfer deltas, never extra world inventories.
+        for(var change:provenExternalChanges) {
+            check.external(change.before(),-1);check.external(change.after(),1);
+        }
         for(var entry:check.balance.entrySet())if(entry.getValue()!=0)
             throw new IllegalStateException("replay_item_resource_graph_required: "+entry.getKey().getString("id")
                     +"; изменение количества в сцене="+entry.getValue()
                     +"; нужны связанные снимки внешних получателей/источников. Мир не изменён.");
+    }
+    private void external(CompoundTag slots,int sign) {
+        if(!ContainerSlotSnapshot.isValid(slots)||slots.contains("SlotSources"))throw new IllegalStateException("replay_player_transfer_incomplete");
+        // Reuse the same strict stack codec and memory ceiling with an isolated logical address.
+        var input=new Input("avilixlogger:transfer",BlockPos.ZERO,null,null);
+        var scratch=new HashMap<Address,Inventory>();
+        add(input,new RollbackEngine.ReplayCheckpoint(new CompoundTag(),null,slots),scratch,sign);
     }
     private void add(Input input,RollbackEngine.ReplayCheckpoint checkpoint,Map<Address,Inventory> inventories,int sign) {
         CompoundTag slots=checkpoint.slots(), be=checkpoint.be();

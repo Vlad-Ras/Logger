@@ -402,6 +402,7 @@ public final class RollbackCoordinator {
             if (scene == null) {
                 var targets=new ArrayList<RecoveryScene.Target>();
                 var entityTargets=new ArrayList<RecoveryEntityBatch.Target>();
+                var playerTransfers=new ArrayList<PlayerBlockTransfer.Proof>();
                 long preparedBytes=0;
                 for (var scope:scopes) {
                     if (!scope.rollback().preparationSkips().isEmpty()) throw new IllegalStateException(
@@ -410,12 +411,14 @@ public final class RollbackCoordinator {
                     if (level==null) throw new IllegalStateException("Измерение недоступно: "+scope.dimension());
                     for (var block:scope.rollback().blocks()) targets.add(new RecoveryScene.Target(level,block));
                     for(var entity:scope.rollback().entityReplays())entityTargets.add(new RecoveryEntityBatch.Target(level,entity));
+                    playerTransfers.addAll(scope.rollback().playerTransfers());
                     preparedBytes+=scope.rollback().estimatedBytes();
                 }
                 long limit=configInt(() -> LoggerConfig.VALUES.rollbackMaxPreparedPayloadMiB.get(),512,64,8192)*1024L*1024L;
-                var storage=entityTargets.isEmpty()?null:LoggerRuntime.storage(server.overworld());
+                var storage=entityTargets.isEmpty()&&playerTransfers.isEmpty()?null:LoggerRuntime.storage(server.overworld());
                 scene=new RecoveryScene(targets,entityTargets,Math.max(0,limit-preparedBytes),
-                        configInt(() -> LoggerConfig.VALUES.recoveryMaxLoadedChunks.get(),128,1,4096),entities->EntityReplayPlan.verifyHistory(storage,entities));
+                        configInt(() -> LoggerConfig.VALUES.recoveryMaxLoadedChunks.get(),128,1,4096),entities->EntityReplayPlan.verifyHistory(storage,entities),playerTransfers,
+                        proofs->PlayerBlockTransfer.verifyHistory(storage,proofs));
                 if (preflightOnly) scene.preflightOnly();
             }
             if (scene.quarantined()) return false;
@@ -507,6 +510,7 @@ public final class RollbackCoordinator {
                 case ENTITY_CAPTURE, ENTITY_RECHECK -> "Проверка сущностей и связанных снимков";
                 case RESOURCE_CHECK -> "Проверка предметов между хранилищами";
                 case RESOURCE_RECHECK -> "Повторная проверка мира после проверки предметов";
+                case PLAYER_VERIFY -> "Проверка сохранённых инвентарей связанных игроков";
                 case ENTITY_APPLY -> "Восстановление сущностей";
                 case ENTITY_VERIFY -> "Проверка состояния сущностей";
                 case WAIT_CHUNKS -> "Загрузка чанков";

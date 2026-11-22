@@ -28,7 +28,7 @@ public abstract class ContainerClickCauseMixin {
             var diesel=com.roften.avilixlogger.compat.industry.DieselAudit.filter(player);
             var menuAction=corpse==null&&transfer==null&&vibrant==null&&diesel==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player):null;
             boolean success=false;
-            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{try{if(vibrant!=null)vibrant.finish(!success);}finally{try{if(diesel!=null)diesel.finish(!success);}finally{if(menuAction!=null)menuAction.finish();}}}}}}
+            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{try{if(vibrant!=null)vibrant.finish(!success);}finally{try{if(diesel!=null)diesel.finish(!success);}finally{if(menuAction!=null)menuAction.finish(success);}}}}}}
         }
     }
     @WrapMethod(method="handleContainerButtonClick")
@@ -44,7 +44,7 @@ public abstract class ContainerClickCauseMixin {
             var diesel=com.roften.avilixlogger.compat.industry.DieselAudit.filter(player);
             var menuAction=corpse==null&&transfer==null&&vibrant==null&&diesel==null?com.roften.avilixlogger.core.LoggerEventHandlers.beginMenuAction(player,"player:menu_button"):null;
             boolean success=false;
-            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{try{if(vibrant!=null)vibrant.finish(!success);}finally{try{if(diesel!=null)diesel.finish(!success);}finally{if(menuAction!=null)menuAction.finish();}}}}}}
+            try{original.call(packet);success=true;}finally{try{if(corpse!=null)corpse.finish(!success);}finally{try{if(accessories!=null)accessories.finish(!success);}finally{try{if(transfer!=null)transfer.finish(success);}finally{try{if(vibrant!=null)vibrant.finish(!success);}finally{try{if(diesel!=null)diesel.finish(!success);}finally{if(menuAction!=null)menuAction.finish(success);}}}}}}
         }
     }
 }

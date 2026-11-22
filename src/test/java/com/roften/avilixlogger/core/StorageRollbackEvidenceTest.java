@@ -40,6 +40,9 @@ final class StorageRollbackEvidenceTest {
             var replay = RollbackEngine.prepareBlockReplay(fixture(List.of(first, second)), plan, scope, () -> false);
             check(replay.blocks().size() == 1, "replay did not consolidate a matching chain");
             var block = replay.blocks().getFirst();
+            var cycle=first.copyForQueue();cycle.id=3;cycle.ts=second.ts+1;cycle.blockBefore=second.blockAfter;cycle.blockAfter=first.blockBefore;
+            var cycled=RollbackEngine.prepareBlockReplay(fixture(List.of(first,second,cycle)),plan,scope,()->false);
+            check(cycled.blocks().size()==1&&cycled.blocks().getFirst().checkpoints().size()==4,"closed history cycle discarded a possible persisted intermediate state");
             check(block.expectedState().getString("Name").equals("minecraft:air")
                     && block.stateTag().getString("Name").equals("minecraft:dirt"), "replay reversed or reordered snapshots");
             var repeated = RollbackEngine.prepareBlockReplay(fixture(List.of(first, first, second, second)), plan, scope, () -> false);

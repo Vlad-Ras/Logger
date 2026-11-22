@@ -162,7 +162,12 @@ public final class RollbackEngine {
                                    List<LogEntry> entityRemovals,
                                    List<LogEntry> deferred,
                                    long estimatedBytes, java.util.Map<String, Integer> preparationSkips,
-                                   List<EntityReplayPlan.Prepared> entityReplays,List<EntityReplayPlan.Issue> preparationIssues) {
+                                   List<EntityReplayPlan.Prepared> entityReplays,List<EntityReplayPlan.Issue> preparationIssues,
+                                   List<PlayerBlockTransfer.Proof> playerTransfers) {
+        public PreparedRollback(List<PreparedBlockSnapshot> blocks,List<LogEntry> removals,List<LogEntry> deferred,long bytes,
+                                java.util.Map<String,Integer> skips,List<EntityReplayPlan.Prepared> entities,List<EntityReplayPlan.Issue> issues) {
+            this(blocks,removals,deferred,bytes,skips,entities,issues,List.of());
+        }
         public PreparedRollback(List<PreparedBlockSnapshot> blocks,List<LogEntry> removals,List<LogEntry> deferred,long bytes,java.util.Map<String,Integer> skips) {
             this(blocks,removals,deferred,bytes,skips,List.of(),List.of());
         }
@@ -172,6 +177,7 @@ public final class RollbackEngine {
         public PreparedRollback {
             entityReplays=entityReplays==null?List.of():List.copyOf(entityReplays);
             preparationIssues=preparationIssues==null?List.of():List.copyOf(preparationIssues);
+            playerTransfers=playerTransfers==null?List.of():List.copyOf(playerTransfers);
             preparationSkips = preparationSkips == null ? java.util.Map.of() : java.util.Map.copyOf(preparationSkips);
             blocks = blocks == null ? List.of() : List.copyOf(blocks);
             entityRemovals = entityRemovals == null ? List.of() : List.copyOf(entityRemovals);
@@ -233,6 +239,7 @@ public final class RollbackEngine {
         var actors = plan.actor() == null || plan.actor().isBlank() ? java.util.Set.<String>of()
                 : new java.util.HashSet<>(java.util.Arrays.asList(plan.actor().toLowerCase(java.util.Locale.ROOT).split(",")));
         var entityBuilder=new EntityReplayPlan();
+        var playerTransfers=new java.util.ArrayList<PlayerBlockTransfer.Proof>();
         var chains = new java.util.LinkedHashMap<BlockPos, ReplayChain>();
         var rejected = new java.util.HashMap<BlockPos, String>();
         var evidenceRecords=new java.util.HashMap<BlockPos,Long>();
@@ -265,7 +272,7 @@ public final class RollbackEngine {
                 }
                 if (matches) selected.add(pos);
                 if (rejected.containsKey(pos)) continue;
-                evidenceRecords.put(pos,row.id);
+                evidenceRecords.merge(pos,row.id,Math::max);
                 var receiptKey = new ReplayReceiptKey(pos, row.ts, row.source, row.actorUuid);
                 if ((row.type == ActionType.CONTAINER_PUT || row.type == ActionType.CONTAINER_TAKE)
                         && row.beBefore == null && row.containerSlotsBefore == null) {
@@ -303,6 +310,8 @@ public final class RollbackEngine {
                         existing.checkpoints().add(after);
                         retained += checkpointWeight(after);
                     }
+                    var proof=PlayerBlockTransfer.parse(row,existing.checkpoints().size()-1,before,after);
+                    if(proof!=null){playerTransfers.add(proof);retained+=192+PayloadSizeEstimator.estimateTags(proof.before(),proof.after());}
                 }
                 if (retained+entityBuilder.estimatedBytes() > limit) throw new IllegalStateException("План восстановления превышает лимит памяти.");
             }
@@ -323,7 +332,8 @@ public final class RollbackEngine {
         var blocks = new java.util.ArrayList<PreparedBlockSnapshot>();
         for (var entry : chains.entrySet()) {
             var chain = entry.getValue();
-            if (chain.first().equals(chain.last())) continue;
+            // A crash may have persisted an intermediate state even if the final state equals the first.
+            if (chain.checkpoints().size()==1) continue;
             var target = chain.last();
             blocks.add(new PreparedBlockSnapshot(entry.getKey(), NbtSerde.toSnbt(target.state()), NbtSerde.toSnbt(target.be()),
                     NbtSerde.toSnbt(target.slots()), chain.type(), target.state(), target.be(), target.slots(),
@@ -341,7 +351,8 @@ public final class RollbackEngine {
         rejected.forEach((pos,reason)->{if(selected.contains(pos))issues.add(new EntityReplayPlan.Issue(scope.dimension(),pos,null,evidenceRecords.getOrDefault(pos,0L),reason));});
         retained+=issues.size()*192L+evidenceRecords.size()*64L;
         if(retained+entityBuilder.estimatedBytes()>limit)throw new IllegalStateException("План с диагностикой превышает лимит памяти");
-        return new PreparedRollback(blocks, List.of(), List.of(), Math.max(0, retained)+entityBuilder.estimatedBytes(), skips,entities,issues);
+        var transfers=playerTransfers.stream().map(proof->proof.cutoff(evidenceRecords.getOrDefault(proof.pos(),proof.event()))).toList();
+        return new PreparedRollback(blocks, List.of(), List.of(), Math.max(0, retained)+entityBuilder.estimatedBytes(), skips,entities,issues,transfers);
     }
 
     private static ReplayCheckpoint replayCheckpoint(String state, String be, String slots, ReplayCheckpoint fallback) {

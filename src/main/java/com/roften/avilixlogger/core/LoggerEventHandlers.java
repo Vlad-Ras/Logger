@@ -1000,6 +1000,9 @@ public final class LoggerEventHandlers {
         private final BlockPos pos;
         private final int[] beforeProperties;
         private final String actionSource;
+        private final CompoundTag playerBefore;
+        private final UUID transferId;
+        private boolean finished;
         private MenuAction(ServerPlayer player,String actionSource) {
             this.actionSource=actionSource;
             this.player = player; menu = player.containerMenu; level = player.serverLevel();
@@ -1010,9 +1013,12 @@ public final class LoggerEventHandlers {
             if(block!=null && !WorldSnapshotAccess.readable(level,block.pos))throw new IllegalStateException("Container chunk unloaded");
             beforeProperties=GenericMenuSnapshot.properties(menu);
             before = snapshot(); beforeBe = block == null ? null : NbtSerde.snapshotBlockEntityAt(level,block.pos);
+            boolean linked=block!=null&&PlayerBlockTransfer.eligible(level,block.pos,menu,player);
+            playerBefore=linked?PlayerBlockTransfer.snapshot(player,menu):null;
+            transferId=linked?UUID.randomUUID():null;
             CompoundTag prior = block != null ? block.beforeSlots : entity != null ? entity.beforeInv : generic != null ? generic.beforeSlots : null;
             boolean sameGeneration=block!=null?block.captureGeneration==captureGeneration:entity!=null?entity.captureGeneration==captureGeneration:generic==null||generic.captureGeneration==captureGeneration;
-            if(sameGeneration)emit(prior,before,block==null?null:block.beforeBe,beforeBe,false);
+            if(sameGeneration)emit(prior,before,block==null?null:block.beforeBe,beforeBe,false,true,null);
         }
         private CompoundTag snapshot() {
             if (block != null) return ContainerSlotSnapshot.snapshotTag(level, block.pos);
@@ -1021,15 +1027,20 @@ public final class LoggerEventHandlers {
             return GenericMenuSnapshot.snapshot(menu, level.registryAccess());
         }
         public void finish() {
-            try { finishCaptured(); } catch (Throwable ignored) {}
+            finish(true);
         }
-        private void finishCaptured() {
+        public void finish(boolean nativeSucceeded) {
+            if(finished)return;finished=true;
+            try { finishCaptured(nativeSucceeded); } catch (Throwable failure) {AdaptiveLogDiagnostics.adapterFailure("menu-transfer-after");}
+        }
+        private void finishCaptured(boolean nativeSucceeded) {
             if(captureGeneration!=ServerCaptureGuard.generation())return;
             if(block!=null && !WorldSnapshotAccess.readable(level,block.pos))return;
             emitProperties(GenericMenuSnapshot.properties(menu));
             CompoundTag after = snapshot();
             CompoundTag afterBe = block == null ? null : NbtSerde.snapshotBlockEntityAt(level,block.pos);
-            emit(before, after, beforeBe, afterBe, true);
+            var playerAfter=playerBefore==null?null:PlayerBlockTransfer.snapshot(player,menu);
+            emit(before, after, beforeBe, afterBe, true,nativeSucceeded&&player.containerMenu==menu,playerAfter);
             if (block != null) { block.beforeSlots = after; block.beforeBe = afterBe;block.captureGeneration=captureGeneration; }
             if (entity != null) {entity.beforeInv = after;entity.captureGeneration=captureGeneration;}
             if (generic != null) {generic.beforeSlots = after;generic.captureGeneration=captureGeneration;}
@@ -1045,7 +1056,7 @@ public final class LoggerEventHandlers {
             row.deferSnapshot(LogEntry.SnapshotField.BE_BEFORE,beforeTag);row.deferSnapshot(LogEntry.SnapshotField.BE_AFTER,afterTag);
             LoggerRuntime.storage(level).append(row);
         }
-        private void emit(CompoundTag before, CompoundTag after, CompoundTag beforeBe, CompoundTag afterBe, boolean direct) {
+        private void emit(CompoundTag before, CompoundTag after, CompoundTag beforeBe, CompoundTag afterBe, boolean direct,boolean nativeSucceeded,CompoundTag playerAfter) {
             if (before == null || after == null) return;
             final UUID actor = direct ? CauseContext.actorUuid(player) : null;
             final String name = direct ? CauseContext.actorName(player) : "SYSTEM[container interval]";
@@ -1057,7 +1068,10 @@ public final class LoggerEventHandlers {
             final var state = block == null ? null : level.getBlockState(block.pos);
             final boolean blockContainer=block!=null;
             final BlockPos actionPos=pos;
-            AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after, beforeBe, afterBe), () -> {
+            final var transfer=direct&&transferId!=null?new PlayerBlockTransfer.Capture(transferId,player.getUUID(),dim,actionPos,
+                    menu.getClass().getName(),playerBefore,playerAfter,nativeSucceeded):null;
+            AsyncLogProcessor.submit(PayloadSizeEstimator.estimateTags(before, after, beforeBe, afterBe,
+                    transfer==null?null:transfer.before(),transfer==null?null:transfer.after()), () -> {
                 if (java.util.Objects.equals(before, after) && java.util.Objects.equals(beforeBe, afterBe)) return;
                 String blockState = state == null ? null : NbtSerde.writeBlockState(state);
                 emitContainerChanges(before, after, access, storage, dim, actionPos, actor, name, source, blockState, timestamp);
@@ -1068,6 +1082,7 @@ public final class LoggerEventHandlers {
                     row.containerSlotsBefore = NbtSerde.toSnbt(before); row.containerSlotsAfter = NbtSerde.toSnbt(after);
                     row.beBefore = NbtSerde.toSnbt(beforeBe); row.beAfter = NbtSerde.toSnbt(afterBe);
                     row.extra = direct ? "synchronous menu action" : "unconfirmed changes between menu actions";
+                    PlayerBlockTransfer.attach(row,transfer,before,after);
                     storage.append(row);
                 }
             });

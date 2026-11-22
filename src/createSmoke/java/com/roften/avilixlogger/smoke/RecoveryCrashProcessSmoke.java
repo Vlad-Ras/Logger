@@ -23,6 +23,8 @@ public final class RecoveryCrashProcessSmoke {
         String mode=System.getProperty("avilixlogger.recoveryCrash");if(mode==null)return;
         var server=event.getServer();var level=server.overworld();
         if(mode.equals("auth-api")){AuthCoreNativeSmoke.run(server);server.halt(false);return;}
+        if(mode.equals("players")){PlayerTransferNativeSmoke.run(level);server.halt(false);return;}
+        if(mode.startsWith("player-")){PlayerTransferNativeSmoke.process(level,mode);return;}
         if(mode.equals("benchmark")){RecoveryBenchmarkSmoke.start(level);return;}
         if(mode.equals("scene")){CrashRecoverySmoke.run(level);server.halt(false);return;}
         if(mode.equals("entities")){EntityRecoveryNativeSmoke.run(level);server.halt(false);return;}

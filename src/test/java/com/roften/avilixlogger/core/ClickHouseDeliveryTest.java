@@ -74,6 +74,25 @@ final class ClickHouseDeliveryTest {
             check(handlerFailure.get() == null, "HTTP contract violation: " + handlerFailure.get());
             check(failed.get() && requests.size() == 2, "split feed/detail retry was not exercised");
             check(first.count == 2 && second.count == 3, "coalescing mutated original item counts");
+            {var transfer=PlayerBlockTransferTest.row();transfer.extra="player transfer exact receipt";
+            PlayerBlockTransfer.attach(transfer,new PlayerBlockTransfer.Capture(UUID.randomUUID(),transfer.actorUuid,transfer.dim,net.minecraft.core.BlockPos.ZERO,
+                    "net.minecraft.world.inventory.ChestMenu",PlayerBlockTransferTest.state(7,false),PlayerBlockTransferTest.state(0,false),true),
+                    PlayerBlockTransferTest.slots(0,27),PlayerBlockTransferTest.slots(7,27));
+            var rollbackFlag=ClickHouseLogStorage.class.getDeclaredField("storeRollbackDetails");rollbackFlag.setAccessible(true);
+            boolean previousRollback=rollbackFlag.getBoolean(database);
+            try {rollbackFlag.setBoolean(database,false);database.appendBatch("player-transfer-test",List.of(transfer));}
+            finally {rollbackFlag.setBoolean(database,previousRollback);}
+            var transferInsert=requests.values().stream().filter(body->body.startsWith("INSERT")&&body.substring(0,body.indexOf('\n')).contains("_blocks")&&body.contains(transfer.extra)).findFirst().orElseThrow();
+            var transferEncoded=com.google.gson.JsonParser.parseString(transferInsert.substring(transferInsert.indexOf('\n')+1).trim()).getAsJsonObject();
+            for(var key:List.of("player_inv_before","player_inv_after","container_slots_before","container_slots_after"))
+                check(!transferEncoded.get(key).getAsString().isEmpty(),"BLOCKS discarded linked transfer column "+key);
+            lookupResponse.set(transferEncoded+"\n");selects.clear();var transferQuery=new LogQuery();transferQuery.type=ActionType.BLOCK_ENTITY_NBT_CHANGE;transferQuery.requireDetails=true;transferQuery.exactId=transfer.id;transferQuery.limit=1;
+            var transferRead=database.query(transferQuery).getFirst();
+            check(transfer.playerInvBefore.equals(transferRead.playerInvBefore)&&transfer.playerInvAfter.equals(transferRead.playerInvAfter)
+                    &&transfer.containerSlotsBefore.equals(transferRead.containerSlotsBefore)&&transfer.containerSlotsAfter.equals(transferRead.containerSlotsAfter),"BLOCKS transfer detail round-trip lost full proof");
+            check(selects.stream().anyMatch(sql->sql.contains("player_inv_before AS player_inv_before")&&sql.contains("container_slots_before AS container_slots_before")),"BLOCKS SELECT still substitutes missing transfer columns");
+            lookupResponse.set(null);
+            System.out.println("PLAYER_TRANSFER_HTTP_OK: four BLOCKS proof columns persist with optional rollback details disabled and survive exact detail lookup");}
             LogEntry loot=row("loot");loot.type=ActionType.ITEM_PICKUP;loot.dim="minecraft:overworld";loot.count=12;loot.actorUuid=UUID.randomUUID();
             UUID cart=UUID.randomUUID();loot.source=CartAuditContext.prefix(cart)+"loot_pickup:0";
             var before=new net.minecraft.nbt.CompoundTag();before.putString("Kind","loot_items");before.putUUID("Drop",UUID.randomUUID());var after=before.copy();after.putInt("Remaining",0);
