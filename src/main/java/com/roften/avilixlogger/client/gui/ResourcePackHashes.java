@@ -5,7 +5,6 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -40,7 +39,9 @@ final class ResourcePackHashes {
                 Path pack = root.resolve(relative);
                 String hash = Files.isDirectory(pack, NO_LINKS) ? hashDirectory(pack, buffer) : hashFile(pack, buffer, MAX_PACK_BYTES);
                 if (!hash.isEmpty()) result.put(id, hash);
-            } catch (InvalidPathException | SecurityException ignored) {}
+            } catch (RuntimeException ignored) {
+                // A provider-specific failure in one pack must not cancel the inventory.
+            }
         }
         return result;
     }
@@ -53,11 +54,11 @@ final class ResourcePackHashes {
         try {
             if (!Files.isRegularFile(file, NO_LINKS) || Files.size(file) > limit) return "";
             var digest = MessageDigest.getInstance("SHA-256");
-            try (var input = Files.newInputStream(file, NO_LINKS)) {
+            try (var input = open(file)) {
                 update(digest, input, buffer, limit);
             }
             return HexFormat.of().formatHex(digest.digest());
-        } catch (IOException | NoSuchAlgorithmException | SecurityException ignored) {
+        } catch (IOException | NoSuchAlgorithmException | RuntimeException ignored) {
             return "";
         }
     }
@@ -83,15 +84,23 @@ final class ResourcePackHashes {
                 framing.putInt(name.length).putLong(size);
                 digest.update(framing.array());
                 digest.update(name);
-                try (var input = Files.newInputStream(file, NO_LINKS)) {
+                try (var input = open(file)) {
                     if (update(digest, input, buffer, size) != size) return "";
                 }
                 remaining -= size;
             }
             return HexFormat.of().formatHex(digest.digest());
-        } catch (IOException | java.io.UncheckedIOException | NoSuchAlgorithmException | SecurityException ignored) {
+        } catch (IOException | NoSuchAlgorithmException | RuntimeException ignored) {
             return "";
         }
+    }
+
+    private static InputStream open(Path file) throws IOException {
+        // Keep the atomic no-symlink open for local packs/mods. Java ZIP/JAR
+        // providers reject NOFOLLOW_LINKS as an open option; loader-owned virtual
+        // entries were already checked with no-follow attributes above.
+        return file.getFileSystem() == java.nio.file.FileSystems.getDefault()
+                ? Files.newInputStream(file, NO_LINKS) : Files.newInputStream(file);
     }
 
     private static String relativeName(Path directory, Path file) {

@@ -86,4 +86,37 @@ final class ClientReportConnectionSmoke {
             abandoned = null; current = null; originalInventory = null;
         }
     }
+    private static Fixture real;
+    private static long realStarted;
+    static void startReal(Minecraft client) throws Exception {
+        inventoryField.set(null, null); // cold inventory: exercise the real ModList and real archive providers
+        real = Fixture.create(client); realStarted = System.nanoTime();
+        LogViewerClientHooks.acceptClientReportRequest(new ClientReportPayloads.Request(8100), real.context());
+        if (real.base().mods().isEmpty()) throw new AssertionError("real inventory metadata missing");
+        var providers = new java.util.TreeMap<String,Integer>();
+        for (var mod : net.neoforged.fml.ModList.get().getMods()) {
+            var owner=mod.getOwningFile(); if(owner==null||owner.getFile()==null)continue;
+            var path=owner.getFile().getFilePath(); if(path!=null)providers.merge(path.getFileSystem().provider().getScheme(),1,Integer::sum);
+        }
+        System.out.println("CLIENT_REPORT_REAL_HASH_STARTED providers="+providers+" initial_mods="+real.base().mods().size());
+    }
+    static void verifyReal() {
+        var assembly=new ClientReportHashesPayload.Assembly(real.base());
+        real.sent().stream().filter(ClientReportHashesPayload.class::isInstance).map(ClientReportHashesPayload.class::cast).forEach(assembly::accept);
+        if(!assembly.complete()||assembly.failed())throw new AssertionError("real ModList/JarJar hash collection failed or stalled");
+        var result=assembly.report();
+        for(var mod : net.neoforged.fml.ModList.get().getMods()) {
+            var owner=mod.getOwningFile();if(owner==null||owner.getFile()==null)continue;
+            var path=owner.getFile().getFilePath();
+            if(path!=null&&java.nio.file.Files.isRegularFile(path)) {
+                var entry=result.mods().stream().filter(row->row.id().equals(mod.getModId())).findFirst().orElse(null);
+                if(entry!=null&&entry.sha256().isEmpty())throw new AssertionError("readable real mod has no SHA-256: "+mod.getModId()+" provider="+path.getFileSystem().provider().getScheme());
+            }
+        }
+        long hashed=result.mods().stream().filter(mod->!mod.sha256().isEmpty()).count();
+        if(hashed==0)throw new AssertionError("no real mod JARs hashed");
+        System.out.println("CLIENT_REPORT_REAL_HASH_OK mods="+result.mods().size()+" hashed="+hashed+" elapsed_ms="+(System.nanoTime()-realStarted)/1_000_000);
+        real.wire().active=false;real=null;
+    }
+
 }

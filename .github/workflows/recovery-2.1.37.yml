@@ -85,6 +85,7 @@ jobs:
           timeout --signal=INT --kill-after=15s 600s xvfb-run -a ./gradlew runClient -PguiSmoke -PacceptanceJfr --no-daemon --console=plain > recovery-client.log 2>&1 || status=$?
           tail -n 100 recovery-client.log
           if [ "${status:-0}" -ne 0 ]; then exit "$status"; fi
+          grep -q CLIENT_REPORT_REAL_HASH_OK recovery-client.log
           grep -q CLIENT_REPORT_EARLY_CONNECTION_OK recovery-client.log
           grep -q CART_GUI_CLIENT_OK recovery-client.log
           grep -q RECOVERY_GUI_NATIVE_OK recovery-client.log

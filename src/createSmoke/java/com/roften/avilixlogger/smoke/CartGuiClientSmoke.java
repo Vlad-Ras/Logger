@@ -72,7 +72,7 @@ public final class CartGuiClientSmoke {
             if(stage<FILES.size()){
                 Screenshot.grab(mc.gameDirectory,FILES.get(stage),mc.getMainRenderTarget(),message->System.out.println("CART_GUI_SCREENSHOT: "+message.getString()));
                 stage++;
-                if(stage==1){ ClientReportConnectionSmoke.verify(); mc.setScreen(panel("Actions")); }
+                if(stage==1){ ClientReportConnectionSmoke.verify(); ClientReportConnectionSmoke.startReal(mc); mc.setScreen(panel("Actions")); }
                 else if(stage==2)root.confirmation("Вернуть саму штуковину в предмет: "+ID+". entry=100; блоков: 125. Основа: снимок entry=80, применено изменений состояния: 12. Хранилищ предметов: 4, предметов: 128; баков: 2, жидкости: 3000 mB. Мир и действия штуковины не откатываются. Подтверждение действует две минуты.","log cart confirm-recovery "+ID+" 100");
                 else if(stage==3)mc.setScreen(panel("Journal"));
                 else if(stage==4){
@@ -274,6 +274,7 @@ public final class CartGuiClientSmoke {
                             "a saved system origin did not expose a hide filter");
                 }
                 else if(stage==16) {
+                    ClientReportConnectionSmoke.verifyReal();
                     var type = Class.forName("com.roften.avilixlogger.client.gui.ClientReportScreen");
                     var constructor = type.getDeclaredConstructor(Screen.class);
                     constructor.setAccessible(true);
